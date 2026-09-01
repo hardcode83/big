@@ -437,7 +437,8 @@ async def list_expenses(
         "reconciliation of D4 will materialise the answer on its next sweep, and the "
         "field will then clear.\n\n"
         "A `date` that falls inside a period already covered by an `OwnerStatement` is "
-        "a `422` (`NamedExpenseInClosedPeriodError`) — V1 does not regenerate, so a "
+        "a `409` (`NamedExpenseInClosedPeriodError`) — the payload may be well-formed, but "
+        "the period is already closed, a state conflict; V1 does not regenerate, so a "
         "closed period cannot absorb new rows (D6.3)."
     ),
 )

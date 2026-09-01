@@ -34,6 +34,12 @@ from app.properties.infrastructure.models import PropertyModel
 from app.statements.domain.enums import ExpenseCategory, OwnerStatementStatus
 from app.statements.infrastructure.models import ExpenseModel, OwnerStatementModel
 from app.tenants.infrastructure.models import TenantConfigModel
+from tests.auth.conftest import (  # noqa: F401 — shared integration fixtures (see below)
+    tenant_a,
+    tenant_b,
+    users_by_role_a,
+    users_by_role_b,
+)
 
 # Reuse the conftest fixtures from `tests/conftest.py` (`api`, `db_session`) and
 # `tests/auth/conftest.py` (`tenant_a`, `tenant_b`, `users_by_role_a`, `users_by_role_b`).
@@ -686,7 +692,8 @@ class TestExpenseCrud:
         self, api, world, db_session
     ) -> None:
         # D6.3: a `date` inside a period already covered by an `OwnerStatement` is a
-        # `422` from the use case — V1 does not regenerate.
+        # `409` — a state conflict (the period is already closed), not a validation error.
+        # V1 does not regenerate.
         closed_statement = await _make_statement(db_session, world)
         db_session.add(closed_statement)
         await db_session.flush()

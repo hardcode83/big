@@ -6,7 +6,7 @@ in `application/reconciliation.py`. Two are the same code path called twice
 `POST /owner-statements/generate` — the precedent is `pricing.GeneratePriceRecommendationsUseCase`,
 with the same one-generator-not-two reasoning).
 
-**The generation writes no `AuditLog` from the clock** (D5/D12, the seventh exception of
+**The generation writes no `AuditLog` from the clock** (D5/D12, the sixth exception of
 rule 9 of `steering/security.md`): the scheduler fires the job, there is no person to
 name and no `ip` to take from a request, and a two-flat tenant would write ~12 anonymous
 rows a year into `audit_logs`. The trail for that path is the `TimelineEvent
@@ -249,9 +249,10 @@ def _expense_creation_change_set(expense: Expense) -> ChangeSet:
     """The audited diff of an `EXPENSE_CREATED`.
 
     The eight allowlisted fields go through `diff()` with `old=None`. `description` is
-    deliberately **absent**: `AUDITABLE_FIELDS["EXPENSE"]` does not name it, and
-    `description` is on `REDACT_ONLY_FIELDS["EXPENSE"]` (rule 11 exception 3). It is
-    never audited on creation either — the row exists, no value of the manager's
+    deliberately **absent**: it is in `AUDITABLE_FIELDS["EXPENSE"]` *and* in
+    `REDACT_ONLY_FIELDS["EXPENSE"]` (rule 11 exception 3), so `diff()` on it raises —
+    only the `redacted()` path may touch it, and then only to emit `{"changed": true}`.
+    It is never audited on creation either — the row exists, no value of the manager's
     prose has reached the column yet, but the structural guarantee holds regardless.
     """
     changes = ChangeSet(audit_actions.ENTITY_EXPENSE)
@@ -1083,7 +1084,7 @@ class GenerateOwnerStatementUseCase:
             ),
         )
 
-        # AuditLog — only on the manual path (D5/D12, the seventh exception).
+        # AuditLog — only on the manual path (D5/D12, the sixth exception).
         if actor is not None:
             await self._audit.record(
                 tenant_id=tenant_id,

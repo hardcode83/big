@@ -333,7 +333,7 @@ export interface paths {
      * Create an expense
      * @description Returns the row plus `pending_owner_approval_id` when `amount > TenantConfig.owner_approval_threshold_eur` (R5.7, D4): a new `OwnerApproval(OTHER)` is created in the same transaction, and the response field tells the UI that the row is gated on the owner's answer. The reconciliation of D4 will materialise the answer on its next sweep, and the field will then clear.
      *
-     * A `date` that falls inside a period already covered by an `OwnerStatement` is a `422` (`NamedExpenseInClosedPeriodError`) — V1 does not regenerate, so a closed period cannot absorb new rows (D6.3).
+     * A `date` that falls inside a period already covered by an `OwnerStatement` is a `409` (`NamedExpenseInClosedPeriodError`) — the payload may be well-formed, but the period is already closed, a state conflict; V1 does not regenerate, so a closed period cannot absorb new rows (D6.3).
      */
     post: operations["create_expense_api_v1_expenses_post"];
   };
@@ -6025,7 +6025,7 @@ export interface operations {
    * Create an expense
    * @description Returns the row plus `pending_owner_approval_id` when `amount > TenantConfig.owner_approval_threshold_eur` (R5.7, D4): a new `OwnerApproval(OTHER)` is created in the same transaction, and the response field tells the UI that the row is gated on the owner's answer. The reconciliation of D4 will materialise the answer on its next sweep, and the field will then clear.
    *
-   * A `date` that falls inside a period already covered by an `OwnerStatement` is a `422` (`NamedExpenseInClosedPeriodError`) — V1 does not regenerate, so a closed period cannot absorb new rows (D6.3).
+   * A `date` that falls inside a period already covered by an `OwnerStatement` is a `409` (`NamedExpenseInClosedPeriodError`) — the payload may be well-formed, but the period is already closed, a state conflict; V1 does not regenerate, so a closed period cannot absorb new rows (D6.3).
    */
   create_expense_api_v1_expenses_post: {
     requestBody: {
@@ -7556,7 +7556,9 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       200: {
-        content: never;
+        content: {
+          "text/csv": unknown;
+        };
       };
       /** @description Missing, malformed or expired credentials. */
       401: {
@@ -7593,7 +7595,9 @@ export interface operations {
     responses: {
       /** @description Successful Response */
       200: {
-        content: never;
+        content: {
+          "application/pdf": unknown;
+        };
       };
       /** @description Missing, malformed or expired credentials. */
       401: {

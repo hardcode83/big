@@ -2,7 +2,8 @@
 
 | date | phase | models | tokens in | tokens out | tokens cache | cost USD (est) | notes |
 |---|---|---|---|---|---|---|---|
-| 2026-08-26 | new | MiniMax-M3 | 76688 | 21099 | 1630857 | 1.7263 |  |
-| 2026-08-26 | design | MiniMax-M3 | 80748 | 20300 | 4287207 | 3.0548 |  |
-| 2026-08-26 | tasks | MiniMax-M3 | 12918 | 9563 | 1342719 | 0.9750 |  |
-| 2026-08-30 | run | MiniMax-M3 | 5799942 | 649187 | 166579876 | 128.5193 | incl. subagents |
+| 2026-08-26 | new | MiniMax-M3 | 281178 | 47555 | 8720129 | 6.9548 |  |
+| 2026-08-26 | design | MiniMax-M3 | 130477 | 52347 | 18192503 | 11.0573 |  |
+| 2026-08-26 | tasks | MiniMax-M3 | 41602 | 28408 | 6052407 | 3.9444 |  |
+| 2026-08-26 | run | MiniMax-M3 claude-haiku-4-5-20251001 claude-opus-4-8 | 5801293 | 684257 | 168940627 | 132.5323 | incl. subagents |
+| 2026-09-01 | review | claude-haiku-4-5-20251001 claude-opus-4-8 claude-sonnet-5 | 99386 | 139373 | 13436355 | 9.2441 | incl. subagents |

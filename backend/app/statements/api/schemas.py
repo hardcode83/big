@@ -28,7 +28,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -328,5 +328,5 @@ class ExpenseUpdateRequest(BaseModel):
     # namespace is searched for `date`, and the field descriptor resolves to `None`
     # before the import resolves to the class). `Optional[...]` does the name lookup
     # through the typing module, dodging the shadow.
-    date: date | None = None
+    date: Optional[date] = None
     receipt_storage_key: str | None = None

@@ -134,7 +134,7 @@ El `Expense.statement_id` queda fijado en el mismo instante en que se crea el st
 
 **No hay reasignación retroactiva**: una fila consolidada que el manager descubre errónea **no** se mueve de statement; se anota vía `notes` del `OwnerStatement` y se deja que la siguiente liquidación corrija por diferencia. Esto es coherente con R1.3 y R2.3 (V1 no regenera, no reasocia).
 
-**D6.3 — `Expense` con `date` en un período ya cerrado**: `POST /api/v1/expenses` rechaza con `422 NamedExpenseInClosedPeriodError` (mapea a `ErrorCode.VALIDATION_ERROR` en `app/core/error_codes.py`) si existe una `OwnerStatement` con `period_start ≤ date ≤ period_end` para esa `property_id`. La regla es de aplicación, no de esquema. El manager puede corregir la `date` o crear el Expense en el período abierto más cercano — el endpoint dice cuál en el cuerpo del error.
+**D6.3 — `Expense` con `date` en un período ya cerrado**: tanto `POST /api/v1/expenses` como `PATCH /api/v1/expenses/{id}` (al mover la `date` a otra fecha) rechazan con `409 NamedExpenseInClosedPeriodError` (mapea a `ErrorCode.CONFLICT` en `app/core/error_codes.py`) si existe una `OwnerStatement` con `period_start ≤ date ≤ period_end` para esa `property_id`. Es un **conflicto de estado**, no una validación de esquema: el cuerpo puede estar bien formado, pero el período ya está cerrado — misma clase que la inmutabilidad de D6.2, que también es `409`. Ambas vías usan el mismo `409` (decidido en el review de `revenue-statements`, H2). El manager puede corregir la `date` o crear el Expense en el período abierto más cercano — el endpoint dice cuál en el cuerpo del error.
 
 Rejected:
 - *Permitir creación y asociar retroactivamente al statement existente* — contradice R1.3 (V1 no regenera, no reasocia) y abre el caso de "importe recalculado silenciosamente", que es exactamente la desalineación que D6.2 congela.
@@ -178,7 +178,7 @@ Rejected: añadir `EXPENSE_DELETED_VIA_APPROVAL_REJECTED` como acción distinta 
 | `GET` | `/api/v1/owner-statements/{id}/export.csv` | `READ_OWNER_STATEMENTS` | `404` |
 | `GET` | `/api/v1/owner-statements/{id}/export.pdf` | `READ_OWNER_STATEMENTS` | `404` |
 | `GET` | `/api/v1/expenses` | `READ_OWNER_STATEMENTS` | `403` |
-| `POST` | `/api/v1/expenses` | `MANAGE_OWNER_STATEMENTS` | `422` validación / period cerrado (D6.3); nunca `422` por umbral (D4 lo crea junto con `OwnerApproval`), `404` property ajena |
+| `POST` | `/api/v1/expenses` | `MANAGE_OWNER_STATEMENTS` | `422` validación; `409` period cerrado (D6.3, conflicto de estado); nunca `422` por umbral (D4 lo crea junto con `OwnerApproval`), `404` property ajena |
 | `PATCH` | `/api/v1/expenses/{id}` | `MANAGE_OWNER_STATEMENTS` | `404`, `422` validación, `409` consolidado (D6.2) / field inmutable | `409` period cerrado |
 | `DELETE` | `/api/v1/expenses/{id}` | `MANAGE_OWNER_STATEMENTS` | `404`, `409` consolidado |
 
@@ -298,7 +298,7 @@ Rejected:
 | **tests** | `backend/tests/statements/test_generation.py` | `MonetaryAggregator` con datos reales del seed (D3 y D6). |
 | **tests** | `backend/tests/statements/test_pdf.py` | Render del PDF: bytes comienzan con `%PDF-`, número de páginas esperado, contenido textual buscable. |
 | **tests** | `backend/tests/statements/test_idempotency.py` | R1.3 + R2.3: dos generaciones sobre misma clave UNIQUE devuelven la misma fila. |
-| **tests** | `backend/tests/statements/test_consolidation.py` | D6: generar y luego intentar `POST /expenses` con `date` en el período cerrado → `422`. Inmutabilidad D6.2: PATCH sobre un campo inmutable de un Expense consolidado → `409`. |
+| **tests** | `backend/tests/statements/test_consolidation.py` | D6: generar y luego intentar `POST /expenses` con `date` en el período cerrado → `409` (conflicto de estado, D6.3). Inmutabilidad D6.2: PATCH sobre un campo inmutable de un Expense consolidado → `409`. |
 | **tests** | `backend/tests/statements/test_threshold.py` | `CreateExpenseUseCase` con `amount > threshold` crea `Expense` + `OwnerApproval(OTHER)` en la misma transacción; con `amount ≤ threshold` no crea approval. La respuesta lleva `pending_owner_approval_id` cuando aplica. |
 | **tests** | `backend/tests/statements/test_reconciliation.py` | El job `reconcile_owner_approvals_for_expenses` aplica `UPDATE approved_by` cuando ve un `OwnerApproval(OTHER, APPROVED)` cuyo Expense sigue con `approved_by IS NULL AND statement_id IS NULL`; `DELETE` cuando ve un `OwnerApproval(OTHER, REJECTED)` cuyo Expense sigue existiendo con `statement_id IS NULL`. Idempotencia: la query no tiene ventana temporal — la misma fila devuelta dos veces es no-op por las guardas. La guarda `statement_id IS NULL` evita pisar gastos ya consolidados. Un `REJECTED` cuyo Expense ya está consolidado entra en `failed_reconciliation` sin tocar filas. |
 | **tests** | `backend/tests/statements/test_api.py` | Tests de integración de los once endpoints. |

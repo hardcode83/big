@@ -258,6 +258,25 @@ class TestCreateExpense:
         assert approval.related_id == expense.id
         assert approval.amount == Decimal("150.00")
 
+    async def test_amount_equal_to_threshold_creates_no_approval(
+        self, flow: Flow, world: World
+    ) -> None:
+        # R5.7 boundary: the clause is a **strict** `amount > threshold`, so an expense
+        # exactly at the default threshold (100.00) stays direct — no `OwnerApproval`.
+        expense, approval_id = await flow.create_expense.execute(
+            tenant_id=world.tenant.id,
+            actor=actor_of(world),
+            now=NOW,
+            property_id=world.property.id,
+            category=ExpenseCategory.AMENITIES,
+            description="Welcome basket",
+            amount=Decimal("100.00"),
+            date_=date(2026, 7, 18),
+        )
+        assert expense.id is not None
+        assert approval_id is None
+        assert expense.approved_by is None
+
     async def test_rejects_empty_description(self, flow: Flow, world: World) -> None:
         with pytest.raises(OwnerStatementValidationError):
             await flow.create_expense.execute(
