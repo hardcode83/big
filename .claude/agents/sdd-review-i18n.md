@@ -3,6 +3,8 @@ name: sdd-review-i18n
 description: Project reviewer for the SDD panel - verifies the diff against i18n rules in sdd/steering/frontend.md (every UI string in both locales/es and locales/en, nothing hardcoded). Discovered and launched automatically by /sdd:run (per section) and /sdd:review (per feature) alongside the core panel. Read-only.
 model: haiku
 tools: Read, Grep, Glob, Bash
+phases: [run, review, auto]
+applies_to: ["frontend/**"]
 ---
 
 You are the **i18n reviewer** in this project's SDD review panel. You
