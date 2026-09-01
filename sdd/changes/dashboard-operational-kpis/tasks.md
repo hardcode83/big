@@ -136,12 +136,18 @@
 
 ## 9. Verification
 
-- [ ] 9.1 Full backend test suite passes:
-  `docker compose exec backend uv run pytest`.
-- [ ] 9.2 `cd frontend && npm run api:check` reports no drift against the regenerated
-  contract.
-- [ ] 9.3 Manual check: as `TENANT_OWNER`, `GET /api/v1/dashboard/operational-kpis`
+- [x] 9.1 Full backend test suite passes:
+  `docker compose exec backend uv run pytest`. 1910 passed, 0 failed (verified during
+  `/sdd:review`).
+- [x] 9.2 `cd frontend && npm run api:check` reports no drift against the regenerated
+  contract. Confirmed: "api: generated types are up to date" (verified during
+  `/sdd:review`).
+- [x] 9.3 Manual check: as `TENANT_OWNER`, `GET /api/v1/dashboard/operational-kpis`
   returns the three fields with real counts against seeded data; as a role lacking one of
   the three domain permissions (verified at the use-case level in 5.3, since no seeded
   role in this project currently holds `READ_PROPERTIES` without also holding all three),
-  confirm via the unit tests that the corresponding field comes back `null`.
+  confirm via the unit tests that the corresponding field comes back `null`. Confirmed via
+  `backend/tests/dashboard/test_api.py`'s operational-kpis happy-path test (real seeded
+  data through the FastAPI `TestClient`, full stack including auth) plus the door-gate role
+  matrix and `test_operational_kpis.py`'s redaction-by-role unit tests (verified during
+  `/sdd:review`).
