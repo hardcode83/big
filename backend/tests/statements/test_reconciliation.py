@@ -60,8 +60,8 @@ async def world(db_session) -> World:
     )
     db_session.add(prop)
     await db_session.flush()
-    from app.auth.infrastructure.models import UserModel
     from app.auth.domain.enums import UserRole
+    from app.auth.infrastructure.models import UserModel
 
     owner = UserModel(
         tenant_id=tenant.id,

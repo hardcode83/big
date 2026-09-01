@@ -198,7 +198,6 @@ async def test_expense_bulk_associate_is_idempotent(db_session) -> None:
     """D6.1: a second `bulk_associate_to_statement` over the same id returns `0`, leaving
     the existing `statement_id` untouched. The `WHERE statement_id IS NULL` guard makes the
     statement side idempotent — the first call wins, the second is no-op."""
-    from app.statements.domain.entities import Expense
 
     tenant = await _tenant(db_session, "TenantA")
     prop = await _property(db_session, tenant, "REDES11")

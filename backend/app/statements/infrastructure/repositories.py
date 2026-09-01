@@ -13,7 +13,8 @@ from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import and_, delete as sqla_delete, func, select, update
+from sqlalchemy import and_, func, select, update
+from sqlalchemy import delete as sqla_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.statements.domain.entities import Expense, OwnerStatement

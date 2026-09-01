@@ -321,6 +321,43 @@ export interface paths {
      */
     get: operations["list_dashboard_cards_api_v1_dashboard_properties_get"];
   };
+  "/api/v1/expenses": {
+    /**
+     * List the tenant's expenses
+     * @description Paginated with `page`/`per_page` (PRD §23), filtered by `property_id`, by the `period_start_from`/`period_start_to` range on `expense.date`, and by `category` — all combined with AND (R5). Only expenses of the caller's tenant are ever returned (R7.2).
+     *
+     * Each item carries its optional `pending_owner_approval_id` (D13): the id of the `OwnerApproval(OTHER, PENDING)` raised for `amount > threshold`, or `None` if the threshold was never crossed or the reconciliation of D4 already materialised the answer.
+     */
+    get: operations["list_expenses_api_v1_expenses_get"];
+    /**
+     * Create an expense
+     * @description Returns the row plus `pending_owner_approval_id` when `amount > TenantConfig.owner_approval_threshold_eur` (R5.7, D4): a new `OwnerApproval(OTHER)` is created in the same transaction, and the response field tells the UI that the row is gated on the owner's answer. The reconciliation of D4 will materialise the answer on its next sweep, and the field will then clear.
+     *
+     * A `date` that falls inside a period already covered by an `OwnerStatement` is a `422` (`NamedExpenseInClosedPeriodError`) — V1 does not regenerate, so a closed period cannot absorb new rows (D6.3).
+     */
+    post: operations["create_expense_api_v1_expenses_post"];
+  };
+  "/api/v1/expenses/{expense_id}": {
+    /**
+     * Get one expense
+     * @description Returns the row plus its optional `pending_owner_approval_id` (D13). The id is the same value the listing returns for the row; an unknown id or one that belongs to another tenant is a `404` with the same body for both (R5.5).
+     */
+    get: operations["get_expense_api_v1_expenses__expense_id__get"];
+    /**
+     * Delete an expense
+     * @description Refuses with `409 ExpenseAlreadyConsolidatedError` when `statement_id IS NOT NULL` (R5.4, D6.2): a consolidated expense is part of the visible statement, and deleting it would falsify the owner's view of the period. The repository's `DELETE WHERE statement_id IS NULL` is the structural guard (QA-panel of §3); the use case's pre-check is the second line of defence.
+     */
+    delete: operations["delete_expense_api_v1_expenses__expense_id__delete"];
+    /**
+     * Update an expense
+     * @description Every field optional; the use case receives `model_dump(exclude_unset=True)` and applies only what the caller supplied (R5.3). Absent and `null` mean different things — sending no `description` is a no-op on it, sending `description: "new"` writes the new value.
+     *
+     * **Consolidated fields are immutable** (D6.2, R5.3): once `statement_id IS NOT NULL`, `amount`, `currency`, `category`, `date`, `property_id`, `statement_id`, and `approved_by` are read-only. The repository raises `ExpenseAlreadyConsolidatedError` for the offending field, mapped to `409 CONFLICT` here. `description` and `receipt_storage_key` remain editable.
+     *
+     * `statement_id`, `property_id`, `approved_by`, `incident_id`, and `created_at` are **not** in the body schema: sending them is a `422` from Pydantic's `extra="forbid"`.
+     */
+    patch: operations["update_expense_api_v1_expenses__expense_id__patch"];
+  };
   "/api/v1/guest/checkin/{token}": {
     /**
      * What the guest still has to provide
@@ -531,6 +568,64 @@ export interface paths {
      * Returns the **incident**, not the approval: what the caller does next depends on where the incident ended up.
      */
     post: operations["respond_owner_approval_api_v1_owner_approvals__approval_id__respond_post"];
+  };
+  "/api/v1/owner-statements": {
+    /**
+     * List the tenant's owner statements
+     * @description Paginated with `page`/`per_page` (PRD §23), filtered by `property_id`, by the `period_start_from`/`period_start_to` range, and by `status` — all combined with AND (R3.1). Only statements of the caller's tenant are ever returned (R7.2).
+     *
+     * Page size is fixed at 20 server-side (R3.1). `per_page` is accepted but the server uses its own constant; the response surfaces the value it actually used so the client can render the pagination correctly.
+     */
+    get: operations["list_owner_statements_api_v1_owner_statements_get"];
+  };
+  "/api/v1/owner-statements/{statement_id}": {
+    /**
+     * Get one owner statement
+     * @description Returns the statement's eleven monetary columns and its `status`/`notes`. Only statements of the caller's tenant are reachable — a `404` with the same body whether the id is unknown or belongs to another tenant (R3.4, R7.2).
+     *
+     * **The detail payload composes here, not in the API layer**: the PDF exporter (`ExportOwnerStatementPdfUseCase`) reads the same `GetOwnerStatementUseCase`, so the two surfaces cannot drift on what 'the detail' is (R3.5).
+     */
+    get: operations["get_owner_statement_api_v1_owner_statements__statement_id__get"];
+    /**
+     * Update an owner statement's notes or status
+     * @description Two fields, never both at once — the router routes on which key is present in the body. `notes` is the rule-11 sink: its value never reaches `audit_logs.changes` (only `{"changed": true}` does), per `steering/security.md` rule 11 (R4.5). An empty or whitespace-only `notes`, or one carrying `U+0000`, is a `422` naming `notes` (R5.6).
+     *
+     * `status` accepts one of `READY` or `SENT` (R4.2, R4.4). The state machine lives on the entity; an illegal move is a `409` with the status untouched, and `SENT` is terminal — no move, legal or otherwise, accepts it as the origin (R4.4, D1).
+     *
+     * **No other column of the statement is writable from the API** (R4.1): the amounts and dates are produced by generation, and the eleven monetary columns are frozen at generation time (D6.1, D6.4). Sending them is a `422` from Pydantic's `extra="forbid"`.
+     */
+    patch: operations["patch_owner_statement_api_v1_owner_statements__statement_id__patch"];
+  };
+  "/api/v1/owner-statements/{statement_id}/export.csv": {
+    /**
+     * Download the statement's expenses as CSV
+     * @description **No `AuditLog` is written for the download** (R6.7) — a read is a read. The audit trail of the statement is its transitions (R4) and the mutations of its expenses (R5).
+     *
+     * Header line is the canonical six columns (`date,category,description,amount,currency,receipt_storage_key`), one row per `Expense` of the statement. UTF-8 without BOM (R6.2), codepoints not escaped (R6.2).
+     */
+    get: operations["export_owner_statement_csv_api_v1_owner_statements__statement_id__export_csv_get"];
+  };
+  "/api/v1/owner-statements/{statement_id}/export.pdf": {
+    /**
+     * Download the statement as a PDF
+     * @description Streamed directly in the response (R6.3): the PDF is **generated in the moment** and never persisted in `StorageAdapter` (R6.3, the gate of `/sdd:new` decision).
+     *
+     * Layout follows R6.4: tenant header, property block, period block, reservation lines (`gross_amount`/`ota_commission`/`net_amount`), expenses by category with subtotals, totals row, and a `notes` box. All amounts with two decimals, separator `,` (R6.5).
+     */
+    get: operations["export_owner_statement_pdf_api_v1_owner_statements__statement_id__export_pdf_get"];
+  };
+  "/api/v1/owner-statements/generate": {
+    /**
+     * Generate owner statements now
+     * @description The manual door of the monthly cron: the same generator, over the same period, so a manager who wants to close the month early does not wait for 02:00 UTC on day 1 (R2.1).
+     *
+     * **Idempotent on the unique key** `(tenant_id, property_id, period_start, period_end)` (R2.3, D6.1): a second call with the same `property_id` and `period_end` returns the existing statement and counts it in `skipped`. The manual path is the **non-exempt** end of the rule-9 carve-out (D5/D12): it writes `OWNER_STATEMENT_GENERATED` to `AuditLog` with the caller as the actor, in addition to the `TimelineEvent` the cron path emits.
+     *
+     * **`currency_mismatch`** reports the `(property_id, period_start, period_end)` triples D3 aborted for non-EUR rows, with the offending `(row_id, currency, table)` list per triple (D3). No statement is partial — a single non-EUR row aborts the whole `(tenant, property, period)` (D3, R2).
+     *
+     * A `property_id` that is unknown, another tenant's, or not `ACTIVE` is a `422` (D9): it is a body field, not a path identifier. `period_end` must be the last day of a calendar month (R2.5).
+     */
+    post: operations["generate_owner_statement_api_v1_owner_statements_generate_post"];
   };
   "/api/v1/price-recommendations": {
     /**
@@ -901,6 +996,49 @@ export interface components {
       taken_at: string;
       /** Url */
       url: string;
+    };
+    /**
+     * GenerationReportResponse
+     * @description The four counters R4.5 asks a generation to report.
+     *
+     * One number per outcome, and they do not overlap: `created` are new rows, `updated` are
+     * recalculated ones, `preserved` are the human decisions R4.3 protects, and `skipped` are
+     * properties with no applicable active rule (R4.6). A fifth counter exists inside the use
+     * case — `failed` — and stays out of the published contract per D9/D10; a failed property
+     * is reported in the application log with the id that caused it.
+     */
+    app__pricing__api__schemas__GenerationReportResponse: {
+      /** Created */
+      created: number;
+      /** Preserved */
+      preserved: number;
+      /** Skipped */
+      skipped: number;
+      /** Updated */
+      updated: number;
+    };
+    /**
+     * GenerationReportResponse
+     * @description R2.6 / D9 — the three counters the manual generation reports.
+     *
+     * `currency_mismatch` is the list of `(property_id, period_start, period_end, mismatches)`
+     * entries the use case collects when D3 aborts one or more `(tenant, property, period)`
+     * slices for non-EUR rows. The shape matches what the use case builds; the router hands
+     * it through unchanged.
+     */
+    app__statements__api__schemas__GenerationReportResponse: {
+      /** Consolidated Count */
+      consolidated_count: number;
+      /** Created */
+      created: number;
+      /** Currency Mismatch */
+      currency_mismatch: {
+          [key: string]: unknown;
+        }[];
+      /** Failed */
+      failed: number;
+      /** Skipped */
+      skipped: number;
     };
     /**
      * AssignCleaningTaskRequest
@@ -1806,6 +1944,142 @@ export interface components {
     ErrorEnvelope: {
       error: components["schemas"]["ErrorBody"];
     };
+    /**
+     * ExpenseCategory
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (Expense.category) without a named block (§7.23).
+     * @enum {string}
+     */
+    ExpenseCategory: "CLEANING" | "LAUNDRY" | "AMENITIES" | "MAINTENANCE" | "SPECIALIST" | "PLATFORM_FEE" | "OTHER";
+    /**
+     * ExpenseCreateRequest
+     * @description `POST /api/v1/expenses` (R5.1, R5.2, R5.6, R5.7).
+     *
+     * `currency` defaults to `"EUR"` (R5.2: when omitted, defaultea a EUR); the use case
+     * runs the `Date not in future` check (R5.2), the threshold check (R5.7), the
+     * description check (R5.6), and the closed-period check (D6.3). This schema only
+     * constrains types and shapes.
+     */
+    ExpenseCreateRequest: {
+      /** Amount */
+      amount: number | string;
+      category: components["schemas"]["ExpenseCategory"];
+      /**
+       * Currency
+       * @default EUR
+       */
+      currency?: string;
+      /**
+       * Date
+       * Format: date
+       */
+      date: string;
+      /** Description */
+      description: string;
+      /** Incident Id */
+      incident_id?: string | null;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Receipt Storage Key */
+      receipt_storage_key?: string | null;
+    };
+    /**
+     * ExpensePageResponse
+     * @description The listing envelope for `GET /api/v1/expenses` (R5.1).
+     *
+     * Same shape as `OwnerStatementPageResponse` — `items`, `total`, `page`, `per_page` —
+     * so the FE can render both with one paginator.
+     */
+    ExpensePageResponse: {
+      /** Items */
+      items: components["schemas"]["ExpenseResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+    };
+    /**
+     * ExpenseResponse
+     * @description One expense row plus the optional `pending_owner_approval_id` (D13).
+     *
+     * `pending_owner_approval_id` is set when an `OwnerApproval(OTHER, PENDING)` exists for
+     * this expense — the reconciliation job of D4 will materialise the owner's answer on
+     * the next sweep, and the field lets the UI say "waiting for the owner" without a
+     * second call. `None` otherwise: no approval, the answer was `APPROVED`/`REJECTED`, or
+     * the threshold was never crossed.
+     */
+    ExpenseResponse: {
+      /** Amount */
+      amount: string;
+      /** Approved By */
+      approved_by: string | null;
+      category: components["schemas"]["ExpenseCategory"];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Currency */
+      currency: string;
+      /**
+       * Date
+       * Format: date
+       */
+      date: string;
+      /** Description */
+      description: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Incident Id */
+      incident_id: string | null;
+      /** Pending Owner Approval Id */
+      pending_owner_approval_id: string | null;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Receipt Storage Key */
+      receipt_storage_key: string | null;
+      /** Statement Id */
+      statement_id: string | null;
+    };
+    /**
+     * ExpenseUpdateRequest
+     * @description `PATCH /api/v1/expenses/{id}` (R5.3, R5.6, D6.2, D6.3).
+     *
+     * Every field optional, and the router forwards `model_dump(exclude_unset=True)` so
+     * absent and `null` mean different things — a PATCH that does not name `description`
+     * is a no-op on it, while a PATCH that explicitly sets it to a new string writes the
+     * new value (R5.3).
+     *
+     * `statement_id`, `property_id`, `approved_by`, `incident_id`, and `created_at` are
+     * deliberately **not** writable here (R5.3, D6.2): `statement_id` is set by the
+     * generation; `approved_by` is set by the reconciliation job; `property_id` would
+     * silently move an expense across portfolios; `incident_id` is set when an incident
+     * raises one. Sending them is a `422` from Pydantic's `extra="forbid"`.
+     */
+    ExpenseUpdateRequest: {
+      /** Amount */
+      amount?: number | string | null;
+      category?: components["schemas"]["ExpenseCategory"] | null;
+      /** Currency */
+      currency?: string | null;
+      /** Date */
+      date?: null;
+      /** Description */
+      description?: string | null;
+      /** Receipt Storage Key */
+      receipt_storage_key?: string | null;
+    };
     /** FinancialSummaryResponse */
     FinancialSummaryResponse: {
       /** Currency */
@@ -1837,6 +2111,24 @@ export interface components {
       detail?: string;
     };
     /**
+     * GenerateOwnerStatementRequest
+     * @description `POST /api/v1/owner-statements/generate` (R2.1, R2.2).
+     *
+     * `property_id` omitted sweeps the tenant's whole `ACTIVE` portfolio; named, it scopes to
+     * that one property. A `property_id` that is unknown, another tenant's, or not `ACTIVE` is
+     * a `422` — it is a body field, not a path identifier (D9's fourth refinement).
+     *
+     * `period_end` is the period's last day (R2.5: a statement covers one calendar month);
+     * `Period.month_containing` in `application/generation.py` rebuilds the closed range
+     * from it, so a caller typing a mid-month day is `422`'d with the field named.
+     */
+    GenerateOwnerStatementRequest: {
+      /** Period End */
+      period_end?: string | null;
+      /** Property Id */
+      property_id?: string | null;
+    };
+    /**
      * GeneratePriceRecommendationsRequest
      * @description `POST /api/v1/price-recommendations/generate` (R4.5, OQ4).
      *
@@ -1848,26 +2140,6 @@ export interface components {
     GeneratePriceRecommendationsRequest: {
       /** Property Id */
       property_id?: string | null;
-    };
-    /**
-     * GenerationReportResponse
-     * @description The four counters R4.5 asks a generation to report.
-     *
-     * One number per outcome, and they do not overlap: `created` are new rows, `updated` are
-     * recalculated ones, `preserved` are the human decisions R4.3 protects, and `skipped` are
-     * properties with no applicable active rule (R4.6). A fifth counter exists inside the use
-     * case — `failed` — and stays out of the published contract per D9/D10; a failed property
-     * is reported in the application log with the id that caused it.
-     */
-    GenerationReportResponse: {
-      /** Created */
-      created: number;
-      /** Preserved */
-      preserved: number;
-      /** Skipped */
-      skipped: number;
-      /** Updated */
-      updated: number;
     };
     /**
      * GuestAccessTokenIssuedResponse
@@ -2421,6 +2693,120 @@ export interface components {
      * @enum {string}
      */
     OwnerApprovalStatus: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
+    /**
+     * OwnerStatementNotesUpdateRequest
+     * @description `PATCH /api/v1/owner-statements/{id}` with `notes` (R4.1, R4.5, R4.6).
+     *
+     * Only `notes`, no other field of the statement is writable from the API (R4.1):
+     * the amounts and dates are produced by generation. The body accepts empty strings
+     * too — the use case refuses them with a `422`, and the router passes the field through.
+     */
+    OwnerStatementNotesUpdateRequest: {
+      /** Notes */
+      notes: string;
+    };
+    /**
+     * OwnerStatementPageResponse
+     * @description R3.2 — the listing envelope: `items`, `total`, `page`, `per_page`.
+     *
+     * `total_pages` is **not** published — the client computes it from `total` and `per_page`
+     * (the same convention `pricing-web` R3.4 set and `/sdd:auto` consumes).
+     */
+    OwnerStatementPageResponse: {
+      /** Items */
+      items: components["schemas"]["OwnerStatementResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+    };
+    /**
+     * OwnerStatementResponse
+     * @description What an authorised caller may see about one statement.
+     *
+     * Every writable column of the statement plus its identity and timestamps. **No
+     * `tenant_id`** — it is the token's, and echoing it tells a caller nothing she did not
+     * already prove. **No `pending_owner_approval_id`** — D13's deliberate asymmetry: a
+     * statement is built from consolidated expenses, and a consolidated expense's approval is
+     * necessarily `APPROVED`, never `PENDING`.
+     */
+    OwnerStatementResponse: {
+      /** Amenities Costs */
+      amenities_costs: string;
+      /** Cleaning Costs */
+      cleaning_costs: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Gross Revenue */
+      gross_revenue: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Laundry Costs */
+      laundry_costs: string;
+      /** Maintenance Costs */
+      maintenance_costs: string;
+      /** Net Owner Result */
+      net_owner_result: string;
+      /** Net Revenue */
+      net_revenue: string;
+      /** Notes */
+      notes: string | null;
+      /** Ota Commissions */
+      ota_commissions: string;
+      /** Other Costs */
+      other_costs: string;
+      /**
+       * Period End
+       * Format: date
+       */
+      period_end: string;
+      /**
+       * Period Start
+       * Format: date
+       */
+      period_start: string;
+      /** Platform Fee */
+      platform_fee: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Specialist Costs */
+      specialist_costs: string;
+      status: components["schemas"]["OwnerStatementStatus"];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * OwnerStatementStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (OwnerStatement.status) without a named block (§7.22).
+     * @enum {string}
+     */
+    OwnerStatementStatus: "DRAFT" | "READY" | "SENT";
+    /**
+     * OwnerStatementTransitionRequest
+     * @description `PATCH /api/v1/owner-statements/{id}` with `status` (R4.2, R4.3, R4.4).
+     *
+     * The state machine lives on the entity (`OwnerStatement._TRANSITIONS`); this schema
+     * only constrains the value to the enum. An illegal move is a `409` raised by the
+     * entity, not a `422` from a shape check (R4.4).
+     */
+    OwnerStatementTransitionRequest: {
+      status: components["schemas"]["OwnerStatementStatus"];
+    };
     /**
      * PaymentStatus
      * @enum {string}
@@ -3587,7 +3973,7 @@ export interface components {
      * TimelineEventType
      * @enum {string}
      */
-    TimelineEventType: "RESERVATION_IMPORTED" | "RESERVATION_CREATED_MANUAL" | "RESERVATION_UPDATED" | "RESERVATION_CANCELLED" | "CHECKIN_WINDOW_OPENED" | "CHECKOUT_WINDOW_REACHED" | "PROPERTY_STATE_CHANGED" | "ACCESS_CODE_PENDING" | "ACCESS_CODE_CREATED_EXTERNAL" | "ACCESS_CODE_MANUAL_ADDED" | "ACCESS_CODE_DELIVERED" | "GUEST_MESSAGE_RECEIVED" | "AI_RESPONSE_SENT" | "AI_ESCALATED_TO_HUMAN" | "HUMAN_RESPONSE_SENT" | "CLEANING_TASK_CREATED" | "CLEANER_ASSIGNED" | "CLEANER_ACCEPTED" | "CLEANER_REJECTED" | "CLEANING_STARTED" | "CLEANING_PHOTO_UPLOADED" | "CLEANING_COMPLETED" | "CLEANING_FAILED_VALIDATION" | "INCIDENT_CREATED" | "INCIDENT_CLASSIFIED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_ACCEPTED" | "TECHNICIAN_REJECTED" | "TECHNICIAN_EN_ROUTE" | "TECHNICIAN_STARTED" | "INCIDENT_RESOLVED" | "INCIDENT_CANCELLED" | "OWNER_APPROVAL_REQUIRED" | "OWNER_APPROVED_EXPENSE" | "OWNER_REJECTED_EXPENSE" | "LOCK_ALERT_RECEIVED" | "PRICE_RECOMMENDATION_CREATED" | "PRICE_UPDATED_EXTERNAL" | "LEGAL_REGISTRATION_SUBMITTED" | "REVIEW_IMPORTED" | "REVIEW_RESPONSE_DRAFTED" | "REVIEW_RESPONSE_APPROVED" | "SLA_BREACH_WARNING" | "NOTIFICATION_SENT" | "NOTIFICATION_FAILED" | "WEBHOOK_RECEIVED" | "GUEST_CHECKIN_COMPLETED";
+    TimelineEventType: "RESERVATION_IMPORTED" | "RESERVATION_CREATED_MANUAL" | "RESERVATION_UPDATED" | "RESERVATION_CANCELLED" | "CHECKIN_WINDOW_OPENED" | "CHECKOUT_WINDOW_REACHED" | "PROPERTY_STATE_CHANGED" | "ACCESS_CODE_PENDING" | "ACCESS_CODE_CREATED_EXTERNAL" | "ACCESS_CODE_MANUAL_ADDED" | "ACCESS_CODE_DELIVERED" | "GUEST_MESSAGE_RECEIVED" | "AI_RESPONSE_SENT" | "AI_ESCALATED_TO_HUMAN" | "HUMAN_RESPONSE_SENT" | "CLEANING_TASK_CREATED" | "CLEANER_ASSIGNED" | "CLEANER_ACCEPTED" | "CLEANER_REJECTED" | "CLEANING_STARTED" | "CLEANING_PHOTO_UPLOADED" | "CLEANING_COMPLETED" | "CLEANING_FAILED_VALIDATION" | "INCIDENT_CREATED" | "INCIDENT_CLASSIFIED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_ACCEPTED" | "TECHNICIAN_REJECTED" | "TECHNICIAN_EN_ROUTE" | "TECHNICIAN_STARTED" | "INCIDENT_RESOLVED" | "INCIDENT_CANCELLED" | "OWNER_APPROVAL_REQUIRED" | "OWNER_APPROVED_EXPENSE" | "OWNER_REJECTED_EXPENSE" | "LOCK_ALERT_RECEIVED" | "PRICE_RECOMMENDATION_CREATED" | "PRICE_UPDATED_EXTERNAL" | "LEGAL_REGISTRATION_SUBMITTED" | "REVIEW_IMPORTED" | "REVIEW_RESPONSE_DRAFTED" | "REVIEW_RESPONSE_APPROVED" | "SLA_BREACH_WARNING" | "NOTIFICATION_SENT" | "NOTIFICATION_FAILED" | "WEBHOOK_RECEIVED" | "GUEST_CHECKIN_COMPLETED" | "OWNER_STATEMENT_GENERATED";
     /**
      * TimelinePageResponse
      * @description The pagination envelope of PRD §23.
@@ -5533,6 +5919,207 @@ export interface operations {
     };
   };
   /**
+   * List the tenant's expenses
+   * @description Paginated with `page`/`per_page` (PRD §23), filtered by `property_id`, by the `period_start_from`/`period_start_to` range on `expense.date`, and by `category` — all combined with AND (R5). Only expenses of the caller's tenant are ever returned (R7.2).
+   *
+   * Each item carries its optional `pending_owner_approval_id` (D13): the id of the `OwnerApproval(OTHER, PENDING)` raised for `amount > threshold`, or `None` if the threshold was never crossed or the reconciliation of D4 already materialised the answer.
+   */
+  list_expenses_api_v1_expenses_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        property_id?: string | null;
+        period_start_from?: string | null;
+        period_start_to?: string | null;
+        category?: components["schemas"]["ExpenseCategory"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ExpensePageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Create an expense
+   * @description Returns the row plus `pending_owner_approval_id` when `amount > TenantConfig.owner_approval_threshold_eur` (R5.7, D4): a new `OwnerApproval(OTHER)` is created in the same transaction, and the response field tells the UI that the row is gated on the owner's answer. The reconciliation of D4 will materialise the answer on its next sweep, and the field will then clear.
+   *
+   * A `date` that falls inside a period already covered by an `OwnerStatement` is a `422` (`NamedExpenseInClosedPeriodError`) — V1 does not regenerate, so a closed period cannot absorb new rows (D6.3).
+   */
+  create_expense_api_v1_expenses_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExpenseCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["ExpenseResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Get one expense
+   * @description Returns the row plus its optional `pending_owner_approval_id` (D13). The id is the same value the listing returns for the row; an unknown id or one that belongs to another tenant is a `404` with the same body for both (R5.5).
+   */
+  get_expense_api_v1_expenses__expense_id__get: {
+    parameters: {
+      path: {
+        expense_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ExpenseResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete an expense
+   * @description Refuses with `409 ExpenseAlreadyConsolidatedError` when `statement_id IS NOT NULL` (R5.4, D6.2): a consolidated expense is part of the visible statement, and deleting it would falsify the owner's view of the period. The repository's `DELETE WHERE statement_id IS NULL` is the structural guard (QA-panel of §3); the use case's pre-check is the second line of defence.
+   */
+  delete_expense_api_v1_expenses__expense_id__delete: {
+    parameters: {
+      path: {
+        expense_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Update an expense
+   * @description Every field optional; the use case receives `model_dump(exclude_unset=True)` and applies only what the caller supplied (R5.3). Absent and `null` mean different things — sending no `description` is a no-op on it, sending `description: "new"` writes the new value.
+   *
+   * **Consolidated fields are immutable** (D6.2, R5.3): once `statement_id IS NOT NULL`, `amount`, `currency`, `category`, `date`, `property_id`, `statement_id`, and `approved_by` are read-only. The repository raises `ExpenseAlreadyConsolidatedError` for the offending field, mapped to `409 CONFLICT` here. `description` and `receipt_storage_key` remain editable.
+   *
+   * `statement_id`, `property_id`, `approved_by`, `incident_id`, and `created_at` are **not** in the body schema: sending them is a `422` from Pydantic's `extra="forbid"`.
+   */
+  update_expense_api_v1_expenses__expense_id__patch: {
+    parameters: {
+      path: {
+        expense_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExpenseUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ExpenseResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * What the guest still has to provide
    * @description The names of the fields of PRD §17 that are still missing, plus the document and legal-registration statuses. **Never the values already supplied** — the guest knows what they typed, and echoing it back would put personal data in one more response body for no benefit.
    */
@@ -6679,6 +7266,252 @@ export interface operations {
     };
   };
   /**
+   * List the tenant's owner statements
+   * @description Paginated with `page`/`per_page` (PRD §23), filtered by `property_id`, by the `period_start_from`/`period_start_to` range, and by `status` — all combined with AND (R3.1). Only statements of the caller's tenant are ever returned (R7.2).
+   *
+   * Page size is fixed at 20 server-side (R3.1). `per_page` is accepted but the server uses its own constant; the response surfaces the value it actually used so the client can render the pagination correctly.
+   */
+  list_owner_statements_api_v1_owner_statements_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        property_id?: string | null;
+        period_start_from?: string | null;
+        period_start_to?: string | null;
+        status?: components["schemas"]["OwnerStatementStatus"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OwnerStatementPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Get one owner statement
+   * @description Returns the statement's eleven monetary columns and its `status`/`notes`. Only statements of the caller's tenant are reachable — a `404` with the same body whether the id is unknown or belongs to another tenant (R3.4, R7.2).
+   *
+   * **The detail payload composes here, not in the API layer**: the PDF exporter (`ExportOwnerStatementPdfUseCase`) reads the same `GetOwnerStatementUseCase`, so the two surfaces cannot drift on what 'the detail' is (R3.5).
+   */
+  get_owner_statement_api_v1_owner_statements__statement_id__get: {
+    parameters: {
+      path: {
+        statement_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OwnerStatementResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Update an owner statement's notes or status
+   * @description Two fields, never both at once — the router routes on which key is present in the body. `notes` is the rule-11 sink: its value never reaches `audit_logs.changes` (only `{"changed": true}` does), per `steering/security.md` rule 11 (R4.5). An empty or whitespace-only `notes`, or one carrying `U+0000`, is a `422` naming `notes` (R5.6).
+   *
+   * `status` accepts one of `READY` or `SENT` (R4.2, R4.4). The state machine lives on the entity; an illegal move is a `409` with the status untouched, and `SENT` is terminal — no move, legal or otherwise, accepts it as the origin (R4.4, D1).
+   *
+   * **No other column of the statement is writable from the API** (R4.1): the amounts and dates are produced by generation, and the eleven monetary columns are frozen at generation time (D6.1, D6.4). Sending them is a `422` from Pydantic's `extra="forbid"`.
+   */
+  patch_owner_statement_api_v1_owner_statements__statement_id__patch: {
+    parameters: {
+      path: {
+        statement_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OwnerStatementNotesUpdateRequest"] | components["schemas"]["OwnerStatementTransitionRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OwnerStatementResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Download the statement's expenses as CSV
+   * @description **No `AuditLog` is written for the download** (R6.7) — a read is a read. The audit trail of the statement is its transitions (R4) and the mutations of its expenses (R5).
+   *
+   * Header line is the canonical six columns (`date,category,description,amount,currency,receipt_storage_key`), one row per `Expense` of the statement. UTF-8 without BOM (R6.2), codepoints not escaped (R6.2).
+   */
+  export_owner_statement_csv_api_v1_owner_statements__statement_id__export_csv_get: {
+    parameters: {
+      path: {
+        statement_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: never;
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Download the statement as a PDF
+   * @description Streamed directly in the response (R6.3): the PDF is **generated in the moment** and never persisted in `StorageAdapter` (R6.3, the gate of `/sdd:new` decision).
+   *
+   * Layout follows R6.4: tenant header, property block, period block, reservation lines (`gross_amount`/`ota_commission`/`net_amount`), expenses by category with subtotals, totals row, and a `notes` box. All amounts with two decimals, separator `,` (R6.5).
+   */
+  export_owner_statement_pdf_api_v1_owner_statements__statement_id__export_pdf_get: {
+    parameters: {
+      path: {
+        statement_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: never;
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Generate owner statements now
+   * @description The manual door of the monthly cron: the same generator, over the same period, so a manager who wants to close the month early does not wait for 02:00 UTC on day 1 (R2.1).
+   *
+   * **Idempotent on the unique key** `(tenant_id, property_id, period_start, period_end)` (R2.3, D6.1): a second call with the same `property_id` and `period_end` returns the existing statement and counts it in `skipped`. The manual path is the **non-exempt** end of the rule-9 carve-out (D5/D12): it writes `OWNER_STATEMENT_GENERATED` to `AuditLog` with the caller as the actor, in addition to the `TimelineEvent` the cron path emits.
+   *
+   * **`currency_mismatch`** reports the `(property_id, period_start, period_end)` triples D3 aborted for non-EUR rows, with the offending `(row_id, currency, table)` list per triple (D3). No statement is partial — a single non-EUR row aborts the whole `(tenant, property, period)` (D3, R2).
+   *
+   * A `property_id` that is unknown, another tenant's, or not `ACTIVE` is a `422` (D9): it is a body field, not a path identifier. `period_end` must be the last day of a calendar month (R2.5).
+   */
+  generate_owner_statement_api_v1_owner_statements_generate_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["GenerateOwnerStatementRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["app__statements__api__schemas__GenerationReportResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List the tenant's price recommendations
    * @description Paginated with `page`/`per_page` (PRD §23), filtered by `property_id`, by the `date_from`/`date_to` range and by `status`, all combined with AND. Only recommendations of the caller's tenant are ever returned (R5.1).
    *
@@ -6784,7 +7617,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["GenerationReportResponse"];
+          "application/json": components["schemas"]["app__pricing__api__schemas__GenerationReportResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

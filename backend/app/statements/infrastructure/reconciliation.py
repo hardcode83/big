@@ -22,8 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.maintenance.domain.enums import OwnerApprovalRelatedType
 from app.maintenance.infrastructure.models import OwnerApprovalModel
 from app.statements.application.reconciliation import (
-    FailedReconciliation,
-    ReconciliationReport,
     ReconciliationStore,
     _InconsistentRow,
     _PendingRow,

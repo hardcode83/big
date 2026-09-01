@@ -34,7 +34,7 @@ from decimal import Decimal
 from app.audit.domain import actions as audit_actions
 from app.audit.domain.repositories import AuditLogRepository
 from app.audit.domain.services import AuditLogFactory
-from app.audit.domain.value_objects import ChangeSet, REDACT_ONLY_FIELDS
+from app.audit.domain.value_objects import REDACT_ONLY_FIELDS, ChangeSet
 from app.core.unit_of_work import CallerOwnedUnitOfWork, UnitOfWork
 from app.maintenance.domain.entities import OwnerApproval
 from app.maintenance.domain.enums import OwnerApprovalRelatedType
@@ -49,7 +49,6 @@ from app.statements.domain.exceptions import (
     ExpenseNotFoundError,
     MixedCurrencyPeriodError,
     NamedExpenseInClosedPeriodError,
-    OwnerStatementInvalidTransitionError,
     OwnerStatementNotFoundError,
     OwnerStatementValidationError,
 )
@@ -100,7 +99,7 @@ _TIMELINE_TITLES: dict[TimelineEventType, str] = {
 #: `String(500)` on the column, and the shorter bound is what the schema actually holds.
 MAX_EXPENSE_DESCRIPTION = 500
 #: `expenses.amount` is `NUMERIC(10, 2)` — same ceiling the schema enforces.
-MAX_EXPENSE_AMOUNT = Decimal("100000000")
+MAX_EXPENSE_AMOUNT = Decimal(100000000)
 
 
 @dataclass(frozen=True)
@@ -1192,19 +1191,15 @@ class TransitionOwnerStatementStatusUseCase:
         if statement is None:
             raise OwnerStatementNotFoundError()
         previous = statement.status
-        try:
-            if target_status is OwnerStatementStatus.READY:
-                statement.mark_ready(now=now)
-            elif target_status is OwnerStatementStatus.SENT:
-                statement.mark_sent(now=now)
-            else:
-                raise OwnerStatementValidationError(
-                    f"target status {target_status} is not a legal move target",
-                    field="status",
-                )
-        except OwnerStatementInvalidTransitionError:
-            # Re-raise — the entity has refused the move before any field touched.
-            raise
+        if target_status is OwnerStatementStatus.READY:
+            statement.mark_ready(now=now)
+        elif target_status is OwnerStatementStatus.SENT:
+            statement.mark_sent(now=now)
+        else:
+            raise OwnerStatementValidationError(
+                f"target status {target_status} is not a legal move target",
+                field="status",
+            )
         await self._statements.save(statement)
         await self._audit.record(
             tenant_id=tenant_id,
@@ -1323,11 +1318,16 @@ class ExportOwnerStatementPdfUseCase:
             for reservation in reservations
             if reservation.currency == "EUR"
         ]
+        expenses_by_category: dict[ExpenseCategory, list[Expense]] = {
+            category: [] for category in ExpenseCategory
+        }
+        for expense in expenses_in_statement:
+            expenses_by_category[expense.category].append(expense)
         body = self._pdf_generator.render(
             statement=statement,
             property=property,
             tenant=tenant,
             reservations=reservations_in_period,
-            expenses=expenses_in_statement,
+            expenses_by_category=expenses_by_category,
         )
         return statement, body

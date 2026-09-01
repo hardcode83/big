@@ -28,7 +28,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -46,7 +46,7 @@ MAX_PAGE = 100_000
 #: schema ceiling — a 4 KB description is refused at parse time, not after the entity is built.
 MAX_EXPENSE_DESCRIPTION = 500
 #: `expenses.amount` is `NUMERIC(10,2)`, so the ceiling is 99 999 999.99.
-MAX_EXPENSE_AMOUNT = Decimal("100000000")
+MAX_EXPENSE_AMOUNT = Decimal(100000000)
 
 #: `allow_inf_nan=False` on every `Decimal` field: Pydantic otherwise accepts the JSON
 #: strings `"NaN"` and `"Infinity"` into a `Decimal`, and the entity refuses both. A price
@@ -88,7 +88,7 @@ class OwnerStatementResponse(BaseModel):
     updated_at: datetime
 
     @classmethod
-    def from_domain(cls, statement: OwnerStatement) -> "OwnerStatementResponse":
+    def from_domain(cls, statement: OwnerStatement) -> OwnerStatementResponse:
         return cls(
             id=statement.id,
             property_id=statement.property_id,
@@ -132,7 +132,7 @@ class OwnerStatementPageResponse(BaseModel):
         total: int,
         page: int,
         per_page: int,
-    ) -> "OwnerStatementPageResponse":
+    ) -> OwnerStatementPageResponse:
         return cls(
             items=[OwnerStatementResponse.from_domain(statement) for statement in statements],
             total=total,
@@ -231,7 +231,7 @@ class ExpenseResponse(BaseModel):
     @classmethod
     def from_domain(
         cls, expense: Expense, *, pending_owner_approval_id: uuid.UUID | None = None
-    ) -> "ExpenseResponse":
+    ) -> ExpenseResponse:
         return cls(
             id=expense.id,
             property_id=expense.property_id,
@@ -269,7 +269,7 @@ class ExpensePageResponse(BaseModel):
         total: int,
         page: int,
         per_page: int,
-    ) -> "ExpensePageResponse":
+    ) -> ExpensePageResponse:
         return cls(
             items=[
                 ExpenseResponse.from_domain(expense, pending_owner_approval_id=pending_id)
@@ -328,5 +328,5 @@ class ExpenseUpdateRequest(BaseModel):
     # namespace is searched for `date`, and the field descriptor resolves to `None`
     # before the import resolves to the class). `Optional[...]` does the name lookup
     # through the typing module, dodging the shadow.
-    date: Optional[date] = None
+    date: date | None = None
     receipt_storage_key: str | None = None

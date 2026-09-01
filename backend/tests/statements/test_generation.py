@@ -5,7 +5,7 @@ entities, and `Period` and `CurrencyFilter` are pure functions. DB-coupled cover
 the generator itself lives in `test_use_cases.py` over the real repositories.
 """
 
-from datetime import date
+from datetime import UTC, date
 from decimal import Decimal
 
 import pytest
@@ -20,7 +20,7 @@ from app.statements.domain.entities import Expense
 from app.statements.domain.enums import ExpenseCategory
 
 
-def _reservation(*, amount: Decimal = Decimal("100.00"), commission: Decimal = Decimal("0"),
+def _reservation(*, amount: Decimal = Decimal("100.00"), commission: Decimal = Decimal(0),
                  currency: str = "EUR", id: str = "r-1") -> Reservation:
     """The minimum viable `Reservation` for the aggregator tests.
 
@@ -77,9 +77,9 @@ def _expense(
 
 
 def _dt(year: int, month: int, day: int):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime(year, month, day, tzinfo=timezone.utc)
+    return datetime(year, month, day, tzinfo=UTC)
 
 
 # ---- Period -----------------------------------------------------------------
@@ -121,7 +121,7 @@ class TestCurrencyFilter:
     def test_returns_empty_for_eur_only_input(self) -> None:
         result = CurrencyFilter.check(
             reservations=[_reservation()],
-            expenses=[_expense(category=ExpenseCategory.CLEANING, amount=Decimal("20"))],
+            expenses=[_expense(category=ExpenseCategory.CLEANING, amount=Decimal(20))],
         )
         assert result == []
 
@@ -143,7 +143,7 @@ class TestCurrencyFilter:
 
     def test_collects_every_offending_row(self) -> None:
         bad1 = _reservation(currency="USD", id="r-1")
-        bad2 = _expense(category=ExpenseCategory.LAUNDRY, amount=Decimal("10"), currency="GBP", id="e-1")
+        bad2 = _expense(category=ExpenseCategory.LAUNDRY, amount=Decimal(10), currency="GBP", id="e-1")
         result = CurrencyFilter.check(
             reservations=[bad1],
             expenses=[bad2],
@@ -161,9 +161,9 @@ class TestMonetaryAggregator:
     def test_empty_input_yields_zero_everywhere(self) -> None:
         agg = MonetaryAggregator(threshold_eur=Decimal("100.00"))
         breakdown = agg.aggregate(reservations=[], expenses=[])
-        assert breakdown.gross_revenue == Decimal("0")
-        assert breakdown.net_revenue == Decimal("0")
-        assert breakdown.net_owner_result == Decimal("0")
+        assert breakdown.gross_revenue == Decimal(0)
+        assert breakdown.net_revenue == Decimal(0)
+        assert breakdown.net_owner_result == Decimal(0)
         for field in (
             "cleaning_costs",
             "laundry_costs",
@@ -173,7 +173,7 @@ class TestMonetaryAggregator:
             "platform_fee",
             "other_costs",
         ):
-            assert getattr(breakdown, field) == Decimal("0"), field
+            assert getattr(breakdown, field) == Decimal(0), field
 
     def test_sums_gross_and_commission(self) -> None:
         agg = MonetaryAggregator(threshold_eur=Decimal("100.00"))
@@ -193,32 +193,32 @@ class TestMonetaryAggregator:
         breakdown = agg.aggregate(
             reservations=[],
             expenses=[
-                _expense(category=ExpenseCategory.CLEANING, amount=Decimal("50")),
-                _expense(category=ExpenseCategory.LAUNDRY, amount=Decimal("30"), id="e-l"),
-                _expense(category=ExpenseCategory.AMENITIES, amount=Decimal("20"), id="e-a"),
-                _expense(category=ExpenseCategory.MAINTENANCE, amount=Decimal("100"), id="e-m"),
-                _expense(category=ExpenseCategory.SPECIALIST, amount=Decimal("200"), id="e-s"),
-                _expense(category=ExpenseCategory.PLATFORM_FEE, amount=Decimal("15"), id="e-p"),
-                _expense(category=ExpenseCategory.OTHER, amount=Decimal("10"), id="e-o"),
+                _expense(category=ExpenseCategory.CLEANING, amount=Decimal(50)),
+                _expense(category=ExpenseCategory.LAUNDRY, amount=Decimal(30), id="e-l"),
+                _expense(category=ExpenseCategory.AMENITIES, amount=Decimal(20), id="e-a"),
+                _expense(category=ExpenseCategory.MAINTENANCE, amount=Decimal(100), id="e-m"),
+                _expense(category=ExpenseCategory.SPECIALIST, amount=Decimal(200), id="e-s"),
+                _expense(category=ExpenseCategory.PLATFORM_FEE, amount=Decimal(15), id="e-p"),
+                _expense(category=ExpenseCategory.OTHER, amount=Decimal(10), id="e-o"),
             ],
         )
-        assert breakdown.cleaning_costs == Decimal("50")
-        assert breakdown.laundry_costs == Decimal("30")
-        assert breakdown.amenities_costs == Decimal("20")
-        assert breakdown.maintenance_costs == Decimal("100")
-        assert breakdown.specialist_costs == Decimal("200")
-        assert breakdown.platform_fee == Decimal("15")
-        assert breakdown.other_costs == Decimal("10")
+        assert breakdown.cleaning_costs == Decimal(50)
+        assert breakdown.laundry_costs == Decimal(30)
+        assert breakdown.amenities_costs == Decimal(20)
+        assert breakdown.maintenance_costs == Decimal(100)
+        assert breakdown.specialist_costs == Decimal(200)
+        assert breakdown.platform_fee == Decimal(15)
+        assert breakdown.other_costs == Decimal(10)
 
     def test_net_owner_result_is_net_revenue_minus_total_costs(self) -> None:
         agg = MonetaryAggregator(threshold_eur=Decimal("10000.00"))
         breakdown = agg.aggregate(
-            reservations=[_reservation(amount=Decimal("500"), commission=Decimal("0"))],
-            expenses=[_expense(category=ExpenseCategory.CLEANING, amount=Decimal("50"))],
+            reservations=[_reservation(amount=Decimal(500), commission=Decimal(0))],
+            expenses=[_expense(category=ExpenseCategory.CLEANING, amount=Decimal(50))],
         )
-        assert breakdown.net_revenue == Decimal("500")
-        assert breakdown.cleaning_costs == Decimal("50")
-        assert breakdown.net_owner_result == Decimal("450")
+        assert breakdown.net_revenue == Decimal(500)
+        assert breakdown.cleaning_costs == Decimal(50)
+        assert breakdown.net_owner_result == Decimal(450)
 
     def test_drops_a_consolidated_expense(self) -> None:
         """D6.1 — a row already attached to a statement does not contribute to a fresh
@@ -232,16 +232,16 @@ class TestMonetaryAggregator:
         breakdown = agg.aggregate(
             reservations=[],
             expenses=[
-                _expense(category=ExpenseCategory.CLEANING, amount=Decimal("50")),
+                _expense(category=ExpenseCategory.CLEANING, amount=Decimal(50)),
                 _expense(
                     category=ExpenseCategory.CLEANING,
-                    amount=Decimal("999"),
+                    amount=Decimal(999),
                     statement_id=statement_id,
                     id="e-consolidated",
                 ),
             ],
         )
-        assert breakdown.cleaning_costs == Decimal("50")
+        assert breakdown.cleaning_costs == Decimal(50)
 
     def test_drops_an_unapproved_over_threshold_expense(self) -> None:
         """R5.7 / D4 — a row over the threshold with `approved_by IS NULL` is the
@@ -253,20 +253,20 @@ class TestMonetaryAggregator:
             expenses=[
                 _expense(
                     category=ExpenseCategory.SPECIALIST,
-                    amount=Decimal("200"),
+                    amount=Decimal(200),
                     approved_by=None,
                     id="e-pending",
                 ),
                 _expense(
                     category=ExpenseCategory.SPECIALIST,
-                    amount=Decimal("200"),
+                    amount=Decimal(200),
                     id="e-approved",
                     approved_by=_uuid_from_string("user-1"),
                 ),
             ],
         )
         # Only the approved row contributes.
-        assert breakdown.specialist_costs == Decimal("200")
+        assert breakdown.specialist_costs == Decimal(200)
 
     def test_keeps_an_expense_under_threshold_even_without_approval(self) -> None:
         """A row under the threshold does not need an `OwnerApproval`; the
@@ -277,13 +277,13 @@ class TestMonetaryAggregator:
             expenses=[
                 _expense(
                     category=ExpenseCategory.AMENITIES,
-                    amount=Decimal("50"),
+                    amount=Decimal(50),
                     approved_by=None,
                     id="e-tiny",
                 ),
             ],
         )
-        assert breakdown.amenities_costs == Decimal("50")
+        assert breakdown.amenities_costs == Decimal(50)
 
 
 def _uuid_from_string(s: str):

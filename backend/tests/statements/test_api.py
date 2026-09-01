@@ -40,12 +40,6 @@ from app.tenants.infrastructure.models import TenantConfigModel
 # The shared `api` fixture wires the same request-session override the rest of the
 # integration suite uses, so the tenant marker the request sets is popped on the way
 # out — the same property production gets from per-request sessions.
-from tests.auth.conftest import (  # noqa: F401 — fixtures
-    tenant_a,
-    tenant_b,
-    users_by_role_a,
-    users_by_role_b,
-)
 
 NOW = datetime(2026, 8, 15, 10, 0, tzinfo=UTC)
 PERIOD_START = date(2026, 7, 1)
@@ -231,6 +225,7 @@ class TestListOwnerStatements:
 
         # Verify the seed is visible to a direct query.
         from sqlalchemy import select, text
+
         from app.statements.infrastructure.models import OwnerStatementModel
         rows_all = await db_session.execute(select(OwnerStatementModel))
         print(f"DB rows (unfiltered): {[(r.id, r.tenant_id) for r in rows_all.scalars().all()]}")
@@ -592,11 +587,6 @@ class TestExpenseCrud:
         self, api, world, db_session
     ) -> None:
         # Seed an expense + a PENDING approval; verify the field on GET.
-        from app.maintenance.domain.enums import (
-            OwnerApprovalRelatedType,
-            OwnerApprovalStatus,
-        )
-        from app.maintenance.infrastructure.models import OwnerApprovalModel
 
         expense = await _make_expense(db_session, world)
         db_session.add(expense)

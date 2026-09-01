@@ -12,7 +12,7 @@ are exactly what the API would wire.
 """
 
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -20,9 +20,10 @@ import pytest_asyncio
 
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
-from app.maintenance.domain.enums import OwnerApprovalRelatedType, OwnerApprovalStatus
-from app.maintenance.infrastructure.models import OwnerApprovalModel
-from app.maintenance.infrastructure.repositories import SqlAlchemyOwnerApprovalRepository
+from app.maintenance.domain.enums import OwnerApprovalRelatedType
+from app.maintenance.infrastructure.repositories import (
+    SqlAlchemyOwnerApprovalRepository,
+)
 from app.properties.domain.enums import PropertyStatus
 from app.properties.infrastructure.models import PropertyModel
 from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
@@ -46,14 +47,12 @@ from app.statements.application.use_cases import (
 from app.statements.domain.enums import ExpenseCategory, OwnerStatementStatus
 from app.statements.domain.exceptions import (
     ExpenseAlreadyConsolidatedError,
-    ExpenseNotFoundError,
     NamedExpenseInClosedPeriodError,
     OwnerStatementInvalidTransitionError,
     OwnerStatementNotFoundError,
     OwnerStatementValidationError,
 )
 from app.statements.domain.repositories import (
-    ExpenseFilters,
     OwnerStatementFilters,
 )
 from app.statements.infrastructure.models import ExpenseModel, OwnerStatementModel
@@ -143,7 +142,15 @@ class Flow:
                 return (",".join(header) + "\n" + "\n".join(str(r) for r in rows)).encode()
 
         class _FakePdfGenerator:
-            def render(self, *, statement, property, tenant, reservations, expenses):
+            def render(
+                self,
+                *,
+                statement,
+                property,
+                tenant,
+                reservations,
+                expenses_by_category,
+            ):
                 return b"%PDF-fake"
 
         self.export_csv = ExportOwnerStatementCsvUseCase(
@@ -189,8 +196,8 @@ async def world(db_session) -> World:
     )
     db_session.add(prop)
     await db_session.flush()
-    from app.auth.infrastructure.models import UserModel
     from app.auth.domain.enums import UserRole
+    from app.auth.infrastructure.models import UserModel
 
     manager = UserModel(
         tenant_id=tenant.id,
@@ -286,7 +293,7 @@ class TestCreateExpense:
                 property_id=world.property.id,
                 category=ExpenseCategory.CLEANING,
                 description="huge",
-                amount=Decimal("1000000000"),  # way past NUMERIC(10,2)
+                amount=Decimal(1000000000),  # way past NUMERIC(10,2)
                 date_=date(2026, 7, 12),
             )
 
@@ -610,7 +617,7 @@ class TestGenerate:
                 check_out_date=date(2026, 7, 10),
                 nights=5,
                 gross_amount=Decimal("200.00"),
-                ota_commission=Decimal("0"),
+                ota_commission=Decimal(0),
                 net_amount=Decimal("200.00"),
                 currency="USD",
             )

@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -72,7 +72,7 @@ def test_expense_instantiates_with_defaults() -> None:
 
 
 def _draft(now: datetime | None = None) -> OwnerStatement:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     return OwnerStatement(
         id=uuid.uuid4(),
         tenant_id=uuid.uuid4(),
@@ -85,8 +85,8 @@ def _draft(now: datetime | None = None) -> OwnerStatement:
 
 
 def test_owner_statement_marks_ready_from_draft() -> None:
-    created = datetime(2026, 7, 1, 9, 0, tzinfo=timezone.utc)
-    later = datetime(2026, 7, 31, 12, tzinfo=timezone.utc)
+    created = datetime(2026, 7, 1, 9, 0, tzinfo=UTC)
+    later = datetime(2026, 7, 31, 12, tzinfo=UTC)
     statement = _draft(created)
 
     statement.mark_ready(now=later)
@@ -99,8 +99,8 @@ def test_owner_statement_marks_ready_from_draft() -> None:
 
 
 def test_owner_statement_marks_sent_from_ready() -> None:
-    now = datetime.now(timezone.utc)
-    later = datetime(2026, 7, 31, 12, tzinfo=timezone.utc)
+    now = datetime.now(UTC)
+    later = datetime(2026, 7, 31, 12, tzinfo=UTC)
     statement = _draft(now)
     statement.mark_ready(now=later)
 
@@ -113,11 +113,11 @@ def test_owner_statement_rejects_skip_from_draft_to_sent() -> None:
     statement = _draft()
 
     with pytest.raises(OwnerStatementInvalidTransitionError):
-        statement.mark_sent(now=datetime.now(timezone.utc))
+        statement.mark_sent(now=datetime.now(UTC))
 
 
 def test_owner_statement_rejects_transition_from_sent() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     statement = _draft(now)
     statement.mark_ready(now=now)
     statement.mark_sent(now=now)
@@ -130,7 +130,7 @@ def test_owner_statement_rejects_transition_from_sent() -> None:
 
 
 def test_owner_statement_rejects_double_ready() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     statement = _draft(now)
     statement.mark_ready(now=now)
 
@@ -142,8 +142,8 @@ def test_owner_statement_rejects_double_ready() -> None:
 
 
 def test_owner_statement_update_notes_accepts_a_non_empty_string() -> None:
-    created = datetime(2026, 7, 1, 9, 0, tzinfo=timezone.utc)
-    later = datetime(2026, 7, 2, 12, 0, tzinfo=timezone.utc)
+    created = datetime(2026, 7, 1, 9, 0, tzinfo=UTC)
+    later = datetime(2026, 7, 2, 12, 0, tzinfo=UTC)
     statement = _draft(created)
 
     statement.update_notes("Reviewed by manager.", now=later)
@@ -162,7 +162,7 @@ def test_owner_statement_update_notes_rejects_invalid(bad: object) -> None:
     statement = _draft()
 
     with pytest.raises(OwnerStatementValidationError):
-        statement.update_notes(bad, now=datetime.now(timezone.utc))
+        statement.update_notes(bad, now=datetime.now(UTC))
 
 
 @pytest.mark.parametrize(
@@ -176,7 +176,7 @@ def test_owner_statement_update_notes_rejects_non_string(bad: object) -> None:
     statement = _draft()
 
     with pytest.raises(OwnerStatementValidationError):
-        statement.update_notes(bad, now=datetime.now(timezone.utc))  # type: ignore[arg-type]
+        statement.update_notes(bad, now=datetime.now(UTC))  # type: ignore[arg-type]
 
 
 def test_owner_statement_unknown_transition_operation_raises() -> None:

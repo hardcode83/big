@@ -29,7 +29,7 @@ the manual path is the **non-exempt** end of the D5/D12 rule-9 carve-out.
 # file into a census it has nothing to do with. Said in a comment rather than in a
 # docstring on purpose: the matcher walks string literals, so a comment is invisible to it.
 import uuid
-from datetime import date, datetime
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -46,9 +46,9 @@ from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.statements.api.dependencies import (
     get_create_expense_use_case,
     get_delete_expense_use_case,
+    get_expense_use_case,
     get_export_owner_statement_csv_use_case,
     get_export_owner_statement_pdf_use_case,
-    get_expense_use_case,
     get_generate_owner_statement_use_case,
     get_list_expenses_use_case,
     get_list_owner_statements_use_case,
@@ -64,8 +64,8 @@ from app.statements.api.schemas import (
     ExpensePageResponse,
     ExpenseResponse,
     ExpenseUpdateRequest,
-    GenerationReportResponse,
     GenerateOwnerStatementRequest,
+    GenerationReportResponse,
     OwnerStatementNotesUpdateRequest,
     OwnerStatementPageResponse,
     OwnerStatementResponse,
@@ -303,6 +303,7 @@ async def patch_owner_statement(
     "/owner-statements/{statement_id}/export.csv",
     summary="Download the statement's expenses as CSV",
     response_class=StreamingResponse,
+    responses={200: {"content": {"text/csv": {}}}},
     description=(
         "**No `AuditLog` is written for the download** (R6.7) — a read is a read. The "
         "audit trail of the statement is its transitions (R4) and the mutations of its "
@@ -340,6 +341,7 @@ async def export_owner_statement_csv(
     "/owner-statements/{statement_id}/export.pdf",
     summary="Download the statement as a PDF",
     response_class=StreamingResponse,
+    responses={200: {"content": {"application/pdf": {}}}},
     description=(
         "Streamed directly in the response (R6.3): the PDF is **generated in the moment** "
         "and never persisted in `StorageAdapter` (R6.3, the gate of `/sdd:new` decision).\n\n"
@@ -548,4 +550,3 @@ async def delete_expense(
         now=now_utc(),
         expense_id=expense_id,
     )
-    return None

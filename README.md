@@ -320,6 +320,7 @@ Push a `main` que toque `backend/**`/`frontend/**` → `.github/workflows/deploy
 
 La app desplegada se sirve en **https://autohostai.digitalsec.work**, a través de un Cloudflare Tunnel: `cloudflared` corre en la VM y abre una conexión saliente al edge, que termina TLS y entrega al frontend por una red de compose dedicada al ingress — desde la que **no** se alcanzan `postgres`, `redis` ni `backend`, para que el routing remoto del túnel no pueda publicarlos. **Los puertos 8000 y 3000 ya no están expuestos** — el security list de la VM solo permite SSH (22), y no hay ningún puerto entrante para HTTP/HTTPS. Decisión y alternativas en [`docs/adr/0003-https-ingress-dev.md`](docs/adr/0003-https-ingress-dev.md); operación y diagnóstico en [`RUNBOOK.md`](infra/environments/dev/RUNBOOK.md) §7.
 - `docs/` — documentación extendida por capability y diagramas (`docs/diagrams/`: C4, hexagonal, ER, state machine, secuencias).
+- `backend/app/statements/` — liquidaciones al propietario y gastos (`application/`, `api/`, `domain/` e `infrastructure/`); operación en [`docs/revenue-statements.md`](docs/revenue-statements.md).
 - `infra/` — IaC por entorno (Terraform), no por dominio de negocio; ver `infra/environments/<entorno>/README.md`.
 - `.github/workflows/` — pipelines de CI/CD (GitHub Actions).
 

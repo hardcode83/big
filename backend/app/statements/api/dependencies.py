@@ -28,7 +28,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.core.db import get_db_session
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
-from app.maintenance.infrastructure.repositories import SqlAlchemyOwnerApprovalRepository
+from app.maintenance.infrastructure.repositories import (
+    SqlAlchemyOwnerApprovalRepository,
+)
 from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
 from app.statements.application.reconciliation import (
@@ -178,7 +180,7 @@ def get_export_owner_statement_csv_use_case(
     return ExportOwnerStatementCsvUseCase(
         expenses=SqlAlchemyExpenseRepository(session),
         statements=SqlAlchemyOwnerStatementRepository(session),
-        csv_exporter=CsvStatementExporter,
+        csv_exporter=CsvStatementExporter(),
     )
 
 
@@ -196,7 +198,7 @@ def get_export_owner_statement_pdf_use_case(
         properties=SqlAlchemyPropertyRepository(session),
         tenants=SqlAlchemyTenantRepository(session),
         reservations=SqlAlchemyReservationRepository(session),
-        pdf_generator=PdfStatementGenerator,
+        pdf_generator=PdfStatementGenerator(),
     )
 
 

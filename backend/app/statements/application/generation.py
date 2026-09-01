@@ -209,14 +209,14 @@ class MonetaryAggregator:
         empty. A period with only expenses and no reservations still has
         `net_revenue = 0` (no income to net) and the eleven cost columns populated.
         """
-        gross_revenue = Decimal("0")
-        ota_commissions = Decimal("0")
+        gross_revenue = Decimal(0)
+        ota_commissions = Decimal(0)
         for reservation in reservations:
-            gross_revenue += reservation.gross_amount or Decimal("0")
-            ota_commissions += reservation.ota_commission or Decimal("0")
+            gross_revenue += reservation.gross_amount or Decimal(0)
+            ota_commissions += reservation.ota_commission or Decimal(0)
         net_revenue = gross_revenue - ota_commissions
 
-        buckets: dict[str, Decimal] = {name: Decimal("0") for name in _CATEGORY_TO_FIELD.values()}
+        buckets: dict[str, Decimal] = {name: Decimal(0) for name in _CATEGORY_TO_FIELD.values()}
         kept_expenses: list[Expense] = []
         expenses_by_category: dict[ExpenseCategory, list[Expense]] = {
             category: [] for category in ExpenseCategory
