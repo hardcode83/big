@@ -425,6 +425,20 @@ def test_the_three_incidents_are_the_ones_prd_27_declares() -> None:
 # --- Preconditions: the tenant and the two accounts bootstrap left (R1.3, D4) ----------
 
 
+async def _set_config(session, tenant_id, **values) -> None:
+    """Update the `TenantConfigModel` row `insert_tenant` (tests/auth/conftest.py) already
+    seeded, rather than inserting a second one — which would collide with the unique
+    constraint on `tenant_id`."""
+    config = (
+        await session.execute(
+            select(TenantConfigModel).where(TenantConfigModel.tenant_id == tenant_id)
+        )
+    ).scalar_one()
+    for field, value in values.items():
+        setattr(config, field, value)
+    await session.flush()
+
+
 async def _row_counts(session) -> dict[str, int]:
     """Every table the seed can write, so "nothing was written" is checked and not assumed.
 
@@ -581,10 +595,7 @@ async def test_a_tenant_in_s3_missing_any_piece_is_refused_before_any_write(
     decision of the section-4 panel rather than an oversight: an empty endpoint is how the
     rest of the system spells "this is AWS".
     """
-    db_session.add(
-        TenantConfigModel(tenant_id=bootstrapped_tenant.id, storage_type=StorageType.S3)
-    )
-    await db_session.flush()
+    await _set_config(db_session, bootstrapped_tenant.id, storage_type=StorageType.S3)
     _configured_s3(monkeypatch)
     if blanked is None:
         monkeypatch.setattr(seed_demo, "credentials_are_resolvable", lambda: False)
@@ -616,10 +627,7 @@ async def test_an_s3_tenant_with_no_endpoint_passes_the_precondition(
     design (`app/integrations/infrastructure/storage/s3.py`: "nothing in the automated suite
     talks to a real store").
     """
-    db_session.add(
-        TenantConfigModel(tenant_id=bootstrapped_tenant.id, storage_type=StorageType.S3)
-    )
-    await db_session.flush()
+    await _set_config(db_session, bootstrapped_tenant.id, storage_type=StorageType.S3)
     _configured_s3(monkeypatch)
     monkeypatch.setattr(settings, "s3_endpoint_url", "")
 
@@ -2090,12 +2098,7 @@ async def test_a_tenant_that_creates_no_cleaning_tasks_is_seeded_without_one(
     it would be this command deciding something that is not its to decide. What tells the
     operator is the console: zero tasks, zero photos.
     """
-    db_session.add(
-        TenantConfigModel(
-            tenant_id=bootstrapped_tenant.id, auto_create_cleaning_task=False
-        )
-    )
-    await db_session.flush()
+    await _set_config(db_session, bootstrapped_tenant.id, auto_create_cleaning_task=False)
 
     created = await apply_plan(db_session, build_plan(), hasher)
 

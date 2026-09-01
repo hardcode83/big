@@ -1,4 +1,5 @@
-"""What gets written when a conversation reaches a person (R5.2, design D20).
+"""What gets written when a conversation reaches a person (R5.2, design D20;
+`notification-channel-routing` R2, R4).
 
 A pure builder, calqued on `app/maintenance/domain/notifications.py`, so the **content** of
 the row is testable without a session and lives next to the rule that shapes it. That rule is
@@ -6,6 +7,13 @@ rule 11 of `sdd/steering/security.md`, whose contract for `notification_logs.sub
 was fixed by `celery-jobs`: this change does not derive a new one, it complies with the one
 that exists — the body carries **ids and a type**, never the content of another row. Nothing
 here reads the message the guest sent.
+
+**Channel + contact (notification-channel-routing R2, R4, design D2, D3).** The builder
+accepts `channel: NotificationChannel = IN_APP` and `contact: str | None = None` as
+**optional** kwargs. `recipient_contact` derives from `contact` when given, otherwise
+falls back to the legacy parameter. The dispatcher in
+`notifications/application/channel_dispatch.py` is the function that calls this builder
+once per resolved channel.
 """
 
 import uuid
@@ -32,8 +40,10 @@ def guest_escalation_notification(
     conversation_id: uuid.UUID,
     property_id: uuid.UUID,
     recipient_user_id: uuid.UUID,
-    recipient_contact: str,
+    recipient_contact: str = "",
     now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
 ) -> NotificationLog:
     """The `GUEST_ESCALATION` row a manager gets when the AI hands a conversation over (R5.2).
 
@@ -58,8 +68,8 @@ def guest_escalation_notification(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         recipient_user_id=recipient_user_id,
-        recipient_contact=recipient_contact,
-        channel=NotificationChannel.IN_APP,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
         notification_type=NotificationType.GUEST_ESCALATION.value,
         created_at=now,
         updated_at=now,

@@ -77,6 +77,7 @@ from app.maintenance.domain.exceptions import (
 from app.maintenance.domain.notifications import (
     incident_critical_notification,
     incident_high_notification,
+    NOTIFICATION_TYPE_INCIDENT_REJECTED,
     RELATED_TYPE_INCIDENT,
     incident_rejection_notification,
     owner_approval_notification,
@@ -93,6 +94,7 @@ from app.maintenance.domain.repositories import (
     IncidentRepository,
     OwnerApprovalRepository,
 )
+from app.notifications.application.channel_dispatch import dispatch_and_persist
 from app.notifications.domain.enums import NotificationType
 from app.notifications.domain.repositories import NotificationLogRepository
 from app.properties.domain.clock_triggers import candidate_window
@@ -1077,6 +1079,9 @@ class _NotifiesSeverity:
 
     _users: UserRepository
     _notifications: NotificationLogRepository
+    #: `notification-channel-routing` (R1, R4) — the fan-out reads the tenant's
+    #: `notification_*_enabled` flags. Each subclass wires the repo into `self._configs`.
+    _configs: TenantConfigRepository
 
     #: Which builder announces which severity. A mapping rather than an `if`, so a severity
     #: added to `IncidentSeverity` later is a `KeyError` here rather than a silent omission —
@@ -1138,17 +1143,21 @@ class _NotifiesSeverity:
                 },
             )
 
+        # Loaded once, before the recipient loop, not once per manager/owner.
+        config = await self._configs.get_or_create(tenant_id, now)
         for recipient in recipients.users:
-            await self._notifications.add(
-                tenant_id,
-                builder(
-                    tenant_id=tenant_id,
-                    incident_id=incident.id,
-                    property_id=incident.property_id,
-                    manager_id=recipient.id,
-                    recipient_contact=recipient.email,
-                    now=now,
-                ),
+            await dispatch_and_persist(
+                notifications=self._notifications,
+                tenant_id=tenant_id,
+                recipient=recipient,
+                config=config,
+                notification_type=notification_type.value,
+                recipient_role=recipient.role.value,
+                log_builder=builder,
+                incident_id=incident.id,
+                property_id=incident.property_id,
+                manager_id=recipient.id,
+                now=now,
             )
 
 
@@ -1296,6 +1305,9 @@ class _ApprovalGateMixin:
     _notifications: NotificationLogRepository
     _audit: _AuditWriter
     _record_timeline: Callable[..., Awaitable[None]]
+    #: `notification-channel-routing` (R1, R4) — the owner-approval fan-out reads the
+    #: tenant's `notification_*_enabled` flags.
+    _configs: TenantConfigRepository
 
     async def _open_approval(
         self,
@@ -1380,17 +1392,20 @@ class _ApprovalGateMixin:
             return
 
         owner = owners.items[0]
-        await self._notifications.add(
-            tenant_id,
-            owner_approval_notification(
-                tenant_id=tenant_id,
-                incident_id=incident.id,
-                property_id=incident.property_id,
-                approval_id=approval.id,
-                owner_id=owner.id,
-                recipient_contact=owner.email,
-                now=now,
-            ),
+        config = await self._configs.get_or_create(tenant_id, now)
+        await dispatch_and_persist(
+            notifications=self._notifications,
+            tenant_id=tenant_id,
+            recipient=owner,
+            config=config,
+            notification_type=NotificationType.OWNER_APPROVAL_REQUIRED.value,
+            recipient_role=owner.role.value,
+            log_builder=owner_approval_notification,
+            incident_id=incident.id,
+            property_id=incident.property_id,
+            approval_id=approval.id,
+            owner_id=owner.id,
+            now=now,
         )
 
 
@@ -1734,17 +1749,19 @@ class AssignIncidentUseCase(_IncidentFlowBase):
             )
 
         config = await self._configs.get_or_create(tenant_id, now)
-        await self._notifications.add(
-            tenant_id,
-            technician_assignment_notification(
-                tenant_id=tenant_id,
-                incident_id=incident.id,
-                property_id=incident.property_id,
-                technician_id=technician_id,
-                recipient_contact=candidate.email,
-                sla_minutes=sla_minutes_for(incident.severity, config),
-                now=now,
-            ),
+        await dispatch_and_persist(
+            notifications=self._notifications,
+            tenant_id=tenant_id,
+            recipient=candidate,
+            config=config,
+            notification_type=NotificationType.TECHNICIAN_ASSIGNED.value,
+            recipient_role=candidate.role.value,
+            log_builder=technician_assignment_notification,
+            incident_id=incident.id,
+            property_id=incident.property_id,
+            technician_id=technician_id,
+            sla_minutes=sla_minutes_for(incident.severity, config),
+            now=now,
         )
 
         await self._audit.record(
@@ -1931,11 +1948,15 @@ class RejectIncidentUseCase(_TechnicianStepUseCase):
         *,
         users: UserRepository,
         notifications: NotificationLogRepository,
+        configs: TenantConfigRepository,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._users = users
         self._notifications = notifications
+        # Added by `notification-channel-routing` (R1, R4) — the rejection fan-out
+        # reads the tenant's `notification_*_enabled` flags.
+        self._configs = configs
 
     def _timeline_extra(self, before: dict[str, Any]) -> dict[str, str] | None:
         """Name the technician who refused — read from the **pre-mutation** snapshot (D11).
@@ -2005,16 +2026,19 @@ class RejectIncidentUseCase(_TechnicianStepUseCase):
             return
 
         manager = managers.items[0]
-        await self._notifications.add(
-            tenant_id,
-            incident_rejection_notification(
-                tenant_id=tenant_id,
-                incident_id=incident.id,
-                property_id=incident.property_id,
-                manager_id=manager.id,
-                recipient_contact=manager.email,
-                now=now,
-            ),
+        config = await self._configs.get_or_create(tenant_id, now)
+        await dispatch_and_persist(
+            notifications=self._notifications,
+            tenant_id=tenant_id,
+            recipient=manager,
+            config=config,
+            notification_type=NOTIFICATION_TYPE_INCIDENT_REJECTED,
+            recipient_role=manager.role.value,
+            log_builder=incident_rejection_notification,
+            incident_id=incident.id,
+            property_id=incident.property_id,
+            manager_id=manager.id,
+            now=now,
         )
 
 

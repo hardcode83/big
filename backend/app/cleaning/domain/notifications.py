@@ -1,4 +1,4 @@
-"""The notifications a cleaning assignment produces (R6).
+"""The notifications a cleaning assignment produces (R6, `notification-channel-routing` R2/R4).
 
 Pure builders, so the **content** of what gets written is testable without a session and
 lives next to the rule that shapes it — rule 11 of `sdd/steering/security.md`, which is where
@@ -10,6 +10,20 @@ What that means concretely, and it is the same discipline as `_escalation_row`
 never the content of another row. There is no access code and no credential anywhere near a
 cleaning assignment, but the shape is what keeps it that way when somebody later adds the
 property's address or the WiFi to the message.
+
+**Channel + contact (notification-channel-routing R2, R4, design D2, D3).** Each builder
+accepts `channel: NotificationChannel = IN_APP` and `contact: str | None = None` as
+**optional** kwargs, and decides what to do with the row from there:
+
+  * `recipient_contact` is `contact` when given, the legacy parameter otherwise. The
+    legacy parameter is kept so existing tests that construct a single row continue to
+    work without a dispatch step (R6.1, R6.3).
+  * `sla_deadline_at` is set only when `channel == IN_APP` (R4.1) — the row the inbox
+    actually shows is the one that carries the deadline; its siblings, if any, are
+    `NULL` and therefore unreachable by `list_sla_breach_candidates`.
+
+`dispatch_channels` (`app/notifications/application/channel_dispatch.py`) is the
+function that calls each builder once per resolved channel with the right contact.
 """
 
 import uuid
@@ -22,10 +36,7 @@ from app.notifications.domain.enums import (
     NotificationType,
 )
 
-#: `related_type` for a row that points at `cleaning_tasks`. A constant because the SLA job
-#: reads it back through the polymorphic pair and a second spelling would orphan those rows.
 RELATED_TYPE_CLEANING_TASK = "cleaning_task"
-
 
 def assignment_notification(
     *,
@@ -33,9 +44,11 @@ def assignment_notification(
     task_id: uuid.UUID,
     property_id: uuid.UUID,
     cleaner_id: uuid.UUID,
-    recipient_contact: str,
+    recipient_contact: str = "",
     sla_minutes: int,
     now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
 ) -> NotificationLog:
     """What the cleaner is told when a task is handed to them (R6.1).
 
@@ -47,13 +60,18 @@ def assignment_notification(
     `list_sla_breach_candidates` requires `status = SENT`, so until that sender exists this
     deadline never produces an escalation. Writing `SENT` here would buy the escalation by
     asserting a delivery that did not happen.
+
+    **Channel fan-out (R4.1)**: only the IN_APP row carries `sla_deadline_at`; siblings are
+    `NULL`. The deadline is opened here and cancelled by `accept` and by a reassignment,
+    both through `cancel_sla_deadline` on this same `related_type`/`related_id` pair, which
+    is why the pair points at the **task** and not at this row.
     """
     return NotificationLog(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         recipient_user_id=cleaner_id,
-        recipient_contact=recipient_contact,
-        channel=NotificationChannel.IN_APP,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
         notification_type=NotificationType.CLEANING_TASK_ASSIGNED.value,
         created_at=now,
         updated_at=now,
@@ -65,13 +83,10 @@ def assignment_notification(
         status=NotificationStatus.PENDING,
         related_type=RELATED_TYPE_CLEANING_TASK,
         related_id=task_id,
-        # R6.1: `TenantConfig.sla_medium_minutes`, default 240 (PRD §11). The escalation this
-        # deadline feeds is already defined — `CLEANING_TASK_ASSIGNED` → `SLA_BREACH` to the
-        # `PROPERTY_MANAGER` (`app/notifications/domain/escalation.py:53-57`) — and this is its
-        # first writer.
-        sla_deadline_at=now + timedelta(minutes=sla_minutes),
+        sla_deadline_at=now + timedelta(minutes=sla_minutes)
+        if channel == NotificationChannel.IN_APP
+        else None,
     )
-
 
 def no_cleaner_available_notification(
     *,
@@ -79,8 +94,10 @@ def no_cleaner_available_notification(
     task_id: uuid.UUID,
     property_id: uuid.UUID,
     manager_id: uuid.UUID,
-    recipient_contact: str,
+    recipient_contact: str = "",
     now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
 ) -> NotificationLog:
     """PRD §11: "Si no hay limpiadora disponible: alertar a manager inmediatamente" (R6.3).
 
@@ -92,8 +109,8 @@ def no_cleaner_available_notification(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         recipient_user_id=manager_id,
-        recipient_contact=recipient_contact,
-        channel=NotificationChannel.IN_APP,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
         notification_type=NotificationType.CLEANING_NO_RESPONSE.value,
         created_at=now,
         updated_at=now,
@@ -107,15 +124,16 @@ def no_cleaner_available_notification(
         related_id=task_id,
     )
 
-
 def completion_notification(
     *,
     tenant_id: uuid.UUID,
     task_id: uuid.UUID,
     property_id: uuid.UUID,
     recipient_id: uuid.UUID,
-    recipient_contact: str,
+    recipient_contact: str = "",
     now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
 ) -> NotificationLog:
     """What the manager is told when a cleaning is finished (R2.1).
 
@@ -135,8 +153,8 @@ def completion_notification(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         recipient_user_id=recipient_id,
-        recipient_contact=recipient_contact,
-        channel=NotificationChannel.IN_APP,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
         notification_type=NotificationType.CLEANING_COMPLETED.value,
         created_at=now,
         updated_at=now,
@@ -150,15 +168,16 @@ def completion_notification(
         related_id=task_id,
     )
 
-
 def validation_failed_notification(
     *,
     tenant_id: uuid.UUID,
     task_id: uuid.UUID,
     property_id: uuid.UUID,
     recipient_id: uuid.UUID,
-    recipient_contact: str,
+    recipient_contact: str = "",
     now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
 ) -> NotificationLog:
     """What the **cleaner** is told when their cleaning does not pass validation (R2.2).
 
@@ -180,8 +199,8 @@ def validation_failed_notification(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         recipient_user_id=recipient_id,
-        recipient_contact=recipient_contact,
-        channel=NotificationChannel.IN_APP,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
         notification_type=NotificationType.CLEANING_FAILED.value,
         created_at=now,
         updated_at=now,

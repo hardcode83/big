@@ -89,6 +89,7 @@ from app.integrations.domain.storage import (
     detect_image_type,
     storage_key_for_photo,
 )
+from app.notifications.application.channel_dispatch import dispatch_and_persist
 from app.notifications.domain.enums import NotificationType
 from app.notifications.domain.repositories import NotificationLogRepository
 from app.properties.domain.clock_triggers import candidate_window, has_active_stay
@@ -349,17 +350,19 @@ class ProvisionCleaningTaskUseCase:
             tenant_id=tenant_id, property=property, task=task, now=now
         )
         config = await self._configs.get_or_create(tenant_id, now)
-        await self._notifications.add(
-            tenant_id,
-            assignment_notification(
-                tenant_id=tenant_id,
-                task_id=task.id,
-                property_id=property.id,
-                cleaner_id=assignee,
-                recipient_contact=by_id[assignee].email,
-                sla_minutes=config.sla_medium_minutes,
-                now=now,
-            ),
+        await dispatch_and_persist(
+            notifications=self._notifications,
+            tenant_id=tenant_id,
+            recipient=by_id[assignee],
+            config=config,
+            notification_type=NotificationType.CLEANING_TASK_ASSIGNED.value,
+            recipient_role=by_id[assignee].role.value,
+            log_builder=assignment_notification,
+            task_id=task.id,
+            property_id=property.id,
+            cleaner_id=assignee,
+            sla_minutes=config.sla_medium_minutes,
+            now=now,
         )
 
     async def _notify_manager_unassigned(
@@ -367,6 +370,9 @@ class ProvisionCleaningTaskUseCase:
     ) -> None:
         """One row per active manager, falling back to the owner — the arrangement
         `EscalateBreachedSlasUseCase` already established for "who holds this role"."""
+        # Loaded once, before the recipient loop (design.md Risks — "Resolutor lee config por
+        # destinatario"), not once per manager.
+        config = await self._configs.get_or_create(tenant_id, now)
         for role in (UserRole.PROPERTY_MANAGER, UserRole.TENANT_OWNER):
             page = await self._users.list(
                 tenant_id,
@@ -377,16 +383,18 @@ class ProvisionCleaningTaskUseCase:
             if not page.items:
                 continue
             for manager in page.items:
-                await self._notifications.add(
-                    tenant_id,
-                    no_cleaner_available_notification(
-                        tenant_id=tenant_id,
-                        task_id=task.id,
-                        property_id=property.id,
-                        manager_id=manager.id,
-                        recipient_contact=manager.email,
-                        now=now,
-                    ),
+                await dispatch_and_persist(
+                    notifications=self._notifications,
+                    tenant_id=tenant_id,
+                    recipient=manager,
+                    config=config,
+                    notification_type=NotificationType.CLEANING_NO_RESPONSE.value,
+                    recipient_role=manager.role.value,
+                    log_builder=no_cleaner_available_notification,
+                    task_id=task.id,
+                    property_id=property.id,
+                    manager_id=manager.id,
+                    now=now,
                 )
             return
 
@@ -1075,18 +1083,23 @@ class AssignCleaningTaskUseCase(_TaskLifecycleBase):
 
         # R6.1 — the same row the automatic path writes, with the same SLA deadline: a manual
         # assignment that nobody answers has to escalate exactly like an automatic one.
+        # Fanned out through `dispatch_and_persist` (R1, R2) — same as `_auto_assign` — so a
+        # manual/re-assignment also honors the tenant's EMAIL/WHATSAPP flags instead of
+        # always writing a single IN_APP row.
         config = await self._configs.get_or_create(tenant_id, now)
-        await self._notifications.add(
-            tenant_id,
-            assignment_notification(
-                tenant_id=tenant_id,
-                task_id=task.id,
-                property_id=task.property_id,
-                cleaner_id=cleaner_id,
-                recipient_contact=candidate.email,
-                sla_minutes=config.sla_medium_minutes,
-                now=now,
-            ),
+        await dispatch_and_persist(
+            notifications=self._notifications,
+            tenant_id=tenant_id,
+            recipient=candidate,
+            config=config,
+            notification_type=NotificationType.CLEANING_TASK_ASSIGNED.value,
+            recipient_role=candidate.role.value,
+            log_builder=assignment_notification,
+            task_id=task.id,
+            property_id=task.property_id,
+            cleaner_id=cleaner_id,
+            sla_minutes=config.sla_medium_minutes,
+            now=now,
         )
 
         await self._audit.record(
@@ -1127,9 +1140,19 @@ class CompleteCleaningTaskUseCase(_TaskLifecycleBase):
     is why that class only reads and assembles.
     """
 
-    def __init__(self, *, evidence: CompletionEvidenceGatherer, **kwargs) -> None:
+    def __init__(
+        self,
+        *,
+        evidence: CompletionEvidenceGatherer,
+        configs: TenantConfigRepository,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self._evidence = evidence
+        # Added by `notification-channel-routing` (R1, R4): the `CLEANING_COMPLETED`
+        # fan-out reads the tenant's `notification_*_enabled` flags, so the close
+        # needs the config repository here and not on the lifecycle base.
+        self._configs = configs
 
     async def execute(
         self, *, tenant_id: uuid.UUID, task_id: uuid.UUID, actor: CleaningActor, now: datetime
@@ -1197,22 +1220,32 @@ class CompleteCleaningTaskUseCase(_TaskLifecycleBase):
                     "notified": len(recipients.users),
                 },
             )
+        # Loaded once, before the recipient loop, not once per manager/owner.
+        config = await self._configs.get_or_create(tenant_id, now)
         for recipient in recipients.users:
-            await self._notifications.add(
-                tenant_id,
-                completion_notification(
-                    tenant_id=tenant_id,
-                    task_id=task.id,
-                    property_id=task.property_id,
-                    recipient_id=recipient.id,
-                    recipient_contact=recipient.email,
-                    now=now,
-                ),
+            await dispatch_and_persist(
+                notifications=self._notifications,
+                tenant_id=tenant_id,
+                recipient=recipient,
+                config=config,
+                notification_type=NotificationType.CLEANING_COMPLETED.value,
+                recipient_role=recipient.role.value,
+                log_builder=completion_notification,
+                task_id=task.id,
+                property_id=task.property_id,
+                recipient_id=recipient.id,
+                now=now,
             )
 
 
 class ValidateCleaningTaskUseCase(_TaskLifecycleBase):
     """R5.5 — the manager's verdict on a finished cleaning."""
+
+    def __init__(self, *, configs: TenantConfigRepository, **kwargs) -> None:
+        super().__init__(**kwargs)
+        # Added by `notification-channel-routing` (R1, R4): the `CLEANING_FAILED`
+        # fan-out reads the tenant's `notification_*_enabled` flags.
+        self._configs = configs
 
     async def execute(
         self,
@@ -1284,16 +1317,19 @@ class ValidateCleaningTaskUseCase(_TaskLifecycleBase):
             )
             return
 
-        await self._notifications.add(
-            tenant_id,
-            validation_failed_notification(
-                tenant_id=tenant_id,
-                task_id=task.id,
-                property_id=task.property_id,
-                recipient_id=cleaner.id,
-                recipient_contact=cleaner.email,
-                now=now,
-            ),
+        config = await self._configs.get_or_create(tenant_id, now)
+        await dispatch_and_persist(
+            notifications=self._notifications,
+            tenant_id=tenant_id,
+            recipient=cleaner,
+            config=config,
+            notification_type=NotificationType.CLEANING_FAILED.value,
+            recipient_role=cleaner.role.value,
+            log_builder=validation_failed_notification,
+            task_id=task.id,
+            property_id=task.property_id,
+            recipient_id=cleaner.id,
+            now=now,
         )
 
 
