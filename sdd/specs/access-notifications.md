@@ -370,16 +370,11 @@ escritos aunque desapareciesen sus builders. Y sin la segunda, `SLA_BREACH` y
 `test_free_text_sink_contract.py` documenta sobre el suyo: un guardián que lee texto se sortea
 escribiendo el nombre en un comentario.
 
-**Los trece con escritor**: `CLEANING_TASK_ASSIGNED`, `CLEANING_NO_RESPONSE`, `CLEANING_COMPLETED`,
-`CLEANING_FAILED`, `INCIDENT_CREATED_CRITICAL`, `INCIDENT_CREATED_HIGH`, `OWNER_APPROVAL_REQUIRED`,
-`TECHNICIAN_ASSIGNED`, `TECHNICIAN_NO_RESPONSE`, `GUEST_ESCALATION`, `PRICE_RECOMMENDATION`,
-`SLA_BREACH` y `PASSWORD_RESET_REQUESTED`. **Los cuatro sin escritor**, cada uno con su dueño
-declarado: `LOCK_ALERT`, que espera una superficie de importación de cerraduras que no existe, y
-los tres recordatorios al huésped —`CHECKIN_REMINDER_24H`, `CHECKIN_REMINDER_2H`,
-`CHECKOUT_REMINDER`—, que son de `guest-scheduled-comms` y no tienen canal al huésped hasta que lo
-haya. Los dos tipos de texto libre que **no** son miembros del enum —`INCIDENT_REJECTED` y
-`LEGAL_REGISTRATION_FAILED`, sobre la columna `String(100)`— quedan fuera del censo por
-construcción: no hay `NotificationType.<X>` que casar.
+**Los trece con escritor y los cuatro sin él** viven en la tabla de la regla 11 de
+`steering/security.md` — este módulo no los enumera aquí para no duplicar el censo. Los dos tipos
+de texto libre que **no** son miembros del enum —`INCIDENT_REJECTED` y `LEGAL_REGISTRATION_FAILED`,
+sobre la columna `String(100)`— quedan fuera del censo por construcción: no hay
+`NotificationType.<X>` que casar.
 
 ### La bandeja in-app
 
@@ -528,8 +523,8 @@ El enum `NotificationType` ya no tiene dieciséis miembros sino **diecisiete**:
 explícita de PRD §14 igual que esta capacidad declaró sus dos jobs frente a los cuatro de
 PRD §8.3. Ese decimoséptimo tampoco tiene escalado, y en su caso **no es deuda**: una
 recuperación de contraseña no tiene plazo que incumplir, así que su fila se escribe sin
-`sla_deadline_at` a propósito. Cuántos de los diecisiete tienen escritor —y qué guardián lo
-mide— vive en «El censo de escritores», más arriba.
+`sla_deadline_at` a propósito. Qué guardián mide el conjunto de escritores y cómo lo hace vive en
+«El censo de escritores», más arriba.
 
 ### Protección del dato de documento
 
@@ -687,10 +682,6 @@ y no una contradicción. Los nombres de los cuatro originales no se tocan.
   aquí. El decimoséptimo miembro del enum (`PASSWORD_RESET_REQUESTED`, de
   `auth-account-recovery`) no cuenta entre ellos: no tener plazo es su comportamiento correcto, no
   una pieza pendiente.
-- **Cuatro tipos siguen sin escritor**, y ninguno es deuda de esta capacidad: `LOCK_ALERT` espera
-  una superficie de importación de cerraduras, y los tres recordatorios al huésped son de
-  `guest-scheduled-comms`. El test de censo los fija por nombre, así que la lista no puede
-  pudrirse en silencio como se pudrió antes de medirse.
 - **Valores de enum que nadie escribe todavía**: `LegalRegistrationStatus.MANUAL_REVIEW` no lo escribe nadie, y
   de `GuestDocumentStatus` solo se alcanza `PROVIDED` —`PENDING`, `VERIFIED` y `REJECTED` no tienen
   camino. `MockSESHospedajesAdapter.get_submission_status` solo devuelve `ACCEPTED` o `UNKNOWN`.
