@@ -657,3 +657,24 @@ async def test_the_models_match_the_migrations(migrations_database) -> None:
     check = _alembic("check", database_url=url)
 
     assert check.returncode == 0, f"models and migrations diverged:\n{check.stdout}{check.stderr}"
+
+
+def test_the_migration_graph_has_a_single_head() -> None:
+    """Exactly one `(head)`: a second leaf makes `alembic upgrade head` refuse to run.
+
+    Two changes that branch from the same revision and merge separately each pass CI
+    on their own, so the first place two heads show up is `main`. On 2026-09-02 (PRs
+    #146 and #151) that reached the deploy: compose had already recreated backend,
+    worker and frontend when `migrate` exited 255, and nothing came back up.
+    `alembic heads` only reads the script directory, so this needs no database.
+    The fix is a merge revision: `alembic merge -m "<title>" <head_a> <head_b>`.
+    """
+    heads = _alembic("heads", database_url=_MIGRATIONS_URL)
+    assert heads.returncode == 0, f"alembic heads failed:\n{heads.stdout}{heads.stderr}"
+
+    lines = [line for line in heads.stdout.splitlines() if "(head)" in line]
+
+    assert len(lines) == 1, (
+        "the Alembic graph has more than one head; add a merge revision "
+        f"(`alembic merge`) before merging:\n{heads.stdout}"
+    )

@@ -357,8 +357,9 @@ vivo y sin puertos, un `run` desnudo imprime `Recreate` y los deja publicados. D
 Mismo criterio, en más detalle, en §«Postura de red del stack local».
 
 El backend tiene **gate de CI en cada PR** (`.github/workflows/backend-tests.yml`):
-migraciones Alembic sobre un PostgreSQL limpio, `alembic check`, la suite completa y
-`downgrade base`, con Postgres y Redis como services.
+una sola cabeza en el grafo de Alembic (`alembic heads`), migraciones sobre un PostgreSQL
+limpio, `alembic check`, la suite completa y `downgrade base`, con Postgres y Redis como
+services.
 
 La suite tarda ~3 minutos (medido el 2026-08-10), así que **solo se ejecuta cuando el diff
 toca `backend/**` o el propio workflow**. El check `backend-tests`, en cambio, **se reporta siempre**: en un PR que
