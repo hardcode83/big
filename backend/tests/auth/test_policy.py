@@ -18,20 +18,48 @@ def test_policy_entries_are_immutable_sets() -> None:
         assert isinstance(permissions, frozenset)
 
 
-def test_super_admin_holds_exactly_self_service_and_nothing_else() -> None:
-    """`super-admin-identity` R4.1: giving the role identity must not widen what it can do.
+def test_super_admin_holds_exactly_self_service_and_platform() -> None:
+    """`super-admin-identity` R4.1 + `platform-admin-api` R5.1.
 
-    Direct pin against `_SELF_SERVICE`, not derived from `is_allowed` checks elsewhere —
-    those prove individual permissions are absent, not that the set is exactly this one.
+    The original pin was against `_SELF_SERVICE` alone; the platform capability is the one
+    that arrived afterwards (`platform-admin-api` R5.1) and is held by `SUPER_ADMIN` and by
+    nobody else, exactly as every other operational permission inside a tenant is not.
+    Direct pin against the union, not derived from `is_allowed` checks elsewhere — those
+    prove individual permissions are absent, not that the set is exactly this one.
     """
-    assert ROLE_PERMISSIONS[UserRole.SUPER_ADMIN] == policy._SELF_SERVICE
+    assert ROLE_PERMISSIONS[UserRole.SUPER_ADMIN] == (
+        policy._SELF_SERVICE | policy._PLATFORM
+    )
     assert ROLE_PERMISSIONS[UserRole.SUPER_ADMIN] == frozenset(
         {
             Permission.READ_OWN_PROFILE,
             Permission.MANAGE_OWN_SESSION,
             Permission.READ_OWN_NOTIFICATIONS,
+            Permission.MANAGE_PLATFORM,
         }
     )
+
+
+def test_manage_platform_is_in_the_enum_but_only_super_admin_holds_it() -> None:
+    """R5.2 / D3 / D6: every other role that can authenticate stays denied.
+
+    Pinned both ways — the permission is in the catalogue AND the four operational roles
+    get `False` from `is_allowed` — so a future edit that adds `MANAGE_PLATFORM` to a
+    bundle (or removes it from the enum) trips at least one assertion here. The
+    `super-admin` affirmative is what the cross-tenant listing of D6 actually relies on;
+    its absence is a regression `saas-cross-tenant` will reach for.
+    """
+    assert Permission.MANAGE_PLATFORM in set(Permission)
+
+    assert is_allowed(UserRole.SUPER_ADMIN, Permission.MANAGE_PLATFORM) is True
+    for role in (
+        UserRole.TENANT_OWNER,
+        UserRole.PROPERTY_MANAGER,
+        UserRole.CLEANER,
+        UserRole.TECHNICIAN,
+    ):
+        assert is_allowed(role, Permission.MANAGE_PLATFORM) is False
+        assert Permission.MANAGE_PLATFORM not in ROLE_PERMISSIONS[role]
 
 
 SELF_SERVICE = (Permission.READ_OWN_PROFILE, Permission.MANAGE_OWN_SESSION)

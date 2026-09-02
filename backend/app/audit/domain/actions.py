@@ -120,6 +120,22 @@ USER_PASSWORD_RESET = "USER_PASSWORD_RESET"
 # the question it exists for.
 USER_PASSWORD_CHANGED = "USER_PASSWORD_CHANGED"
 USER_PASSWORD_RECOVERED = "USER_PASSWORD_RECOVERED"
+# `platform-admin-api` (R2.1, R2.2, design D1, D7). The counterpart of `TENANT_UPDATED` for the
+# row's birth: until this change a tenant could only arrive through `app/cli/bootstrap.py`, which
+# is not an API mutation and writes no audit row, so "who created this tenant" had no answer at
+# all. Now `POST /api/v1/platform/tenants` creates one, and rule 9 of `sdd/steering/security.md`
+# names `Tenant` in its enumeration — so the creation is audited on the same footing as the
+# update, on `ENTITY_TENANT`, in the same transaction as the two inserts.
+#
+# One action for the whole creation and not one per row, exactly as this module's docstring
+# prescribes ("one row per API mutation"): the tenant and its `tenant_configs` row are a single
+# operation with a single actor, and the config's defaults are not a separate decision anybody
+# audits. `TENANT_CONFIG_UPDATED` covers the later edits.
+#
+# There is no `TENANT_DELETED` and no `TENANT_SUSPENDED`: `domain-foundation-core` models
+# retirement through `status`, this change exposes no route that writes it, and an action for an
+# operation the API does not offer is the speculative vocabulary this module argues against.
+TENANT_CREATED = "TENANT_CREATED"
 TENANT_UPDATED = "TENANT_UPDATED"
 TENANT_CONFIG_UPDATED = "TENANT_CONFIG_UPDATED"
 
@@ -405,6 +421,7 @@ ACTIONS = frozenset(
         USER_PASSWORD_RESET,
         USER_PASSWORD_CHANGED,
         USER_PASSWORD_RECOVERED,
+        TENANT_CREATED,
         TENANT_UPDATED,
         TENANT_CONFIG_UPDATED,
         PMS_CREDENTIAL_READ,

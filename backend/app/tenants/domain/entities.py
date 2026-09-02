@@ -53,6 +53,52 @@ class Tenant:
     default_language: str = "es"
     status: TenantStatus = TenantStatus.ACTIVE
 
+    @classmethod
+    def create(
+        cls,
+        *,
+        name: str,
+        billing_email: str,
+        now: datetime,
+        country: str = "ES",
+        timezone: str = "Europe/Madrid",
+        default_language: str = "es",
+    ) -> "Tenant":
+        """A new ACTIVE tenant (`platform-admin-api` R1.1, design D2).
+
+        The mirror of `User.create` in shape — keyword-only, an injected `now`, a fresh `id`,
+        `status` set by the constructor and not by the caller — with **one deliberate
+        difference: this one validates its own inputs.** `User.create` documents that "`email`
+        must arrive already normalised" because its caller normalises to look the account up
+        before creating it; nothing looks a tenant up by name before this call, so the
+        normalisation has to happen here or not at all.
+
+        Every guard is the same function `update` uses, deliberately: a name this accepts and
+        `update` would reject — or the reverse — would mean a tenant could only be born in a
+        state it could never be edited back into. That is why these are calls and not a
+        re-implementation, even where the re-implementation would be two lines.
+
+        `status` is not a parameter for the same reason `update` does not expose it (R5.3): a
+        tenant created SUSPENDED would lock its own users out with no endpoint to undo it.
+        Every tenant is born ACTIVE.
+
+        **This does not and cannot enforce uniqueness of `name`.** That is
+        `uq_tenants_name`'s job, added by this change's migration, and the repository is what
+        translates its violation — see `TenantAlreadyExistsError` (R-2). A domain object with
+        no view of the table cannot know whether a name is taken.
+        """
+        return cls(
+            id=uuid.uuid4(),
+            name=_require_text(name, "name", MAX_NAME),
+            billing_email=_require_email(billing_email),
+            created_at=now,
+            updated_at=now,
+            country=normalise_country(country),
+            timezone=normalise_timezone(timezone),
+            default_language=normalise_language(default_language),
+            status=TenantStatus.ACTIVE,
+        )
+
     def update(
         self,
         *,

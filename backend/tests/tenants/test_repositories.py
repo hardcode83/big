@@ -11,7 +11,9 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
+from app.tenants.domain.entities import Tenant, TenantConfig
 from app.tenants.domain.enums import StorageType, TenantStatus
+from app.tenants.domain.exceptions import TenantAlreadyExistsError
 from app.tenants.infrastructure.models import TenantConfigModel, TenantModel
 from app.tenants.infrastructure.repositories import (
     SqlAlchemyTenantConfigRepository,
@@ -229,3 +231,98 @@ async def test_checkin_window_hours_never_reads_another_tenants_configuration(db
     await repo.apply_changes(theirs.id, {"checkin_window_hours_before": 9})
 
     assert await repo.checkin_window_hours(mine.id) == 2
+
+
+# --- `add` (R1.2, R-2) --------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_add_persists_both_rows_for_a_free_name(db_session) -> None:
+    """Happy path: a free name writes one `tenants` row and one `tenant_configs` row."""
+    now = utc_now()
+    tenant = Tenant.create(
+        name="Magno", billing_email="ops@magno.example", now=now
+    )
+    config = TenantConfig.with_defaults(tenant_id=tenant.id, now=now)
+    repo = SqlAlchemyTenantRepository(db_session)
+
+    await repo.add(tenant, config)
+
+    tenant_row = (
+        await db_session.execute(
+            select(TenantModel).where(TenantModel.id == tenant.id)
+        )
+    ).scalar_one()
+    assert tenant_row.name == "Magno"
+    assert tenant_row.status is TenantStatus.ACTIVE
+
+    config_row = (
+        await db_session.execute(
+            select(TenantConfigModel).where(TenantConfigModel.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    assert config_row.id == config.id
+    assert config_row.owner_approval_threshold_eur == Decimal("100.00")
+
+
+@pytest.mark.asyncio
+async def test_add_translates_a_duplicate_name_into_TenantAlreadyExistsError(
+    db_session,
+) -> None:
+    """R-2: the unique constraint the migration introduces maps to a domain error.
+
+    The first `add` succeeds; the second, with a tenant that reuses the same name, must
+    raise `TenantAlreadyExistsError` — and only one row of either kind may remain. The
+    `db_session` rolls back automatically, but the assertion about a single row is what
+    proves the violation was caught at flush time, not at commit time (which is what the
+    repository's explicit `flush` exists to make observable here).
+    """
+    now = utc_now()
+    existing = await insert_tenant(db_session, name="Magno")
+    # Commit the seed before exercising `add`: a failure inside `add` will roll the
+    # whole transaction back otherwise, and the post-rollback count would see nothing.
+    await db_session.commit()
+    repo = SqlAlchemyTenantRepository(db_session)
+
+    duplicate = Tenant.create(
+        name="Magno", billing_email="other@magno.example", now=now
+    )
+    duplicate_config = TenantConfig.with_defaults(tenant_id=duplicate.id, now=now)
+
+    with pytest.raises(TenantAlreadyExistsError):
+        await repo.add(duplicate, duplicate_config)
+    await db_session.rollback()
+
+    rows = (
+        await db_session.execute(
+            select(TenantModel).where(TenantModel.name == "Magno")
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].id == existing.id
+
+
+@pytest.mark.asyncio
+async def test_add_does_not_translate_unrelated_integrity_errors(db_session) -> None:
+    """A bad foreign key on the configuration is a programmer error, not a domain conflict.
+
+    The repository's contract is "this name is free"; shielding the database from every
+    failure mode would map a programming mistake into a `409` the router cannot justify,
+    which is the kind of mapping the section-3 panel would catch. The `IntegrityError`
+    re-raises untouched, with a config whose `tenant_id` points at a row that does not exist.
+    """
+    now = utc_now()
+    tenant = Tenant.create(
+        name="Orphan", billing_email="ops@orphan.example", now=now
+    )
+    # Hand the repository a config whose `tenant_id` does NOT match the tenant we are
+    # adding — Postgres rejects the FK at flush time.
+    bad_config = TenantConfig.with_defaults(
+        tenant_id=uuid.uuid4(), now=now
+    )
+    repo = SqlAlchemyTenantRepository(db_session)
+
+    from sqlalchemy.exc import IntegrityError
+
+    with pytest.raises(IntegrityError):
+        await repo.add(tenant, bad_config)

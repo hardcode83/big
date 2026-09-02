@@ -11,7 +11,14 @@ from app.tenants.domain.enums import StorageType, TenantStatus
 class TenantModel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "tenants"
 
-    name: Mapped[str] = mapped_column(String(200))
+    # `platform-admin-api` (R-2, D2 enmendada): `tenants.name` is the only natural handle
+    # on the row the API exposes before its id is known, and the document search of D6 is
+    # keyed on the same column. The migration `936fef5a01b1_tenants_name_unique.py` adds
+    # `uq_tenants_name`; this `unique=True` is what makes the constraint visible to
+    # SQLAlchemy's metadata (so the model and the schema do not drift) and is the
+    # application-level counterpart the repository's `IntegrityError` translation
+    # substring-matches against.
+    name: Mapped[str] = mapped_column(String(200), unique=True)
     billing_email: Mapped[str] = mapped_column(String(255))
     country: Mapped[str] = mapped_column(String(2), default="ES", server_default="ES")
     timezone: Mapped[str] = mapped_column(

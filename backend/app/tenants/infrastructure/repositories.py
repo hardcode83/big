@@ -9,10 +9,18 @@ from collections.abc import Mapping
 from datetime import datetime
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.tenants.domain.entities import Tenant, TenantConfig
+from app.tenants.domain.exceptions import TenantAlreadyExistsError
 from app.tenants.infrastructure.models import TenantConfigModel, TenantModel
+
+# `platform-admin-api` R-2: the only UNIQUE constraint the migration adds on `tenants`.
+# Substring-matched against `IntegrityError.orig` so a Postgres-level rename still maps
+# here, and so a future UNIQUE on a *different* column reaches the router unmapped
+# rather than a 409 it cannot justify.
+_UNIQUE_NAME_CONSTRAINTS = frozenset({"uq_tenants_name", "tenants_name_key"})
 
 # `status` is absent on purpose (R5.3), and so are the identity columns.
 TENANT_WRITABLE = frozenset(
@@ -63,6 +71,61 @@ class SqlAlchemyTenantRepository:
         )
         if result.rowcount != 1:
             raise ValueError("Cannot update a tenant that does not exist")
+
+    async def add(self, tenant: Tenant, config: TenantConfig) -> None:
+        """Persist both rows in one call, raising `TenantAlreadyExistsError` on a clash.
+
+        The tenant row is flushed before the config is added: `tenant_configs.tenant_id`
+        is a `ForeignKey` and SQLAlchemy does not guarantee the `INSERT` order across two
+        `session.add` calls, so the `FK` violation would race the `UNIQUE` violation we
+        actually want to translate. The first `flush` is what surfaces the `uq_tenants_name`
+        violation at a known place and folds it into `TenantAlreadyExistsError`; the second
+        `flush` is the one that writes the configuration.
+
+        Only the `uq_tenants_name` violation is mapped. Everything else re-raises so the
+        router can see the failure as the unmapped `500` it is — the caller's contract
+        is "this name is free", not "I shielded the database from every failure mode".
+        """
+        self._session.add(
+            TenantModel(
+                id=tenant.id,
+                name=tenant.name,
+                billing_email=tenant.billing_email,
+                country=tenant.country,
+                timezone=tenant.timezone,
+                default_language=tenant.default_language,
+                status=tenant.status,
+            )
+        )
+        try:
+            await self._session.flush()
+        except IntegrityError as error:
+            if any(name in str(error.orig) for name in _UNIQUE_NAME_CONSTRAINTS):
+                raise TenantAlreadyExistsError(
+                    f"A tenant named {tenant.name!r} already exists"
+                ) from error
+            raise
+        self._session.add(
+            TenantConfigModel(
+                id=config.id,
+                tenant_id=config.tenant_id,
+                owner_approval_threshold_eur=config.owner_approval_threshold_eur,
+                ai_confidence_threshold=config.ai_confidence_threshold,
+                sla_critical_minutes=config.sla_critical_minutes,
+                sla_high_minutes=config.sla_high_minutes,
+                sla_medium_minutes=config.sla_medium_minutes,
+                sla_low_minutes=config.sla_low_minutes,
+                checkin_window_hours_before=config.checkin_window_hours_before,
+                checkout_ready_hours_after=config.checkout_ready_hours_after,
+                auto_create_cleaning_task=config.auto_create_cleaning_task,
+                cleaning_photo_required=config.cleaning_photo_required,
+                storage_type=config.storage_type,
+                notification_email_enabled=config.notification_email_enabled,
+                notification_whatsapp_enabled=config.notification_whatsapp_enabled,
+                review_recurring_issues_top_n=config.review_recurring_issues_top_n,
+            )
+        )
+        await self._session.flush()
 
 
 class SqlAlchemyTenantConfigRepository:
