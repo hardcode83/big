@@ -72,6 +72,11 @@ olvidar regenerar el contrato cortara la ejecución antes de la suite.
 
 ### Pasos verificados
 
+- THE SYSTEM SHALL comprobar, antes de migrar, que `alembic heads` devuelve exactamente una
+  cabeza, y fallar nombrándolas si hay más. Dos changes que ramifican de la misma revisión y
+  se mergean por separado dejan dos hojas y cada PR es verde por sí solo, así que el primer
+  sitio donde se ven es el push a `main` (2026-09-02, PRs #146 y #151). La misma invariante
+  la cubre un test de la suite (`tests/test_migrations.py`), para que falle también en local.
 - THE SYSTEM SHALL aplicar `alembic upgrade head` sobre una base de datos PostgreSQL recién
   creada. La suite construye su esquema con `Base.metadata.create_all`, así que por sí sola
   no probaría la cadena real de migraciones.
