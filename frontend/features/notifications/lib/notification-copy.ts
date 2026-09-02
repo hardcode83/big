@@ -31,6 +31,7 @@ export const NOTIFICATION_COPY_KEYS: Record<NotificationType, string> = {
   PRICE_RECOMMENDATION: "notifications:types.PRICE_RECOMMENDATION",
   SLA_BREACH: "notifications:types.SLA_BREACH",
   PASSWORD_RESET_REQUESTED: "notifications:types.PASSWORD_RESET_REQUESTED",
+  REVIEW_RESPONSE_APPROVED: "notifications:types.REVIEW_RESPONSE_APPROVED",
 };
 
 /** The translated generic of R4.3, for a value the interface does not know. */
