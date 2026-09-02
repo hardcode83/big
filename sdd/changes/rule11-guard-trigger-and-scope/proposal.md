@@ -141,11 +141,15 @@ la base, **so that** el rojo que vea sea mío.
 Acceptance criteria:
 
 1. WHEN el guardián se ejecuta sobre la rama de este change fusionada con `main`, THE SYSTEM SHALL
-   reportar **cero** infractores. *(Post-PR: su único rastreador era la tarea 6.3, y pasó al § de
-   obligaciones de `sdd/specs/rule11-ownership-guard.md`, con su acta en el § «Registro de evidencia
-   sobre la PR» del `tasks.md`. Medido ya sobre la rama sola —cero infractores, 95/800—; lo que falta
-   es sobre la base fusionada, y en un run **posterior** a la última fusión de `main`, porque GitHub
-   no re-dispara `pull_request` cuando la base se mueve.)*
+   reportar **cero** infractores. *(**Cumplido el 2026-09-02**, y con evidencia de CI y no local: run
+   [`33621908289`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33621908289), evento
+   `pull_request` sobre un `headSha` que contiene la fusión de base `main@078339d`, **cero
+   infractores** con 98 markdown + 800 python. Su acta, con la base medida en su columna, está en el
+   § «Registro de evidencia sobre la PR» del `tasks.md`, y la obligación permanente de la capacidad
+   vive en el § correspondiente de `sdd/specs/rule11-ownership-guard.md`. Tenía que ser un run
+   **posterior** a la última fusión de `main` porque GitHub no re-dispara `pull_request` cuando la
+   base se mueve — de ahí la columna «Base medida», que es lo que distingue este verde de uno
+   caducado.)*
 2. **Enmendado por OQ2 en el gate del 2026-08-31** (redacción original abajo). Los tres bloques de
    `sdd/specs/access-notifications.md` (372, 525 y 689) **no se corrigen, porque nunca fueron
    infractores**: encajan el eje de sumideros por el meta-vocabulario del censo (`censo`) y no por
@@ -183,12 +187,28 @@ Acceptance criteria:
 
 1. WHEN se verifica este change, THE SYSTEM SHALL demostrar la ejecución del guardián por **las dos**
    vías, con evidencia registrada: un diff que sólo toca prosa (`sdd/**` o `docs/**`) y un diff que
-   sólo toca `backend/**`. *(Post-PR: se registra sobre la Pull Request, no en `tasks.md`.)*
+   sólo toca `backend/**`. *(**Cumplido el 2026-09-02.** Sola prosa: run
+   [`33622941695`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33622941695), y en el
+   mismo evento `backend-tests-suite` salió **`skipped`** mientras este check corría — el defecto
+   entero, observado. Sólo `backend/**`: run
+   [`33622993073`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33622993073). Los dos
+   desde PR desechables **con base en la rama y con el diff confinado a un solo árbol** (#149 y
+   #150, cerradas sin fusionar), porque la PR del propio change no puede tener ninguno de esos dos
+   diffs. El acta está en el § «Registro de evidencia sobre la PR» del `tasks.md` —en el árbol,
+   grepeable— y no en un comentario de la PR.)*
 2. WHEN se introduce deliberadamente un bloque infractor de cada forma que el guardián dice cazar
    —atribución en markdown y atribución en un docstring o run de `#` de un `.py`—, THE SYSTEM SHALL
-   ponerse en rojo en ambas, y la demostración SHALL quedar registrada en el change. *(Cumplido en
-   local para el **binario** por las tres formas, tarea 6.2a; la mitad del **check run** es post-PR.
-   No la descarga el fallo cerrado: las vías de `GuardError` son R1.4 y R4.3, otro camino de código.)*
+   ponerse en rojo en ambas, y la demostración SHALL quedar registrada en el change. *(**Cumplido
+   por las dos mitades.** El **binario**, en local, por las tres formas: tarea 6.2a. El **check
+   run**, el 2026-09-02: rojo en markdown con run
+   [`33623489251`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33623489251)
+   nombrando `docs/__r4_probe.md:16` y la frase `'sin escritor'`; rojo en docstring y en tirada de
+   `#` con run
+   [`33623440585`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33623440585), las dos
+   formas en un solo run; y verde al revertir con run
+   [`33623610089`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33623610089), que es
+   lo que prueba que el rojo era del bloque y no del entorno. No la descargaba el fallo cerrado: las
+   vías de `GuardError` son R1.4 y R4.3, otro camino de código.)*
 3. IF el guardián se ejecutara con su lista de rutas de alcance vacía o su árbol de prosa ausente,
    THEN THE SYSTEM SHALL fallar en alto y no reportar «cero infractores». *(Cumplido: meta-pruebas.)*
 

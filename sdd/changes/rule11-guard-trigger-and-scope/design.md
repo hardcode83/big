@@ -151,12 +151,21 @@ nombre del check run sale del *job*, no del workflow — y **ninguna detección 
 R1.1 pide que el guardián corra cuando el diff toque cualquier ruta que escanea; correr siempre
 lo satisface trivialmente y por construcción. Y es lo correcto aquí por un motivo que no es
 sólo comodidad: un gate de área es **un segundo sitio donde equivocarse sobre el alcance**, que
-es literalmente el defecto que este change arregla. El escaneo tarda ~1 s sobre los **895** ficheros
-que recorre —95 markdown + 800 python, medidos sobre el árbol que se entrega el 2026-09-02; los 969
-que decía esta frase eran el corpus **anterior** al change, cuando el alcance aún incluía lo que D4
-reordena—, así que los tres jobs de `backend-tests.yml` no se pagan; el mismo razonamiento que
-`api-contract.yml` y `compose-ports.yml` escriben en su cabecera, y la cifra de orden de magnitud
-(«~900») que la del propio workflow ya usa.
+es literalmente el defecto que este change arregla. El escaneo tarda ~1 s sobre **~900** ficheros,
+así que los tres jobs de `backend-tests.yml` no se pagan; el mismo razonamiento que
+`api-contract.yml` y `compose-ports.yml` escriben en su cabecera, y la misma cifra de orden de
+magnitud que la cabecera del propio workflow ya usa.
+
+**Aquí va la magnitud y no el desglose, y el motivo es una lección de este mismo change.** La frase
+dijo primero «969 ficheros» (el corpus **anterior** al change) y luego «895 — 95 markdown + 800
+python, medidos sobre el árbol que se entrega»; las dos se quedaron obsoletas, y la segunda **en el
+mismo día en que se escribió**, porque el `sync-base` de `/sdd:ship` trajo tres specs de `main` y
+subió el censo a 98 markdown. El censo no se mueve sólo con lo que este change añade o borra: se
+mueve **también cuando avanza la base**, y eso pasa después de que la prosa esté escrita. Así que el
+desglose exacto vive donde se re-mide con su run y su SHA de base —la fila de R3.1 del § «Registro
+de evidencia sobre la PR» del `tasks.md`— y aquí sólo el orden de magnitud, que es lo que el
+argumento de D2 necesita. Es el mismo movimiento que cerró el recuento del residual 5: dejar de
+citar un número que se mueve en vez de perseguirlo.
 
 `push: branches: [main]` no es decorativo: es lo que habría puesto en rojo el run 33409418091,
 donde `backend-tests-suite` salió `skipped` sobre el commit `f86a83f` que introdujo los tres
@@ -348,10 +357,14 @@ reducción pequeña y real de su superficie de lectura.
 (`test_the_scan_catches_what_it_claims_to` cubre markdown, docstring y tirada de `#`), así que
 lo que R4 aporta de nuevo es probar que **el check run** se pone rojo. El plan:
 
-1. **R4.1 — las dos formas de diff.** Los dos runs se toman de **dos Pull Requests desechables de
-   un solo commit cuya base es la rama de este change** —una que toque sólo prosa, otra que toque
-   sólo `backend/**`—, y se registran sus ids en el § «Registro de evidencia sobre la PR» del
-   `tasks.md`.
+1. **R4.1 — las dos formas de diff.** Los dos runs se toman de **dos Pull Requests desechables cuya
+   base es la rama de este change y cuyo diff `base...head` no sale de un solo árbol** —una que
+   toque sólo prosa, otra que toque sólo `backend/**`—, y se registran sus ids en el § «Registro de
+   evidencia sobre la PR» del `tasks.md`. *(Este paso dijo «de un solo commit» hasta el 2026-09-02:
+   era un proxy de la propiedad que hace falta, no la propiedad. Lo que `backend-tests-detect` mira
+   es `base...head`, así que varios commits valen si todos tocan el mismo árbol — y así se reutilizó
+   cada sonda para el commit rojo de R4.2 y su revert. El mecanismo, con su precio en runs
+   `cancelled` por `concurrency`, está en la spec.)*
 
    > **Corregido por segunda vez en review (2026-09-02), y esta vez por medición del mecanismo.**
    > El paso decía que los dos runs se tomaban de «eventos `pull_request` sobre la PR ya abierta,
@@ -362,9 +375,9 @@ lo que R4 aporta de nuevo es probar que **el check run** se pone rojo. El plan:
    > serlo, porque siempre toca `scripts/`. Leerlo como «el diff del *push* que provoca el
    > `synchronize`» sí permite rellenar las filas, pero entonces la anotación que la obligación
    > manda escribir —que `backend-tests-suite` sale `skipped` y este check no— es **falsa**, porque
-   > `backend-tests-detect` sigue evaluando el diff completo de la PR. De ahí el vehículo: dos PR de
-   > un solo commit con base en la rama, cuyo head ya arrastra el workflow, donde el diff de cada
-   > una **es** su commit y el contraste se observa de verdad. Se cierran tras registrar los ids.
+   > `backend-tests-detect` sigue evaluando el diff completo de la PR. De ahí el vehículo: dos PR
+   > con base en la rama, cuyo head ya arrastra el workflow y cuyo diff `base...head` **no sale de
+   > un solo árbol**, así que el contraste se observa de verdad. Se cierran tras registrar los ids.
    > El mecanismo vive en `sdd/specs/rule11-ownership-guard.md` § «Obligaciones sobre la Pull
    > Request abierta, antes del merge», que es su home; aquí sólo consta la decisión.
 

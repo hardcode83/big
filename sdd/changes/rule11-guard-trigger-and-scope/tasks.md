@@ -106,8 +106,10 @@ del check run, es obligación sobre la PR abierta declarada en la spec, con su a
   que el contrato no vive allí (encaja por `censo` + `quién la escribe` sin atribuir nada). Sigue
   siendo cero verdaderos positivos, así que no mueve la decisión; lo que sí deja escrito es que la
   spec nueva da verde gracias a este mismo estrechamiento. Las dos cifras de arriba —94 markdown y
-  801 python— también son de aquel día y cuadran con las de hoy (95/800): entró la spec nueva y
-  salió el fichero viejo que 4.1 borra.
+  801 python— también son de aquel día, y cuadran con las **95/800 de la rama sola** el 2026-09-01:
+  entró la spec nueva y salió el fichero viejo que 4.1 borra. (El árbol que se entrega da **98/800**,
+  porque el `sync-base` de `/sdd:ship` trajo tres specs de `main` después de escribirse esto; la
+  cifra viva y su porqué están en la fila 7.1 de la § 7.)
 
   Vía nueva — `python3 scripts/rule11-ownership.py`:
 
@@ -432,7 +434,11 @@ el `push:`.
 
   Salida del script **1**, y del `make` **2** (que es como `make` propaga el fallo de la receta).
   Retiradas las tres sondas, `make check-rule11-ownership` vuelve a **0** con 95 markdown y 800
-  python. Lo que esto **no** prueba, y por eso sigue siendo obligación sobre la PR (ver el § de abajo): que el *check run* se ponga rojo.
+  python — cifras **de la rama sola el 2026-09-01**, que es cuando se midió esto; el árbol que se
+  entrega da 98/800 tras el `sync-base`, y la cifra viva está en la fila 7.1.
+  Lo que esto **no** prueba: que el *check run* se ponga rojo. Por eso era obligación sobre la PR
+  —**ya cumplida**, ver el § de abajo: runs `33623489251` (markdown) y `33623440585` (docstring y
+  tirada de `#`), con su verde al revertir en `33623610089`.
   Y no lo descargan las ocho vías de fallo cerrado de la sección 5 — ésas son cadena rota (R1.4,
   R4.3), no un bloque infractor: otro camino de código. [R4.2]
 
@@ -451,8 +457,8 @@ rellena tras `/sdd:ship`, y luego `/sdd:review` recertifica con `mark-recertifie
 | Obligación | Requisito | Id de run | Base medida | Resultado |
 |---|---|---|---|---|
 | Diff de sola prosa (`sdd/**` o `docs/**`), en PR desechable con base en la rama | R4.1 | [`33622941695`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33622941695) | — | **`rule11-ownership` pass en 19 s**, y en el mismo evento **`backend-tests-suite` `skipped`** — el contraste entero. PR sonda #149, commit `27c4533`, diff = `docs/__r4_probe.md` y nada más |
-| Diff de sólo `backend/**`, en PR desechable con base en la rama | R4.1 | [`33622993073`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33622993073) | — | **pass en 20 s.** PR sonda #150, commit `b784214`, diff = `backend/app/__r4_probe.py` y nada más; aquí `backend-tests-suite` sí corre, que es la vía que ya funcionaba antes del change |
-| Check en rojo por bloque en markdown | R4.2 | [`33623489251`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33623489251) | — | **fail en 12 s**, nombrando `docs/__r4_probe.md:16` y la frase `'sin escritor'`, `infractores: 1`, `Error 1` del `make`. Y en ese mismo run **`backend-tests-suite` salió `skipping`**: es el bloque que la superficie vieja no habría visto |
+| Diff de sólo `backend/**`, en PR desechable con base en la rama | R4.1 | [`33622993073`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33622993073) | — | **pass en 20 s.** PR sonda #150, commit `b784214`, diff = `backend/app/__r4_probe.py` y nada más; el censo subió a 801 python por el propio fichero sonda. Aquí `backend-tests-detect` resolvió `backend=true (diff-touches-backend)` y **despachó** `backend-tests-suite` —la vía que ya funcionaba antes del change—, aunque su conclusión propia acabó en `cancelled` porque la concurrencia la cortó al llegar el commit rojo tres minutos después: se ejecutó, no salió verde, y esta fila no le atribuye conclusión |
+| Check en rojo por bloque en markdown | R4.2 | [`33623489251`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33623489251) | — | **fail en 12 s**, nombrando `docs/__r4_probe.md:16` y la frase `'sin escritor'`, `infractores: 1`, `Error 1` del `make`. Y en ese mismo **evento** —no en este run, que es el del workflow `rule11-ownership`; el de `backend-tests` es `33623489487`, donde el job de consolidación anotó literalmente «el diff no toca `backend/**` … así que la suite NO se ejecutó»— **`backend-tests-suite` salió `skipped`** mientras este check se ponía rojo: es el bloque que la superficie vieja no habría visto |
 | Check en rojo por bloque en docstring o tirada de `#` | R4.2 | [`33623440585`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33623440585) | — | **fail en 12 s**, las dos formas en un run: `backend/app/__r4_probe.py:19` con `'sin escritor'` (docstring) y `:22` con `'primer escritor'` (tirada de `#`), `infractores: 2` |
 | Verde al revertir el bloque inyectado | R4.2 | [`33623610089`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33623610089) | — | **pass en 21 s** sobre el revert `857e06a` de la sonda #149. El rojo era del bloque y no del entorno |
 | Cero infractores sobre la base fusionada, en un run **posterior** a la última fusión de `main` | R3.1 | [`33621908289`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33621908289) | `078339d3c87121dfc5ebbda828e293d0a4893af0` | **pass**, 98 markdown + 800 python, cero infractores. Evento `pull_request` sobre `headSha` `1578215`, que **contiene** el merge de sync de `main@078339d`; run creado a las 10:54:59Z, posterior a esa fusión, y `main` no se ha movido desde entonces (punta `078339d`, 06:10:13Z), así que el merge ref incluye la base actual |
@@ -480,9 +486,13 @@ después se empujó, para que el rojo de CI probara el check run y no un acciden
 El diff de una PR es `base...head`, y el de esta toca `sdd/**`, `scripts/`, `Makefile`,
 `docker-compose.yml` y `backend/tests/**` a la vez: no es «sola prosa» ni «sólo `backend/**`» por
 construcción, así que esas dos filas serían inalcanzables si se midieran sobre ella. Se toman de dos
-Pull Requests de un solo commit **cuya base es la rama de este change**, no `main`, de modo que el
-diff de cada una es exactamente su commit y `backend-tests-detect` evalúa ese mismo diff — que es lo
-que hace cierta la anotación de `backend-tests-suite` `skipped`. Se cierran tras registrar los ids.
+Pull Requests desechables **cuya base es la rama de este change**, no `main`, y **cuyo diff
+`base...head` no sale de un solo árbol**, de modo que `backend-tests-detect` resuelve el área sobre
+ese mismo diff — que es lo que hace cierta la anotación de `backend-tests-suite` `skipped`. **Cada
+sonda llevó más de un commit**, y no pasa nada: #149 tres (benigno, bloque infractor, revert) y #150
+dos, todos dentro de su árbol. La condición es el árbol y no el número de commits; reutilizarlas
+para el rojo de R4.2 ahorró dos PR y costó que algún run del commit anterior saliera `cancelled`
+por `concurrency`, que es lo que la fila 2 anota. Se cierran tras registrar los ids.
 El mecanismo y su motivo viven en `sdd/specs/rule11-ownership-guard.md` § «Obligaciones sobre la Pull
 Request abierta, antes del merge»; aquí sólo se registra el resultado. Lo levantó el panel de review
 del 2026-09-02, que midió que la lectura anterior no era satisfacible.
@@ -497,7 +507,7 @@ marcador de fin: los pipes truncan y el filtro de `rtk` colapsa pytest a un fals
 
 | | resultado |
 |---|---|
-| 7.1 `make check-rule11-ownership` | salida **0**, 95 markdown + 800 python, cero infractores (**2026-09-02**) — el 2026-08-31, ya creadas las meta-pruebas, el árbol daba **94/801**, la salida que está pegada en la tarea **1.5** (`:115-116`); antes de crearlas, en la 1.4, eran 94/800, y el porqué del salto está escrito en `:82-84`. El censo se mueve con cada fichero que el propio change añade o borra —entró la spec nueva, salió el guardián viejo—, así que cada cifra va fechada |
+| 7.1 `make check-rule11-ownership` | salida **0**, **98 markdown + 800 python**, cero infractores — re-medido el **2026-09-02 sobre el SHA que se ancla**, ya con `main` fusionado. **El censo se mueve por dos vías y sólo una es nuestra**: los ficheros que el propio change añade o borra (94→95 markdown al entrar la spec nueva; 800→801→800 python al crearse las meta-pruebas y borrarse el guardián viejo, con el salto explicado en `:82-84` y la salida de la 1.5 pegada en `:115-116`), **y el avance de la base**, que trajo tres specs de `main` en el `sync-base` de `/sdd:ship` y llevó el markdown de 95 a **98**. La segunda vía es la que dejó obsoletas dos redacciones de esta misma celda el mismo día, así que la cifra va fechada **y** atribuida al SHA sobre el que se midió. El desglose que CI observa está en la fila de R3.1 del § «Registro de evidencia sobre la PR», con su id de run y su base |
 | 7.2 `pytest scripts/ -q` | **247 passed** (2026-09-02) — eran 246 en la pasada de run; la review añadió una prueba, la que ancla el coste declarado de D3. Llegó a 248 con el guardián del gatillo, retirado el 2026-09-02 (ver D2). Esta cifra se mueve con cada prueba nueva, así que va fechada |
 | 7.3 suite del backend | **9213 passed, 41 skipped** — contra la partida de **9218/41**, exactamente los 5 tests del fichero borrado |
 | 7.4 `check-compose-ports` · `check-version-parity` | **0** y **0** |
@@ -511,7 +521,10 @@ dan la misma cifra, así que retirar los montajes no cambió el resultado de nin
 
 **Lo que la sección 7 NO puede cerrar** y no se disimula: nada de aquí demuestra que el *check run*
 se ponga rojo y verde donde debe. Eso son las obligaciones sobre la PR abierta —§ «Registro de
-evidencia sobre la PR», arriba—, y sus ids no existen hasta que `/sdd:ship` abra la PR.
+evidencia sobre la PR», arriba—, y sus ids no podían existir hasta que `/sdd:ship` abriera la PR.
+**Ya existen**: las seis filas de ese § están rellenas con runs reales del 2026-09-02, así que lo
+que la sección 7 no puede cerrar **está cerrado allí**, no pendiente. Esta frase se conserva porque
+explica por qué la evidencia vive en dos sitios y no en uno.
 
 
 - [x] 7.1 `make check-rule11-ownership` → cero infractores y salida 0.

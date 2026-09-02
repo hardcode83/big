@@ -202,13 +202,23 @@ podrá comprobar que se cumplió.
   `backend-tests.yml` para decidir el área; y una PR que altere el gatillo, el alcance o el eje de
   este guardián toca siempre `scripts/` y casi siempre `sdd/**` y `backend/**` a la vez, así que su
   diff no es «sólo prosa» ni «sólo `backend/**`» por construcción. Los dos ids se toman de **dos
-  Pull Requests desechables de un solo commit cuya base es la rama de la PR principal**, no `main`:
-  así el diff de cada una es exactamente su commit —una que toque sólo `sdd/**` o `docs/**`, otra
-  que toque sólo `backend/**`—, su head arrastra ya el workflow, y `backend-tests-detect` evalúa ese
+  Pull Requests desechables cuya base es la rama de la PR principal** —no `main`— y **cuyo diff
+  completo, `base...head`, no sale de un solo árbol**: una que toque sólo `sdd/**` o `docs/**`, otra
+  que toque sólo `backend/**`. Su head arrastra ya el workflow, y `backend-tests-detect` evalúa ese
   mismo diff, que es lo que hace **cierta** la anotación de `backend-tests-suite` `skipped`. Se
   cierran tras registrar los ids. Medir el diff del *push* que provoca un `synchronize` sobre la PR
   principal no vale: el área que `backend-tests` resuelve sigue siendo la del diff completo de la
   PR, así que el contraste que este punto manda anotar no se observaría.
+
+  **La condición es el árbol, no el número de commits, y conviene decirlo porque la primera
+  redacción pedía «un solo commit».** Un commit garantizaba la propiedad de forma trivial, pero no
+  era la propiedad: lo que `backend-tests-detect` mira es `base...head`, así que una PR sonda con
+  varios commits sigue valiendo mientras **todos** toquen el mismo árbol — y eso permite reutilizar
+  la misma sonda para los commits en rojo y su revert (el punto siguiente) en vez de abrir una PR
+  por evento. Tiene un precio que conviene conocer al leer los ids: los runs del commit anterior
+  pueden salir **`cancelled`** por `concurrency` cuando llega el siguiente, así que un
+  `backend-tests-suite` en `cancelled` sobre una sonda no es una señal de nada — la fila que importa
+  es la del check propio, y el área resuelta se lee en el log de `backend-tests-detect`.
 - **El check en rojo por cada forma que dice cazar.** Un commit temporal con un bloque infractor en
   markdown y otro en un docstring o tirada de `#`, el id de run con el check en rojo, y el verde al
   revertirlo. Que la *función* y el *binario* los cazan se prueba en local con las meta-pruebas y con
