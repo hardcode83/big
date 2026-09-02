@@ -59,8 +59,8 @@ nothing, and `alembic downgrade base` (which CI runs) drops the whole type in th
 created it anyway. The index *is* dropped, and re-upgrading only fails if two portal threads
 for one stay were created while it was down.
 
-Revision ID: 80ea2e544b36
-Revises: e5c9b1f47a28
+Revision ID: 2b28c6b3f82a
+Revises: a1b2c3d4e5f6
 Create Date: 2026-08-29 00:00:00.000000
 
 **Re-encadenada al sincronizar la base (2026-08-31).** Nació colgando de `d4a7e18c6b93`, pero
@@ -82,6 +82,17 @@ recrearla, que es lo que hay que hacer: `make down` borrando volúmenes, `make u
 `make bootstrap`, `make seed-demo`. Ni `main` ni `dev` se ven afectados en ninguno de los dos
 casos: nunca tuvieron esta revisión sellada, y sobre BD limpia el ciclo completo pasa.
 
+**Re-encadenada por segunda vez al entrar en `main` (2026-09-02), de `80ea2e544b36` a `2b28c6b3f82a`.**
+Mientras el PR #152 esperaba, `main` recibió dos migraciones más desde ese mismo padre
+`e5c9b1f47a28` —`c22b8ae01096` (super-admin-identity) y `r3v1ew5a01..03` (revenue-reviews)— y
+la revisión de merge `a1b2c3d4e5f6` que las unifica. El merge de #152 dejó de nuevo dos cabezas;
+esta vez el preflight de `deploy-dev.yml` abortó ANTES de recrear contenedores y la VM siguió
+sirviendo la versión anterior (run 33649334905). Cuelga ahora de `a1b2c3d4e5f6`, que es lo que
+pide la propia revisión de merge, y cambia de id por la misma razón que la vez anterior: la
+BD del worktree que la selló con el id viejo debe fallar en alto, no darse por migrada y
+saltarse el DDL de super-admin-identity y revenue-reviews. `main` y `dev` siguen sin haberla
+sellado nunca.
+
 """
 from typing import Sequence, Union
 
@@ -90,8 +101,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '80ea2e544b36'
-down_revision: Union[str, Sequence[str], None] = 'e5c9b1f47a28'
+revision: str = '2b28c6b3f82a'
+down_revision: Union[str, Sequence[str], None] = 'a1b2c3d4e5f6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

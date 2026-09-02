@@ -33,7 +33,7 @@ class ConversationModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampM
         Index("ix_conversations_tenant_id_status", "tenant_id", "status"),
         Index("ix_conversations_reservation_id", "reservation_id"),
         # At most one `PORTAL` thread per stay (`guest-portal-messaging` R3.4, D6). Declared
-        # here as well as in `80ea2e544b36` because the test suite builds its schema from this
+        # here as well as in `2b28c6b3f82a` because the test suite builds its schema from this
         # metadata and never runs the migrations — without this copy the index would not exist
         # in the tests and the concurrency test of R3.4 would prove nothing while still passing.
         #
@@ -42,7 +42,7 @@ class ConversationModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampM
         # `create_all` *creates* `conversation_channel` in the same transaction rather than
         # extending it, and PostgreSQL 12+ allows using the labels of an enum created in the
         # transaction that created it. Why the migration cannot do the same, and what it pays
-        # instead, is written once in `80ea2e544b36` and not re-derived here.
+        # instead, is written once in `2b28c6b3f82a` and not re-derived here.
         Index(
             "uq_conversations_portal_reservation",
             "tenant_id",
