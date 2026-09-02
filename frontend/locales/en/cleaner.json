@@ -1,0 +1,158 @@
+{
+  "list": {
+    "label": "My cleaning tasks",
+    "empty": {
+      "title": "You have no tasks right now",
+      "description": "When a cleaning is assigned to you, it will show up here."
+    },
+    "error": {
+      "title": "We couldn't load your tasks",
+      "description": "Please try again in a few seconds."
+    },
+    "loading": "Loading your tasks…"
+  },
+  "detail": {
+    "back": "Back to my tasks",
+    "loading": "Loading the task…",
+    "unavailable": {
+      "title": "Task not available",
+      "description": "It may no longer be assigned to you."
+    },
+    "error": {
+      "title": "We couldn't load the task",
+      "description": "Please try again in a few seconds."
+    }
+  },
+  "context": {
+    "title": "Where and when",
+    "propertyName": "Property",
+    "propertyInternalCode": "Code",
+    "address": "Address",
+    "timezone": "Property time zone",
+    "checkoutAt": "Stay checkout",
+    "nextCheckinDeadline": "Next check-in",
+    "unavailable": {
+      "title": "We could not load the address",
+      "description": "The property could not be resolved right now."
+    }
+  },
+  "checklist": {
+    "title": "Checklist",
+    "complete": "Mark as done",
+    "completing": "Saving…",
+    "completed": "Done",
+    "completedBy": "by",
+    "required": "Required",
+    "pending": "Pending",
+    "empty": {
+      "title": "This task has no checklist",
+      "description": "The template declares no items for this property."
+    },
+    "errors": {
+      "notFound": "This item no longer belongs to the template. We have refreshed it.",
+      "conflict": "The task changed state and this item can't be ticked. The current state is shown above.",
+      "generic": "We couldn't tick the item. Please try again."
+    }
+  },
+  "photoRequirements": {
+    "title": "Photos the template asks for",
+    "covered": "Covered",
+    "pending": "Pending",
+    "required": "Required",
+    "upload": "Upload photo",
+    "empty": {
+      "title": "This task asks for no photos",
+      "description": "The template declares no photo categories."
+    }
+  },
+  "gallery": {
+    "title": "Uploaded photos",
+    "loading": "Loading the photos…",
+    "empty": {
+      "title": "No photos yet",
+      "description": "The photos you upload will show up here."
+    },
+    "alt": "Cleaning photo"
+  },
+  "actions": {
+    "title": "What you can do",
+    "accept": "Accept",
+    "reject": "Turn down",
+    "start": "Start",
+    "complete": "Close the cleaning",
+    "reportIncident": "Report incident",
+    "none": {
+      "pendingReview": "This cleaning is waiting for validation.",
+      "completed": "This cleaning is closed.",
+      "rejected": "This cleaning was turned down.",
+      "cancelled": "This cleaning was cancelled.",
+      "failed": "This cleaning did not pass validation: the review is the manager's.",
+      "notActionable": "There is nothing to do on this task right now."
+    },
+    "errors": {
+      "conflict": "The task changed state and this action no longer fits. The current state is shown above.",
+      "generic": "We couldn't complete the action. Please try again."
+    }
+  },
+  "complete": {
+    "title": "Close cleaning",
+    "success": {
+      "title": "Cleaning closed",
+      "description": "The close has been recorded.",
+      "back": "Back to my tasks"
+    },
+    "errors": {
+      "missing-required-items": "Required checklist items are missing. They are highlighted above.",
+      "missing-required-photos": "Required photos are missing. They are highlighted above.",
+      "critical-incident": "There is an unresolved critical incident on the property and the cleaning can't be closed.",
+      "generic": "We couldn't close the cleaning. Please try again."
+    }
+  },
+  "incidentReport": {
+    "title": "Report an incident",
+    "titleField": "Title",
+    "descriptionField": "Description",
+    "submit": "Submit incident",
+    "submitting": "Submitting…",
+    "errors": {
+      "titleRequired": "Enter a title.",
+      "titleTooLong": "The title can't be longer than 300 characters.",
+      "descriptionRequired": "Enter a description.",
+      "descriptionTooLong": "The description can't be longer than 5000 characters.",
+      "conflict": "The task changed state and no longer accepts an incident. The current state is shown above.",
+      "generic": "We couldn't submit the incident. Please try again."
+    },
+    "ack": {
+      "title": "Incident registered",
+      "id": "Identifier",
+      "status": "Status",
+      "createdAt": "Registered on"
+    }
+  },
+  "upload": {
+    "title": "Upload a photo",
+    "file": "Choose or take a photo",
+    "uploading": "Uploading…",
+    "optional": "Uploading photos is not required for every category.",
+    "errors": {
+      "conflict": "The task changed state and no longer accepts photos. The current state is shown above.",
+      "tooLarge": "The photo is too large. Take a lighter one or lower the quality.",
+      "unsupportedFormat": "That file isn't a photo in a supported format. JPEG, PNG and WebP are accepted.",
+      "storage": "We couldn't store the photo. Please try again in a few seconds.",
+      "generic": "We couldn't upload the photo. Please try again."
+    }
+  },
+  "filters": {
+    "label": "Filter by status",
+    "all": "All statuses",
+    "clear": "Clear filter"
+  },
+  "pagination": {
+    "label": "My tasks pagination",
+    "previous": "Previous page",
+    "next": "Next page",
+    "pageOfTotal": "Page {{page}} of {{totalPages}}",
+    "totalTasks": "{{total}} tasks in total"
+  },
+  "noRowContext": "—"
+}

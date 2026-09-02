@@ -132,7 +132,8 @@ consumidor y no hay ninguno.
 `steering/security.md`. La comprobación de arriba cierra el caso del operador descuidado dentro de
 la propia petición; el caso general —escribir *otro* código más tarde— no lo puede cerrar ninguna
 comprobación intra-petición, y ampliar el contrato de un sumidero es una decisión de steering.
-Anotado en la entrada de roadmap de `cleaner-app`, que es quien ampliará la superficie de `notes`.
+Anotado en `sdd/roadmap/cleaner-app.md` §4: el disparador original no se cumple, y la decisión
+queda sin change asignado. Su mitad de cifrado en reposo sigue en `plaintext-sink-encryption-at-rest`.
 
 ### El puerto del proveedor de acceso
 

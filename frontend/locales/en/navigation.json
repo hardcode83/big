@@ -134,5 +134,9 @@
     "triggerLabel": "User menu",
     "logout": "Sign out",
     "anonymous": "User"
+  },
+  "topbarPreferences": {
+    "trigger": "Preferences",
+    "title": "Preferences"
   }
 }
