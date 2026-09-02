@@ -49,9 +49,15 @@ from app.guests.domain.ports import (
     SESHospedajesAdapter,
 )
 from app.guests.domain.repositories import GuestRepository
+from app.notifications.application.channel_dispatch import dispatch_channels
+from app.notifications.domain.channel_resolver import (
+    RecipientContact,
+    resolve_channels,
+)
 from app.notifications.domain.entities import NotificationLog
-from app.notifications.domain.enums import NotificationChannel, NotificationStatus
+from app.notifications.domain.enums import NotificationStatus
 from app.notifications.domain.repositories import NotificationLogRepository
+from app.tenants.domain.repositories import TenantConfigRepository
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType
 from app.timeline.domain.repositories import TimelineEventRepository
 from app.timeline.domain.services import TimelineEventFactory
@@ -379,6 +385,7 @@ class SubmitLegalRegistrationUseCase:
         users: UserRepository,
         timeline: TimelineEventRepository,
         notifications: NotificationLogRepository,
+        tenant_configs: TenantConfigRepository,
         audit: AuditLogRepository,
         uow: UnitOfWork,
     ) -> None:
@@ -391,6 +398,12 @@ class SubmitLegalRegistrationUseCase:
         self._recipients = RoleRecipients(users=users)
         self._timeline = timeline
         self._notifications = notifications
+        # The tenant's channel flags, loaded **once per execute** by the resolver
+        # (`notification-channel-routing` R1.5). The repository's `get_or_create`
+        # is the right shape here: a tenant whose config has not been bootstrapped
+        # still gets the defaults rather than a `None` that would force every
+        # caller to special-case it.
+        self._tenant_configs = tenant_configs
         self._audit = GuestAuditWriter(audit)
         self._uow = uow
 
@@ -500,10 +513,17 @@ class SubmitLegalRegistrationUseCase:
                     "notified": len(recipients.users),
                 },
             )
+        # Loaded once, before the recipient loop, not once per manager/owner.
+        config = await self._tenant_configs.get_or_create(tenant_id, now)
         for recipient in recipients.users:
-            await self._notifications.add(
-                tenant_id, self._failure_notification(tenant_id, stay, recipient, now)
-            )
+            for row in self._failure_notification(
+                tenant_id=tenant_id,
+                stay=stay,
+                recipient=recipient,
+                config=config,
+                now=now,
+            ):
+                await self._notifications.add(tenant_id, row)
         await self._record_audit(
             tenant_id=tenant_id,
             reservation_id=reservation_id,
@@ -595,8 +615,14 @@ class SubmitLegalRegistrationUseCase:
         )
 
     def _failure_notification(
-        self, tenant_id: uuid.UUID, stay, recipient, now: datetime
-    ) -> NotificationLog:
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        stay,
+        recipient,
+        config,
+        now: datetime,
+    ) -> list[NotificationLog]:
         """Queued, not sent: `PENDING` is the seam `dispatch_notifications` drains.
 
         `subject`/`body` carry ids and a type, never the content of another row — the
@@ -611,21 +637,45 @@ class SubmitLegalRegistrationUseCase:
         is correct rather than accidental: `escalation_for` returns `None` for an unknown type,
         so a failed filing escalates to nobody — which is right, since it has no SLA deadline
         and the manager is already being told.
+
+        **Channel fan-out (`notification-channel-routing` R2, R4)**: the row is built once
+        per resolved channel via `dispatch_channels`, with `contact` derived from the channel
+        (R2.3) and `sla_deadline_at` left `None` because this type has no escalation policy.
+        The builder is the lambda below — pure, no imports, no I/O.
         """
-        return NotificationLog(
-            id=uuid.uuid4(),
+        def _builder(
+            *,
+            channel,
+            contact: str | None,
+            **_,
+        ) -> NotificationLog:
+            return NotificationLog(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                recipient_user_id=recipient.id,
+                recipient_contact=contact or recipient.email,
+                channel=channel,
+                notification_type=LEGAL_REGISTRATION_FAILED_NOTIFICATION,
+                created_at=now,
+                updated_at=now,
+                subject="Legal registration failed",
+                body=(
+                    f"The SES.Hospedajes submission failed. Reservation {stay.reservation_id}."
+                ),
+                status=NotificationStatus.PENDING,
+                related_type=RELATED_TYPE_RESERVATION,
+                related_id=stay.reservation_id,
+            )
+
+        channels = resolve_channels(
+            tenant_config=config,
+            recipient=RecipientContact(email=recipient.email, phone=recipient.phone),
             tenant_id=tenant_id,
-            recipient_user_id=recipient.id,
-            recipient_contact=recipient.email,
-            channel=NotificationChannel.IN_APP,
             notification_type=LEGAL_REGISTRATION_FAILED_NOTIFICATION,
-            created_at=now,
-            updated_at=now,
-            subject="Legal registration failed",
-            body=(
-                f"The SES.Hospedajes submission failed. Reservation {stay.reservation_id}."
-            ),
-            status=NotificationStatus.PENDING,
-            related_type=RELATED_TYPE_RESERVATION,
-            related_id=stay.reservation_id,
+            recipient_role=recipient.role.value if recipient.role else None,
+        )
+        return dispatch_channels(
+            recipient=recipient,
+            channels=channels,
+            log_builder=_builder,
         )

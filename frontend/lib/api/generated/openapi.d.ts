@@ -314,6 +314,13 @@ export interface paths {
      */
     post: operations["resolve_conversation_api_v1_conversations__conversation_id__resolve_post"];
   };
+  "/api/v1/dashboard/operational-kpis": {
+    /**
+     * Tenant-wide operational counts
+     * @description Three tenant-wide counts (`dashboard-operational-kpis` R1, R2, R3): today's live cleaning tasks, check-ins in the next 7 days, and open incidents with their urgent (HIGH/CRITICAL) breakdown. All three keys are always present, `null` included: a field comes back `null` when the caller's role lacks the permission that guards its source domain (`READ_CLEANING_TASKS`, `READ_RESERVATIONS`, `READ_INCIDENTS` respectively), indistinguishable from having nothing to count — the same 'agregar no concede' rule the other two dashboard routes apply. `open_incidents` is one nested object, redacted as a whole.
+     */
+    get: operations["get_operational_kpis_api_v1_dashboard_operational_kpis_get"];
+  };
   "/api/v1/dashboard/properties": {
     /**
      * The dashboard card of every property
@@ -2462,6 +2469,30 @@ export interface components {
      * @enum {string}
      */
     NotificationType: "CLEANING_TASK_ASSIGNED" | "CLEANING_NO_RESPONSE" | "CLEANING_COMPLETED" | "CLEANING_FAILED" | "INCIDENT_CREATED_CRITICAL" | "INCIDENT_CREATED_HIGH" | "OWNER_APPROVAL_REQUIRED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_NO_RESPONSE" | "GUEST_ESCALATION" | "LOCK_ALERT" | "CHECKIN_REMINDER_24H" | "CHECKIN_REMINDER_2H" | "CHECKOUT_REMINDER" | "PRICE_RECOMMENDATION" | "SLA_BREACH" | "PASSWORD_RESET_REQUESTED";
+    /**
+     * OpenIncidentCountsResponse
+     * @description The `open_incidents` block of `GET /dashboard/operational-kpis` (R3).
+     */
+    OpenIncidentCountsResponse: {
+      /** Total */
+      total: number;
+      /** Urgent */
+      urgent: number;
+    };
+    /**
+     * OperationalKpisResponse
+     * @description `GET /api/v1/dashboard/operational-kpis` (`dashboard-operational-kpis` R1, R2, R3).
+     *
+     * All three top-level keys are always present, `null` included: `null` marks a role that
+     * may not read the source domain (R4.3), never omission.
+     */
+    OperationalKpisResponse: {
+      /** Cleanings Today */
+      cleanings_today: number | null;
+      open_incidents: components["schemas"]["OpenIncidentCountsResponse"] | null;
+      /** Upcoming Checkins */
+      upcoming_checkins: number | null;
+    };
     /**
      * OwnerApprovalStatus
      * @description ASSUMPTION: name invented — the PRD declares this enum inline
@@ -5544,6 +5575,32 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Tenant-wide operational counts
+   * @description Three tenant-wide counts (`dashboard-operational-kpis` R1, R2, R3): today's live cleaning tasks, check-ins in the next 7 days, and open incidents with their urgent (HIGH/CRITICAL) breakdown. All three keys are always present, `null` included: a field comes back `null` when the caller's role lacks the permission that guards its source domain (`READ_CLEANING_TASKS`, `READ_RESERVATIONS`, `READ_INCIDENTS` respectively), indistinguishable from having nothing to count — the same 'agregar no concede' rule the other two dashboard routes apply. `open_incidents` is one nested object, redacted as a whole.
+   */
+  get_operational_kpis_api_v1_dashboard_operational_kpis_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OperationalKpisResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };

@@ -176,12 +176,16 @@ def get_complete_cleaning_task_use_case(session: SessionDep) -> CompleteCleaning
             photos=SqlAlchemyCleaningPhotoRepository(session),
             incidents=SqlAlchemyBlockingIncidentQuery(session),
         ),
+        configs=SqlAlchemyTenantConfigRepository(session),
         **_lifecycle_kwargs(session),
     )
 
 
 def get_validate_cleaning_task_use_case(session: SessionDep) -> ValidateCleaningTaskUseCase:
-    return ValidateCleaningTaskUseCase(**_lifecycle_kwargs(session))
+    return ValidateCleaningTaskUseCase(
+        configs=SqlAlchemyTenantConfigRepository(session),
+        **_lifecycle_kwargs(session),
+    )
 
 
 def get_cleaning_task_use_case(session: SessionDep) -> GetCleaningTaskUseCase:

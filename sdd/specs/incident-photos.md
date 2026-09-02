@@ -393,7 +393,8 @@ cambio de comportamiento.
   una firma HMAC. Y R5.2 decía que las demás rutas de `/incidents` estaban en `JSON_BODY_MAX_BYTES`:
   están en `REQUEST_MAX_BYTES`, y la intención se satisface dejando el fall-through como estaba.
 - **El guardián que R6.5 nombraba no es el que se actualizó.** El proposal pedía verificar la
-  ausencia de sumidero nuevo contra `tests/test_rule11_ownership.py`, y ese fichero **no se tocó**:
+  ausencia de sumidero nuevo contra el guardián de la regla 11 (entonces en `backend/tests/`, hoy
+  en `scripts/rule11-ownership.py`), y ese fichero **no se tocó**:
   lo que se amplió fue el censo de `tests/maintenance/test_free_text_sink_contract.py` (de dos
   routers a tres). La propiedad de fondo —enum cerrado, ningún texto libre del llamante— sí queda
   fijada, por el test de los dos miembros del enum y por el `Form()` que lo coacciona; pero el

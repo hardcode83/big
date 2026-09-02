@@ -105,7 +105,7 @@ de la frase de arriba: cuenta viviendas que la consulta de candidatas no puede v
 
 | Contador | Significa | ¿Hay que hacer algo? |
 |---|---|---|
-| `escalated` | Incumplimiento marcado y escalado escrito | No |
+| `escalated` | Incumplimiento marcado y escalado escrito | No. Desde `notification-channel-routing`, el escalado se abanica en una fila por canal resuelto del tenant (igual que cualquier otro aviso), todas con `sla_deadline_at = NULL` — el plazo pertenece a la fila original incumplida, no a las del escalado |
 | `without_action` | El tipo de notificación no tiene escalado definido | No, pero queda registrado |
 | `without_recipient` | No hay manager ni owner activo a quien avisar | **Sí, urgente.** El incumplimiento se deja **sin marcar** y se reintenta cada minuto hasta que alguien arregle el roster |
 | `recipients_truncated` | Había más destinatarios que una página (100) | **Sí.** Alguien no recibió el aviso |

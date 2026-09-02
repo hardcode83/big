@@ -479,6 +479,20 @@ tocar la base de datos a mano.
   excluyendo (`super-admin-identity` R4.2) —, así que el bootstrap sigue siendo su única
   puerta de entrada.
 
+### `TenantConfig` y los conmutadores de canal
+
+- THE SYSTEM SHALL mantener, en `tenant_configs`, los flags `notification_email_enabled`
+  (default `True`) y `notification_whatsapp_enabled` (default `False`) como los dos
+  **interruptores de canal** que gobiernan `notifications/domain/channel_resolver.py`.
+  Son del tenant, no del usuario; el par se lee una vez por `execute` desde
+  `TenantConfigRepository.get_or_create(tenant_id, now)` y se pasa al resolutor.
+- WHERE el tenant no tenga fila de `tenant_configs` recuperable, THE SYSTEM SHALL
+  resolver a `{IN_APP}` únicamente (R1.5) y SHALL registrar
+  `notifications.tenant_config_missing` con `tenant_id` y `notification_type`.
+- Los flags entran y salen por `PATCH /api/v1/tenants/{id}` sobre `TenantConfig`,
+  están en `AUDITABLE_FIELDS` y tienen tests de mutación. Cambiarlos afecta a los
+  avisos que nazcan después, no a los ya escritos — un aviso es un hecho del momento.
+
 ### Secretos y configuración
 
 - THE SYSTEM SHALL leer toda su configuración vía `Settings(BaseSettings)`.

@@ -230,6 +230,79 @@ async def test_the_count_never_crosses_a_tenant_boundary(db_session) -> None:
     assert counts == {mine.id: 1}
 
 
+# --- count_open_for_tenant (`dashboard-operational-kpis` R3) ---------------------------
+
+
+@pytest.mark.asyncio
+async def test_count_open_for_tenant_is_zero_when_nothing_is_open(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+
+    counts = await SqlAlchemyIncidentReader(db_session).count_open_for_tenant(tenant.id)
+
+    assert counts.total == 0
+    assert counts.urgent == 0
+
+
+@pytest.mark.asyncio
+async def test_an_open_high_or_critical_incident_counts_in_both_total_and_urgent(
+    db_session,
+) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    high = await _incident(db_session, tenant, prop)
+    high.severity = IncidentSeverity.HIGH
+    critical = await _incident(db_session, tenant, prop)
+    critical.severity = IncidentSeverity.CRITICAL
+    await db_session.flush()
+
+    counts = await SqlAlchemyIncidentReader(db_session).count_open_for_tenant(tenant.id)
+
+    assert counts.total == 2
+    assert counts.urgent == 2
+
+
+@pytest.mark.asyncio
+async def test_an_open_low_or_medium_incident_counts_only_in_total(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    low = await _incident(db_session, tenant, prop)
+    low.severity = IncidentSeverity.LOW
+    await db_session.flush()
+
+    counts = await SqlAlchemyIncidentReader(db_session).count_open_for_tenant(tenant.id)
+
+    assert counts.total == 1
+    assert counts.urgent == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("closed", [IncidentStatus.RESOLVED, IncidentStatus.CANCELLED])
+async def test_a_closed_incident_counts_in_neither(
+    db_session, closed: IncidentStatus
+) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    await _incident(db_session, tenant, prop, status=closed)
+
+    counts = await SqlAlchemyIncidentReader(db_session).count_open_for_tenant(tenant.id)
+
+    assert counts.total == 0
+    assert counts.urgent == 0
+
+
+@pytest.mark.asyncio
+async def test_count_open_for_tenant_never_crosses_a_tenant_boundary(db_session) -> None:
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    theirs = await _property(db_session, tenant_b, "THEIRS")
+    await _incident(db_session, tenant_b, theirs)
+
+    counts = await SqlAlchemyIncidentReader(db_session).count_open_for_tenant(tenant_a.id)
+
+    assert counts.total == 0
+    assert counts.urgent == 0
+
+
 # --- list_open_for_property (R2.1) ------------------------------------------------------
 
 

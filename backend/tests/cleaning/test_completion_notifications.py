@@ -17,6 +17,7 @@ from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.infrastructure.models import UserModel
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
+from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
 from app.cleaning.api.dependencies import get_complete_cleaning_task_use_case
 from app.cleaning.application.use_cases import CleaningActor, ValidateCleaningTaskUseCase
 from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
@@ -209,6 +210,7 @@ def _validate_use_case(session) -> ValidateCleaningTaskUseCase:
         audit=SqlAlchemyAuditLogRepository(session),
         notifications=SqlAlchemyNotificationLogRepository(session),
         users=SqlAlchemyUserRepository(session),
+        configs=SqlAlchemyTenantConfigRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
 

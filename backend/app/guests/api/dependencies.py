@@ -31,6 +31,7 @@ from app.guests.infrastructure.portal_repositories import (
 )
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.notifications.infrastructure.repositories import SqlAlchemyNotificationLogRepository
+from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
 from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
 
 SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
@@ -85,6 +86,7 @@ def get_submit_legal_registration_use_case(
         users=SqlAlchemyUserRepository(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         notifications=SqlAlchemyNotificationLogRepository(session),
+        tenant_configs=SqlAlchemyTenantConfigRepository(session),
         audit=SqlAlchemyAuditLogRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )

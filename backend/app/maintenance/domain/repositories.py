@@ -39,7 +39,11 @@ from typing import Protocol
 
 from app.maintenance.domain.entities import Incident, IncidentPhoto, OwnerApproval
 from app.maintenance.domain.enums import IncidentSeverity, IncidentStatus
-from app.maintenance.domain.value_objects import IncidentSummary, OwnerApprovalSummary
+from app.maintenance.domain.value_objects import (
+    IncidentSummary,
+    OpenIncidentCounts,
+    OwnerApprovalSummary,
+)
 
 
 @dataclass(frozen=True)
@@ -131,6 +135,22 @@ class IncidentReader(Protocol):
         "the first one" is a deterministic choice that matches how the collection orders.
 
         Empty `property_ids` returns an empty mapping without querying.
+        """
+        ...
+
+    async def count_open_for_tenant(self, tenant_id: uuid.UUID) -> OpenIncidentCounts:
+        """The tenant-wide open-incident counts, with the urgent breakdown (`dashboard-
+        operational-kpis` R3, design D3).
+
+        Tenant-wide, not batched by property, unlike `count_open_for_properties`: this
+        answers "how many, in total" and has no reason to enumerate properties first.
+
+        Both numbers from one query with a conditional aggregate
+        (`func.count().filter(...)`, which Postgres compiles to `COUNT(*) FILTER (WHERE
+        ...)`), so the breakdown costs nothing extra over the plain count.
+
+        Returns `OpenIncidentCounts(total=0, urgent=0)`, never `None`, when the tenant has
+        no open incident.
         """
         ...
 

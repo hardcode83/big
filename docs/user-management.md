@@ -121,7 +121,7 @@ El tenant y su configuración son **un solo recurso**, con la config anidada baj
 | `checkout_ready_hours_after` | Cuántas horas después de la salida se considera lista. |
 | `auto_create_cleaning_task` | Si una salida genera automáticamente su tarea de limpieza. |
 | `cleaning_photo_required` | Si la limpiadora debe subir fotos para cerrar la tarea. |
-| `notification_email_enabled` / `notification_whatsapp_enabled` | Canales de notificación activos. |
+| `notification_email_enabled` / `notification_whatsapp_enabled` | Canales de notificación activos. Con `notification-channel-routing` gobiernan de verdad el resolutor de canales (`sdd/specs/access-notifications.md` §«Por qué canal sale un aviso»): activarlos añade filas `EMAIL`/`WHATSAPP` junto a la `IN_APP` de siempre, sin duplicar lo que ve la bandeja. |
 | `timezone` | Zona IANA con la que se calculan las ventanas de check-in y checkout. |
 | `country`, `default_language`, `name`, `billing_email` | Datos del tenant. |
 

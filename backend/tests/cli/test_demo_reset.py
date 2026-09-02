@@ -288,8 +288,10 @@ def test_the_demo_password_has_no_default(monkeypatch: pytest.MonkeyPatch) -> No
 #: Where `.env.example` can be read from. `/workspace/` is the read-only bind mount
 #: `docker-compose.yml` gives the backend container, because it mounts `./backend` as `/app` and
 #: the repository root is not reachable from inside. The repository layout is the second and last
-#: candidate, which is the one that resolves in CI, where the checkout is complete. Same shape as
-#: `tests/test_rule11_ownership.py`, and for the same reason.
+#: candidate, which is the one that resolves in CI, where the checkout is complete. The rule 11
+#: ownership guard used to have this same shape and for the same reason; it no longer does, because
+#: `rule11-guard-trigger-and-scope` moved it out of the container to `scripts/rule11-ownership.py`,
+#: where a single origin suffices. The shape survives here because THIS suite still runs inside.
 _ENV_EXAMPLE_CANDIDATES = (
     Path("/workspace/.env.example"),
     Path(__file__).resolve().parents[3] / ".env.example",
@@ -1181,7 +1183,12 @@ def test_children_are_deleted_before_the_parents_they_hang_from() -> None:
 async def test_the_delete_phase_empties_the_demo_tenant(
     db_session: AsyncSession, test_engine
 ) -> None:
-    demo = await insert_tenant(db_session, name=demo_reset.DEMO_TENANT_NAME)
+    # `with_notification_config=False`: this test's own assertion documents that
+    # `tenant_configs` is preserved but the fixture never creates one — true again now that
+    # `insert_tenant` seeds one by default (`notification-channel-routing`).
+    demo = await insert_tenant(
+        db_session, name=demo_reset.DEMO_TENANT_NAME, with_notification_config=False
+    )
     # One of the four constant accounts, which must survive, and one a visitor could have
     # created through `POST /users` with the published owner credential, which must not.
     await insert_user(
@@ -1447,8 +1454,15 @@ async def test_the_delete_phase_leaves_every_row_of_the_working_tenant_untouched
     that drops the tenant clause — which is what makes the listener stop seeing it — reds this
     test.
     """
-    neighbour = await insert_tenant(db_session, name="AutoHostAI Dev")
-    demo = await insert_tenant(db_session, name=demo_reset.DEMO_TENANT_NAME)
+    # `with_notification_config=False` on both: this test documents `tenant_configs`
+    # as the one table neither fixture populates — true again now that
+    # `insert_tenant` seeds a config row by default (`notification-channel-routing`).
+    neighbour = await insert_tenant(
+        db_session, name="AutoHostAI Dev", with_notification_config=False
+    )
+    demo = await insert_tenant(
+        db_session, name=demo_reset.DEMO_TENANT_NAME, with_notification_config=False
+    )
     await populate_tenant(db_session, neighbour)
     await populate_tenant(db_session, demo)
     await db_session.commit()
@@ -2771,9 +2785,10 @@ _WORKFLOW_CANDIDATES = (
 def _workflow_text() -> str:
     """The workflow, from the container mount or the repository layout.
 
-    Same two-candidate shape `tests/test_rule11_ownership.py` and the `.env.example` test use, and
-    for the same reason: the backend container mounts only `./backend`, so the repo root is not
-    reachable from where the suite runs. `docker-compose.yml` already mounted `deploy-dev.yml` for
+    Same two-candidate shape the `.env.example` test uses, and for the same reason: the backend
+    container mounts only `./backend`, so the repo root is not reachable from where the suite runs.
+    (The rule 11 guard was the third user of this shape until `rule11-guard-trigger-and-scope` took
+    it out of the container; a guard that runs on the host needs only one origin.) `docker-compose.yml` already mounted `deploy-dev.yml` for
     the provenance regression, and this change adds the same mount for this file at
     `/workspace/demo-reset.yml`, so it resolves locally as well as in CI.
     """

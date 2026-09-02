@@ -22,7 +22,7 @@ from app.auth.domain.enums import UserRole
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.cleaning.infrastructure.models import CleaningTaskModel
 from app.guests.infrastructure.models import GuestModel
-from app.maintenance.domain.enums import IncidentSource, IncidentStatus
+from app.maintenance.domain.enums import IncidentSeverity, IncidentSource, IncidentStatus
 from app.maintenance.infrastructure.models import IncidentModel
 from app.reservations.domain.enums import ReservationChannel, ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
@@ -90,6 +90,9 @@ async def neighbour_world(db_session, tenant_b, property_b):
             property_id=property_b.id,
             checklist_template_id=template.id,
             status=CleaningTaskStatus.IN_PROGRESS,
+            # `dashboard-operational-kpis` R1/R4.4: scheduled today, so a leaking
+            # `count_live_for_day` would show up in tenant A's `cleanings_today`.
+            scheduled_start=datetime.combine(TODAY, datetime.min.time(), tzinfo=UTC),
         )
     )
 
@@ -102,6 +105,9 @@ async def neighbour_world(db_session, tenant_b, property_b):
             title="Neighbour incident",
             description="Neighbour description",
             status=IncidentStatus.OPEN,
+            # `dashboard-operational-kpis` R3/R4.4: urgent, so a leaking
+            # `count_open_for_tenant` would show up in both `total` and `urgent`.
+            severity=IncidentSeverity.CRITICAL,
         )
     )
 
@@ -262,3 +268,44 @@ async def test_the_aggregate_of_an_own_property_carries_none_of_the_neighbours_r
     assert body["pending_approvals"] == []
     for marker in (*NEIGHBOUR_MARKERS, "Neighbour description", "Neighbour incident"):
         assert marker not in response.text
+
+
+# --- `/dashboard/operational-kpis` (`dashboard-operational-kpis` R4.4) --------------------
+#
+# One test per count, per the design's mitigation for section 6's risk that a fourth
+# permission-redacted response is "one more combination for a matrix to miss" — a single
+# test asserting all three would still catch a leak, but would not say which count leaked.
+
+
+@pytest.mark.asyncio
+async def test_cleanings_today_does_not_include_a_neighbours_live_task(
+    api, owner_headers, property_a, neighbour_world
+) -> None:
+    """Tenant A has nothing scheduled; tenant B has a live task scheduled today."""
+    response = await api.get("/api/v1/dashboard/operational-kpis", headers=owner_headers)
+
+    assert response.status_code == 200
+    assert response.json()["cleanings_today"] == 0
+
+
+@pytest.mark.asyncio
+async def test_upcoming_checkins_does_not_include_a_neighbours_check_in(
+    api, owner_headers, property_a, neighbour_world
+) -> None:
+    """Tenant A has no reservation; tenant B has a check-in inside the window."""
+    response = await api.get("/api/v1/dashboard/operational-kpis", headers=owner_headers)
+
+    assert response.status_code == 200
+    assert response.json()["upcoming_checkins"] == 0
+
+
+@pytest.mark.asyncio
+async def test_open_incidents_does_not_include_a_neighbours_urgent_incident(
+    api, owner_headers, property_a, neighbour_world
+) -> None:
+    """Tenant A has no incident; tenant B has one open **and** urgent (`CRITICAL`), so a
+    leak into either `total` or `urgent` alone would show up here."""
+    response = await api.get("/api/v1/dashboard/operational-kpis", headers=owner_headers)
+
+    assert response.status_code == 200
+    assert response.json()["open_incidents"] == {"total": 0, "urgent": 0}

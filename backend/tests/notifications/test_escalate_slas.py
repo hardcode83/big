@@ -15,6 +15,8 @@ from app.core.tenancy import CrossTenantWriteError
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.repositories import UserFilters, UserPage
 from app.notifications.application.use_cases import EscalateBreachedSlasUseCase
+from app.tenants.domain.entities import TenantConfig
+from app.tenants.domain.enums import StorageType
 from app.notifications.domain.entities import NotificationLog
 from app.notifications.domain.exceptions import NotificationLogNotFoundError
 from app.notifications.domain.enums import (
@@ -142,15 +144,51 @@ def _breached(
     )
 
 
+class FakeTenantConfigRepository:
+    """Minimal `TenantConfigRepository` for the escalation harness — `notification-channel-routing`.
+
+    Default has both flags off so the resolver returns `{IN_APP}` only — matching the
+    expectations this file carried before the fan-out was wired through. Tests that want
+    to exercise R3 (contact missing) or the multi-channel fan-out pass `email_enabled=True`
+    or `whatsapp_enabled=True`.
+    """
+
+    def __init__(
+        self,
+        *,
+        email_enabled: bool = False,
+        whatsapp_enabled: bool = False,
+    ) -> None:
+        self._email_enabled = email_enabled
+        self._whatsapp_enabled = whatsapp_enabled
+
+    async def get_or_create(
+        self, tenant_id: uuid.UUID, now: datetime
+    ) -> TenantConfig:
+        return TenantConfig(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            created_at=now,
+            updated_at=now,
+            notification_email_enabled=self._email_enabled,
+            notification_whatsapp_enabled=self._whatsapp_enabled,
+            storage_type=StorageType.LOCAL,
+        )
+
+
 class Harness:
     def __init__(self) -> None:
         self.notifications = FakeNotificationLogRepository()
         self.users = FakeUserRepository()
+        self.tenant_configs = FakeTenantConfigRepository()
         self.uow = FakeUnitOfWork()
 
     async def run(self, now: datetime = NOW):
         return await EscalateBreachedSlasUseCase(
-            notifications=self.notifications, users=self.users, uow=self.uow
+            notifications=self.notifications,
+            users=self.users,
+            tenant_configs=self.tenant_configs,
+            uow=self.uow,
         ).execute(tenant_id=TENANT, now=now)
 
 
@@ -184,9 +222,11 @@ async def test_a_breached_technician_assignment_writes_a_technician_no_response_
         for log in harness.notifications.logs.values()
         if log.id != breached.id
     ]
+    # Default harness config has both flags off → resolver returns `{IN_APP}` only.
     assert [log.notification_type for log in written] == [
         NotificationType.TECHNICIAN_NO_RESPONSE.value
     ]
+    assert [log.channel for log in written] == [NotificationChannel.IN_APP]
     # R3.1 keeps recipient and reason: only the type moved (design D8).
     assert written[0].recipient_user_id == manager.id
     assert written[0].related_id == breached.id

@@ -953,6 +953,7 @@ def a_generator(flow, *, uow=None, recommendations=None, timeline=None, notifica
     from app.core.unit_of_work import SqlAlchemyUnitOfWork
     from app.pricing.application.use_cases import GeneratePriceRecommendationsUseCase
     from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
+    from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
 
     return GeneratePriceRecommendationsUseCase(
         rules=flow.rules,
@@ -963,6 +964,7 @@ def a_generator(flow, *, uow=None, recommendations=None, timeline=None, notifica
         audit=flow.audit,
         users=flow.users,
         notifications=notifications or flow.notifications,
+        tenant_configs=SqlAlchemyTenantConfigRepository(flow.session),
         uow=uow or SqlAlchemyUnitOfWork(flow.session),
     )
 
@@ -1487,6 +1489,42 @@ async def test_a_run_that_creates_sixty_recommendations_writes_one_row_per_recip
     assert len(rows) == 2
     assert {row.related_id for row in rows} == {world.property.id}
     assert all(row.related_type == "property" for row in rows)
+    assert all(row.sla_deadline_at is None for row in rows)
+
+
+async def test_a_run_fans_out_across_the_tenants_enabled_channels(
+    flow, world, db_session
+) -> None:
+    """notification-channel-routing R1, R2 — the price-recommendation writer, exercised
+    through the real use case → resolver → `dispatch_and_persist` path, not just the
+    pure `channel_dispatch.py` unit tests."""
+    from sqlalchemy import select
+
+    from app.notifications.domain.enums import NotificationChannel
+    from app.tenants.infrastructure.models import TenantConfigModel
+
+    config = (
+        await db_session.execute(
+            select(TenantConfigModel).where(TenantConfigModel.tenant_id == world.tenant.id)
+        )
+    ).scalar_one()
+    config.notification_email_enabled = True
+    config.notification_whatsapp_enabled = True
+    world.manager.phone = "+34600000003"
+    db_session.add(world.manager)
+    await db_session.flush()
+
+    await a_rule(flow, world, property_id=world.property.id)
+    await flow.generate.execute(world.tenant.id, now=NOW, property_id=world.property.id)
+
+    rows = await _price_rows(db_session, world.tenant.id)
+    manager_rows = {row.channel: row for row in rows if row.recipient_user_id == world.manager.id}
+    assert set(manager_rows) == {
+        NotificationChannel.IN_APP,
+        NotificationChannel.EMAIL,
+        NotificationChannel.WHATSAPP,
+    }
+    assert manager_rows[NotificationChannel.WHATSAPP].recipient_contact == world.manager.phone
     assert all(row.sla_deadline_at is None for row in rows)
 
 

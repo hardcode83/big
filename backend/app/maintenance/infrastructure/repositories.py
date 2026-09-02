@@ -42,10 +42,14 @@ from app.maintenance.domain.entities import (
     IncidentPhoto,
     OwnerApproval,
 )
-from app.maintenance.domain.enums import IncidentStatus, OwnerApprovalStatus
+from app.maintenance.domain.enums import IncidentSeverity, IncidentStatus, OwnerApprovalStatus
 from app.maintenance.domain.exceptions import MaintenanceValidationError
 from app.maintenance.domain.repositories import IncidentFilters, IncidentPage
-from app.maintenance.domain.value_objects import IncidentSummary, OwnerApprovalSummary
+from app.maintenance.domain.value_objects import (
+    IncidentSummary,
+    OpenIncidentCounts,
+    OwnerApprovalSummary,
+)
 from app.maintenance.infrastructure.models import (
     IncidentModel,
     IncidentPhotoModel,
@@ -55,6 +59,12 @@ from app.maintenance.infrastructure.models import (
 # Sorted so the emitted `IN` is stable across runs, which keeps query logs and the
 # statement-count test of R1.7 comparable. Same device the cleaning adapter uses.
 _OPEN_STATUSES = sorted(OPEN_INCIDENT_STATUSES, key=lambda status: status.value)
+
+# `dashboard-operational-kpis` R3.2: "urgent" is HIGH+CRITICAL, an ASSUMPTION resolved with
+# Jose at proposal time. Sorted for the same reason `_OPEN_STATUSES` is.
+_URGENT_SEVERITIES = sorted(
+    (IncidentSeverity.HIGH, IncidentSeverity.CRITICAL), key=lambda severity: severity.value
+)
 _CLOSED_STATUSES = sorted(CLOSED_INCIDENT_STATUSES, key=lambda status: status.value)
 
 #: The columns `Incident`'s own methods may change. Named rather than writing the whole row,
@@ -111,6 +121,22 @@ class SqlAlchemyIncidentReader:
         # `GROUP BY` already omits properties with no open incident, which is exactly the
         # sparse mapping the port promises — no post-filtering needed.
         return {property_id: int(count) for property_id, count in rows.all()}
+
+    async def count_open_for_tenant(self, tenant_id: uuid.UUID) -> OpenIncidentCounts:
+        """One query, one conditional aggregate — `total` and `urgent` cost the same
+        statement (`dashboard-operational-kpis` design D3)."""
+        row = (
+            await self._session.execute(
+                select(
+                    func.count(),
+                    func.count().filter(IncidentModel.severity.in_(_URGENT_SEVERITIES)),
+                ).where(
+                    IncidentModel.tenant_id == tenant_id,
+                    IncidentModel.status.in_(_OPEN_STATUSES),
+                )
+            )
+        ).one()
+        return OpenIncidentCounts(total=int(row[0] or 0), urgent=int(row[1] or 0))
 
     async def list_open_for_property(
         self, tenant_id: uuid.UUID, property_id: uuid.UUID

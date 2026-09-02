@@ -310,9 +310,24 @@ Es el hogar del censo porque es el hogar del emisor; quién escribe qué lo atri
 regla 11 de `steering/security.md`, y esta sección cuenta cuántos y con qué forma.
 
 - THE SYSTEM SHALL escribir toda fila de `notification_logs` que nazca en el emisor con
-  `status = PENDING` y `channel = IN_APP`, y SHALL no intentar entregarla: la entrega es de
-  `dispatch_notifications`. La única excepción declarada sigue siendo `auth-account-recovery`,
-  que entrega síncronamente y nunca pasa por `PENDING`.
+  `status = PENDING`, y SHALL no intentar entregarla: la entrega es de `dispatch_notifications`.
+  La única excepción declarada sigue siendo `auth-account-recovery`, que entrega síncronamente
+  y nunca pasa por `PENDING`.
+- THE SYSTEM SHALL escribir **una fila por canal resuelto** por el resolutor de
+  `notifications/domain/channel_resolver.py`, que combina los flags `notification_email_enabled`
+  y `notification_whatsapp_enabled` del `TenantConfig` con los contactos disponibles del
+  destinatario (`User.email` y `User.phone`). El conjunto resuelto es siempre `{IN_APP}` ∪ (EMAIL
+  si flag y email utilizable) ∪ (WHATSAPP si flag y teléfono utilizable); un canal cuyo contacto
+  falta queda excluido, no degradado a otro, y la exclusión registra
+  `notifications.channel_dropped_for_missing_contact` con tipo y canal, sin valor del contacto
+  (regla 11). WHERE el tenant no tenga fila de `tenant_configs`, THE SYSTEM SHALL resolver a
+  `{IN_APP}` únicamente. Los autores que ya tenían `NotificationChannel.IN_APP` como literal dejan
+  de fijarlo a mano: el fan-out vive en `notifications/application/channel_dispatch.py` y
+  delega al builder del dominio una vez por canal con `(channel, contact)` ajustados al canal.
+- THE SYSTEM SHALL fijar `sla_deadline_at` únicamente en la fila cuyo canal es `IN_APP`; las filas
+  hermanas se escriben con `sla_deadline_at = NULL`. Combinado con `list_sla_breach_candidates`
+  que exige `sla_deadline_at IS NOT NULL`, esto es lo que mantiene una sola candidata a
+  `SLA_BREACH` por aviso abanicado.
 - THE SYSTEM SHALL resolver los destinatarios de un aviso operativo con **un solo** servicio de
   dominio, `RoleRecipients` (`backend/app/auth/domain/recipients.py`), que recibe el puerto
   `UserRepository` y expone `managers_or_owners(tenant_id)` y `active_holders(tenant_id, role)`,
@@ -360,6 +375,15 @@ regla 11 de `steering/security.md`, y esta sección cuenta cuántos y con qué f
      `notification_type=NotificationType.<X>` (sin `.value`), **sólo** en
      `notifications/domain/escalation.py`.
 
+  `notifications/application/channel_dispatch.py` **no es una tercera forma**: `dispatch_channels`
+  no construye ninguna fila por sí mismo, llama al `log_builder` que recibe una vez por canal
+  resuelto, y ese builder sigue siendo el sitio donde vive una de las dos formas de arriba —el
+  builder del dominio correspondiente, o el `_builder` interno de `_escalation_rows` en
+  `notifications/application/use_cases.py`, que compone `NotificationLog` con
+  `notification_type=escalation.notification_type.value` exactamente como antes del fan-out.
+  El censo por AST sigue viendo el mismo literal en el mismo sitio; lo único que cambió es
+  cuántas veces se llama al builder por aviso.
+
 **Por qué hacen falta las dos formas, y por qué se fija el callee.** Sin fijarlo, la primera casa
 también con las cuatro llamadas a `cancel_sla_deadline` que **borran** un plazo y no escriben
 nada, de modo que `CLEANING_TASK_ASSIGNED` y `TECHNICIAN_ASSIGNED` seguirían contando como
@@ -379,11 +403,14 @@ sobre la columna `String(100)`— quedan fuera del censo por construcción: no h
 ### La bandeja in-app
 
 - THE SYSTEM SHALL exponer `GET /api/v1/notifications` con el envelope paginado de PRD §23,
-  devolviendo **solo** las filas dirigidas al usuario del token, de más nueva a más vieja —es una
-  bandeja, no una cola. El identificador de usuario sale del JWT y no hay parámetro de ruta ni de
-  consulta que ensanche el alcance. `page` acota en `100.000` y `per_page` en `100`, por la misma
-  razón que `cleaning` y `reservations`: `page` se convierte en un `OFFSET` de SQL y un número de
-  veinte dígitos desbordaría `int8` como error de driver en vez de como `422`.
+  devolviendo **solo** las filas dirigidas al usuario del token **y** con
+  `channel = IN_APP`, de más nueva a más vieja —es una bandeja, no una cola. El identificador
+  de usuario sale del JWT y no hay parámetro de ruta ni de consulta que ensanche el alcance.
+  El acotamiento por `channel = IN_APP` es del repositorio, no del router: por diseño (D4),
+  el router no sabe de canales, y el default perezoso del repositorio fija el canal del inbox
+  para que un descuido accidental no lo burle. `page` acota en `100.000` y `per_page` en `100`,
+  por la misma razón que `cleaning` y `reservations`: `page` se convierte en un `OFFSET` de SQL
+  y un número de veinte dígitos desbordaría `int8` como error de driver en vez de como `422`.
 - THE SYSTEM SHALL aceptar `unread` como parámetro de consulta opcional que estrecha la página a
   `read_at IS NULL`, sin romper el envelope (`data`, `total`, `page`, `per_page`, `total_pages`) ni
   el orden. Ausente, la bandeja devuelve leídas y no leídas.
@@ -400,7 +427,8 @@ sobre la columna `String(100)`— quedan fuera del censo por construcción: no h
   `POST /api/v1/notifications/read-all` (que responde **cuántas** movió) y
   `GET /api/v1/notifications/unread-count` (que responde `{"unread": <int>}`). Las cuatro rutas
   exigen `READ_OWN_NOTIFICATIONS` y **todas** derivan el destinatario del JWT, sin ningún parámetro
-  que ensanche el alcance.
+  que ensanche el alcance. `unread-count` acota por la misma `channel = IN_APP` que el listado, de
+  forma que el número de la campana y la longitud de la bandeja sean consistentes.
 - THE SYSTEM SHALL hacer el acuse **idempotente**: el `UPDATE` fija
   `read_at = COALESCE(read_at, <ahora>)`, así que un segundo acuse casa con la fila, reporta éxito y
   **no mueve** el instante — `read_at` registra la primera lectura, no la última visita.

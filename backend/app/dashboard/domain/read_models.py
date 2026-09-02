@@ -175,6 +175,34 @@ class PropertyDashboardCard:
 
 
 @dataclass(frozen=True)
+class OpenIncidentCountsBlock:
+    """The `open_incidents` block of `dashboard-operational-kpis` R3 — total plus urgent.
+
+    Redacted as one unit (design D5): `null` entirely when the caller may not read
+    incidents, never one field present and the other `null` — the same convention
+    `FinancialBlock` and `AccessBlock` already use for a permission that guards more than
+    one number at once.
+    """
+
+    total: int
+    urgent: int
+
+
+@dataclass(frozen=True)
+class OperationalKpis:
+    """The tenant-wide counts of `dashboard-operational-kpis` R1, R2, R3.
+
+    Each field is `None` when the caller's role lacks the permission that guards its
+    source (design D4) — indistinguishable, deliberately, from "there is none", the same
+    block-omission rule `PropertyDashboardCard`/`PropertyDetail` already apply.
+    """
+
+    cleanings_today: int | None
+    upcoming_checkins: int | None
+    open_incidents: OpenIncidentCountsBlock | None
+
+
+@dataclass(frozen=True)
 class PropertyDetail:
     """The aggregate of PRD §9.2 (`dto.ts:161-174`, R2.1).
 

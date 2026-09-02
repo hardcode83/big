@@ -434,3 +434,69 @@ class TestListForProperties:
         assert await repository.list_for_properties(
             tenant.id, [], date(2026, 7, 30), date(2026, 8, 10)
         ) == []
+
+
+class TestCountCheckInsInRange:
+    """`dashboard-operational-kpis` R2: tenant-wide, inclusive bounds, no property batching."""
+
+    @pytest.mark.asyncio
+    async def test_the_window_bounds_are_inclusive(self, db_session) -> None:
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        repository = SqlAlchemyReservationRepository(db_session)
+        today = _reservation(tenant, prop, check_in=date(2026, 8, 1))
+        seven_days_out = _reservation(tenant, prop, check_in=date(2026, 8, 8))
+        eight_days_out = _reservation(tenant, prop, check_in=date(2026, 8, 9))
+        yesterday = _reservation(tenant, prop, check_in=date(2026, 7, 31))
+        for reservation in (today, seven_days_out, eight_days_out, yesterday):
+            await repository.add(tenant.id, reservation)
+
+        count = await repository.count_check_ins_in_range(
+            tenant.id, date(2026, 8, 1), date(2026, 8, 8)
+        )
+
+        assert count == 2
+
+    @pytest.mark.asyncio
+    async def test_cancelled_and_no_show_check_ins_are_excluded(self, db_session) -> None:
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        repository = SqlAlchemyReservationRepository(db_session)
+        await repository.add(
+            tenant.id,
+            _reservation(tenant, prop, check_in=date(2026, 8, 1), status=ReservationStatus.CANCELLED),
+        )
+        await repository.add(
+            tenant.id,
+            _reservation(tenant, prop, check_in=date(2026, 8, 2), status=ReservationStatus.NO_SHOW),
+        )
+        confirmed = _reservation(tenant, prop, check_in=date(2026, 8, 3))
+        await repository.add(tenant.id, confirmed)
+
+        count = await repository.count_check_ins_in_range(
+            tenant.id, date(2026, 8, 1), date(2026, 8, 8)
+        )
+
+        assert count == 1
+
+    @pytest.mark.asyncio
+    async def test_no_check_ins_in_the_window_returns_zero(self, db_session) -> None:
+        tenant, _ = await _tenant_with_property(db_session, "TenantA")
+        repository = SqlAlchemyReservationRepository(db_session)
+
+        count = await repository.count_check_ins_in_range(
+            tenant.id, date(2026, 8, 1), date(2026, 8, 8)
+        )
+
+        assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_it_never_counts_another_tenant(self, db_session) -> None:
+        tenant_a, _ = await _tenant_with_property(db_session, "TenantA")
+        tenant_b, prop_b = await _tenant_with_property(db_session, "TenantB")
+        repository = SqlAlchemyReservationRepository(db_session)
+        await repository.add(tenant_b.id, _reservation(tenant_b, prop_b, check_in=date(2026, 8, 1)))
+
+        count = await repository.count_check_ins_in_range(
+            tenant_a.id, date(2026, 8, 1), date(2026, 8, 8)
+        )
+
+        assert count == 0

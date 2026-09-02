@@ -157,6 +157,7 @@ def get_reject_incident_use_case(session: SessionDep) -> RejectIncidentUseCase:
     return RejectIncidentUseCase(
         users=SqlAlchemyUserRepository(session),
         notifications=SqlAlchemyNotificationLogRepository(session),
+        configs=SqlAlchemyTenantConfigRepository(session),
         **_flow_kwargs(session),
     )
 
