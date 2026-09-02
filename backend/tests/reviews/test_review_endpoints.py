@@ -184,6 +184,51 @@ async def test_patch_response_with_ignore_advances_status(api, db_session) -> No
 
 
 @pytest.mark.asyncio
+async def test_patch_response_with_ignore_writes_an_audit_diff_with_pre_mutation_status(
+    api, db_session
+) -> None:
+    """R1.7: the audit diff for `REVIEW_IGNORED` records the status the row had at the
+    moment of the action. Without the snapshot, the diff reads `from = IGNORED, to =
+    IGNORED` because `review.ignore(...)` mutates the entity before the diff is built —
+    the bug the review panel caught.
+    """
+    from sqlalchemy import select
+
+    from app.audit.infrastructure.models import AuditLogModel
+    from app.reviews.domain.enums import ReviewStatus
+
+    tenant = await seed_tenant(db_session, "TenantA")
+    prop = await seed_property(db_session, tenant, "REDES11")
+    review = await seed_review(
+        db_session, tenant, prop, status=ReviewStatus.DRAFTED
+    )
+    manager = await seed_user(db_session, tenant, "manager@example.com")
+
+    response = await api.patch(
+        f"/api/v1/reviews/{review.id}/response",
+        headers=auth_header(api, manager),
+        json={"action": "IGNORE"},
+    )
+    assert response.status_code == 200
+
+    audit_row = (
+        await db_session.execute(
+            select(AuditLogModel)
+            .where(
+                AuditLogModel.entity_id == review.id,
+            )
+            .order_by(AuditLogModel.created_at.desc())
+        )
+    ).scalars().first()
+
+    assert audit_row is not None, "REVIEW_IGNORED must write one audit row"
+    changes = audit_row.changes
+    assert isinstance(changes, dict), changes
+    assert changes["status"]["old"] == ReviewStatus.DRAFTED.value, changes
+    assert changes["status"]["new"] == ReviewStatus.IGNORED.value, changes
+
+
+@pytest.mark.asyncio
 async def test_patch_response_with_an_illegal_action_is_409(api, db_session) -> None:
     """R4.1: a `POSTED_MANUALLY` from `NEW` is refused with `409`."""
     tenant = await seed_tenant(db_session, "TenantA")

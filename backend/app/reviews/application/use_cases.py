@@ -19,9 +19,7 @@ from app.audit.domain import actions as audit_actions
 from app.audit.domain.repositories import AuditLogRepository
 from app.audit.domain.services import AuditLogFactory
 from app.audit.domain.value_objects import ChangeSet
-from app.auth.domain.enums import UserRole
 from app.auth.domain.ports import UserRepository
-from app.auth.domain.repositories import UserFilters
 from app.core.unit_of_work import UnitOfWork
 from app.notifications.domain.repositories import NotificationLogRepository
 from app.reviews.domain.entities import Review, ReviewResponseDraft
@@ -373,20 +371,34 @@ class ApproveReviewUseCase:
         await self._reviews.save(tenant_id, review)
 
         # R6.2 — `NotificationType.REVIEW_RESPONSE_APPROVED` to managers and owners.
-        # `RoleRecipients.managers_or_owners` is the project's helper for "the people
-        # who care about this row" — same pattern the conversation escalation uses.
-        # The repository query is a `UserRepository.list` per role because the helper
-        # returns ids, and the notification row needs each recipient's contact.
-        recipients: list = []
-        for role in (UserRole.PROPERTY_MANAGER, UserRole.TENANT_OWNER):
-            page = await self._users.list(
-                tenant_id=tenant_id,
-                filters=UserFilters(role=role),
-                page=1,
-                per_page=100,
+        # Resolved via `RoleRecipients.managers_or_owners` so the recipient rule lives
+        # in one place (design D1 of `auth/domain/recipients.py`). The previous
+        # implementation open-coded `UserRepository.list` per role, which diverged
+        # from the project pattern and dropped recipients past page one silently.
+        from app.auth.domain.recipients import RoleRecipients
+
+        recipients = await RoleRecipients(users=self._users).managers_or_owners(tenant_id)
+        if not recipients.users:
+            logger.error(
+                "reviews.approval_without_recipient",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "review_id": str(review.id),
+                    "property_id": str(review.property_id),
+                },
             )
-            recipients.extend(page.items)
-        for user in recipients:
+        if recipients.dropped > 0:
+            logger.warning(
+                "reviews.approval_recipients_truncated",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "review_id": str(review.id),
+                    "property_id": str(review.property_id),
+                    "total": len(recipients.users) + recipients.dropped,
+                    "notified": len(recipients.users),
+                },
+            )
+        for user in recipients.users:
             notification = build_review_response_approved_log(
                 tenant_id=tenant_id,
                 review_id=review.id,
@@ -470,6 +482,10 @@ class IgnoreReviewUseCase:
         review = await self._reviews.get(tenant_id, review_id)
         if review is None:
             raise ReviewNotFoundError()
+        # R1.7: snapshot the pre-mutation status so the audit diff can record which
+        # state the row had before `ignore()`. Without this snapshot the diff would
+        # read `from = IGNORED, to = IGNORED` — the bug the review panel caught.
+        from_status = review.status.value
         review.ignore(now=now)
         await self._reviews.save(tenant_id, review)
 
@@ -490,11 +506,9 @@ class IgnoreReviewUseCase:
             ),
         )
 
-        # R1.7: audit the ignore. The status diff carries the from-state in
-        #  — a  or  is the only thing that
-        # makes the row attributable to a particular actor in the trail, and 
-        # is what the index  answers
-        # before the action does.
+        # R1.7: audit the ignore. The from-state carries the status the row had at the
+        # moment of the action — the only way the trail can answer "what was the state
+        # before this audit row was written?" without replaying the timeline.
         await self._audit.add(
             tenant_id,
             AuditLogFactory.build(
@@ -504,8 +518,9 @@ class IgnoreReviewUseCase:
                 entity_id=review.id,
                 actor_user_id=actor_user_id,
                 actor_ip=actor_ip,
-                changes=ChangeSet(audit_actions.ENTITY_REVIEW)
-                .diff("status", review.status.value, ReviewStatus.IGNORED.value),
+                changes=ChangeSet(audit_actions.ENTITY_REVIEW).diff(
+                    "status", from_status, ReviewStatus.IGNORED.value
+                ),
                 now=now,
             ),
         )
