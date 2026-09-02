@@ -392,11 +392,12 @@ class SqlAlchemyReviewRepository:
         Without the second half a deterministic adapter would be asked the same question
         for ever.
 
-        **No `FOR UPDATE SKIP LOCKED` here** — the use case runs the read inside
-        `run_in_marked_session`, the loop holds the session for the duration of the
-        tenant, and the SQLAlchemy session is per-tenant. The lock this module needs is
-        the tenant-level lock `run_for_every_tenant` already holds. Same pattern
-        `IncidentQuery.list_pending_classification` documents.
+        **`FOR UPDATE SKIP LOCKED`** — the read claims each row for the duration of the
+        transaction, and a second tick on the same tenant (or a backfill admin tool that
+        races the scheduler) sees those rows as locked and walks past them instead of
+        double-classifying. The tenant-level lock `run_for_every_tenant` already holds is
+        the outer fence; this is the inner one. Postgres 9.5+ supports the clause and the
+        project ships on 16, so the call has been safe since the module existed.
 
         Oldest first, `limit`ed: a tenant whose classifier was down all night must not
         turn one tick into an unbounded run.
@@ -410,6 +411,7 @@ class SqlAlchemyReviewRepository:
             )
             .order_by(ReviewModel.created_at, ReviewModel.id)
             .limit(limit)
+            .with_for_update(skip_locked=True)
         )
         return [_to_review(model) for model in rows.scalars()]
 

@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
 from app.auth.domain.enums import UserRole
 from app.reviews.application.use_cases import ClassifyPendingReviewsUseCase
@@ -206,3 +207,57 @@ async def test_a_classified_row_does_not_reappear_in_pending(db_session) -> None
     # `ai_summary IS NOT NULL` is now true.
     refreshed = await review_repo.get(tenant.id, review.id)
     assert refreshed.ai_summary is not None
+
+
+@pytest.mark.asyncio
+async def test_list_pending_classification_skips_rows_locked_by_another_transaction(
+    test_engine, db_session
+) -> None:
+    """`list_pending_classification` claims each row via `FOR UPDATE SKIP LOCKED` (D2/D16).
+
+    A second transaction that arrives while the first still holds the claim walks past
+    the locked rows instead of waiting (the SKIP LOCKED half) or returning them (the bare
+    FOR UPDATE half). The outer fence is the tenant lock `run_for_every_tenant` already
+    holds; this test pins the inner one at the repository boundary so a refactor that
+    drops the clause is caught red instead of becoming a production latency regression.
+
+    Two sessions on the same engine, no commit between the lock and the second read —
+    `expire_on_commit=False` keeps the test fixtures visible across both transactions
+    the way production's session-per-request keeps them.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.reviews.infrastructure.models import ReviewModel
+
+    tenant, prop, _ = await _setup(db_session)
+    await seed_review(db_session, tenant, prop, content="La casa estaba sucia", language="es")
+    await seed_review(db_session, tenant, prop, content="La wifi iba fatal", language="es")
+    await db_session.commit()
+
+    session_a = AsyncSession(test_engine, expire_on_commit=False)
+    trans_a = await session_a.begin()
+    try:
+        # First transaction takes `FOR UPDATE` on every pending row and holds the
+        # transaction open. The rows are locked until `trans_a.rollback()` runs.
+        locked = await session_a.execute(
+            select(ReviewModel)
+            .where(
+                ReviewModel.tenant_id == tenant.id,
+                ReviewModel.ai_summary.is_(None),
+                ReviewModel.classification_attempts < 3,
+            )
+            .with_for_update()
+        )
+        assert len(locked.scalars().all()) == 2
+
+        async with AsyncSession(test_engine, expire_on_commit=False) as session_b:
+            rows = await SqlAlchemyReviewRepository(
+                session_b
+            ).list_pending_classification(tenant.id, limit=10)
+            assert rows == [], (
+                "SKIP LOCKED should make the second transaction walk past the rows the "
+                "first holds; the second batch returned the same set instead."
+            )
+    finally:
+        await trans_a.rollback()
+        await session_a.close()
