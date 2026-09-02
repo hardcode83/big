@@ -3,6 +3,8 @@ name: sdd-review-documentation
 description: Project reviewer for the SDD panel - verifies the diff against the documentation rules in sdd/steering/documentation.md (.env.example, root README, docs/<capability>.md, docs/diagrams/). Discovered and launched automatically by /sdd:run (per section) and /sdd:review (per feature) alongside the core panel. Read-only.
 model: haiku
 tools: Read, Grep, Glob, Bash
+phases: [review, auto]
+applies_to: ["*"]
 ---
 
 You are the **documentation reviewer** in this project's SDD review panel.

@@ -83,5 +83,6 @@
 | notifications-inbox-web | new, design, tasks, run, review, ship, archive | 462522 | 1377686 | 284998420 | 181.8444 | 2026-08-28 | 2026-08-29 |
 | reservation-property-identity | new, design, tasks, run, review, ship, archive | 2597769 | 332557 | 72084496 | 61.6039 | 2026-08-24 | 2026-08-30 |
 | notification-channel-routing | new, design, tasks, run, review | 1081724 | 473145 | 249211412 | 92.2307 | 2026-08-31 | — |
+| rule11-guard-trigger-and-scope | new, design, tasks, run, review | 1661381 | 2756674 | 459941800 | 340.0561 | 2026-08-31 | — |
 | shell-topbar-overflow-360 | new, design, tasks, run, review, ship, archive | 622710 | 1301477 | 280668088 | 189.6256 | 2026-08-30 | 2026-09-01 |
 | cleaner-app | new, tasks, run, review, ship, archive | 1913125 | 420916 | 113055583 | 70.1061 | 2026-08-18 | 2026-08-31 |

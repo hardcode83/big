@@ -110,7 +110,7 @@ def _writers() -> dict[str, list[str]]:
     """Every type with a writer, mapped to the sites that write it.
 
     Sites are carried so a failure can name a file and a line instead of only a set
-    difference — the same courtesy `test_layering.py` and `test_rule11_ownership.py` extend.
+    difference — the same courtesy `test_layering.py` and `scripts/rule11-ownership.py` extend.
     """
     found: dict[str, list[str]] = {}
     for path in sorted(APP_ROOT.rglob("*.py")):

@@ -3,6 +3,8 @@ name: sdd-review-tenancy
 description: Project reviewer for the SDD panel - verifies the diff against tenant isolation rules in sdd/steering/security.md. Discovered and launched automatically by /sdd:run (per section) and /sdd:review (per feature) alongside the core panel. Read-only.
 model: sonnet
 tools: Read, Grep, Glob, Bash
+phases: [run, review, auto]
+applies_to: ["backend/**"]
 ---
 
 You are the **tenancy reviewer** in this project's SDD review panel. You
