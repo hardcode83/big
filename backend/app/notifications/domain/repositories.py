@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Protocol
 
 from app.notifications.domain.entities import NotificationLog
-from app.notifications.domain.enums import NotificationStatus
+from app.notifications.domain.enums import NotificationChannel, NotificationStatus
 
 
 @dataclass(frozen=True)
@@ -103,6 +103,7 @@ class NotificationLogRepository(Protocol):
         page: int,
         per_page: int,
         unread: bool | None = None,
+        channel: NotificationChannel = NotificationChannel.IN_APP,
     ) -> NotificationLogPage:
         """One page of the notifications addressed to **one user** (design D6).
 
@@ -119,6 +120,11 @@ class NotificationLogRepository(Protocol):
         Default `None` means "all of them", which is what every caller before that change
         asked for; the envelope, the order and the page ceilings are untouched by the
         filter, because a filtered inbox is still the inbox of PRD §23.
+
+        `channel` defaults to `IN_APP` (`notification-channel-routing` R5.1, design D4): the
+        inbox is the IN_APP channel, and the default is what keeps a forgetful caller from
+        accidentally listing the EMAIL/WHATSAPP rows a channel-routed tenant now also has.
+        Passing another channel is opt-in, for diagnostics.
         """
         ...
 
@@ -144,13 +150,23 @@ class NotificationLogRepository(Protocol):
         """
         ...
 
-    async def count_unread(self, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
+    async def count_unread(
+        self,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        channel: NotificationChannel = NotificationChannel.IN_APP,
+    ) -> int:
         """How many of this user's notifications are unread (R2.2, design D4).
 
         Its own query rather than a field of the page envelope: this is the one question
         every connected client asks every 60 s, so it must not carry a page of rows it will
         not read. `ix_notification_logs_unread` — partial on `read_at IS NULL` — is the
         index that keeps its cost bounded as read rows accumulate.
+
+        `channel` defaults to `IN_APP` (`notification-channel-routing` R5.2), the same
+        default and for the same reason as `list_for_recipient`: the bell's count and the
+        inbox's length must stay consistent.
         """
         ...
 

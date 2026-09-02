@@ -81,6 +81,10 @@ def test_it_accepts_exactly_the_identifiers_and_nothing_else() -> None:
         "recipient_id",
         "recipient_contact",
         "now",
+        # `notification-channel-routing` R2/R4 (design D2, D3): the fan-out dispatcher calls
+        # the builder once per resolved channel, passing the channel and its contact.
+        "channel",
+        "contact",
     }
 
 

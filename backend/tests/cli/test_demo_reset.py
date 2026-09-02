@@ -1183,7 +1183,12 @@ def test_children_are_deleted_before_the_parents_they_hang_from() -> None:
 async def test_the_delete_phase_empties_the_demo_tenant(
     db_session: AsyncSession, test_engine
 ) -> None:
-    demo = await insert_tenant(db_session, name=demo_reset.DEMO_TENANT_NAME)
+    # `with_notification_config=False`: this test's own assertion documents that
+    # `tenant_configs` is preserved but the fixture never creates one — true again now that
+    # `insert_tenant` seeds one by default (`notification-channel-routing`).
+    demo = await insert_tenant(
+        db_session, name=demo_reset.DEMO_TENANT_NAME, with_notification_config=False
+    )
     # One of the four constant accounts, which must survive, and one a visitor could have
     # created through `POST /users` with the published owner credential, which must not.
     await insert_user(
@@ -1449,8 +1454,15 @@ async def test_the_delete_phase_leaves_every_row_of_the_working_tenant_untouched
     that drops the tenant clause — which is what makes the listener stop seeing it — reds this
     test.
     """
-    neighbour = await insert_tenant(db_session, name="AutoHostAI Dev")
-    demo = await insert_tenant(db_session, name=demo_reset.DEMO_TENANT_NAME)
+    # `with_notification_config=False` on both: this test documents `tenant_configs`
+    # as the one table neither fixture populates — true again now that
+    # `insert_tenant` seeds a config row by default (`notification-channel-routing`).
+    neighbour = await insert_tenant(
+        db_session, name="AutoHostAI Dev", with_notification_config=False
+    )
+    demo = await insert_tenant(
+        db_session, name=demo_reset.DEMO_TENANT_NAME, with_notification_config=False
+    )
     await populate_tenant(db_session, neighbour)
     await populate_tenant(db_session, demo)
     await db_session.commit()

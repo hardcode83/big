@@ -16,7 +16,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.notifications.domain.enums import NotificationStatus
+from app.notifications.domain.enums import NotificationChannel, NotificationStatus
+from app.notifications.infrastructure.models import NotificationLogModel
 from tests.notifications.conftest import auth_header, insert_notification
 
 NOW = datetime(2026, 8, 8, 12, 0, tzinfo=UTC)
@@ -73,6 +74,48 @@ async def test_a_user_never_sees_another_tenants_notifications(
 
     assert response.status_code == 200
     assert response.json()["data"] == []
+
+
+@pytest.mark.asyncio
+async def test_activating_email_does_not_change_how_many_items_the_inbox_returns(
+    api, db_session, tenant_a, users_by_role_a
+) -> None:
+    """R5.4: `notification_email_enabled` changes what channels a notification fans out
+    to, never what `GET /api/v1/notifications` shows for a given set of avisos.
+
+    Two notifications, each fanned out to all three channels — the shape production
+    writes once the tenant's email and WhatsApp flags are both on. The inbox reads
+    `channel = IN_APP` regardless, so the item count it returns is the count of avisos,
+    not of rows: activating email must not double it.
+    """
+    manager = users_by_role_a["PROPERTY_MANAGER"]
+    for _ in range(2):
+        related_id = uuid.uuid4()
+        for channel in (
+            NotificationChannel.IN_APP,
+            NotificationChannel.EMAIL,
+            NotificationChannel.WHATSAPP,
+        ):
+            db_session.add(
+                NotificationLogModel(
+                    tenant_id=tenant_a.id,
+                    recipient_user_id=manager.id,
+                    recipient_contact=manager.email,
+                    channel=channel,
+                    notification_type="CLEANING_TASK_ASSIGNED",
+                    related_type="cleaning_task",
+                    related_id=related_id,
+                    status=NotificationStatus.SENT,
+                )
+            )
+    await db_session.flush()
+
+    response = await api.get("/api/v1/notifications", headers=auth_header(api, manager))
+
+    payload = response.json()
+    # Two avisos, each fanned out to three rows — the endpoint shows two, not six.
+    assert payload["total"] == 2
+    assert len(payload["data"]) == 2
 
 
 @pytest.mark.asyncio

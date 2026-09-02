@@ -130,6 +130,10 @@ def adapter_registry() -> dict[NotificationChannel, NotificationAdapter]:
 
     `PUSH` is absent on purpose. PRD §14 lists it as "adapter placeholder (futuro)", and a
     placeholder that reports success would mark rows `SENT` that nothing ever received.
+    `tests/notifications/test_adapters.py` pins `PUSH not in registry` directly; this
+    function is untouched by `notification-channel-routing` (R6.2), so the AST guard of
+    `test_channel_literals.py` does not require it to name every enum member the way the
+    resolver and dispatcher do.
     """
     console = ConsoleEmailAdapter()
     return {

@@ -33,6 +33,7 @@ from app.properties.infrastructure.models import PropertyModel
 from app.reservations.domain.enums import ReservationChannel, ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 from app.tenants.infrastructure.models import TenantModel
+from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
 
 NOW = datetime(2026, 8, 17, 6, tzinfo=timezone.utc)
 TODAY = date(2026, 8, 17)
@@ -77,8 +78,21 @@ class World:
 
 
 async def _tenant(db_session, name: str) -> TenantModel:
+    from app.tenants.infrastructure.models import TenantConfigModel
+
     tenant = TenantModel(name=name, billing_email=f"{uuid.uuid4().hex[:8]}@example.com")
     db_session.add(tenant)
+    await db_session.flush()
+    # `notification-channel-routing` — pin the channel flags off so the resolver returns
+    # `{IN_APP}` only and this suite's single-row assertions stay valid. A test that wants
+    # both flags on seeds its own `TenantConfigModel` with the flags it needs.
+    db_session.add(
+        TenantConfigModel(
+            tenant_id=tenant.id,
+            notification_email_enabled=False,
+            notification_whatsapp_enabled=False,
+        )
+    )
     await db_session.flush()
     return tenant
 
@@ -244,6 +258,7 @@ class Flow:
             # whoever approves them.
             users=self.users,
             notifications=self.notifications,
+            tenant_configs=SqlAlchemyTenantConfigRepository(session),
             uow=uow,
         )
         self.list_recommendations = ListPriceRecommendationsUseCase(self.recommendations)

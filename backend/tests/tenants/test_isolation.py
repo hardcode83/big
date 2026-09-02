@@ -77,6 +77,17 @@ async def test_patching_another_tenant_answers_404_and_changes_nothing(
 async def test_patching_another_tenants_config_answers_404(
     api, db_session, tenant_a, tenant_b, users_by_role_a
 ) -> None:
+    """The row this test proves stays uncreated is the one `insert_tenant` now pre-seeds
+    by default (`notification-channel-routing`) — delete it before the check exercises the
+    "not even created" invariant, or the count below would be off by one for reasons that
+    have nothing to do with the 404 order this test actually pins."""
+    from sqlalchemy import delete
+
+    await db_session.execute(
+        delete(TenantConfigModel).where(TenantConfigModel.tenant_id == tenant_b.id)
+    )
+    await db_session.flush()
+
     response = await api.patch(
         f"/api/v1/tenants/{tenant_b.id}",
         json={"config": {"sla_high_minutes": 999}},

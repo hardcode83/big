@@ -36,6 +36,7 @@ from app.notifications.infrastructure.repositories import SqlAlchemyNotification
 from app.properties.infrastructure.models import PropertyModel
 from app.reservations.domain.enums import ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
+from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
 from app.timeline.domain.enums import TimelineEventType
 from app.timeline.infrastructure.models import TimelineEventModel
 from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
@@ -417,6 +418,7 @@ async def _submit_with_a_failing_provider(api, db_session, tenant, manager, rese
             users=SqlAlchemyUserRepository(db_session),
             timeline=SqlAlchemyTimelineEventRepository(db_session),
             notifications=SqlAlchemyNotificationLogRepository(db_session),
+            tenant_configs=SqlAlchemyTenantConfigRepository(db_session),
             audit=SqlAlchemyAuditLogRepository(db_session),
             uow=_FlushOnlyUow(db_session),
         )
@@ -486,6 +488,7 @@ async def test_a_failed_filing_with_nobody_to_tell_is_logged_not_swallowed(
             users=roster,
             timeline=SqlAlchemyTimelineEventRepository(db_session),
             notifications=SqlAlchemyNotificationLogRepository(db_session),
+            tenant_configs=SqlAlchemyTenantConfigRepository(db_session),
             audit=SqlAlchemyAuditLogRepository(db_session),
             uow=_FlushOnlyUow(db_session),
         )
@@ -580,6 +583,50 @@ async def test_a_rejected_submission_fails_the_stay_and_alerts_the_managers(
         )
     )
     assert list(events.scalars()) == []
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_submission_fans_out_across_the_tenants_enabled_channels(
+    api, db_session, tenant_a, users_by_role_a
+) -> None:
+    """notification-channel-routing R1, R2 — the `LEGAL_REGISTRATION_FAILED` writer,
+    exercised through the real use case → resolver → `dispatch_and_persist` path, not
+    just the pure `channel_dispatch.py` unit tests."""
+    from app.notifications.domain.enums import NotificationChannel
+    from app.tenants.infrastructure.models import TenantConfigModel
+
+    guest = await _guest(db_session, tenant_a)
+    reservation = await _stay(db_session, tenant_a, guest)
+    manager = users_by_role_a[UserRole.PROPERTY_MANAGER]
+    manager.phone = "+34600000004"
+    db_session.add(manager)
+    config = (
+        await db_session.execute(
+            select(TenantConfigModel).where(TenantConfigModel.tenant_id == tenant_a.id)
+        )
+    ).scalar_one()
+    config.notification_email_enabled = True
+    config.notification_whatsapp_enabled = True
+    await db_session.flush()
+
+    response = await _submit_with_a_failing_provider(
+        api, db_session, tenant_a, manager, reservation, guest
+    )
+    assert response.status_code == 200
+
+    rows = await db_session.execute(
+        select(NotificationLogModel).where(NotificationLogModel.tenant_id == tenant_a.id)
+    )
+    by_channel = {row.channel: row for row in rows.scalars()}
+    assert set(by_channel) == {
+        NotificationChannel.IN_APP,
+        NotificationChannel.EMAIL,
+        NotificationChannel.WHATSAPP,
+    }
+    assert by_channel[NotificationChannel.WHATSAPP].recipient_contact == manager.phone
+    assert all(
+        row.notification_type == "LEGAL_REGISTRATION_FAILED" for row in by_channel.values()
+    )
 
 
 @pytest.mark.asyncio

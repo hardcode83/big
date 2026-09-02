@@ -700,12 +700,13 @@ async def _inbox_log(
     *,
     read_at: datetime | None = None,
     created_at: datetime | None = None,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
 ) -> NotificationLogModel:
     model = NotificationLogModel(
         tenant_id=tenant.id,
         recipient_user_id=recipient.id,
         recipient_contact=recipient.email,
-        channel=NotificationChannel.IN_APP,
+        channel=channel,
         notification_type="CLEANING_TASK_ASSIGNED",
         status=NotificationStatus.SENT,
         read_at=read_at,
@@ -715,6 +716,68 @@ async def _inbox_log(
     db_session.add(model)
     await db_session.flush()
     return model
+
+
+@pytest.mark.asyncio
+async def test_default_list_for_recipient_filters_to_in_app(db_session) -> None:
+    """R5.1 — the inbox returns the in-app rows, not the EMAIL/WHATSAPP siblings.
+
+    Asserted in both directions: with the default applied, EMAIL/WHATSAPP siblings
+    disappear; passing `channel=EMAIL` explicitly with the same dataset still keeps
+    the default IN_APP-filter tight — the default is **not** bypassable by the
+    router or by accident, only by an explicit keyword.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    manager = await _user(db_session, tenant, "manager@example.com")
+    in_app = await _inbox_log(db_session, tenant, manager)
+    email_sibling = await _inbox_log(
+        db_session, tenant, manager, channel=NotificationChannel.EMAIL
+    )
+    whatsapp_sibling = await _inbox_log(
+        db_session, tenant, manager, channel=NotificationChannel.WHATSAPP
+    )
+    repository = SqlAlchemyNotificationLogRepository(db_session)
+
+    # Default — only IN_APP.
+    page = await repository.list_for_recipient(tenant.id, manager.id, page=1, per_page=10)
+    assert {log.id for log in page.items} == {in_app.id}
+
+    # Explicit other channel — only that channel.
+    page = await repository.list_for_recipient(
+        tenant.id, manager.id, page=1, per_page=10, channel=NotificationChannel.EMAIL
+    )
+    assert {log.id for log in page.items} == {email_sibling.id}
+
+    page = await repository.list_for_recipient(
+        tenant.id, manager.id, page=1, per_page=10, channel=NotificationChannel.WHATSAPP
+    )
+    assert {log.id for log in page.items} == {whatsapp_sibling.id}
+
+
+@pytest.mark.asyncio
+async def test_default_count_unread_filters_to_in_app(db_session) -> None:
+    """R5.2 — the bell counter is consistent with the inbox filter.
+
+    Same shape as the inbox: with both flags on, three siblings exist; the counter
+    answers one. The default cannot be bypassed silently because both rows are
+    addressed to the same user.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    manager = await _user(db_session, tenant, "manager@example.com")
+    await _inbox_log(db_session, tenant, manager)
+    await _inbox_log(db_session, tenant, manager, channel=NotificationChannel.EMAIL)
+    await _inbox_log(db_session, tenant, manager, channel=NotificationChannel.WHATSAPP)
+    repository = SqlAlchemyNotificationLogRepository(db_session)
+
+    # Default — 1 unread (the IN_APP row).
+    assert await repository.count_unread(tenant.id, manager.id) == 1
+    # Explicit EMAIL — 1 unread (the EMAIL row).
+    assert (
+        await repository.count_unread(
+            tenant.id, manager.id, channel=NotificationChannel.EMAIL
+        )
+        == 1
+    )
 
 
 @pytest.mark.asyncio
