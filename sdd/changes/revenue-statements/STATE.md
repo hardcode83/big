@@ -5,7 +5,7 @@ local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: sdd/revenue-statements
-implementation_sha: 0848f67498ded4c6afebe0ce8cec01f769b9dec8
+implementation_sha: 523dba88abf6356a082ddea4b9e79abd1da68ea4
 pr_number: 147
 pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/147
 pr_state: OPEN
