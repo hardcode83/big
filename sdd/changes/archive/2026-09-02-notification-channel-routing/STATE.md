@@ -1,6 +1,6 @@
 ---
 schema: 1
-state: PR_OPEN
+state: ARCHIVED
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
@@ -8,9 +8,9 @@ head_branch: sdd/notification-channel-routing
 implementation_sha: caee4eccf4d8f635dc1aba8db5a00c9e91d602bc
 pr_number: 143
 pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/143
-pr_state: OPEN
-merge_evidence:
-merge_sha:
+pr_state: MERGED
+merge_evidence: pr
+merge_sha: 18d74625e5be9efba04c4574714cea0d966428bd
 ---
 
 # Change lifecycle
