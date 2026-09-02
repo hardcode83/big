@@ -84,3 +84,4 @@
 | reservation-property-identity | new, design, tasks, run, review, ship, archive | 2597769 | 332557 | 72084496 | 61.6039 | 2026-08-24 | 2026-08-30 |
 | shell-topbar-overflow-360 | new, design, tasks, run, review, ship, archive | 622710 | 1301477 | 280668088 | 189.6256 | 2026-08-30 | 2026-09-01 |
 | cleaner-app | new, tasks, run, review, ship, archive | 1913125 | 420916 | 113055583 | 70.1061 | 2026-08-18 | 2026-08-31 |
+| revenue-reviews | new, design, tasks, run, review | 9184504 | 527262 | 202912922 | 163.3934 | 2026-09-01 | — |
