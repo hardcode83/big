@@ -159,7 +159,7 @@ class GenerateOwnerStatementRequest(BaseModel):
     period_end: date | None = None
 
 
-class GenerationReportResponse(BaseModel):
+class OwnerStatementGenerationReportResponse(BaseModel):
     """R2.6 / D9 — the three counters the manual generation reports.
 
     `currency_mismatch` is the list of `(property_id, period_start, period_end, mismatches)`

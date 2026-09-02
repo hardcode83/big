@@ -56,6 +56,7 @@ export const TIMELINE_EVENT_TYPES = [
   "NOTIFICATION_FAILED",
   "WEBHOOK_RECEIVED",
   "GUEST_CHECKIN_COMPLETED",
+  "OWNER_STATEMENT_GENERATED",
 ] as const satisfies readonly TimelineEventType[];
 
 type Missing = Exclude<TimelineEventType, (typeof TIMELINE_EVENT_TYPES)[number]>;

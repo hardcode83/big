@@ -2807,6 +2807,35 @@
         "title": "GeneratePriceRecommendationsRequest",
         "type": "object"
       },
+      "GenerationReportResponse": {
+        "description": "The four counters R4.5 asks a generation to report.\n\nOne number per outcome, and they do not overlap: `created` are new rows, `updated` are\nrecalculated ones, `preserved` are the human decisions R4.3 protects, and `skipped` are\nproperties with no applicable active rule (R4.6). A fifth counter exists inside the use\ncase — `failed` — and stays out of the published contract per D9/D10; a failed property\nis reported in the application log with the id that caused it.",
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "preserved": {
+            "title": "Preserved",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "preserved",
+          "skipped"
+        ],
+        "title": "GenerationReportResponse",
+        "type": "object"
+      },
       "GuestAccessTokenIssuedResponse": {
         "description": "The **only** place the cleartext guest token ever appears (`guest-portal-api` D14).\n\nRule 3(a) of `steering/security.md` names this exception in so many words: a secret we\nmint for a third party to authenticate with \"se puede devolver **una sola vez en el\nmomento de generarlo y en cada rotación, nunca en una lectura posterior**\". There is no\nlater read to worry about — `GuestAccessTokenRepository` offers none, and the row stores\nonly a digest — so the exception is bounded by the schema rather than by discipline.\n\nNo `id`, no `token_hash`, no `reservation_id`: the operator needs the value and the\nstay's identity is already in the path they called. Every field here is one more thing a\nproxy log or a browser cache can keep.",
         "properties": {
@@ -4022,6 +4051,44 @@
         ],
         "title": "OwnerApprovalStatus",
         "type": "string"
+      },
+      "OwnerStatementGenerationReportResponse": {
+        "description": "R2.6 / D9 — the three counters the manual generation reports.\n\n`currency_mismatch` is the list of `(property_id, period_start, period_end, mismatches)`\nentries the use case collects when D3 aborts one or more `(tenant, property, period)`\nslices for non-EUR rows. The shape matches what the use case builds; the router hands\nit through unchanged.",
+        "properties": {
+          "consolidated_count": {
+            "title": "Consolidated Count",
+            "type": "integer"
+          },
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "currency_mismatch": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Currency Mismatch",
+            "type": "array"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "skipped",
+          "failed",
+          "consolidated_count",
+          "currency_mismatch"
+        ],
+        "title": "OwnerStatementGenerationReportResponse",
+        "type": "object"
       },
       "OwnerStatementNotesUpdateRequest": {
         "additionalProperties": false,
@@ -8133,73 +8200,6 @@
           "taken_at"
         ],
         "title": "CleaningPhotoResponse",
-        "type": "object"
-      },
-      "app__pricing__api__schemas__GenerationReportResponse": {
-        "description": "The four counters R4.5 asks a generation to report.\n\nOne number per outcome, and they do not overlap: `created` are new rows, `updated` are\nrecalculated ones, `preserved` are the human decisions R4.3 protects, and `skipped` are\nproperties with no applicable active rule (R4.6). A fifth counter exists inside the use\ncase — `failed` — and stays out of the published contract per D9/D10; a failed property\nis reported in the application log with the id that caused it.",
-        "properties": {
-          "created": {
-            "title": "Created",
-            "type": "integer"
-          },
-          "preserved": {
-            "title": "Preserved",
-            "type": "integer"
-          },
-          "skipped": {
-            "title": "Skipped",
-            "type": "integer"
-          },
-          "updated": {
-            "title": "Updated",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "created",
-          "updated",
-          "preserved",
-          "skipped"
-        ],
-        "title": "GenerationReportResponse",
-        "type": "object"
-      },
-      "app__statements__api__schemas__GenerationReportResponse": {
-        "description": "R2.6 / D9 — the three counters the manual generation reports.\n\n`currency_mismatch` is the list of `(property_id, period_start, period_end, mismatches)`\nentries the use case collects when D3 aborts one or more `(tenant, property, period)`\nslices for non-EUR rows. The shape matches what the use case builds; the router hands\nit through unchanged.",
-        "properties": {
-          "consolidated_count": {
-            "title": "Consolidated Count",
-            "type": "integer"
-          },
-          "created": {
-            "title": "Created",
-            "type": "integer"
-          },
-          "currency_mismatch": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Currency Mismatch",
-            "type": "array"
-          },
-          "failed": {
-            "title": "Failed",
-            "type": "integer"
-          },
-          "skipped": {
-            "title": "Skipped",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "created",
-          "skipped",
-          "failed",
-          "consolidated_count",
-          "currency_mismatch"
-        ],
-        "title": "GenerationReportResponse",
         "type": "object"
       }
     },
@@ -14183,7 +14183,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__statements__api__schemas__GenerationReportResponse"
+                  "$ref": "#/components/schemas/OwnerStatementGenerationReportResponse"
                 }
               }
             },
@@ -14684,7 +14684,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__pricing__api__schemas__GenerationReportResponse"
+                  "$ref": "#/components/schemas/GenerationReportResponse"
                 }
               }
             },

@@ -188,7 +188,8 @@
       "NOTIFICATION_SENT": "Notification sent",
       "NOTIFICATION_FAILED": "Notification failed",
       "WEBHOOK_RECEIVED": "Webhook received",
-      "GUEST_CHECKIN_COMPLETED": "Guest completed check-in"
+      "GUEST_CHECKIN_COMPLETED": "Guest completed check-in",
+      "OWNER_STATEMENT_GENERATED": "Owner statement generated"
     },
     "actor": {
       "SYSTEM": "System",

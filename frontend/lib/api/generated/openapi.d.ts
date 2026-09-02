@@ -1019,49 +1019,6 @@ export interface components {
       url: string;
     };
     /**
-     * GenerationReportResponse
-     * @description The four counters R4.5 asks a generation to report.
-     *
-     * One number per outcome, and they do not overlap: `created` are new rows, `updated` are
-     * recalculated ones, `preserved` are the human decisions R4.3 protects, and `skipped` are
-     * properties with no applicable active rule (R4.6). A fifth counter exists inside the use
-     * case — `failed` — and stays out of the published contract per D9/D10; a failed property
-     * is reported in the application log with the id that caused it.
-     */
-    app__pricing__api__schemas__GenerationReportResponse: {
-      /** Created */
-      created: number;
-      /** Preserved */
-      preserved: number;
-      /** Skipped */
-      skipped: number;
-      /** Updated */
-      updated: number;
-    };
-    /**
-     * GenerationReportResponse
-     * @description R2.6 / D9 — the three counters the manual generation reports.
-     *
-     * `currency_mismatch` is the list of `(property_id, period_start, period_end, mismatches)`
-     * entries the use case collects when D3 aborts one or more `(tenant, property, period)`
-     * slices for non-EUR rows. The shape matches what the use case builds; the router hands
-     * it through unchanged.
-     */
-    app__statements__api__schemas__GenerationReportResponse: {
-      /** Consolidated Count */
-      consolidated_count: number;
-      /** Created */
-      created: number;
-      /** Currency Mismatch */
-      currency_mismatch: {
-          [key: string]: unknown;
-        }[];
-      /** Failed */
-      failed: number;
-      /** Skipped */
-      skipped: number;
-    };
-    /**
      * AssignCleaningTaskRequest
      * @description `PATCH /cleaning-tasks/{id}` — assignment is the only mutation it accepts.
      *
@@ -2167,6 +2124,26 @@ export interface components {
       property_id?: string | null;
     };
     /**
+     * GenerationReportResponse
+     * @description The four counters R4.5 asks a generation to report.
+     *
+     * One number per outcome, and they do not overlap: `created` are new rows, `updated` are
+     * recalculated ones, `preserved` are the human decisions R4.3 protects, and `skipped` are
+     * properties with no applicable active rule (R4.6). A fifth counter exists inside the use
+     * case — `failed` — and stays out of the published contract per D9/D10; a failed property
+     * is reported in the application log with the id that caused it.
+     */
+    GenerationReportResponse: {
+      /** Created */
+      created: number;
+      /** Preserved */
+      preserved: number;
+      /** Skipped */
+      skipped: number;
+      /** Updated */
+      updated: number;
+    };
+    /**
      * GuestAccessTokenIssuedResponse
      * @description The **only** place the cleartext guest token ever appears (`guest-portal-api` D14).
      *
@@ -2744,6 +2721,29 @@ export interface components {
      * @enum {string}
      */
     OwnerApprovalStatus: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
+    /**
+     * OwnerStatementGenerationReportResponse
+     * @description R2.6 / D9 — the three counters the manual generation reports.
+     *
+     * `currency_mismatch` is the list of `(property_id, period_start, period_end, mismatches)`
+     * entries the use case collects when D3 aborts one or more `(tenant, property, period)`
+     * slices for non-EUR rows. The shape matches what the use case builds; the router hands
+     * it through unchanged.
+     */
+    OwnerStatementGenerationReportResponse: {
+      /** Consolidated Count */
+      consolidated_count: number;
+      /** Created */
+      created: number;
+      /** Currency Mismatch */
+      currency_mismatch: {
+          [key: string]: unknown;
+        }[];
+      /** Failed */
+      failed: number;
+      /** Skipped */
+      skipped: number;
+    };
     /**
      * OwnerStatementNotesUpdateRequest
      * @description `PATCH /api/v1/owner-statements/{id}` with `notes` (R4.1, R4.5, R4.6).
@@ -7639,7 +7639,7 @@ export interface operations {
       /** @description Successful Response */
       201: {
         content: {
-          "application/json": components["schemas"]["app__statements__api__schemas__GenerationReportResponse"];
+          "application/json": components["schemas"]["OwnerStatementGenerationReportResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */
@@ -7768,7 +7768,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["app__pricing__api__schemas__GenerationReportResponse"];
+          "application/json": components["schemas"]["GenerationReportResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

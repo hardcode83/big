@@ -65,7 +65,7 @@ from app.statements.api.schemas import (
     ExpenseResponse,
     ExpenseUpdateRequest,
     GenerateOwnerStatementRequest,
-    GenerationReportResponse,
+    OwnerStatementGenerationReportResponse,
     OwnerStatementNotesUpdateRequest,
     OwnerStatementPageResponse,
     OwnerStatementResponse,
@@ -155,7 +155,7 @@ async def list_owner_statements(
 
 @router.post(
     "/owner-statements/generate",
-    response_model=GenerationReportResponse,
+    response_model=OwnerStatementGenerationReportResponse,
     status_code=201,
     summary="Generate owner statements now",
     description=(
@@ -187,7 +187,7 @@ async def generate_owner_statement(
         Depends(get_generate_owner_statement_use_case),
     ],
     client_ip: Annotated[str, Depends(get_client_ip)],
-) -> GenerationReportResponse:
+) -> OwnerStatementGenerationReportResponse:
     outcome = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         now=now_utc(),
@@ -195,7 +195,7 @@ async def generate_owner_statement(
         period_end=payload.period_end,
         actor=_actor(authenticated, client_ip),
     )
-    return GenerationReportResponse(
+    return OwnerStatementGenerationReportResponse(
         created=outcome.created,
         skipped=outcome.skipped,
         failed=outcome.failed,

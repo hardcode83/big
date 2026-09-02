@@ -26,9 +26,9 @@ function contractEventTypes(): string[] {
 }
 
 describe("TIMELINE_EVENT_TYPES (R2.1)", () => {
-  it("carries 47 values with no duplicate", () => {
-    expect(TIMELINE_EVENT_TYPES).toHaveLength(47);
-    expect(new Set(TIMELINE_EVENT_TYPES).size).toBe(47);
+  it("carries 48 values with no duplicate", () => {
+    expect(TIMELINE_EVENT_TYPES).toHaveLength(48);
+    expect(new Set(TIMELINE_EVENT_TYPES).size).toBe(48);
   });
 
   it("is exactly the TimelineEventType enum of the published contract", () => {
