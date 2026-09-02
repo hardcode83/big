@@ -20,7 +20,7 @@ export interface NotificationsIdentity {
 
 export function useNotificationsIdentity(): NotificationsIdentity | null {
   const { status, user } = useAuth();
-  if (status !== "authenticated" || user === null) {
+  if (status !== "authenticated" || user === null || user.tenant_id === null) {
     return null;
   }
   return { tenantId: user.tenant_id, userId: user.id };
