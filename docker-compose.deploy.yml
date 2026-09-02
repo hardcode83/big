@@ -210,6 +210,17 @@ services:
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      # Relay SMTP (change `smtp-delivery-adapter`). Sin `:?`, mismo motivo que el bloque de
+      # medios de arriba: la ventana entre el merge y el primer "Render .env" no tiene ninguna
+      # de las seis, y el fail-fast de verdad ya vive en `adapter_registry()`
+      # (`SMTPConfigurationError`, no en el arranque del contenedor) — con `SMTP_HOST` vacío
+      # sigue registrando `ConsoleEmailAdapter`, exactamente como en dev local.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-}
     volumes:
       # Fotos de limpieza y demás ficheros subidos (change `cleaning-photos-storage`, R1.3).
       # Aquí la imagen no lleva bind mount del código, pero el volumen sigue siendo obligatorio
@@ -251,6 +262,17 @@ services:
       # And the worker is where credentials get read: a job that resolves a PMS adapter per
       # property decrypts them, so the key is not optional here either.
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
+      # Relay SMTP (change `smtp-delivery-adapter`). `worker`, no `beat`: beat solo programa
+      # (`celery -A app.worker beat`, sin `-B`, nunca ejecuta un cuerpo de tarea); el cuerpo de
+      # `dispatch_notifications` (`scheduler/tasks.py`, que llama `adapter_registry()` en
+      # `_dispatch`) lo EJECUTA el worker. Mismo `:-` sin fail-fast de arranque que en
+      # `backend`, por el mismo motivo.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-}
     depends_on:
       redis:
         condition: service_healthy
