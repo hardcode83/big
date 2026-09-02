@@ -1,9 +1,15 @@
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime, timezone
 from decimal import Decimal
+
+import pytest
 
 from app.statements.domain.entities import Expense, OwnerStatement
 from app.statements.domain.enums import ExpenseCategory, OwnerStatementStatus
+from app.statements.domain.exceptions import (
+    OwnerStatementInvalidTransitionError,
+    OwnerStatementValidationError,
+)
 
 _MONEY_FIELDS = (
     "gross_revenue",
@@ -60,3 +66,124 @@ def test_expense_instantiates_with_defaults() -> None:
     assert expense.incident_id is None
     assert expense.receipt_storage_key is None
     assert expense.approved_by is None
+
+
+# --- state machine tests (R4.1, R4.2, R4.4, D1) ---------------------------------
+
+
+def _draft(now: datetime | None = None) -> OwnerStatement:
+    now = now or datetime.now(UTC)
+    return OwnerStatement(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        property_id=uuid.uuid4(),
+        period_start=date(2026, 7, 1),
+        period_end=date(2026, 7, 31),
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def test_owner_statement_marks_ready_from_draft() -> None:
+    created = datetime(2026, 7, 1, 9, 0, tzinfo=UTC)
+    later = datetime(2026, 7, 31, 12, tzinfo=UTC)
+    statement = _draft(created)
+
+    statement.mark_ready(now=later)
+
+    assert statement.status is OwnerStatementStatus.READY
+    # R4.6 — `updated_at` must move to the transition moment, otherwise a rejected
+    # mark_ready would leave a timestamp artifact (and the manager would see a row
+    # that "looks moved" but is still DRAFT).
+    assert statement.updated_at == later
+
+
+def test_owner_statement_marks_sent_from_ready() -> None:
+    now = datetime.now(UTC)
+    later = datetime(2026, 7, 31, 12, tzinfo=UTC)
+    statement = _draft(now)
+    statement.mark_ready(now=later)
+
+    statement.mark_sent(now=later)
+
+    assert statement.status is OwnerStatementStatus.SENT
+
+
+def test_owner_statement_rejects_skip_from_draft_to_sent() -> None:
+    statement = _draft()
+
+    with pytest.raises(OwnerStatementInvalidTransitionError):
+        statement.mark_sent(now=datetime.now(UTC))
+
+
+def test_owner_statement_rejects_transition_from_sent() -> None:
+    now = datetime.now(UTC)
+    statement = _draft(now)
+    statement.mark_ready(now=now)
+    statement.mark_sent(now=now)
+
+    with pytest.raises(OwnerStatementInvalidTransitionError):
+        statement.mark_ready(now=now)
+
+    with pytest.raises(OwnerStatementInvalidTransitionError):
+        statement.mark_sent(now=now)
+
+
+def test_owner_statement_rejects_double_ready() -> None:
+    now = datetime.now(UTC)
+    statement = _draft(now)
+    statement.mark_ready(now=now)
+
+    with pytest.raises(OwnerStatementInvalidTransitionError):
+        statement.mark_ready(now=now)
+
+
+# --- update_notes tests (R4.5, R4.6, D1) --------------------------------------
+
+
+def test_owner_statement_update_notes_accepts_a_non_empty_string() -> None:
+    created = datetime(2026, 7, 1, 9, 0, tzinfo=UTC)
+    later = datetime(2026, 7, 2, 12, 0, tzinfo=UTC)
+    statement = _draft(created)
+
+    statement.update_notes("Reviewed by manager.", now=later)
+
+    assert statement.notes == "Reviewed by manager."
+    # R4.6 — `updated_at` must move on accept; without this assertion, dropping
+    # `self.updated_at = now` would slip past every test in the file.
+    assert statement.updated_at == later
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [None, "", "   ", "\t\n", "before\x00after"],
+)
+def test_owner_statement_update_notes_rejects_invalid(bad: object) -> None:
+    statement = _draft()
+
+    with pytest.raises(OwnerStatementValidationError):
+        statement.update_notes(bad, now=datetime.now(UTC))
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [123, 1.5, [], {"x": 1}, b"bytes-not-str", object()],
+)
+def test_owner_statement_update_notes_rejects_non_string(bad: object) -> None:
+    """`not isinstance(notes, str)` is the first guard; a regression to `notes is None`
+    would let dicts/lists/ints fall through to `"\x00" in notes` and either crash or
+    silently accept them, depending on the surface."""
+    statement = _draft()
+
+    with pytest.raises(OwnerStatementValidationError):
+        statement.update_notes(bad, now=datetime.now(UTC))  # type: ignore[arg-type]
+
+
+def test_owner_statement_unknown_transition_operation_raises() -> None:
+    """Defensive coverage for the `_check_transition("not_in_table")` branch — the two
+    public methods hardcode their operation names, but the table-driven lookup is the
+    single point of failure if a future operation slips in without registering here."""
+    statement = _draft()
+
+    with pytest.raises(OwnerStatementInvalidTransitionError):
+        statement._check_transition("not_in_table")

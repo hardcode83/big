@@ -2475,6 +2475,313 @@
         "title": "ErrorEnvelope",
         "type": "object"
       },
+      "ExpenseCategory": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(Expense.category) without a named block (§7.23).",
+        "enum": [
+          "CLEANING",
+          "LAUNDRY",
+          "AMENITIES",
+          "MAINTENANCE",
+          "SPECIALIST",
+          "PLATFORM_FEE",
+          "OTHER"
+        ],
+        "title": "ExpenseCategory",
+        "type": "string"
+      },
+      "ExpenseCreateRequest": {
+        "additionalProperties": false,
+        "description": "`POST /api/v1/expenses` (R5.1, R5.2, R5.6, R5.7).\n\n`currency` defaults to `\"EUR\"` (R5.2: when omitted, defaultea a EUR); the use case\nruns the `Date not in future` check (R5.2), the threshold check (R5.7), the\ndescription check (R5.6), and the closed-period check (D6.3). This schema only\nconstrains types and shapes.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "category": {
+            "$ref": "#/components/schemas/ExpenseCategory"
+          },
+          "currency": {
+            "default": "EUR",
+            "title": "Currency",
+            "type": "string"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 500,
+            "title": "Description",
+            "type": "string"
+          },
+          "incident_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Id"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "receipt_storage_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Storage Key"
+          }
+        },
+        "required": [
+          "property_id",
+          "category",
+          "description",
+          "amount",
+          "date"
+        ],
+        "title": "ExpenseCreateRequest",
+        "type": "object"
+      },
+      "ExpensePageResponse": {
+        "description": "The listing envelope for `GET /api/v1/expenses` (R5.1).\n\nSame shape as `OwnerStatementPageResponse` — `items`, `total`, `page`, `per_page` —\nso the FE can render both with one paginator.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page"
+        ],
+        "title": "ExpensePageResponse",
+        "type": "object"
+      },
+      "ExpenseResponse": {
+        "description": "One expense row plus the optional `pending_owner_approval_id` (D13).\n\n`pending_owner_approval_id` is set when an `OwnerApproval(OTHER, PENDING)` exists for\nthis expense — the reconciliation job of D4 will materialise the owner's answer on\nthe next sweep, and the field lets the UI say \"waiting for the owner\" without a\nsecond call. `None` otherwise: no approval, the answer was `APPROVED`/`REJECTED`, or\nthe threshold was never crossed.",
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          },
+          "category": {
+            "$ref": "#/components/schemas/ExpenseCategory"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "incident_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Id"
+          },
+          "pending_owner_approval_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Owner Approval Id"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "receipt_storage_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Storage Key"
+          },
+          "statement_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Statement Id"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "category",
+          "description",
+          "amount",
+          "currency",
+          "date",
+          "receipt_storage_key",
+          "incident_id",
+          "statement_id",
+          "approved_by",
+          "pending_owner_approval_id",
+          "created_at"
+        ],
+        "title": "ExpenseResponse",
+        "type": "object"
+      },
+      "ExpenseUpdateRequest": {
+        "additionalProperties": false,
+        "description": "`PATCH /api/v1/expenses/{id}` (R5.3, R5.6, D6.2, D6.3).\n\nEvery field optional, and the router forwards `model_dump(exclude_unset=True)` so\nabsent and `null` mean different things — a PATCH that does not name `description`\nis a no-op on it, while a PATCH that explicitly sets it to a new string writes the\nnew value (R5.3).\n\n`statement_id`, `property_id`, `approved_by`, `incident_id`, and `created_at` are\ndeliberately **not** writable here (R5.3, D6.2): `statement_id` is set by the\ngeneration; `approved_by` is set by the reconciliation job; `property_id` would\nsilently move an expense across portfolios; `incident_id` is set when an incident\nraises one. Sending them is a `422` from Pydantic's `extra=\"forbid\"`.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExpenseCategory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "date": {
+            "title": "Date",
+            "type": "null"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "receipt_storage_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Storage Key"
+          }
+        },
+        "title": "ExpenseUpdateRequest",
+        "type": "object"
+      },
       "FinancialSummaryResponse": {
         "properties": {
           "currency": {
@@ -2539,6 +2846,38 @@
           }
         },
         "title": "ForgotPasswordResponse",
+        "type": "object"
+      },
+      "GenerateOwnerStatementRequest": {
+        "additionalProperties": false,
+        "description": "`POST /api/v1/owner-statements/generate` (R2.1, R2.2).\n\n`property_id` omitted sweeps the tenant's whole `ACTIVE` portfolio; named, it scopes to\nthat one property. A `property_id` that is unknown, another tenant's, or not `ACTIVE` is\na `422` — it is a body field, not a path identifier (D9's fourth refinement).\n\n`period_end` is the period's last day (R2.5: a statement covers one calendar month);\n`Period.month_containing` in `application/generation.py` rebuilds the closed range\nfrom it, so a caller typing a mid-month day is `422`'d with the field named.",
+        "properties": {
+          "period_end": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period End"
+          },
+          "property_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          }
+        },
+        "title": "GenerateOwnerStatementRequest",
         "type": "object"
       },
       "GeneratePriceRecommendationsRequest": {
@@ -3935,6 +4274,242 @@
         ],
         "title": "OwnerApprovalStatus",
         "type": "string"
+      },
+      "OwnerStatementGenerationReportResponse": {
+        "description": "R2.6 / D9 — the three counters the manual generation reports.\n\n`currency_mismatch` is the list of `(property_id, period_start, period_end, mismatches)`\nentries the use case collects when D3 aborts one or more `(tenant, property, period)`\nslices for non-EUR rows. The shape matches what the use case builds; the router hands\nit through unchanged.",
+        "properties": {
+          "consolidated_count": {
+            "title": "Consolidated Count",
+            "type": "integer"
+          },
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "currency_mismatch": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Currency Mismatch",
+            "type": "array"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "skipped",
+          "failed",
+          "consolidated_count",
+          "currency_mismatch"
+        ],
+        "title": "OwnerStatementGenerationReportResponse",
+        "type": "object"
+      },
+      "OwnerStatementNotesUpdateRequest": {
+        "additionalProperties": false,
+        "description": "`PATCH /api/v1/owner-statements/{id}` with `notes` (R4.1, R4.5, R4.6).\n\nOnly `notes`, no other field of the statement is writable from the API (R4.1):\nthe amounts and dates are produced by generation. The body accepts empty strings\ntoo — the use case refuses them with a `422`, and the router passes the field through.",
+        "properties": {
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "notes"
+        ],
+        "title": "OwnerStatementNotesUpdateRequest",
+        "type": "object"
+      },
+      "OwnerStatementPageResponse": {
+        "description": "R3.2 — the listing envelope: `items`, `total`, `page`, `per_page`.\n\n`total_pages` is **not** published — the client computes it from `total` and `per_page`\n(the same convention `pricing-web` R3.4 set and `/sdd:auto` consumes).",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OwnerStatementResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page"
+        ],
+        "title": "OwnerStatementPageResponse",
+        "type": "object"
+      },
+      "OwnerStatementResponse": {
+        "description": "What an authorised caller may see about one statement.\n\nEvery writable column of the statement plus its identity and timestamps. **No\n`tenant_id`** — it is the token's, and echoing it tells a caller nothing she did not\nalready prove. **No `pending_owner_approval_id`** — D13's deliberate asymmetry: a\nstatement is built from consolidated expenses, and a consolidated expense's approval is\nnecessarily `APPROVED`, never `PENDING`.",
+        "properties": {
+          "amenities_costs": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amenities Costs",
+            "type": "string"
+          },
+          "cleaning_costs": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Cleaning Costs",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "gross_revenue": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Gross Revenue",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "laundry_costs": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Laundry Costs",
+            "type": "string"
+          },
+          "maintenance_costs": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Maintenance Costs",
+            "type": "string"
+          },
+          "net_owner_result": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Net Owner Result",
+            "type": "string"
+          },
+          "net_revenue": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Net Revenue",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "ota_commissions": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Ota Commissions",
+            "type": "string"
+          },
+          "other_costs": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Other Costs",
+            "type": "string"
+          },
+          "period_end": {
+            "format": "date",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "platform_fee": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Platform Fee",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "specialist_costs": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Specialist Costs",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OwnerStatementStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "period_start",
+          "period_end",
+          "status",
+          "notes",
+          "gross_revenue",
+          "ota_commissions",
+          "net_revenue",
+          "cleaning_costs",
+          "laundry_costs",
+          "amenities_costs",
+          "maintenance_costs",
+          "specialist_costs",
+          "platform_fee",
+          "other_costs",
+          "net_owner_result",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OwnerStatementResponse",
+        "type": "object"
+      },
+      "OwnerStatementStatus": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(OwnerStatement.status) without a named block (§7.22).",
+        "enum": [
+          "DRAFT",
+          "READY",
+          "SENT"
+        ],
+        "title": "OwnerStatementStatus",
+        "type": "string"
+      },
+      "OwnerStatementTransitionRequest": {
+        "additionalProperties": false,
+        "description": "`PATCH /api/v1/owner-statements/{id}` with `status` (R4.2, R4.3, R4.4).\n\nThe state machine lives on the entity (`OwnerStatement._TRANSITIONS`); this schema\nonly constrains the value to the enum. An illegal move is a `409` raised by the\nentity, not a `422` from a shape check (R4.4).",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/OwnerStatementStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "OwnerStatementTransitionRequest",
+        "type": "object"
       },
       "PMSProvider": {
         "description": "Which PMS a property talks to.\n\nReplaces PRD §22's single `PMS_PROVIDER` environment variable, which ADR 0006 retired\nbefore any code read it: a global selector cannot express two providers coexisting, and\nthat happens in both futures the ADR names — the migration window to Channex, where some\nproperties have moved and others have not, and the SaaS phase, where each client arrives\nwith the PMS they already pay for.\n\n`MOCK` is a first-class member, not a testing hack: it is the MVP's default and what the\nsuite and local startup run against, so a property with no provider resolves to it.\n\nDeliberately NOT the full list of the eleven providers ADR 0006 evaluated: `OCTORATE` joins\nthe day it is worth storing a credential for one.\n\nA member is **not** a promise that an adapter exists. `BEDS24` is here before its adapter\n(which arrives with `pms-beds24-adapter`) precisely so its account credential can be\nprovisioned and rotated first — the credential is the long-lived thing, the adapter is code.\nResolving such a property fails with `PmsUnavailableError` naming the gap, never by silently\nfalling back to the mock.",
@@ -7112,7 +7687,8 @@
           "NOTIFICATION_SENT",
           "NOTIFICATION_FAILED",
           "WEBHOOK_RECEIVED",
-          "GUEST_CHECKIN_COMPLETED"
+          "GUEST_CHECKIN_COMPLETED",
+          "OWNER_STATEMENT_GENERATED"
         ],
         "title": "TimelineEventType",
         "type": "string"
@@ -11458,6 +12034,427 @@
         ]
       }
     },
+    "/api/v1/expenses": {
+      "get": {
+        "description": "Paginated with `page`/`per_page` (PRD §23), filtered by `property_id`, by the `period_start_from`/`period_start_to` range on `expense.date`, and by `category` — all combined with AND (R5). Only expenses of the caller's tenant are ever returned (R7.2).\n\nEach item carries its optional `pending_owner_approval_id` (D13): the id of the `OwnerApproval(OTHER, PENDING)` raised for `amount > threshold`, or `None` if the threshold was never crossed or the reconciliation of D4 already materialised the answer.",
+        "operationId": "list_expenses_api_v1_expenses_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "property_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "period_start_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period Start From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "period_start_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period Start To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ExpenseCategory"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpensePageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the tenant's expenses",
+        "tags": [
+          "statements"
+        ]
+      },
+      "post": {
+        "description": "Returns the row plus `pending_owner_approval_id` when `amount > TenantConfig.owner_approval_threshold_eur` (R5.7, D4): a new `OwnerApproval(OTHER)` is created in the same transaction, and the response field tells the UI that the row is gated on the owner's answer. The reconciliation of D4 will materialise the answer on its next sweep, and the field will then clear.\n\nA `date` that falls inside a period already covered by an `OwnerStatement` is a `409` (`NamedExpenseInClosedPeriodError`) — the payload may be well-formed, but the period is already closed, a state conflict; V1 does not regenerate, so a closed period cannot absorb new rows (D6.3).",
+        "operationId": "create_expense_api_v1_expenses_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpenseCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpenseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create an expense",
+        "tags": [
+          "statements"
+        ]
+      }
+    },
+    "/api/v1/expenses/{expense_id}": {
+      "delete": {
+        "description": "Refuses with `409 ExpenseAlreadyConsolidatedError` when `statement_id IS NOT NULL` (R5.4, D6.2): a consolidated expense is part of the visible statement, and deleting it would falsify the owner's view of the period. The repository's `DELETE WHERE statement_id IS NULL` is the structural guard (QA-panel of §3); the use case's pre-check is the second line of defence.",
+        "operationId": "delete_expense_api_v1_expenses__expense_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "expense_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Expense Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete an expense",
+        "tags": [
+          "statements"
+        ]
+      },
+      "get": {
+        "description": "Returns the row plus its optional `pending_owner_approval_id` (D13). The id is the same value the listing returns for the row; an unknown id or one that belongs to another tenant is a `404` with the same body for both (R5.5).",
+        "operationId": "get_expense_api_v1_expenses__expense_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "expense_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Expense Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpenseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get one expense",
+        "tags": [
+          "statements"
+        ]
+      },
+      "patch": {
+        "description": "Every field optional; the use case receives `model_dump(exclude_unset=True)` and applies only what the caller supplied (R5.3). Absent and `null` mean different things — sending no `description` is a no-op on it, sending `description: \"new\"` writes the new value.\n\n**Consolidated fields are immutable** (D6.2, R5.3): once `statement_id IS NOT NULL`, `amount`, `currency`, `category`, `date`, `property_id`, `statement_id`, and `approved_by` are read-only. The repository raises `ExpenseAlreadyConsolidatedError` for the offending field, mapped to `409 CONFLICT` here. `description` and `receipt_storage_key` remain editable.\n\n`statement_id`, `property_id`, `approved_by`, `incident_id`, and `created_at` are **not** in the body schema: sending them is a `422` from Pydantic's `extra=\"forbid\"`.",
+        "operationId": "update_expense_api_v1_expenses__expense_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "expense_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Expense Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpenseUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpenseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update an expense",
+        "tags": [
+          "statements"
+        ]
+      }
+    },
     "/api/v1/guest/checkin/{token}": {
       "get": {
         "description": "The names of the fields of PRD §17 that are still missing, plus the document and legal-registration statuses. **Never the values already supplied** — the guest knows what they typed, and echoing it back would put personal data in one more response body for no benefit.",
@@ -13933,6 +14930,507 @@
         "summary": "The owner answers a pending approval",
         "tags": [
           "maintenance"
+        ]
+      }
+    },
+    "/api/v1/owner-statements": {
+      "get": {
+        "description": "Paginated with `page`/`per_page` (PRD §23), filtered by `property_id`, by the `period_start_from`/`period_start_to` range, and by `status` — all combined with AND (R3.1). Only statements of the caller's tenant are ever returned (R7.2).\n\nPage size is fixed at 20 server-side (R3.1). `per_page` is accepted but the server uses its own constant; the response surfaces the value it actually used so the client can render the pagination correctly.",
+        "operationId": "list_owner_statements_api_v1_owner_statements_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "property_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "period_start_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period Start From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "period_start_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period Start To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OwnerStatementStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnerStatementPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the tenant's owner statements",
+        "tags": [
+          "statements"
+        ]
+      }
+    },
+    "/api/v1/owner-statements/generate": {
+      "post": {
+        "description": "The manual door of the monthly cron: the same generator, over the same period, so a manager who wants to close the month early does not wait for 02:00 UTC on day 1 (R2.1).\n\n**Idempotent on the unique key** `(tenant_id, property_id, period_start, period_end)` (R2.3, D6.1): a second call with the same `property_id` and `period_end` counts it in `skipped` and does not regenerate. The response is this batch report — counters, not a statement body; fetch the statement itself via `GET /owner-statements` or `GET /{id}`. The manual path is the **non-exempt** end of the rule-9 carve-out (D5/D12): it writes `OWNER_STATEMENT_GENERATED` to `AuditLog` with the caller as the actor, in addition to the `TimelineEvent` the cron path emits.\n\n**`currency_mismatch`** reports the `(property_id, period_start, period_end)` triples D3 aborted for non-EUR rows, with the offending `(row_id, currency, table)` list per triple (D3). No statement is partial — a single non-EUR row aborts the whole `(tenant, property, period)` (D3, R2).\n\nA `property_id` that is unknown, another tenant's, or not `ACTIVE` is a `422` (D9): it is a body field, not a path identifier. `period_end` must be the last day of a calendar month (R2.5).",
+        "operationId": "generate_owner_statement_api_v1_owner_statements_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateOwnerStatementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnerStatementGenerationReportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Generate owner statements now",
+        "tags": [
+          "statements"
+        ]
+      }
+    },
+    "/api/v1/owner-statements/{statement_id}": {
+      "get": {
+        "description": "Returns the statement's eleven monetary columns and its `status`/`notes`. Only statements of the caller's tenant are reachable — a `404` with the same body whether the id is unknown or belongs to another tenant (R3.4, R7.2).\n\n**The detail payload composes here, not in the API layer**: the PDF exporter (`ExportOwnerStatementPdfUseCase`) reads the same `GetOwnerStatementUseCase`, so the two surfaces cannot drift on what 'the detail' is (R3.5).",
+        "operationId": "get_owner_statement_api_v1_owner_statements__statement_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "statement_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Statement Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnerStatementResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get one owner statement",
+        "tags": [
+          "statements"
+        ]
+      },
+      "patch": {
+        "description": "Two fields, never both at once — the router routes on which key is present in the body. `notes` is the rule-11 sink: its value never reaches `audit_logs.changes` (only `{\"changed\": true}` does), per `steering/security.md` rule 11 (R4.5). An empty or whitespace-only `notes`, or one carrying `U+0000`, is a `422` naming `notes` (R5.6).\n\n`status` accepts one of `READY` or `SENT` (R4.2, R4.4). The state machine lives on the entity; an illegal move is a `409` with the status untouched, and `SENT` is terminal — no move, legal or otherwise, accepts it as the origin (R4.4, D1).\n\n**No other column of the statement is writable from the API** (R4.1): the amounts and dates are produced by generation, and the eleven monetary columns are frozen at generation time (D6.1, D6.4). Sending them is a `422` from Pydantic's `extra=\"forbid\"`.",
+        "operationId": "patch_owner_statement_api_v1_owner_statements__statement_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "statement_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Statement Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/OwnerStatementNotesUpdateRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/OwnerStatementTransitionRequest"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnerStatementResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update an owner statement's notes or status",
+        "tags": [
+          "statements"
+        ]
+      }
+    },
+    "/api/v1/owner-statements/{statement_id}/export.csv": {
+      "get": {
+        "description": "**No `AuditLog` is written for the download** (R6.7) — a read is a read. The audit trail of the statement is its transitions (R4) and the mutations of its expenses (R5).\n\nHeader line is the canonical six columns (`date,category,description,amount,currency,receipt_storage_key`), one row per `Expense` of the statement. UTF-8 without BOM (R6.2), codepoints not escaped (R6.2).",
+        "operationId": "export_owner_statement_csv_api_v1_owner_statements__statement_id__export_csv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "statement_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Statement Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {}
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Download the statement's expenses as CSV",
+        "tags": [
+          "statements"
+        ]
+      }
+    },
+    "/api/v1/owner-statements/{statement_id}/export.pdf": {
+      "get": {
+        "description": "Streamed directly in the response (R6.3): the PDF is **generated in the moment** and never persisted in `StorageAdapter` (R6.3, the gate of `/sdd:new` decision).\n\nLayout follows R6.4: tenant header, property block, period block, reservation lines (`gross_amount`/`ota_commission`/`net_amount`), expenses by category with subtotals, totals row, and a `notes` box. All amounts with two decimals, separator `,` (R6.5).",
+        "operationId": "export_owner_statement_pdf_api_v1_owner_statements__statement_id__export_pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "statement_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Statement Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {}
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Download the statement as a PDF",
+        "tags": [
+          "statements"
         ]
       }
     },

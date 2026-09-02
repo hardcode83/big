@@ -308,6 +308,7 @@ A diferencia de la de firma, la de cifrado **no se regenera sola si ya hay un va
 - `.make/` — **generado y gitignorado**. Ahí escribe `make up PORT_OFFSET=<n>` el overlay con los cuatro mapeos desplazados (`docker-compose.offset.yml`), con números literales y regenerado en cada invocación. Vive fuera de la raíz y **no** se llama `docker-compose.override.yml` a propósito: así Compose no lo descubre por sí solo y el desplazamiento no puede cambiar el veredicto de `make check-compose-ports`.
 - `docker-compose.deploy.yml` / `.env.deploy.example` — orquestación del **deploy a dev**: imágenes de GHCR por SHA (sin build), consumido por el CD en la VM.
 - `sdd/` — flujo de Spec-Driven Development: specs, changes en curso, steering, roadmap.
+- `backend/app/statements/` — liquidaciones al propietario y gastos, con las cuatro capas `domain/` → `application/` → `infrastructure/` → `api/`; el módulo ganó `application/`/`api/` con `revenue-statements` (job mensual, generación manual, CRUD de gastos con umbral de aprobación, export CSV/PDF). Operación en [`docs/revenue-statements.md`](docs/revenue-statements.md).
 
 Comandos de consola del backend (no hay endpoint para ninguno, a propósito):
 

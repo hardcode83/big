@@ -193,7 +193,8 @@
       "NOTIFICATION_SENT": "Notificación enviada",
       "NOTIFICATION_FAILED": "Notificación fallida",
       "WEBHOOK_RECEIVED": "Webhook recibido",
-      "GUEST_CHECKIN_COMPLETED": "El huésped ha completado el check-in"
+      "GUEST_CHECKIN_COMPLETED": "El huésped ha completado el check-in",
+      "OWNER_STATEMENT_GENERATED": "Liquidación generada"
     },
     "actor": {
       "SYSTEM": "Sistema",

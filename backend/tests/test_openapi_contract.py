@@ -71,7 +71,7 @@ def test_the_route_guard_actually_sees_the_api() -> None:
     """
     routes = _api_routes(create_app())
 
-    assert len(routes) >= 22
+    assert len(routes) >= 29
     assert {path.split("/")[3] for path, _ in routes} == {
         "auth",
         "users",
@@ -157,6 +157,9 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         "pricing-rules",
         "price-recommendations",
         "provenance",
+        # `revenue-statements`: owner statements and their expense aggregate (PRD §23).
+        "owner-statements",
+        "expenses",
     }
 
 
@@ -191,10 +194,9 @@ def test_every_api_route_declares_a_response_model() -> None:
     * `204 No Content` — there is no body to describe. Today exactly `POST /auth/logout`,
       `DELETE /users/{user_id}` and `DELETE /reservations/{reservation_id}`.
     * a body that is not JSON, which declares its media types in `responses` instead. Today
-      exactly `GET /cleaning-photos/{photo_id}` (`cleaning-photos-storage`, design D7), which
-      returns image bytes: `response_model` describes a JSON schema, and there is no JSON
-      schema for a JPEG. It names `image/jpeg`, `image/png` and `image/webp` — the allowlist
-      `content_type_for_extension` answers from — so the contract still says what comes back.
+      exactly the signed media route and the two owner-statement export routes, which return
+      image, CSV, or PDF bytes: `response_model` describes a JSON schema, and there is no JSON
+      schema for those payloads. Their declared media types still say what comes back.
     * `BODILESS_SUCCESS_PATHS` — a success that is deliberately empty under a status other
       than 204. Today exactly the webhook receiver's `202` (`reservations-webhooks` R1.1).
     """

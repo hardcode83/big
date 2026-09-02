@@ -92,16 +92,15 @@ def test_it_rejects_an_action_outside_the_vocabulary(action: str) -> None:
         )
 
 
-# `OWNER_STATEMENT` stands for "a real table that is not in the vocabulary yet"; it replaced
-# `PROPERTY`, which `properties-crud` registered. See the twin note in `test_change_set.py`.
-# `INCIDENT` replaced `RESERVATION` when `access-notifications` registered the latter
-# (PRD §17/§15 projections), `OWNER_APPROVAL` replaced `INCIDENT` when `guest-portal-api`
-# registered it — the guest portal is the first writer of `incidents` — `PRICING_RULE`
-# replaced `OWNER_APPROVAL` when `maintenance` registered it with its approval flow (D6),
-# and `OWNER_STATEMENT` replaced `PRICING_RULE` when `revenue-pricing` registered it and
-# `PRICE_RECOMMENDATION` (its D12), which used up rule 9's enumeration. `owner_statements`
-# is a `domain-foundation-financial` table whose first writer will be `revenue-statements`.
-@pytest.mark.parametrize("entity_type", ["User", "users", "OWNER_STATEMENT", ""])
+# `CONVERSATION` stands for "a real table that is not in the vocabulary yet"; it replaced
+# `REVIEW`, which `revenue-reviews` registered (R1.7/R3.5) while `revenue-statements` —
+# the change that had just moved the placeholder off `OWNER_STATEMENT` (design D7) — was
+# still open, so the two collided in the merge of #147. See the twin note in
+# `test_change_set.py`. The history of the placeholder rolls forward through
+# `PROPERTY` → `RESERVATION` → `INCIDENT` → `OWNER_APPROVAL` → `PRICING_RULE` →
+# `OWNER_STATEMENT` → `REVIEW` → `CONVERSATION`. `conversations` is a `messaging-ai` table
+# that `guest-portal-messaging` writes; nobody has registered it as an audit entity.
+@pytest.mark.parametrize("entity_type", ["User", "users", "CONVERSATION", ""])
 def test_it_rejects_an_entity_type_outside_the_vocabulary(entity_type: str) -> None:
     with pytest.raises(AuditContractError):
         AuditLogFactory.build(
