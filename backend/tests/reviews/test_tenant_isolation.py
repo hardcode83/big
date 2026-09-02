@@ -212,12 +212,40 @@ async def test_aggregate_counts_exclude_other_tenants_rows(db_session) -> None:
     only one property's reviews — the bug would slip through until a second tenant
     shipped a review. This test seeds both tenants, runs both aggregates for
     each, and verifies the OTHER tenant's rows are not in the totals.
+
+    Each review carries `sentiment=NEUTRAL` and one `recurring_issues` entry — the
+    aggregates filter `WHERE sentiment IS NOT NULL` and `WHERE recurring_issues IS
+    NOT NULL`, so a row with `NULL` on either column is invisible to the count.
+    Without seeding non-NULL values the assertion below would see zero rows and
+    fail on `sum == 1`, the same symptom the test fix prevents.
     """
+    from app.reviews.domain.enums import RecurringIssueTag
     from app.reviews.infrastructure.repositories import (
         SqlAlchemyReviewRepository,
     )
 
-    a, b, a_review, b_review, *_ = await two_tenants(db_session)
+    a = await seed_tenant(db_session, "TenantA")
+    b = await seed_tenant(db_session, "TenantB")
+    a_prop = await seed_property(db_session, a, "REDES11")
+    b_prop = await seed_property(db_session, b, "PAJARITOS8")
+    a_review = await seed_review(
+        db_session,
+        a,
+        a_prop,
+        content="Mensaje de A",
+        language="es",
+        sentiment=ReviewSentiment.NEUTRAL,
+        recurring_issues=[RecurringIssueTag.WIFI.value],
+    )
+    b_review = await seed_review(
+        db_session,
+        b,
+        b_prop,
+        content="Mensaje de B",
+        language="es",
+        sentiment=ReviewSentiment.NEUTRAL,
+        recurring_issues=[RecurringIssueTag.NOISE.value],
+    )
     repo = SqlAlchemyReviewRepository(db_session)
 
     # Tenant A's aggregates — the property `a_prop` carries `a_review` only.

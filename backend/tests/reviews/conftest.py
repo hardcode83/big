@@ -16,7 +16,7 @@ import pytest_asyncio
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.infrastructure.models import UserModel
 from app.properties.infrastructure.models import PropertyModel
-from app.reviews.domain.enums import ReviewChannel, ReviewStatus
+from app.reviews.domain.enums import ReviewChannel, ReviewSentiment, ReviewStatus
 from app.reviews.infrastructure.models import ReviewModel, ReviewResponseDraftModel
 from app.tenants.infrastructure.models import TenantModel
 
@@ -59,6 +59,9 @@ async def seed_user(
     return model
 
 
+_UNSET: object = object()
+
+
 async def seed_review(
     db_session,
     tenant: TenantModel,
@@ -69,22 +72,41 @@ async def seed_review(
     rating: float | None = None,
     content: str | None = None,
     language: str | None = None,
-    published_at: datetime | None = None,
+    published_at: datetime | None = NOW,
+    sentiment: ReviewSentiment | None | object = _UNSET,
+    recurring_issues: object = _UNSET,
 ) -> ReviewModel:
-    model = ReviewModel(
-        id=uuid.uuid4(),
-        tenant_id=tenant.id,
-        property_id=prop.id,
-        channel=channel,
-        status=status,
-        reviewer_name="Anonymous",
-        rating=None if rating is None else _decimal(rating),
-        content=content,
-        language=language,
-        published_at=published_at,
-        created_at=NOW,
-        updated_at=NOW,
-    )
+    # `published_at` defaults to `NOW` so the aggregate endpoints (`count_by_sentiment_for_property`,
+    # `aggregate_recurring_issues_for_property`) — which filter `WHERE published_at >= cutoff`
+    # over a 90-day window — include the seeded row. Tests that want a `NULL` `published_at`
+    # pass the value explicitly. Without this default, the isolation tests' aggregate
+    # assertions (R2.5) silently see zero rows because the filter excludes NULL.
+    #
+    # `sentiment` and `recurring_issues` use a sentinel default rather than `None`: passing
+    # `None` explicitly to `ReviewModel` would encode the value as JSONB 'null' for
+    # `recurring_issues`, which then trips `jsonb_array_elements_text` with "cannot extract
+    # elements from a scalar" once `published_at` lets the row into the 90-day aggregate.
+    # Leaving the column off the constructor lets the model's `default=None` apply as SQL
+    # NULL, which the aggregate's `IS NOT NULL` filter excludes cleanly.
+    model_kwargs: dict = {
+        "id": uuid.uuid4(),
+        "tenant_id": tenant.id,
+        "property_id": prop.id,
+        "channel": channel,
+        "status": status,
+        "reviewer_name": "Anonymous",
+        "rating": None if rating is None else _decimal(rating),
+        "content": content,
+        "language": language,
+        "published_at": published_at,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    if sentiment is not _UNSET:
+        model_kwargs["sentiment"] = sentiment
+    if recurring_issues is not _UNSET:
+        model_kwargs["recurring_issues"] = recurring_issues
+    model = ReviewModel(**model_kwargs)
     db_session.add(model)
     await db_session.flush()
     return model
