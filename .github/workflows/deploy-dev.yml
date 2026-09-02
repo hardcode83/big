@@ -236,10 +236,26 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Deploy — pull + up --wait [R3, R5]
+      - name: Deploy — pull + preflight + up --wait [R3, R5]
         run: |
           set -euo pipefail
           docker compose -f docker-compose.deploy.yml pull
+          # Preflight: una sola cabeza en el grafo de Alembic ANTES de tocar contenedores.
+          # `up -d --wait` recrea backend/worker/beat/frontend y solo después espera a que
+          # `migrate` termine; si `migrate` sale 255 con "Multiple head revisions" (2026-09-02,
+          # run 33644113200, PRs #146 y #151 mergeados con ocho minutos de diferencia) los
+          # contenedores nuevos nunca arrancan y los viejos ya no existen: plataforma caída
+          # hasta que alguien empuja una revisión de merge. Comprobado sobre la imagen que se
+          # va a desplegar, no sobre el checkout, porque es esa imagen la que corre `migrate`.
+          # `alembic heads` solo lee el directorio de scripts —no toca la base de datos—,
+          # `--no-deps` evita arrancar `postgres` desde aquí y `--rm` no deja contenedor.
+          heads="$(docker compose -f docker-compose.deploy.yml run --rm --no-deps -T migrate alembic heads)"
+          count="$(printf '%s\n' "$heads" | grep -c '(head)' || true)"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::el grafo de Alembic de la imagen tiene ${count} cabezas; no se ha tocado ningún contenedor y la versión anterior sigue sirviendo"
+            printf '%s\n' "$heads"
+            exit 1
+          fi
           if ! docker compose -f docker-compose.deploy.yml up -d --wait --wait-timeout 180; then
             echo "::error::deploy falló — servicios no healthy dentro del timeout"
             docker compose -f docker-compose.deploy.yml logs --tail=200

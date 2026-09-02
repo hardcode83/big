@@ -67,6 +67,12 @@ CADENCES: dict[str, timedelta] = {
     # owner answers to expense rows; the SQL is idempotent on the row state, so a faster
     # cadence would not buy anything but a tighter feedback loop on the manager's screen.
     "reconcile_owner_approvals_for_expenses": timedelta(minutes=5),
+    # `revenue-reviews` (design D2). Same cadence and same reasoning as
+    # `classify_incidents`: PRD §18 declares the pipeline and says nothing about what
+    # triggers it. Five minutes is the ceiling on what the analyser is asked, and the
+    # lock that prevents two workers from classifying the same row is the same one
+    # `run_for_every_tenant` already holds (D16).
+    "classify_reviews": timedelta(minutes=5),
 }
 
 

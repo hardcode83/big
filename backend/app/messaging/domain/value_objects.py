@@ -33,6 +33,7 @@ from app.messaging.domain.enums import (
     EscalationReason,
     MessageIntent,
 )
+from app.audit.domain.services import is_guest_token_digest
 from app.messaging.domain.exceptions import MessagingValidationError
 from app.tenants.domain.value_objects import SUPPORTED_LANGUAGES
 
@@ -224,6 +225,74 @@ _CONTACT_KIND_BY_CHANNEL: dict[ConversationChannel, str] = {
 def contact_kind_for(channel: ConversationChannel) -> str | None:
     """`"phone"`, `"email"`, or `None` when the channel addresses nobody (D14)."""
     return _CONTACT_KIND_BY_CHANNEL.get(channel)
+
+
+@dataclass(frozen=True)
+class InboundMessageActor:
+    """Who put a message into the pipeline, and from where (`guest-portal-messaging` R4.1, D8).
+
+    Replaces the `actor_user_id: uuid.UUID` + `ip` pair that
+    `ProcessInboundGuestMessageUseCase.execute` and `IncidentReportingPort.report` used to
+    take. Until this change the only way into that pipeline was
+    `POST /conversations/{id}/messages` with `MANAGE_CONVERSATIONS`, so a `User` was always
+    there to name; `POST /api/v1/guest/messages/{token}` is the second door, and behind it
+    there is no user at all — only the bearer of an opaque link, named by its digest.
+
+    **Exactly one of the two identities**, enforced in `__post_init__`. Widening from a
+    required `user_id` to a choice loosens one invariant and tightens another: a caller could
+    now build an actor with neither, so the check refuses that too — which was never
+    constructible before either, but only by accident of `user_id` being required. Both at
+    once is refused because a row claiming a write was made by a logged-in manager **and** by
+    the bearer of a portal link describes something that cannot have happened, and
+    `audit_logs` is append-only, so nobody can go back and decide which half was true.
+
+    **The digest IS validated here, and by the same predicate rather than a second spelling
+    of it.** `is_guest_token_digest` is documented as the one predicate its layers must agree
+    on, and it is *imported* — a `domain/` → `domain/` dependency, which is the direction the
+    rule allows — so this is a fourth *application* of one rule, not a fourth statement of it.
+
+    It is applied here because those existing layers all guard **one** column,
+    `audit_logs.actor_guest_token_hash`: the factory, `SqlAlchemyAuditLogRepository.add` and
+    the column's own CHECK. This actor reaches a **second** column —
+    `incidents.reported_by_guest_token`, written by `ReportIncidentFromConversationUseCase` —
+    and that one has no CHECK, no repository check and no `__post_init__` on `Incident`. Today
+    a bad digest still cannot persist, but only because the audit write happens to raise
+    before the single commit; that is statement ordering inside one function, not a guarantee.
+    Checking at construction makes it one **for every writer that takes an
+    `InboundMessageActor`** — which is this port and whatever comes through it.
+
+    Deliberately not claimed more widely: `ReportGuestIncidentUseCase` writes the same column
+    from a bare `reporter_token_hash: str` resolved by the portal authoriser, and this type
+    does not reach it. Closing that one means a CHECK on the column, which is a schema change
+    this change did not ask for. Raised by the security panel of section 2, twice — once for
+    the gap and once for a first version of this paragraph that claimed to have closed it for
+    everybody.
+
+    Shaped after `GuestActor` (`app/guests/application/use_cases.py`) rather than reusing it:
+    that one lives in another module's `application/`, and `messaging/domain/ports.py` importing
+    it would cross the dependency rule (D8).
+    """
+
+    user_id: uuid.UUID | None = None
+    token_hash: str | None = None
+    ip: str | None = None
+
+    def __post_init__(self) -> None:
+        # Neither branch interpolates a value. The module's standing rule is unconditional —
+        # "No refusal message ever quotes the value it refused" — and `str(exc)` is rendered
+        # into a 422 body and into every log line. Naming the fields and the expected shape
+        # is what the other refusals in this module do. Raised by the security panel of
+        # section 2, which found the `user_id` half quoting itself.
+        if (self.user_id is None) == (self.token_hash is None):
+            raise MessagingValidationError(
+                "an InboundMessageActor names exactly one actor: either user_id or "
+                "token_hash, never both and never neither"
+            )
+        if self.token_hash is not None and not is_guest_token_digest(self.token_hash):
+            raise MessagingValidationError(
+                "token_hash must be a lower-case SHA-256 hex digest of the portal token, "
+                "never the token itself"
+            )
 
 
 @dataclass(frozen=True)

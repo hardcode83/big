@@ -77,6 +77,7 @@ from app.maintenance.domain.exceptions import (
 from app.maintenance.domain.notifications import (
     incident_critical_notification,
     incident_high_notification,
+    NOTIFICATION_TYPE_INCIDENT_REJECTED,
     RELATED_TYPE_INCIDENT,
     incident_rejection_notification,
     owner_approval_notification,
@@ -93,6 +94,12 @@ from app.maintenance.domain.repositories import (
     IncidentRepository,
     OwnerApprovalRepository,
 )
+# `messaging` owns the actor that crosses `IncidentReportingPort`, which this module
+# implements. `application/` depending on another module's `domain/` is the direction the
+# dependency rule allows — the reverse (a `domain/` reaching into someone's `application/`)
+# is what D8 rejected when it declined to reuse `guests`' `GuestActor`.
+from app.messaging.domain.value_objects import InboundMessageActor
+from app.notifications.application.channel_dispatch import dispatch_and_persist
 from app.notifications.domain.enums import NotificationType
 from app.notifications.domain.repositories import NotificationLogRepository
 from app.properties.domain.clock_triggers import candidate_window
@@ -251,17 +258,37 @@ _CONVERSATION_TIMELINE_TITLE = "Incident reported in a guest conversation"
 class ReportIncidentFromConversationUseCase:
     """`IncidentReportingPort` of `messaging`, implemented here (`messaging-ai` R4.6, D12).
 
-    A sibling of `ReportGuestIncidentUseCase` above, and the differences are all consequences
-    of who is at the keyboard:
+    A sibling of `ReportGuestIncidentUseCase` above. Until `guest-portal-messaging` the
+    difference between the two was *who is at the keyboard* — this one had a human, that one a
+    link bearer — and this class hard-coded a human in three places. It no longer does:
+    `IncidentReportingPort.report` now takes an `InboundMessageActor` that is **either** a user
+    **or** a token bearer (R4.1, D8), because `POST /api/v1/guest/messages/{token}` is a second
+    door into the pipeline and there is no user behind it.
 
-    * **the actor is a human**, not the bearer of a guest link, so the `AuditLog` carries
-      `actor_user_id` and `actor_ip`. This is why `messaging-ai` needs **no new exception to
-      rule 9** of `steering/security.md` — worth saying because that rule's fourth exception
-      (automatic classification with no actor) invites the opposite assumption;
-    * `reporter_token_hash` does not exist here, which is why this is a new use case rather
-      than a reuse: `ReportGuestIncidentUseCase` requires that digest and forcing it would
-      mean inventing one;
-    * the timeline actor is `USER` and not `GUEST`, for the same reason.
+    So the three things this class used to fix are now all derived from that one actor:
+
+    * the incident's reporter — `reported_by_user_id` **or** `reported_by_guest_token`;
+    * the `AuditLog`'s actor — `actor_user_id` **or** `actor_guest_token_hash`, with
+      `actor_ip` either way;
+    * the `TimelineActorType` — `USER` **or** `GUEST`, and `TimelineEventFactory` only admits
+      `actor_user_id` alongside `USER`, so neither branch can claim somebody who was not there.
+
+    **It is still not a reuse of `ReportGuestIncidentUseCase`**, and the reason survived the
+    change: that one commits on its own, which would break the single transaction — `messaging-ai`
+    R4.7, which is `guest-portal-messaging` R1.4; both ids name the same promise and this file's
+    other references use the former — and it does not check the closed catalogue of titles this
+    path requires.
+
+    **Still no new exception to rule 9** of `steering/security.md`, and for a narrower reason
+    than "both branches have an actor": **no exemption is being taken at all**. Rule 9's base
+    obligation names `Incident`, this use case writes that row on both branches, and the rule
+    nowhere requires the actor be a `User`. An exception under rule 9 is a device for being
+    excused from writing; nothing here is excused.
+
+    Not argued as "the exceptions are about actorless writes, so we are outside them" — that
+    is false about the rule (only the fourth and fifth rest on an absent actor) and is the
+    reusable-sounding criterion its closing paragraph refuses. Section 2's security panel
+    found that argument in this docstring.
 
     **The incident is not classified** (R4.6): it is born `OPEN` with `ai_classification`
     unset, which is exactly what the `classify_incidents` job of D2 picks up on its next tick.
@@ -293,8 +320,7 @@ class ReportIncidentFromConversationUseCase:
         reservation_id: uuid.UUID | None,
         title: str,
         description: str,
-        actor_user_id: uuid.UUID,
-        ip: str | None,
+        actor: InboundMessageActor,
         now: datetime,
     ) -> uuid.UUID:
         """Open the incident and return its id.
@@ -327,7 +353,11 @@ class ReportIncidentFromConversationUseCase:
             created_at=now,
             updated_at=now,
             reservation_id=reservation_id,
-            reported_by_user_id=actor_user_id,
+            # Exactly one of the two is set, because `InboundMessageActor` refuses to exist
+            # any other way. Not an `if`: passing both fields straight through keeps the
+            # "exactly one" a property of the type rather than of this branch.
+            reported_by_user_id=actor.user_id,
+            reported_by_guest_token=actor.token_hash,
         )
         await self._incidents.add(tenant_id, incident)
 
@@ -338,9 +368,9 @@ class ReportIncidentFromConversationUseCase:
                 action=audit_actions.INCIDENT_CREATED,
                 entity_type=audit_actions.ENTITY_INCIDENT,
                 entity_id=incident.id,
-                actor_user_id=actor_user_id,
-                actor_guest_token_hash=None,
-                actor_ip=ip,
+                actor_user_id=actor.user_id,
+                actor_guest_token_hash=actor.token_hash,
+                actor_ip=actor.ip,
                 changes=ChangeSet(audit_actions.ENTITY_INCIDENT)
                 .diff("source", None, IncidentSource.GUEST)
                 .diff("status", None, IncidentStatus.OPEN)
@@ -356,8 +386,16 @@ class ReportIncidentFromConversationUseCase:
                     id=uuid.uuid4(),
                     tenant_id=tenant_id,
                     property_id=property_id,
-                    actor_type=TimelineActorType.USER,
-                    actor_user_id=actor_user_id,
+                    # `GUEST` when the bearer of a portal link wrote the message, `USER` when
+                    # an operator transcribed it. `TimelineEventFactory` admits
+                    # `actor_user_id` only alongside `USER`, so the pair below cannot claim
+                    # somebody who was not there.
+                    actor_type=(
+                        TimelineActorType.USER
+                        if actor.user_id is not None
+                        else TimelineActorType.GUEST
+                    ),
+                    actor_user_id=actor.user_id,
                     event_type=TimelineEventType.INCIDENT_CREATED,
                     title=_CONVERSATION_TIMELINE_TITLE,
                     created_at=now,
@@ -1077,6 +1115,9 @@ class _NotifiesSeverity:
 
     _users: UserRepository
     _notifications: NotificationLogRepository
+    #: `notification-channel-routing` (R1, R4) — the fan-out reads the tenant's
+    #: `notification_*_enabled` flags. Each subclass wires the repo into `self._configs`.
+    _configs: TenantConfigRepository
 
     #: Which builder announces which severity. A mapping rather than an `if`, so a severity
     #: added to `IncidentSeverity` later is a `KeyError` here rather than a silent omission —
@@ -1138,17 +1179,21 @@ class _NotifiesSeverity:
                 },
             )
 
+        # Loaded once, before the recipient loop, not once per manager/owner.
+        config = await self._configs.get_or_create(tenant_id, now)
         for recipient in recipients.users:
-            await self._notifications.add(
-                tenant_id,
-                builder(
-                    tenant_id=tenant_id,
-                    incident_id=incident.id,
-                    property_id=incident.property_id,
-                    manager_id=recipient.id,
-                    recipient_contact=recipient.email,
-                    now=now,
-                ),
+            await dispatch_and_persist(
+                notifications=self._notifications,
+                tenant_id=tenant_id,
+                recipient=recipient,
+                config=config,
+                notification_type=notification_type.value,
+                recipient_role=recipient.role.value,
+                log_builder=builder,
+                incident_id=incident.id,
+                property_id=incident.property_id,
+                manager_id=recipient.id,
+                now=now,
             )
 
 
@@ -1296,6 +1341,9 @@ class _ApprovalGateMixin:
     _notifications: NotificationLogRepository
     _audit: _AuditWriter
     _record_timeline: Callable[..., Awaitable[None]]
+    #: `notification-channel-routing` (R1, R4) — the owner-approval fan-out reads the
+    #: tenant's `notification_*_enabled` flags.
+    _configs: TenantConfigRepository
 
     async def _open_approval(
         self,
@@ -1380,17 +1428,20 @@ class _ApprovalGateMixin:
             return
 
         owner = owners.items[0]
-        await self._notifications.add(
-            tenant_id,
-            owner_approval_notification(
-                tenant_id=tenant_id,
-                incident_id=incident.id,
-                property_id=incident.property_id,
-                approval_id=approval.id,
-                owner_id=owner.id,
-                recipient_contact=owner.email,
-                now=now,
-            ),
+        config = await self._configs.get_or_create(tenant_id, now)
+        await dispatch_and_persist(
+            notifications=self._notifications,
+            tenant_id=tenant_id,
+            recipient=owner,
+            config=config,
+            notification_type=NotificationType.OWNER_APPROVAL_REQUIRED.value,
+            recipient_role=owner.role.value,
+            log_builder=owner_approval_notification,
+            incident_id=incident.id,
+            property_id=incident.property_id,
+            approval_id=approval.id,
+            owner_id=owner.id,
+            now=now,
         )
 
 
@@ -1734,17 +1785,19 @@ class AssignIncidentUseCase(_IncidentFlowBase):
             )
 
         config = await self._configs.get_or_create(tenant_id, now)
-        await self._notifications.add(
-            tenant_id,
-            technician_assignment_notification(
-                tenant_id=tenant_id,
-                incident_id=incident.id,
-                property_id=incident.property_id,
-                technician_id=technician_id,
-                recipient_contact=candidate.email,
-                sla_minutes=sla_minutes_for(incident.severity, config),
-                now=now,
-            ),
+        await dispatch_and_persist(
+            notifications=self._notifications,
+            tenant_id=tenant_id,
+            recipient=candidate,
+            config=config,
+            notification_type=NotificationType.TECHNICIAN_ASSIGNED.value,
+            recipient_role=candidate.role.value,
+            log_builder=technician_assignment_notification,
+            incident_id=incident.id,
+            property_id=incident.property_id,
+            technician_id=technician_id,
+            sla_minutes=sla_minutes_for(incident.severity, config),
+            now=now,
         )
 
         await self._audit.record(
@@ -1931,11 +1984,15 @@ class RejectIncidentUseCase(_TechnicianStepUseCase):
         *,
         users: UserRepository,
         notifications: NotificationLogRepository,
+        configs: TenantConfigRepository,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._users = users
         self._notifications = notifications
+        # Added by `notification-channel-routing` (R1, R4) — the rejection fan-out
+        # reads the tenant's `notification_*_enabled` flags.
+        self._configs = configs
 
     def _timeline_extra(self, before: dict[str, Any]) -> dict[str, str] | None:
         """Name the technician who refused — read from the **pre-mutation** snapshot (D11).
@@ -2005,16 +2062,19 @@ class RejectIncidentUseCase(_TechnicianStepUseCase):
             return
 
         manager = managers.items[0]
-        await self._notifications.add(
-            tenant_id,
-            incident_rejection_notification(
-                tenant_id=tenant_id,
-                incident_id=incident.id,
-                property_id=incident.property_id,
-                manager_id=manager.id,
-                recipient_contact=manager.email,
-                now=now,
-            ),
+        config = await self._configs.get_or_create(tenant_id, now)
+        await dispatch_and_persist(
+            notifications=self._notifications,
+            tenant_id=tenant_id,
+            recipient=manager,
+            config=config,
+            notification_type=NOTIFICATION_TYPE_INCIDENT_REJECTED,
+            recipient_role=manager.role.value,
+            log_builder=incident_rejection_notification,
+            incident_id=incident.id,
+            property_id=incident.property_id,
+            manager_id=manager.id,
+            now=now,
         )
 
 

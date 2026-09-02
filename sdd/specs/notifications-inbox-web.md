@@ -11,6 +11,13 @@ humano podía llegar a esa fila: toda la comunicación interna del sistema —li
 técnico asignado, incidencia rechazada, aprobación del propietario, escalación de huésped,
 incumplimiento de SLA— terminaba en `notification_logs` y solo se leía con SQL.
 
+**Acotada al canal `IN_APP`** (R5, `notification-channel-routing`): el listado y el
+contador filtran por `channel = IN_APP` por defecto en el repositorio, no en el router
+(D4), de forma que un aviso multi-canal no aparece dos veces en la bandeja y la campana
+sigue contando un elemento por aviso. WHERE el tenant activa `notification_email_enabled`,
+THE SYSTEM SHALL NOT alterar el número de elementos que la bandeja devuelve para un
+mismo conjunto de avisos (R5.4).
+
 **No es una ruta.** Es una campana en el `Topbar` de las tres shells autenticadas que abre un
 panel `Sheet`. Deliberado: cada grupo de rutas de la app admite un juego de roles distinto en su
 `AuthGuard`, así que una pantalla propia costaría tres pantallas y tres registros, mientras que
@@ -19,6 +26,16 @@ la campana cuesta un componente montado en tres sitios. Por eso no hay descripto
 
 Es una capa de presentación pura: no añade ni relaja regla de negocio ni de acceso alguna, y el
 backend sigue siendo la única autoridad sobre qué filas ve cada usuario.
+
+**Desde `notification-channel-routing`, esa autoridad incluye el canal.** `GET
+/api/v1/notifications` y `GET /notifications/unread-count` acotan por `channel = IN_APP`
+además del acotamiento por usuario del token — contrato del backend en
+[`access-notifications.md`](access-notifications.md) §«La bandeja in-app». El resto del
+contrato que esta spec consume no cambia: mismo envelope paginado, mismo orden, mismo
+parámetro `unread`, mismos campos publicados y misma semántica de `read_at`. Con el email o
+el WhatsApp del tenant activados, un aviso se abanica en varias filas de `notification_logs`
+pero la campana y el panel siguen viendo exactamente una — la IN_APP —, así que ningún
+componente de esta capa necesita cambiar para que R1 y R2 sigan siendo ciertos.
 
 ## Requirements
 
@@ -37,7 +54,9 @@ backend sigue siendo la única autoridad sobre qué filas ve cada usuario.
   distintivo numérico.
 - WHERE el contador supera `MAX_BADGE_COUNT = 99`, THE SYSTEM SHALL pintar `99+`
   (`bell.overflowCount`). El tope es **de presentación**: `GET /notifications/unread-count`
-  devuelve la cuenta exacta y el backend no la acota.
+  devuelve la cuenta exacta y el backend no la acota. Esa cuenta ya viene acotada a
+  `channel = IN_APP` (`notification-channel-routing` R5.2): activar el email o el WhatsApp
+  del tenant no duplica el número que la campana pinta.
 - THE SYSTEM SHALL dar al control un nombre accesible traducido que **incluya el número**:
   `«Notificaciones, 3 sin leer»` cuando hay no leídas y `«Notificaciones, Sin notificaciones
   nuevas»` cuando no las hay, con plural i18n (`bell.unreadCount_one`/`_other`). El icono es
@@ -51,7 +70,10 @@ backend sigue siendo la única autoridad sobre qué filas ve cada usuario.
   `access-notifications`: `dispatch_notifications` corre cada minuto, así que pedir más a menudo
   no puede descubrir nada nuevo. SSE queda fuera y no se vuelve a decidir aquí.
 - THE SYSTEM SHALL NOT poner en polling el **listado**: la campana pregunta un `count(*)`, el
-  panel se refresca al abrirse, al paginar y al invalidarse tras un acuse.
+  panel se refresca al abrirse, al paginar y al invalidarse tras un acuse. Tanto el `count(*)`
+  como el listado leen exclusivamente filas `channel = IN_APP`, así que el número de la
+  campana y la longitud del panel se mantienen consistentes entre sí con independencia de la
+  configuración de canal del tenant.
 - THE SYSTEM SHALL deshabilitar la consulta (`enabled: false`) mientras no haya identidad, bajo
   la clave inerte `["notifications-no-session"]`.
 - THE SYSTEM SHALL escopar las claves de TanStack Query por tenant **y por usuario**
@@ -88,12 +110,10 @@ backend sigue siendo la única autoridad sobre qué filas ve cada usuario.
   traducido (`notifications:types.<MIEMBRO>`), y SHALL NOT usar `subject` ni `body`: están
   escritos en inglés, para un operador, y llevan UUID en crudo. El DTO del frontend **ni siquiera
   los transporta**, de modo que pintarlos no es una opción disponible.
-- THE SYSTEM SHALL cubrir los **diecisiete** miembros de `NotificationType` en `locales/es` y
-  `locales/en`, incluidos los nueve que hoy no escribe nadie y que traerá
-  `notification-writers-gap`. La exhaustividad la garantiza el tipo:
-  `NOTIFICATION_COPY_KEYS: Record<NotificationType, string>` sobre el `NotificationType` derivado
-  del contrato generado, así que un miembro sin entrada falla `npm run typecheck` — no un test de
-  paridad que alguien tenga que acordarse de escribir.
+- THE SYSTEM SHALL cubrir los **dieciocho** miembros de `NotificationType` en `locales/es` y
+  `locales/en` (los diecisiete originales más `REVIEW_RESPONSE_APPROVED`, que `revenue-reviews`
+  introduce para avisar al propietario del tenant cuando una respuesta a reseña pasa a
+  `APPROVED`). La exhaustividad la garantiza el tipo:
 - IF llega un `notification_type` que la interfaz no conoce —la columna es `String(100)` libre y
   admite valores anteriores al enum—, THEN THE SYSTEM SHALL pintar `types.unknown` traducido y
   SHALL NOT romper el renderizado. La búsqueda en la tabla usa `Object.hasOwn`, de modo que un

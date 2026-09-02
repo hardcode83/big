@@ -18,6 +18,7 @@ from app.maintenance.domain.enums import IncidentSource, IncidentStatus
 from app.maintenance.domain.exceptions import MaintenanceValidationError
 from app.messaging.domain.enums import MessageIntent
 from app.messaging.domain.templates import INCIDENT_TITLES
+from app.messaging.domain.value_objects import InboundMessageActor
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType
 
 NOW = datetime(2026, 8, 16, 10, 0, tzinfo=UTC)
@@ -26,6 +27,12 @@ PROPERTY = uuid.uuid4()
 RESERVATION = uuid.uuid4()
 ACTOR = uuid.uuid4()
 IP = "203.0.113.10"
+#: The other actor this port now admits (`guest-portal-messaging` R4.1, D8): the bearer of a
+#: portal link, named by the digest and never by the token. A real SHA-256 shape, because
+#: `AuditLogFactory` refuses anything else.
+TOKEN_DIGEST = "b" * 64
+USER_ACTOR = InboundMessageActor(user_id=ACTOR, ip=IP)
+GUEST_ACTOR = InboundMessageActor(token_hash=TOKEN_DIGEST, ip=IP)
 
 #: What the guest typed, carrying the rule-3 values the census worries about — so the
 #: propagation tests below assert the absence of a real value rather than of an empty string.
@@ -77,15 +84,20 @@ class Harness:
             uow=self.uow,
         )
 
-    async def run(self, *, intent: MessageIntent = MessageIntent.ACCESS_PROBLEM, reservation_id=RESERVATION):
+    async def run(
+        self,
+        *,
+        intent: MessageIntent = MessageIntent.ACCESS_PROBLEM,
+        reservation_id=RESERVATION,
+        actor: InboundMessageActor = USER_ACTOR,
+    ):
         return await self.use_case.report(
             tenant_id=TENANT,
             property_id=PROPERTY,
             reservation_id=reservation_id,
             title=INCIDENT_TITLES[intent],
             description=GUEST_TEXT,
-            actor_user_id=ACTOR,
-            ip=IP,
+            actor=actor,
             now=NOW,
         )
 
@@ -163,8 +175,7 @@ async def test_a_title_outside_the_closed_catalogue_is_refused(title: str) -> No
             reservation_id=RESERVATION,
             title=title,
             description=GUEST_TEXT,
-            actor_user_id=ACTOR,
-            ip=IP,
+            actor=USER_ACTOR,
             now=NOW,
         )
 
@@ -173,16 +184,17 @@ async def test_a_title_outside_the_closed_catalogue_is_refused(title: str) -> No
 
 @pytest.mark.asyncio
 async def test_the_audit_row_names_the_human_at_the_keyboard() -> None:
-    """**Why `messaging-ai` needs no new exception to rule 9.** The rule's fourth exception
-    covers automatic classification with no actor, and invites the assumption that anything
-    the AI touches is actorless. A guest's message arrives through the panel or the API with
-    an authenticated user behind it, and that user is the actor."""
+    """**Why this path needs no new exception to rule 9**: it takes no exemption. Rule 9's
+    base obligation names `Incident`, this use case writes that row, and the rule nowhere
+    requires the actor be a `User`. A message transcribed through the panel or the API
+    arrives with an authenticated user behind it, and that user is the actor."""
     harness = Harness()
 
     await harness.run()
 
     entry = harness.audit.rows[0]
     assert entry.actor_user_id == ACTOR
+    assert entry.actor_guest_token_hash is None
     assert entry.actor_ip == IP
     assert entry.action == audit_actions.INCIDENT_CREATED
     assert entry.entity_type == audit_actions.ENTITY_INCIDENT
@@ -204,9 +216,8 @@ async def test_the_audit_row_carries_no_word_the_guest_typed() -> None:
 
 @pytest.mark.asyncio
 async def test_the_timeline_event_has_a_user_actor_and_a_constant_title() -> None:
-    """`GUEST` was right for `ReportGuestIncidentUseCase`, where nobody was authenticated.
-    Here somebody is, and `TimelineEventFactory` only accepts `actor_user_id` alongside
-    `USER`, so the two cannot disagree about who was there."""
+    """With a user actor the timeline says `USER`. `TimelineEventFactory` only accepts
+    `actor_user_id` alongside `USER`, so the two cannot disagree about who was there."""
     harness = Harness()
 
     await harness.run()
@@ -257,3 +268,87 @@ async def test_it_never_ends_the_transaction_it_was_given() -> None:
     await harness.run()
 
     assert harness.uow.commits == 1
+
+
+# --- The token bearer, the second actor this port admits -----------------------------------
+# `guest-portal-messaging` R4.1, D8. Until that change this use case fixed a human in three
+# places — the incident's reporter, the audit row's actor and the timeline's actor type — and
+# each is now derived from the one `InboundMessageActor` it is handed. One test per derivation,
+# because getting any of the three wrong is a different lie in a different append-only table.
+
+
+@pytest.mark.asyncio
+async def test_the_incident_names_the_token_bearer_as_its_reporter() -> None:
+    """`reported_by_guest_token` and **not** `reported_by_user_id`: there is no user behind
+    `POST /api/v1/guest/messages/{token}` to name."""
+    harness = Harness()
+
+    await harness.run(actor=GUEST_ACTOR)
+
+    incident = harness.incidents.rows[0]
+    assert incident.reported_by_guest_token == TOKEN_DIGEST
+    assert incident.reported_by_user_id is None
+
+
+@pytest.mark.asyncio
+async def test_the_audit_row_names_the_token_bearer_by_its_digest() -> None:
+    """The actor `guest-portal-api` established for the anonymous surface. Rule 9 needs no new
+    exception because none is claimed: the row is written, and the rule does not require its
+    actor be a `User`."""
+    harness = Harness()
+
+    await harness.run(actor=GUEST_ACTOR)
+
+    entry = harness.audit.rows[0]
+    assert entry.actor_guest_token_hash == TOKEN_DIGEST
+    assert entry.actor_user_id is None
+    assert entry.actor_ip == IP
+
+
+@pytest.mark.asyncio
+async def test_the_timeline_event_says_guest_and_claims_no_user() -> None:
+    """`TimelineEventFactory` admits `actor_user_id` only alongside `USER`, so a `GUEST` event
+    carrying a user id would not be constructible — this pins that the branch picks `GUEST`
+    rather than relying on the factory to catch a `USER` that names nobody."""
+    harness = Harness()
+
+    await harness.run(actor=GUEST_ACTOR)
+
+    event = harness.timeline.rows[0]
+    assert event.actor_type is TimelineActorType.GUEST
+    assert event.actor_user_id is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "actor", [USER_ACTOR, GUEST_ACTOR], ids=["user", "token-bearer"]
+)
+async def test_the_audit_row_carries_exactly_one_actor(
+    actor: InboundMessageActor,
+) -> None:
+    """R4.1: "toda fila de `AuditLog` que ese camino escriba SHALL llevar
+    `actor_guest_token_hash` y **exactamente uno** de los dos actores, nunca los dos ni
+    ninguno". Asserted over both branches at once, because a row with neither is as wrong as
+    a row with both and only one of the two is refused by `AuditLogFactory`."""
+    harness = Harness()
+
+    await harness.run(actor=actor)
+
+    entry = harness.audit.rows[0]
+    named = [entry.actor_user_id, entry.actor_guest_token_hash]
+    assert len([value for value in named if value is not None]) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_guest_branch_leaks_no_word_the_guest_typed_either() -> None:
+    """The two propagation tests above drive the **user** branch. R4.4 does not depend on
+    which actor wrote, so the branch that reaches `messages.content` from the open internet
+    gets the same assertion rather than inheriting it by assumption."""
+    harness = Harness()
+
+    await harness.run(actor=GUEST_ACTOR)
+
+    rendered = str(harness.audit.rows[0].changes) + str(harness.timeline.rows[0].metadata)
+    assert "12345678Z" not in rendered
+    assert "4471" not in rendered
+    assert GUEST_TEXT not in rendered

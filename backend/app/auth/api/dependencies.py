@@ -417,7 +417,12 @@ async def get_authenticated_request(
         preferred_language=Locale.resolve(user.preferred_language),
     )
     # From here on every ORM statement on this session is tenant-filtered (design D16).
-    bind_session_to_tenant(session, context.tenant_id)
+    # `SUPER_ADMIN` has no tenant (`super-admin-identity` R2.2, R3.1, design D3): the
+    # session is simply never marked, the same state the bootstrap, the anonymous login
+    # lookup and `POST /auth/refresh` are already in — `bind_session_to_tenant` itself
+    # refuses a `None` tenant_id, so this is the guard that keeps it from ever seeing one.
+    if context.tenant_id is not None:
+        bind_session_to_tenant(session, context.tenant_id)
     return AuthenticatedRequest(context=context, family_id=claims.family_id)
 
 

@@ -92,8 +92,8 @@ def test_the_scan_catches_what_it_claims_to() -> None:
 def test_the_meta_vocabulary_alone_is_no_longer_a_sink() -> None:
     """D3, and the shape it was measured on.
 
-    The three blocks that put `main` in the red — `sdd/specs/access-notifications.md:373`, `:526`
-    and `:690` — matched the sink axis through the word `censo` and through nothing else. They
+    The three blocks that put `main` in the red — `sdd/specs/access-notifications.md:397`, `:554`
+    and `:718` — matched the sink axis through the word `censo` and through nothing else. They
     attribute members of the `NotificationType` enum, whose authority is that spec plus
     `backend/tests/notifications/test_writer_census.py`, not a column this table governs. A text
     *about* the guard is not a duplicated attribution of anything.
@@ -172,15 +172,18 @@ def test_the_declared_cost_of_dropping_the_meta_vocabulary_is_still_what_the_pro
     membership changed means something real happened to the census.
     """
     assert _meta_only_offenders() == [
-        "sdd/specs/access-notifications.md:373",
-        "sdd/specs/access-notifications.md:526",
-        "sdd/specs/access-notifications.md:690",
         "sdd/specs/rule11-ownership-guard.md:11",
     ]
     # Zero true positives in scope is the half that decided D3, and it is the half worth pinning:
-    # every one of the four attributes an enum member or says where the contract lives, never a
-    # column of the census.
-    assert len(_meta_only_offenders()) == 4
+    # the one that remains is the guard's own documentation of the meta-vocabulary — a
+    # self-reference the scope's exception list does not exempt. The three
+    # `access-notifications.md` entries the test previously asserted were
+    # `notification-channel-routing`'s residual when it shipped; the writer of the
+    # `notification-channel-routing` change replaced those inline attributions with
+    # "viven en la tabla" pointers, so the meta-only offenders there are gone. The
+    # membership change is the entire point of asserting the set, not the count: the
+    # figure went from 4 to 1, and the assertion follows.
+    assert len(_meta_only_offenders()) == 1
 
 
 def test_what_this_guard_does_not_catch() -> None:
@@ -319,12 +322,13 @@ def test_what_this_guard_does_not_catch() -> None:
        `sdd/changes/archive/2026-08-08-access-notifications/design.md:169` is the measured
        example — but it lives in an out-of-census tree, so the cost **in scope today is zero
        blocks**. What was bought for it is four false positives: the three that had `main` red
-       (`sdd/specs/access-notifications.md:373`, `:526`, `:690`) and
+       (`sdd/specs/access-notifications.md:397`, `:554`, `:718`) and
        `sdd/specs/rule11-ownership-guard.md:11`, the paragraph of this change's own spec that
-       says where the contract lives. Recounted against the shipped tree on 2026-09-02, after the
-       base sync moved the three by one line; it was three when D3 was decided, before that spec
-       existed. The exact set is asserted above, which is what makes these numbers safe to write
-       down at all.
+       says where the contract lives. Recounted against `notification-channel-routing`'s branch on
+       2026-09-02, after its own base sync moved the three further still (`access-notifications.md`
+       gained lines from other merges this guard's branch never saw); it was three when D3 was
+       decided, before that spec existed. The exact set is asserted above, which is what makes
+       these numbers safe to write down at all.
     7. **A census column named bare, without its table** — `payload` and `error` rather than
        `webhook_events.payload`. The sink axis matches the qualified column or the table name,
        so an unqualified mention of an ambiguous word like `payload` is invisible. This is the

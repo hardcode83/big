@@ -53,6 +53,9 @@ from app.tenants.api.router import router as tenants_router
 from app.timeline.api.errors import register_timeline_error_handlers
 from app.timeline.api.router import router as timeline_router
 from app.provenance.api.router import router as provenance_router
+from app.reviews.api.errors import register_reviews_error_handlers
+from app.reviews.api.router import router as reviews_router
+from app.reviews.api.router import summary_router as reviews_summary_router
 
 API_V1_PREFIX = "/api/v1"
 
@@ -96,6 +99,7 @@ def create_app() -> FastAPI:
     register_pricing_error_handlers(app)
     register_statements_error_handlers(app)
     register_notification_error_handlers(app)
+    register_reviews_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -168,8 +172,10 @@ def create_app() -> FastAPI:
     # its routes carry no `Authorization` header and declare no permission, because the token
     # in the path is the credential. Keeping them off `guests_router` — which declares
     # `AUTHENTICATED_RESPONSES` — is what stops an unauthenticated route from hiding inside a
-    # shape that says otherwise, and forces an entry per route in `ANONYMOUS_ENDPOINTS`:
-    # four, one per route of PRD §23.
+    # shape that says otherwise, and forces **an entry per route** in `ANONYMOUS_ENDPOINTS` —
+    # which is the property that matters, and the reason no number is given here: this comment
+    # said "four, one per route of PRD §23" until `guest-portal-messaging` mounted two more.
+    # The census is the authority on how many there are, and it is enforced by a test.
     app.include_router(guest_portal_router, prefix=API_V1_PREFIX)
     # `dashboard-api`: the read side of PRD §10. `timeline` had `domain/` and
     # `infrastructure/` since `timeline-state-machine` and no way to read an event back —
@@ -196,6 +202,14 @@ def create_app() -> FastAPI:
     # there is no anonymous door into this module.
     app.include_router(statements_router, prefix=API_V1_PREFIX)
     app.include_router(provenance_router, prefix=API_V1_PREFIX)
+    # `revenue-reviews`: PRD §18's seven endpoints. Two routers because the summary
+    # lives under `/properties/{id}/reviews/summary` and a literal segment there would
+    # collide with `/properties/{id}` — same registration-order lesson as
+    # `blocked_transitions_router`. Mounted after `maintenance` because a review may
+    # open an incident; reading the two in this order is how that dependency reads
+    # in the code.
+    app.include_router(reviews_router, prefix=API_V1_PREFIX)
+    app.include_router(reviews_summary_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late.

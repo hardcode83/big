@@ -234,6 +234,13 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
 - THE SYSTEM SHALL crear el escalado en estado `PENDING` y no SHALL intentar entregarlo por
   ningún canal: la entrega es de `dispatch_notifications`, que drena las filas `PENDING` cada
   minuto. La costura entre encolar y entregar es deliberada.
+- THE SYSTEM SHALL abanicar el escalado en **una fila por canal resuelto** por
+  `notifications/domain/channel_resolver.py`, igual que cualquier otro aviso operativo, y SHALL
+  fijar `sla_deadline_at = NULL` en todas — los plazos pertenecen a la fila original
+  incumplida, no a las del escalado. El plazo sigue cancelándose con
+  `cancel_sla_deadline(tenant_id, related_type, related_id, notification_type)`, que casa
+  por el par polimórfico y por tanto cierra **todas** las filas hermanas de un mismo aviso
+  en una sola llamada, sin tocar el canal.
 - THE SYSTEM SHALL encontrar candidatos reales desde que existe ese emisor. La consulta exige
   `status = SENT` y, hasta `access-notifications`, **nada escribía ese valor**: cada ejecución
   encontraba cero. `check_sla_breaches` cambió de comportamiento sin cambiar de código.

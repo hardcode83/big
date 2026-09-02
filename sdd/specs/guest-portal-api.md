@@ -7,7 +7,7 @@ abrir una incidencia **sin ser un `User` del sistema y sin JWT** (PRD §§6, 7.6
 La identidad la aporta un **token opaco por estancia** que viaja en la ruta: él resuelve la
 reserva, la propiedad y el tenant, y nada de la petición puede ampliar ese alcance.
 
-Son cuatro rutas anónimas bajo `/api/v1/guest/`, dos rutas de operador para acuñar y revocar el
+Son seis rutas anónimas bajo `/api/v1/guest/`, dos rutas de operador para acuñar y revocar el
 token, una tabla `guest_access_tokens`, la columna `audit_logs.actor_guest_token_hash` y el
 `application/` que [`domain-foundation-ops.md`](domain-foundation-ops.md) dejaba pendiente para
 `Incident`. Se apoya en lo que ya existía: el escritor único del documento cifrado y el servicio
@@ -15,8 +15,10 @@ de estado legal de [`access-notifications.md`](access-notifications.md), y la fo
 anónima que [`reservations-webhooks.md`](reservations-webhooks.md) fijó — token en la ruta, hash
 indexable, respuesta de fallo única, redacción en el log de acceso.
 
-**Sin frontend.** La ruta `frontend/app/(guest)/guest/[token]/` existe reservada pero ninguna
-página la ejerce; la interfaz es `guest-portal-web`. Hoy el portal se opera con `curl`.
+**Con frontend, desde `guest-portal-messaging`.** `/guest/[token]` es funcional contra estas
+seis rutas — estancia, check-in, incidencia y, desde este change, la conversación con el
+alojamiento. Su interfaz y su i18n viven en [`guest-portal.md`](guest-portal.md); esta spec
+cubre solo el contrato de superficie.
 
 El *cómo se opera y se diagnostica* —invocaciones, tabla de configuración, consultas SQL de
 diagnóstico— está en [`docs/guest-portal.md`](../../docs/guest-portal.md); esta spec cubre qué
@@ -26,11 +28,11 @@ garantiza el sistema.
 
 ### Reparto de rutas y montaje
 
-- THE SYSTEM SHALL servir las cuatro rutas anónimas desde un router propio,
+- THE SYSTEM SHALL servir las seis rutas anónimas desde un router propio,
   `app/guests/api/portal_router.py`, montado por separado del router autenticado del módulo, que
   declara `AUTHENTICATED_RESPONSES` y cuelga sus rutas de `require(...)`. Una ruta sin autenticar
   dentro de una forma que promete lo contrario es lo que esa separación existe para impedir.
-- THE SYSTEM SHALL exponer exactamente estas cuatro rutas, con el token como último segmento:
+- THE SYSTEM SHALL exponer exactamente estas seis rutas, con el token como último segmento:
 
   | Método y ruta | Respuesta | Éxito |
   |---|---|---|
@@ -38,12 +40,17 @@ garantiza el sistema.
   | `GET /api/v1/guest/checkin/{token}` | `CheckinStatusResponse` | `200` |
   | `POST /api/v1/guest/checkin/{token}` | `CheckinSubmittedResponse` | `200` |
   | `POST /api/v1/guest/incident/{token}` | `IncidentReportedResponse` | `201` |
+  | `POST /api/v1/guest/messages/{token}` | `GuestMessageResponse` | `201` |
+  | `GET /api/v1/guest/messages/{token}` | `GuestThreadResponse` | `200` |
 
-- THE SYSTEM SHALL declarar en las cuatro un contrato de error propio de `404`, `429` y `413`
+  Las dos últimas las añadió `guest-portal-messaging`: la superficie pasó de cuatro rutas a
+  seis, y ambas comparten el `_authorised` de la sección siguiente, sin una segunda copia del
+  orden.
+- THE SYSTEM SHALL declarar en las seis un contrato de error propio de `404`, `429` y `413`
   contra `ErrorEnvelope`, y NEVER SHALL declarar el `401` de las rutas autenticadas: no pueden
   prometer un código que nunca devuelven.
-- THE SYSTEM SHALL mantener las cuatro entradas en el censo `ANONYMOUS_ENDPOINTS` de
-  `tests/test_route_authorization.py`, de modo que añadir una quinta ruta anónima sea un diff
+- THE SYSTEM SHALL mantener las seis entradas en el censo `ANONYMOUS_ENDPOINTS` de
+  `tests/test_route_authorization.py`, de modo que añadir una séptima ruta anónima sea un diff
   visible y no un descuido.
 - THE SYSTEM SHALL no introducir ningún código de error nuevo: `NOT_FOUND`, `RATE_LIMITED`,
   `PAYLOAD_TOO_LARGE` y `VALIDATION_ERROR` ya existen en el registro.
@@ -116,7 +123,7 @@ garantiza el sistema.
 
 ### Autorización: el token es la única identidad
 
-- WHEN llega una petición a cualquiera de las cuatro rutas, THE SYSTEM SHALL derivar la reserva,
+- WHEN llega una petición a cualquiera de las seis rutas, THE SYSTEM SHALL derivar la reserva,
   la propiedad y el `tenant_id` **de la fila del token, dentro del caso de uso**, y NEVER SHALL
   leerlos de la ruta, del cuerpo, de la query ni de una cabecera. El router recibe el token y
   nada más.
@@ -131,7 +138,7 @@ garantiza el sistema.
   modo que ninguna instancia ORM entre en el mapa de identidad antes de que la sesión tenga
   tenant. Que el límite 4 de `app/core/db.py` no muerda aquí es entonces estructural y no una
   consecuencia del refcounting de CPython.
-- THE SYSTEM SHALL rechazar cualquier JWT **por ausencia**: ninguna de las cuatro rutas declara
+- THE SYSTEM SHALL rechazar cualquier JWT **por ausencia**: ninguna de las seis rutas declara
   esquema bearer ni dependencia de autenticación, así que no hay código que lea `Authorization`.
   Una petición con un JWT válido y sin token de ruta válido recibe el mismo `404` que cualquier
   otra. Un rechazo explícito sería peor: obligaría a leer la cabecera para poder rechazarla.
@@ -162,9 +169,13 @@ garantiza el sistema.
   - **por IP**, `GUEST_PORTAL_PROBE_LIMIT_PER_MINUTE` (20), alimentado **solo por autorizaciones
     fallidas** y consultado como portón **antes de cualquier consulta**;
   - **por token**, `GUEST_PORTAL_RATE_LIMIT_PER_MINUTE` (60), cobrado **después** de autorizar y
-    con el digest ya resuelto, nunca re-hasheando el segmento de ruta.
+    con el digest ya resuelto, nunca re-hasheando el segmento de ruta. Compartido entre las
+    **seis** rutas del portal, no reservado a una: desde `guest-portal-messaging` el hilo lo gasta
+    también, a razón de una consulta por sondeo del frontend.
 - El segundo importa aquí más que en los webhooks: es lo único que acota cuántas filas de
-  `incidents` puede producir una estancia, porque la incidencia no está deduplicada.
+  `incidents` puede producir una estancia, porque la incidencia no está deduplicada — y, desde
+  `guest-portal-messaging`, lo único que acota cuántas filas de `audit_logs` puede escribir un
+  mensaje del huésped (ver «Mensaje al alojamiento y su hilo»).
 - THE SYSTEM SHALL aplicar el tope de cuerpo general de `/api/v1/` (1 MiB) **antes del routing**,
   sin rama ni ajuste propio, y SHALL devolver `413` sin haber escrito nada — un cuerpo truncado
   llega como desconexión del cliente, y un rechazo que además escribe es peor que cualquiera de
@@ -284,6 +295,62 @@ garantiza el sistema.
 - THE SYSTEM SHALL rechazar en el adaptador cualquier escritura cuyo tenant no coincida con el de
   la entidad, en lugar de confiar en el filtro global, que no cubre los `INSERT`.
 
+### Mensaje al alojamiento y su hilo (`guest-portal-messaging`)
+
+El pipeline de clasificación, escalación y respuesta automática es de
+[`messaging-ai.md`](messaging-ai.md); esta sección cubre solo el contrato de las dos rutas del
+portal — cómo se escribe y se lee, no qué decide el pipeline con lo escrito.
+
+- THE SYSTEM SHALL aceptar en `POST /api/v1/guest/messages/{token}` **exactamente un campo**,
+  `content` (`MultiLineText`, 1..`MAX_MESSAGE_CONTENT_LENGTH` = 4000 caracteres, espacio
+  recortado antes de medir), y SHALL rechazar cualquier otro campo —incluidos `sender_type`,
+  `tenant_id`, `reservation_id`, `property_id` y `conversation_id`— con `422`. El `sender_type`
+  es `GUEST` por construcción de la ruta y NEVER SHALL ser expresable por el llamante.
+- WHEN el mensaje se acepta, THE SYSTEM SHALL ejecutar el pipeline entero de `messaging-ai` —
+  detección de idioma, clasificación, persistencia, evaluación de escalación y respuesta o
+  escalación— en una sola transacción, y responder `201` con el mensaje del huésped tal y como
+  aparecerá en el hilo.
+- THE SYSTEM SHALL crear la conversación de canal `PORTAL` de la estancia si aún no existe, con
+  el primer mensaje del huésped y por ninguna otra vía; ver [`messaging-ai.md`](messaging-ai.md)
+  para el canal y la unicidad de la conversación.
+- THE SYSTEM SHALL exponer `GET /api/v1/guest/messages/{token}` con paginación `?page&per_page`,
+  con los mismos topes que declara `messaging/api/schemas.py` (`MAX_PER_PAGE` = 100, `MAX_PAGE` =
+  100.000), devolviendo los mensajes en **orden cronológico ascendente**. WHEN la petición no
+  declara `page`, THE SYSTEM SHALL devolver la **última** página —la ventana más reciente,
+  ascendente dentro—, porque un hilo se lee por su final; un `page` explícito SHALL seguir
+  alcanzando las anteriores. `total`, `page` y `per_page` viajan siempre en la respuesta.
+- WHEN la estancia todavía no tiene conversación de portal, THE SYSTEM SHALL responder `200` con
+  un hilo vacío, y NEVER SHALL crearla ni responder `404`: leer no abre conversación.
+- THE SYSTEM SHALL emitir un remitente **agrupado en dos valores** —el huésped y el
+  alojamiento— derivado en el backend de `sender_type`, y NEVER SHALL publicar si una respuesta
+  la escribió la IA o una persona, ni `sender_user_id`, ni `confidence_score`, ni `intent`, ni
+  `metadata`, ni `conversation_id`. La exclusión es **estructural**: `PortalMessage` y
+  `PortalThread` (`app/guests/domain/portal_ports.py`, junto a `StayInfo` y por su misma razón)
+  no declaran esos campos, así que ningún serializador futuro puede filtrarlos por descuido.
+  **Residuo declarado**: la agrupación no hace la distinción indecidible — el mismo instante que
+  el mensaje que la provocó, la misma ventana de sondeo y el catálogo cerrado de respuestas la
+  dejan inferible desde fuera del cuerpo — solo que no viaja en la proyección. Detalle completo
+  en `sdd/changes/archive/2026-09-02-guest-portal-messaging/design.md` §«Residuo de R2.2».
+- WHERE la conversación está `PENDING_HUMAN` o `HUMAN_HANDLING`, THE SYSTEM SHALL declararlo
+  como el estado cerrado `AWAITING_HUMAN` («te responderá una persona»), y NEVER SHALL devolver
+  la razón de escalación, que es información interna.
+- THE SYSTEM NEVER SHALL ofrecer al portador del token ninguna ruta para escalar, resolver,
+  cerrar ni reabrir una conversación, ni para listar conversaciones que no sean la de su
+  estancia: los dos puertos del portal (`GuestPortalThreadReader`, `GuestPortalMessageSubmitter`)
+  no declaran ningún otro método.
+- THE SYSTEM SHALL pasar `client_ip` al escritor del mensaje, igual que ya hacen las cuatro rutas
+  existentes: no es un identificador de alcance —tenant, reserva y propiedad siguen saliendo del
+  token—, es la dirección desde la que llegó la petición, y la regla 9 de `steering/security.md`
+  la exige en `actor_ip` de cualquier fila de auditoría que el mensaje dispare.
+- **El throttle por token acota más que el ritmo de la ruta.** Desde este change es también lo
+  único que limita cuántas filas de `audit_logs` puede escribir un portador anónimo: un mensaje
+  clasificado como incidencia abre una y el pipeline audita cada incidencia. Es el mismo patrón
+  de hecho que la tercera excepción de la regla 9 describe para los webhooks, con dos matices que
+  acotan y no eximen — aquí el llamante presenta un token válido, y la fila exige una
+  clasificación de incidencia y no una petición cualquiera. Las filas del mensaje van con
+  `actor_user_id` a `NULL`, así que no cargan el índice por actor que esa excepción protege;
+  cargan la tabla, y el techo es el mismo `GUEST_PORTAL_RATE_LIMIT_PER_MINUTE` de abajo.
+
 ### Auditoría
 
 - WHEN se escribe o modifica PII del huésped por esta vía, THE SYSTEM SHALL registrar la fila de
@@ -371,7 +438,7 @@ garantiza el sistema.
 | Variable | Defecto | Qué hace |
 |---|---|---|
 | `GUEST_PORTAL_TOKEN_GRACE_DAYS` | `2` | Días tras `check_out_date` en que el enlace sigue autorizando |
-| `GUEST_PORTAL_RATE_LIMIT_PER_MINUTE` | `60` | Peticiones por minuto y token, tras autorizar |
+| `GUEST_PORTAL_RATE_LIMIT_PER_MINUTE` | `60` | Peticiones por minuto y token, tras autorizar — repartidas entre las seis rutas |
 | `GUEST_PORTAL_PROBE_LIMIT_PER_MINUTE` | `20` | Autorizaciones **fallidas** por minuto e IP |
 | `GUEST_PORTAL_SUPPORT_CHANNEL` | — | Vía de soporte que se le enseña al huésped |
 
@@ -423,12 +490,17 @@ Ninguna es secreta, así que las tres primeras llevan defecto funcional.
 
 - `backend/app/guests/domain/portal_token.py` — generación y hash del token.
 - `backend/app/guests/domain/portal_authorisation.py` — la regla de vigencia, pura.
-- `backend/app/guests/domain/portal_ports.py` — `GuestAccessToken`, `StayInfo`, `GuestSession` y
-  los puertos.
+- `backend/app/guests/domain/portal_ports.py` — `GuestAccessToken`, `StayInfo`, `GuestSession`,
+  los puertos originales y, desde `guest-portal-messaging`, `PortalMessage`, `PortalThread`,
+  `PortalMessageSender`, `PortalThreadState`, `GuestPortalThreadReader` y
+  `GuestPortalMessageSubmitter`.
 - `backend/app/guests/application/portal.py` — `GuestPortalAuthenticator` y los casos de uso de
   consulta, check-in, emisión y revocación.
+- `backend/app/messaging/application/portal.py` — `PostPortalGuestMessageUseCase` y
+  `ReadPortalThreadUseCase`, los implementadores de los dos puertos de arriba; ver
+  [`messaging-ai.md`](messaging-ai.md) para el pipeline que ejecutan.
 - `backend/app/guests/api/portal_router.py`, `portal_schemas.py`, `portal_dependencies.py` — las
-  cuatro rutas anónimas y su cableado.
+  seis rutas anónimas y su cableado.
 - `backend/app/guests/api/router.py`, `errors.py` — las dos rutas de operador y la traducción del
   conflicto de emisión.
 - `backend/app/guests/infrastructure/portal_repositories.py` — los adaptadores, incluida la

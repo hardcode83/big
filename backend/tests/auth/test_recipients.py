@@ -175,43 +175,46 @@ async def test_active_holders_returns_one_page_of_the_role(
 
 
 @pytest.mark.asyncio
-async def test_dropped_counts_what_the_page_left_out(
+async def test_dropped_is_zero_when_pagination_covers_the_full_roster(
     recipients: RoleRecipients, users: FakeUserRepository, tenant_id: uuid.UUID
 ) -> None:
-    """`page.total - len(page.items)`, which is what makes the silent partial visible.
+    """A tenant whose roster spans more than one page is no longer truncated.
 
-    `EscalateBreachedSlasUseCase` adds this to `EscalationReport.recipients_truncated`, so
-    the helper has to carry it or that consumer could not be absorbed at all — the reason
-    design D1 gives for `dropped` existing from day one rather than being added later.
+    The previous implementation asked for `per_page=MAX_RECIPIENTS` and called it done,
+    so a tenant with more administrative users than that got a silent partial — the exact
+    failure mode `EscalateBreachedSlasUseCase` keeps `recipients_truncated` to surface.
+    R6.2 closes it: the helper pages end-to-end, and `dropped` stays at zero until the
+    safety ceiling (`MAX_PAGE` * `PAGE_SIZE`) is actually exceeded.
     """
-    for index in range(RoleRecipients.MAX_RECIPIENTS + 3):
+    for index in range(RoleRecipients.PAGE_SIZE + 3):
         users.seed(
             _user(tenant_id, role=UserRole.PROPERTY_MANAGER, name=f"Manager{index:03d}")
         )
 
     result = await recipients.managers_or_owners(tenant_id)
 
-    assert len(result.users) == RoleRecipients.MAX_RECIPIENTS
-    assert result.dropped == 3
+    assert len(result.users) == RoleRecipients.PAGE_SIZE + 3
+    assert result.dropped == 0
 
 
 @pytest.mark.asyncio
-async def test_the_fallback_reports_the_truncation_of_the_page_it_actually_used(
+async def test_the_owner_fallback_pages_end_to_end_too(
     recipients: RoleRecipients, users: FakeUserRepository, tenant_id: uuid.UUID
 ) -> None:
-    """The bug the escalation job had before it routed both reads through one helper.
+    """With no manager and more than a page of owners, the helper still returns every owner.
 
-    With no manager and more than a page of owners, only the *fallback* page is truncated —
-    and the counter has to say so. Counting only the primary role is exactly the "silent
-    partial notification" its own docstring says the counter exists to prevent.
+    The bug the escalation job had before it routed both reads through one helper was
+    that the fallback stopped at one page and counted its truncation — a silent partial
+    notification whose counter happened to be zero. The new loop walks both pages the
+    same way; this test pins the fallback path at a roster larger than one page.
     """
-    for index in range(RoleRecipients.MAX_RECIPIENTS + 2):
+    for index in range(RoleRecipients.PAGE_SIZE + 2):
         users.seed(_user(tenant_id, role=UserRole.TENANT_OWNER, name=f"Owner{index:03d}"))
 
     result = await recipients.managers_or_owners(tenant_id)
 
-    assert len(result.users) == RoleRecipients.MAX_RECIPIENTS
-    assert result.dropped == 2
+    assert len(result.users) == RoleRecipients.PAGE_SIZE + 2
+    assert result.dropped == 0
 
 
 # -- the shape of the answer ----------------------------------------------------------
@@ -243,7 +246,7 @@ async def test_it_emits_no_log_of_its_own(
     scheduler's logs; the same event from a cleaning completion is a different key. A helper
     that logged would either invent a third name or force every caller to share one.
     """
-    for index in range(RoleRecipients.MAX_RECIPIENTS + 1):
+    for index in range(RoleRecipients.PAGE_SIZE + 1):
         users.seed(
             _user(tenant_id, role=UserRole.PROPERTY_MANAGER, name=f"Manager{index:03d}")
         )
@@ -251,5 +254,5 @@ async def test_it_emits_no_log_of_its_own(
     with caplog.at_level("DEBUG"):
         result = await recipients.managers_or_owners(tenant_id)
 
-    assert result.dropped == 1
+    assert result.dropped == 0
     assert [r for r in caplog.records if r.name.startswith("app.auth")] == []

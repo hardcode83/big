@@ -92,13 +92,15 @@ def test_it_rejects_an_action_outside_the_vocabulary(action: str) -> None:
         )
 
 
-# `REVIEW` stands for "a real table that is not in the vocabulary yet"; it replaced
-# `OWNER_STATEMENT`, which `revenue-statements` registered (design D7). See the twin
-# note in `test_change_set.py`. The history of the placeholder rolls forward through
+# `CONVERSATION` stands for "a real table that is not in the vocabulary yet"; it replaced
+# `REVIEW`, which `revenue-reviews` registered (R1.7/R3.5) while `revenue-statements` —
+# the change that had just moved the placeholder off `OWNER_STATEMENT` (design D7) — was
+# still open, so the two collided in the merge of #147. See the twin note in
+# `test_change_set.py`. The history of the placeholder rolls forward through
 # `PROPERTY` → `RESERVATION` → `INCIDENT` → `OWNER_APPROVAL` → `PRICING_RULE` →
-# `OWNER_STATEMENT` → `REVIEW`. `reviews` is a `domain-foundation-financial` table whose
-# first writer will be `revenue-reviews`.
-@pytest.mark.parametrize("entity_type", ["User", "users", "REVIEW", ""])
+# `OWNER_STATEMENT` → `REVIEW` → `CONVERSATION`. `conversations` is a `messaging-ai` table
+# that `guest-portal-messaging` writes; nobody has registered it as an audit entity.
+@pytest.mark.parametrize("entity_type", ["User", "users", "CONVERSATION", ""])
 def test_it_rejects_an_entity_type_outside_the_vocabulary(entity_type: str) -> None:
     with pytest.raises(AuditContractError):
         AuditLogFactory.build(

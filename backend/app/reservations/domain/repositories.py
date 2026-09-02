@@ -111,3 +111,22 @@ class ReservationRepository(Protocol):
         isolation rule, and one able to re-point the idempotency key would defeat D9.
         """
         ...
+
+    async def count_check_ins_in_range(
+        self, tenant_id: uuid.UUID, date_from: date, date_to: date
+    ) -> int:
+        """How many reservations check in within `[date_from, date_to]`, both inclusive
+        (`dashboard-operational-kpis` R2).
+
+        **A different question from `list_for_properties`'s stay overlap**: this counts
+        `check_in_date` falling in the window, not "any stay touching it" — R2.1 asks for
+        check-ins, not occupancy. `CANCELLED`/`NO_SHOW` are excluded and baked into the
+        method rather than a parameter, the same reasoning `list_live_for_properties`
+        gives for `LIVE_STATUSES`.
+
+        Tenant-wide, not batched by property: unlike `list_for_properties`, this answers
+        "how many, in total" and has no reason to enumerate properties first.
+
+        Returns `0`, never `None`, when nothing checks in within the window.
+        """
+        ...

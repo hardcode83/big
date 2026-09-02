@@ -32,8 +32,23 @@ def hasher() -> BcryptPasswordHasher:
 
 
 async def insert_tenant(
-    session: AsyncSession, *, name: str | None = None, status: TenantStatus = TenantStatus.ACTIVE
+    session: AsyncSession,
+    *,
+    name: str | None = None,
+    status: TenantStatus = TenantStatus.ACTIVE,
+    with_notification_config: bool = True,
 ) -> TenantModel:
+    """A tenant, with a `TenantConfigModel` row already seeded by default.
+
+    `with_notification_config=False` skips that row — the shape `tests/tenants/` needs to
+    exercise `TenantConfigRepository.get_or_create`'s lazy-creation contract (R5.7): a tenant
+    that arrived through this helper without a config, exactly like one that never went
+    through bootstrap. Every other caller wants the row present, pinned with the two channel
+    flags off, so the resolver returns `{IN_APP}` only and the suite's single-row assertions
+    stay valid — a test that wants both flags on seeds its own `TenantConfigModel`.
+    """
+    from app.tenants.infrastructure.models import TenantConfigModel
+
     tenant = TenantModel(
         id=uuid.uuid4(),
         name=name or f"tenant-{uuid.uuid4().hex[:8]}",
@@ -42,13 +57,22 @@ async def insert_tenant(
     )
     session.add(tenant)
     await session.flush()
+    if with_notification_config:
+        session.add(
+            TenantConfigModel(
+                tenant_id=tenant.id,
+                notification_email_enabled=False,
+                notification_whatsapp_enabled=False,
+            )
+        )
+        await session.flush()
     return tenant
 
 
 async def insert_user(
     session: AsyncSession,
     *,
-    tenant: TenantModel,
+    tenant: TenantModel | None,
     role: UserRole = UserRole.PROPERTY_MANAGER,
     email: str | None = None,
     password: str = PASSWORD,
@@ -66,11 +90,14 @@ async def insert_user(
     WHOLE installation now (design D16, ADR 0005): a fixed default would make any
     test that seeds two users collide, in a different tenant just as much as in the
     same one.
+
+    `tenant=None` seeds a `SUPER_ADMIN` (`super-admin-identity` R1.1) — every other
+    role keeps a concrete tenant, so callers pass one for those.
     """
     raw_email = email or f"user-{uuid.uuid4().hex[:8]}@example.com"
     user = UserModel(
         id=uuid.uuid4(),
-        tenant_id=tenant.id,
+        tenant_id=tenant.id if tenant is not None else None,
         name="Test User",
         email=normalize_email(raw_email) if normalize else raw_email,
         password_hash=await (hasher or BcryptPasswordHasher(rounds=TEST_BCRYPT_ROUNDS)).hash(
@@ -95,17 +122,27 @@ async def tenant_b(db_session: AsyncSession) -> TenantModel:
     return await insert_tenant(db_session, name="tenant-b")
 
 
+def tenant_for_role(role: UserRole, tenant: TenantModel) -> TenantModel | None:
+    """`SUPER_ADMIN` never has a tenant (`super-admin-identity` R1.1/R1.2): the database
+    enforces this now (`ck_users_super_admin_tenant_id_null`), so inserting it WITH one
+    fails the insert outright rather than merely testing an unreachable state. Exported
+    so any test seeding a user per-role (not only the fixtures below) gets this right."""
+    return None if role is UserRole.SUPER_ADMIN else tenant
+
+
 @pytest_asyncio.fixture
 async def users_by_role_a(db_session: AsyncSession, tenant_a: TenantModel) -> dict:
     return {
-        role: await insert_user(db_session, tenant=tenant_a, role=role) for role in UserRole
+        role: await insert_user(db_session, tenant=tenant_for_role(role, tenant_a), role=role)
+        for role in UserRole
     }
 
 
 @pytest_asyncio.fixture
 async def users_by_role_b(db_session: AsyncSession, tenant_b: TenantModel) -> dict:
     return {
-        role: await insert_user(db_session, tenant=tenant_b, role=role) for role in UserRole
+        role: await insert_user(db_session, tenant=tenant_for_role(role, tenant_b), role=role)
+        for role in UserRole
     }
 
 

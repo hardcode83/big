@@ -28,11 +28,12 @@ from app.cleaning.domain.enums import CleaningTaskStatus
 from app.cleaning.domain.notifications import RELATED_TYPE_CLEANING_TASK
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.notifications.application.use_cases import EscalateBreachedSlasUseCase
-from app.notifications.domain.enums import NotificationStatus, NotificationType
+from app.notifications.domain.enums import NotificationChannel, NotificationStatus, NotificationType
 from app.notifications.infrastructure.models import NotificationLogModel
 from app.notifications.infrastructure.repositories import SqlAlchemyNotificationLogRepository
 from app.properties.domain.enums import PropertyOperationalState
 from app.tenants.infrastructure.models import TenantConfigModel
+from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
 from tests.cleaning.conftest import auth_header, insert_task
 
 TASKS = "/api/v1/cleaning-tasks"
@@ -107,10 +108,64 @@ async def test_manual_assignment_writes_the_notification_with_its_deadline(
 
 
 @pytest.mark.asyncio
+async def test_manual_assignment_fans_out_across_the_tenants_enabled_channels(
+    api, db_session, tenant_a, property_a, users_by_role_a, task_a
+):
+    """R1, R2 — the manual assignment path (unlike `_auto_assign`) used to bypass the
+    resolver entirely and always write a single IN_APP row regardless of the tenant's
+    flags. Exercised end to end (real HTTP → `AssignCleaningTaskUseCase` → `dispatch_and_
+    persist`) precisely because that is the path the earlier unit-only coverage of
+    `channel_dispatch.py` could not catch this bypass through.
+    """
+    config = (
+        await db_session.execute(
+            select(TenantConfigModel).where(TenantConfigModel.tenant_id == tenant_a.id)
+        )
+    ).scalar_one()
+    config.notification_email_enabled = True
+    config.notification_whatsapp_enabled = True
+    cleaner = await _insert_cleaner(db_session, tenant_a)
+    cleaner.phone = "+34600000000"
+    db_session.add(cleaner)
+    await db_session.flush()
+
+    response = await api.patch(
+        f"{TASKS}/{task_a.id}",
+        json={"assigned_cleaner_id": str(cleaner.id)},
+        headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER]),
+    )
+    assert response.status_code == 200
+
+    logs = await _logs_of(db_session, tenant_a.id)
+    by_channel = {log.channel: log for log in logs}
+    assert set(by_channel) == {
+        NotificationChannel.IN_APP,
+        NotificationChannel.EMAIL,
+        NotificationChannel.WHATSAPP,
+    }
+    assert by_channel[NotificationChannel.IN_APP].recipient_contact == cleaner.email
+    assert by_channel[NotificationChannel.EMAIL].recipient_contact == cleaner.email
+    assert by_channel[NotificationChannel.WHATSAPP].recipient_contact == cleaner.phone
+    # R4.1 — only the IN_APP row carries the SLA deadline.
+    assert by_channel[NotificationChannel.IN_APP].sla_deadline_at is not None
+    assert by_channel[NotificationChannel.EMAIL].sla_deadline_at is None
+    assert by_channel[NotificationChannel.WHATSAPP].sla_deadline_at is None
+    assert all(log.status is NotificationStatus.PENDING for log in logs)
+
+
+@pytest.mark.asyncio
 async def test_the_deadline_follows_the_tenants_configured_sla(
     api, db_session, tenant_a, users_by_role_a, task_a
 ):
-    db_session.add(TenantConfigModel(tenant_id=tenant_a.id, sla_medium_minutes=30))
+    # `insert_tenant` (tests/auth/conftest.py) already seeds a `TenantConfigModel` row with
+    # the channel flags pinned off — update it rather than inserting a second one, which
+    # would collide with the unique constraint on `tenant_id`.
+    config = (
+        await db_session.execute(
+            select(TenantConfigModel).where(TenantConfigModel.tenant_id == tenant_a.id)
+        )
+    ).scalar_one()
+    config.sla_medium_minutes = 30
     cleaner = await _insert_cleaner(db_session, tenant_a)
     await db_session.flush()
 
@@ -330,6 +385,7 @@ async def test_an_answered_assignment_never_escalates(
     report = await EscalateBreachedSlasUseCase(
         notifications=SqlAlchemyNotificationLogRepository(db_session),
         users=SqlAlchemyUserRepository(db_session),
+        tenant_configs=SqlAlchemyTenantConfigRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
     ).execute(tenant_id=tenant_a.id, now=deadline + timedelta(days=7))
 
@@ -370,6 +426,7 @@ async def test_an_unanswered_assignment_escalates_to_the_manager(
     report = await EscalateBreachedSlasUseCase(
         notifications=SqlAlchemyNotificationLogRepository(db_session),
         users=SqlAlchemyUserRepository(db_session),
+        tenant_configs=SqlAlchemyTenantConfigRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
     ).execute(
         tenant_id=tenant_a.id,
@@ -411,6 +468,7 @@ async def test_a_pending_assignment_is_not_a_breach_candidate(
     report = await EscalateBreachedSlasUseCase(
         notifications=SqlAlchemyNotificationLogRepository(db_session),
         users=SqlAlchemyUserRepository(db_session),
+        tenant_configs=SqlAlchemyTenantConfigRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
     ).execute(
         tenant_id=tenant_a.id, now=assignment.sla_deadline_at + timedelta(days=7)

@@ -14,6 +14,7 @@ from app.messaging.domain.value_objects import (
     ChannelSendResult,
     ConversationContext,
     GeneratedResponse,
+    InboundMessageActor,
     MessageClassification,
 )
 
@@ -147,8 +148,7 @@ class IncidentReportingPort(Protocol):
         reservation_id: uuid.UUID | None,
         title: str,
         description: str,
-        actor_user_id: uuid.UUID,
-        ip: str | None,
+        actor: InboundMessageActor,
         now: datetime,
     ) -> uuid.UUID:
         """Open the incident and return its id. **Never commits** — the implementer is given a
@@ -159,11 +159,30 @@ class IncidentReportingPort(Protocol):
         `maintenance` D2 picks up on its next tick. Not one line of `IncidentClassifier` runs
         in this change.
 
-        `actor_user_id` is a **human** actor and is required. A guest's message reaches this
-        system through the panel or the API with an authenticated user at the keyboard, so
-        there is always one — which is why this change needs **no new exception to rule 9** of
-        `steering/security.md`. That is worth saying out loud, because the rule's fourth
-        exception (automatic classification with no actor) invites the opposite assumption.
+        `actor` is **either** a human or the bearer of a portal link, never both and never
+        neither — `InboundMessageActor` refuses the other two shapes (`guest-portal-messaging`
+        R4.1, D8). Until that change this parameter was a required `actor_user_id: uuid.UUID`,
+        and the prose here said a human is always at the keyboard because the only door into
+        this pipeline was `POST /conversations/{id}/messages` with `MANAGE_CONVERSATIONS`.
+        `POST /api/v1/guest/messages/{token}` is the second door and there is no user behind
+        it.
+
+        **This still needs no new exception to rule 9** of `steering/security.md`, and the
+        reason is not that the actor is a person. It is that **no exemption is being taken**:
+        rule 9's base obligation names `Incident`, this path writes that `AuditLog` row, and
+        the rule nowhere requires the actor be a `User`. The token bearer is named by its
+        digest in `actor_guest_token_hash` — the actor `guest-portal-api` established for the
+        anonymous surface — and `AuditLogFactory` refuses a row claiming both and a digest
+        that is not SHA-256.
+
+        Deliberately **not** argued as "rule 9's exceptions are about writes with no actor, so
+        having one puts us outside them". That reading is false about the rule — only its
+        fourth and fifth exceptions rest on an absent actor; the first is about a bespoke sink
+        for a `SYSTEM` transition, and the second and third are both cadence arguments (the
+        third scoped to an anonymous route, whose cadence the rule calls "peor que la de la
+        segunda") — and it is a general-sounding criterion of exactly the shape rule 9's
+        closing paragraph refuses ("este razonamiento **no es un criterio reutilizable**"). Raised by
+        the security panel of section 2, which found that argument here.
 
         `title` comes from a closed catalogue of constants; `description` is the guest's
         message **verbatim**, with nothing added, removed or paraphrased (D13).

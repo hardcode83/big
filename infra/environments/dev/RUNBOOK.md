@@ -213,11 +213,11 @@ docker compose -f docker-compose.deploy.yml exec postgres \
 
 Decidir cuál fila se queda, borrar o corregir el resto, y re-lanzar el deploy. Por qué existe ese índice: el login recibe solo `{email, password}`, así que si una dirección puede existir dos veces **no identifica la cuenta**, y quien pueda crear usuarios en otro tenant deja fuera del producto a una cuenta existente sin que haya endpoint de desbloqueo (ADR 0005, design D16/D19).
 
-### 6.5 Crear los usuarios iniciales en el entorno desplegado (change `auth-tenancy`)
+### 6.5 Crear los usuarios iniciales en el entorno desplegado (changes `auth-tenancy`, `super-admin-identity`)
 
 El producto no tiene registro público, así que tras un arranque en frío **no hay ninguna cuenta con la que entrar** hasta que se ejecuta el bootstrap. No está en el pipeline a propósito: las contraseñas las elige una persona, así que no encajan en el patrón `random_*` + Vault que usa el resto de secretos (`steering/security.md` §8) y no deben quedar escritas en el `.env` que el workflow reescribe en cada deploy.
 
-Se hace **una vez**, a mano. **No con `-e` en la línea de comandos**: eso deja las dos contraseñas más privilegiadas del despliegue en el `~/.bash_history` del operador y, mientras corre, en un `/proc/<pid>/cmdline` legible por cualquiera de la máquina (CWE-214). Se pasan por un fichero temporal con permisos `600` que se borra al terminar:
+Se hace **una vez**, a mano. **No con `-e` en la línea de comandos**: eso deja las tres contraseñas más privilegiadas del despliegue en el `~/.bash_history` del operador y, mientras corre, en un `/proc/<pid>/cmdline` legible por cualquiera de la máquina (CWE-214). Se pasan por un fichero temporal con permisos `600` que se borra al terminar:
 
 ```bash
 # en la VM, en el directorio del proyecto compose
@@ -230,6 +230,9 @@ BOOTSTRAP_OWNER_PASSWORD=...
 BOOTSTRAP_MANAGER_NAME=...
 BOOTSTRAP_MANAGER_EMAIL=...
 BOOTSTRAP_MANAGER_PASSWORD=...
+BOOTSTRAP_SUPER_ADMIN_NAME=...
+BOOTSTRAP_SUPER_ADMIN_EMAIL=...
+BOOTSTRAP_SUPER_ADMIN_PASSWORD=...
 EOF
 
 # el heredoc con 'EOF' entre comillas no expande nada, y el fichero nace en 600

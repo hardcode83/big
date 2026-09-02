@@ -26,9 +26,14 @@ function contractEventTypes(): string[] {
 }
 
 describe("TIMELINE_EVENT_TYPES (R2.1)", () => {
-  it("carries 48 values with no duplicate", () => {
-    expect(TIMELINE_EVENT_TYPES).toHaveLength(48);
-    expect(new Set(TIMELINE_EVENT_TYPES).size).toBe(48);
+  it("matches the published TimelineEventType enum, value and count", () => {
+    // The contract is the source of truth — the count is derived so the assertion
+    // cannot drift when the backend enum grows (which is exactly what revenue-reviews
+    // does, adding REVIEW_CREATED / REVIEW_DRAFT_EDITED / REVIEW_CLASSIFIED_LOW_CONFIDENCE
+    // / REVIEW_IGNORED / REVIEW_POSTED_MANUALLY).
+    const contract = contractEventTypes();
+    expect(TIMELINE_EVENT_TYPES).toHaveLength(contract.length);
+    expect(new Set(TIMELINE_EVENT_TYPES).size).toBe(contract.length);
   });
 
   it("is exactly the TimelineEventType enum of the published contract", () => {

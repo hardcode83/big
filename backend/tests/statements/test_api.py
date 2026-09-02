@@ -33,7 +33,6 @@ from app.properties.domain.enums import PropertyStatus
 from app.properties.infrastructure.models import PropertyModel
 from app.statements.domain.enums import ExpenseCategory, OwnerStatementStatus
 from app.statements.infrastructure.models import ExpenseModel, OwnerStatementModel
-from app.tenants.infrastructure.models import TenantConfigModel
 from tests.auth.conftest import (  # noqa: F401 — shared integration fixtures (see below)
     tenant_a,
     tenant_b,
@@ -116,10 +115,10 @@ async def world(
     property_a,
     property_b,
 ) -> World:
-    # Seed the tenant configs (the threshold check reads from them).
-    db_session.add(TenantConfigModel(tenant_id=tenant_a.id))
-    db_session.add(TenantConfigModel(tenant_id=tenant_b.id))
-    await db_session.flush()
+    # The threshold check reads each tenant's config row. Since `notification-channel-routing`
+    # (PR #143) `tests/auth/conftest.py::insert_tenant` seeds that row itself, so `tenant_a`
+    # and `tenant_b` already carry one — adding a second here trips
+    # `tenant_configs_tenant_id_key` (the CI failure of PR #147 before its base sync).
     return World(
         tenant_a,
         tenant_b,

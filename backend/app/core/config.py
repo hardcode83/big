@@ -213,9 +213,12 @@ class Settings(BaseSettings):
     guest_portal_token_grace_days: int = 2
     # Two limits, asymmetric on purpose, and the reasoning is NOT the webhook one above even
     # though the shape is (D6). The per-token limit is generous and charged **after** a
-    # successful authorisation. It bounds the four routes of PRD §23 — and for
-    # `POST /guest/incident`, which is deliberately not idempotent (D13), it is the only thing
-    # bounding how many `incidents` rows one stay can produce.
+    # successful authorisation. It is **one budget shared by every portal route** — six of them
+    # since `guest-portal-messaging` added `GET`/`POST /guest/messages/{token}`, recounted
+    # against `portal_router.py` rather than incremented — which is what makes the polling of
+    # that change's thread a cost the other routes feel. And for `POST /guest/incident`, which
+    # is deliberately not idempotent (D13), it is the only thing bounding how many `incidents`
+    # rows one stay can produce.
     guest_portal_rate_limit_per_minute: int = 60
     # The per-IP limit is strict and counted **only over failed authorisations**, asked
     # before any lookup — that is what makes guessing a token cost something (R2.4). Keyed by
@@ -338,6 +341,14 @@ class Settings(BaseSettings):
     bootstrap_manager_email: str = ""
     bootstrap_manager_password: str = ""
 
+    # The third bootstrap seed (`super-admin-identity` R5.1): a `SUPER_ADMIN` with no
+    # tenant, so the identity model is verifiable end to end and not just declarable in
+    # the schema. Same pattern as the eight above — no defaults, real passwords only
+    # (steering/security.md #8).
+    bootstrap_super_admin_name: str = ""
+    bootstrap_super_admin_email: str = ""
+    bootstrap_super_admin_password: str = ""
+
     # Demo dataset (`make seed-demo`, change `seed-data-demo` design D4). Only the two
     # operational accounts: the owner and the manager are whoever BOOTSTRAP_* already named,
     # resolved by role, so re-declaring them here would let the two declarations disagree.
@@ -355,7 +366,7 @@ class Settings(BaseSettings):
     seed_technician_password: str = ""
 
     # The single password of the four demonstration accounts (`make demo-reset`, change
-    # `demo-user` design D3). No default, exactly like the eight BOOTSTRAP_*/SEED_* above: a
+    # `demo-user` design D3). No default, exactly like the BOOTSTRAP_*/SEED_* settings above: a
     # default here would be a known credential shipped in the tree, and the demo tenant lives in
     # a publicly reachable environment. Its floor is `PASSWORD_MIN_LENGTH`, checked by
     # `app/cli/demo_reset.py:build_plan` before any transaction opens rather than by a

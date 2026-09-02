@@ -1,4 +1,5 @@
-"""The notifications an incident produces, and the SLA deadline one of them opens (R3, design D12).
+"""The notifications an incident produces, and the SLA deadline one of them opens (R3, design D12;
+`notification-channel-routing` R2, R4).
 
 Pure builders, calqued on `app/cleaning/domain/notifications.py`, so the **content** of what
 gets written is testable without a session and lives next to the rule that shapes it — rule 11
@@ -14,6 +15,13 @@ declared in `app/notifications/domain/escalation.py` — it said `SLA_BREACH` un
 `notification-writers-gap` R3.1 gave the technician branch its own name. Unlike when `cleaning` wrote its own, the deadline
 now works end to end: `access-notifications` left a `dispatch_notifications` that moves
 `PENDING → SENT`, and `SENT` is what the breach query requires.
+
+**Channel + contact (notification-channel-routing R2, R4, design D2, D3).** Each builder
+accepts `channel: NotificationChannel = IN_APP` and `contact: str | None = None` as
+**optional** kwargs. `recipient_contact` derives from `contact` when given, otherwise
+falls back to the legacy parameter (R6.1, R6.3). `sla_deadline_at` is set only when
+`channel == IN_APP` (R4.1) — the row the inbox shows is the only one the SLA breach
+query can ever reach.
 """
 
 import uuid
@@ -28,21 +36,14 @@ from app.notifications.domain.enums import (
 )
 from app.tenants.domain.entities import TenantConfig
 
-#: `related_type` for a row that points at `incidents`. A constant because the SLA job reads
-#: it back through the polymorphic pair and a second spelling would orphan those rows — and
-#: because `cancel_sla_deadline` is called with the same literal from three use cases.
 RELATED_TYPE_INCIDENT = "incident"
 
-#: Which `TenantConfig` field carries the deadline of each severity (R3.2, PRD §11). A
-#: mapping rather than a chain of `if`s so that a severity added to the enum later fails
-#: loudly in `sla_minutes_for` instead of silently inheriting somebody else's deadline.
 _SLA_FIELD_BY_SEVERITY: dict[IncidentSeverity, str] = {
     IncidentSeverity.CRITICAL: "sla_critical_minutes",
     IncidentSeverity.HIGH: "sla_high_minutes",
     IncidentSeverity.MEDIUM: "sla_medium_minutes",
     IncidentSeverity.LOW: "sla_low_minutes",
 }
-
 
 def sla_minutes_for(severity: IncidentSeverity, config: TenantConfig) -> int:
     """How long the technician has, per the tenant's own configuration (R3.2).
@@ -56,16 +57,17 @@ def sla_minutes_for(severity: IncidentSeverity, config: TenantConfig) -> int:
         raise KeyError(f"No SLA deadline is configured for severity {severity!r}")
     return int(getattr(config, field))
 
-
 def technician_assignment_notification(
     *,
     tenant_id: uuid.UUID,
     incident_id: uuid.UUID,
     property_id: uuid.UUID,
     technician_id: uuid.UUID,
-    recipient_contact: str,
+    recipient_contact: str = "",
     sla_minutes: int,
     now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
 ) -> NotificationLog:
     """What the technician is told when an incident is handed to them (R3.1, R3.2).
 
@@ -76,13 +78,18 @@ def technician_assignment_notification(
     The deadline is opened here and cancelled by `accept` (R3.3) and by a reassignment
     (R3.5), both through `cancel_sla_deadline` on this same `related_type`/`related_id`
     pair — which is why the pair points at the **incident** and not at this row.
+
+    **Channel fan-out (R4.1)**: only the IN_APP row carries `sla_deadline_at`; siblings
+    stay `NULL`. Together with `list_sla_breach_candidates` requiring
+    `sla_deadline_at IS NOT NULL`, this is what keeps a fanned-out notification producing
+    a single SLA-breach candidate.
     """
     return NotificationLog(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         recipient_user_id=technician_id,
-        recipient_contact=recipient_contact,
-        channel=NotificationChannel.IN_APP,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
         notification_type=NotificationType.TECHNICIAN_ASSIGNED.value,
         created_at=now,
         updated_at=now,
@@ -94,21 +101,12 @@ def technician_assignment_notification(
         status=NotificationStatus.PENDING,
         related_type=RELATED_TYPE_INCIDENT,
         related_id=incident_id,
-        sla_deadline_at=now + timedelta(minutes=sla_minutes),
+        sla_deadline_at=now + timedelta(minutes=sla_minutes)
+        if channel == NotificationChannel.IN_APP
+        else None,
     )
 
-
-#: The `notification_type` of the row a refusal leaves for the manager (R1.4, design D3).
-#:
-#: A **plain string constant and not a member of `NotificationType`**, which is what `guests`
-#: already does with `LEGAL_REGISTRATION_FAILED`, and for its three reasons: `NotificationType`
-#: is the sixteen canonical names of PRD §14 and this is not one of them; the column is free
-#: text since `domain-foundation-financial`, so there is **no migration**; and
-#: `escalation_for` returns `None` for a type it does not recognise, which is exactly the "no
-#: SLA deadline and no escalation" R1.4 demands — obtained by construction rather than by an
-#: omission somebody could later fill in.
 NOTIFICATION_TYPE_INCIDENT_REJECTED = "INCIDENT_REJECTED"
-
 
 def incident_rejection_notification(
     *,
@@ -116,8 +114,10 @@ def incident_rejection_notification(
     incident_id: uuid.UUID,
     property_id: uuid.UUID,
     manager_id: uuid.UUID,
-    recipient_contact: str,
+    recipient_contact: str = "",
     now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
 ) -> NotificationLog:
     """What the manager is told when the technician says no (R1.4).
 
@@ -130,7 +130,7 @@ def incident_rejection_notification(
     Subject and body are a constant plus identifiers, never the content of another row — the
     contract rule 11 of `sdd/steering/security.md` fixes for
     `notification_logs.subject`/`body`. Nothing here reads the incident's `title`,
-    `description`, `ai_summary` or the note the manager had written for the technician.
+    `description`, `ai_summary` or the note the manager had written for the the technician.
 
     The polymorphic pair points at the **incident** like its two siblings, so everything this
     module notifies about one incident is reachable by one query.
@@ -139,8 +139,8 @@ def incident_rejection_notification(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         recipient_user_id=manager_id,
-        recipient_contact=recipient_contact,
-        channel=NotificationChannel.IN_APP,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
         notification_type=NOTIFICATION_TYPE_INCIDENT_REJECTED,
         created_at=now,
         updated_at=now,
@@ -154,7 +154,6 @@ def incident_rejection_notification(
         related_id=incident_id,
     )
 
-
 def owner_approval_notification(
     *,
     tenant_id: uuid.UUID,
@@ -162,8 +161,10 @@ def owner_approval_notification(
     property_id: uuid.UUID,
     approval_id: uuid.UUID,
     owner_id: uuid.UUID,
-    recipient_contact: str,
+    recipient_contact: str = "",
     now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
 ) -> NotificationLog:
     """What the owner is told when a cost needs their answer (R2.3).
 
@@ -179,8 +180,8 @@ def owner_approval_notification(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         recipient_user_id=owner_id,
-        recipient_contact=recipient_contact,
-        channel=NotificationChannel.IN_APP,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
         notification_type=NotificationType.OWNER_APPROVAL_REQUIRED.value,
         created_at=now,
         updated_at=now,
@@ -194,15 +195,16 @@ def owner_approval_notification(
         related_id=incident_id,
     )
 
-
 def incident_critical_notification(
     *,
     tenant_id: uuid.UUID,
     incident_id: uuid.UUID,
     property_id: uuid.UUID,
     manager_id: uuid.UUID,
-    recipient_contact: str,
+    recipient_contact: str = "",
     now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
 ) -> NotificationLog:
     """What the manager is told when an incident turns out to be CRITICAL (R1.1).
 
@@ -227,8 +229,8 @@ def incident_critical_notification(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         recipient_user_id=manager_id,
-        recipient_contact=recipient_contact,
-        channel=NotificationChannel.IN_APP,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
         notification_type=NotificationType.INCIDENT_CREATED_CRITICAL.value,
         created_at=now,
         updated_at=now,
@@ -242,15 +244,16 @@ def incident_critical_notification(
         related_id=incident_id,
     )
 
-
 def incident_high_notification(
     *,
     tenant_id: uuid.UUID,
     incident_id: uuid.UUID,
     property_id: uuid.UUID,
     manager_id: uuid.UUID,
-    recipient_contact: str,
+    recipient_contact: str = "",
     now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
 ) -> NotificationLog:
     """What the manager is told when an incident turns out to be HIGH (R1.2).
 
@@ -269,8 +272,8 @@ def incident_high_notification(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         recipient_user_id=manager_id,
-        recipient_contact=recipient_contact,
-        channel=NotificationChannel.IN_APP,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
         notification_type=NotificationType.INCIDENT_CREATED_HIGH.value,
         created_at=now,
         updated_at=now,

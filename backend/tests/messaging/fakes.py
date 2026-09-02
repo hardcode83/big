@@ -17,7 +17,11 @@ from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.repositories import UserFilters, UserPage
 from app.guests.domain.value_objects import GuestSummary
 from app.messaging.domain.entities import Conversation, Message
-from app.messaging.domain.enums import MessageIntent, MessageSenderType
+from app.messaging.domain.enums import (
+    ConversationChannel,
+    MessageIntent,
+    MessageSenderType,
+)
 from app.messaging.domain.exceptions import ConversationNotFoundError
 from app.messaging.domain.repositories import (
     ConversationFilters,
@@ -41,6 +45,10 @@ class FakeConversationRepository:
     def __init__(self, *conversations: Conversation) -> None:
         self.rows: dict[uuid.UUID, Conversation] = {c.id: c for c in conversations}
         self.saves = 0
+        #: Recorded whole so a test can assert **which** anchors the caller passed — R1.3 says
+        #: they come from the `GuestSession` and from nowhere else, and `ensure_portal` does not
+        #: check them itself.
+        self.ensure_portal_calls: list[dict] = []
 
     async def add(self, tenant_id: uuid.UUID, conversation: Conversation) -> None:
         self.rows[conversation.id] = conversation
@@ -56,6 +64,62 @@ class FakeConversationRepository:
     async def save(self, tenant_id: uuid.UUID, conversation: Conversation) -> None:
         self.saves += 1
         self.rows[conversation.id] = conversation
+
+    async def ensure_portal(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        reservation_id: uuid.UUID,
+        property_id: uuid.UUID,
+        guest_id: uuid.UUID | None,
+        language: str,
+        now,
+    ) -> Conversation:
+        """The in-memory twin of `INSERT … ON CONFLICT DO NOTHING` + `SELECT`.
+
+        Idempotent like the real one, and — the half worth copying — it does **not** overwrite
+        the language of an existing row, because that is what R3.3 turns on and what a
+        `DO UPDATE` would silently change. The race itself is not modelled here: the real
+        adapter's concurrency contract is proved against Postgres in `test_repositories.py`,
+        which is the only place it can be.
+        """
+        self.ensure_portal_calls.append(
+            {
+                "tenant_id": tenant_id,
+                "reservation_id": reservation_id,
+                "property_id": property_id,
+                "guest_id": guest_id,
+                "language": language,
+            }
+        )
+        existing = await self.find_portal(tenant_id, reservation_id)
+        if existing is not None:
+            return existing
+        conversation = Conversation(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            channel=ConversationChannel.PORTAL,
+            created_at=now,
+            updated_at=now,
+            property_id=property_id,
+            reservation_id=reservation_id,
+            guest_id=guest_id,
+            language=language,
+        )
+        self.rows[conversation.id] = conversation
+        return conversation
+
+    async def find_portal(
+        self, tenant_id: uuid.UUID, reservation_id: uuid.UUID
+    ) -> Conversation | None:
+        for row in self.rows.values():
+            if (
+                row.tenant_id == tenant_id
+                and row.reservation_id == reservation_id
+                and row.channel is ConversationChannel.PORTAL
+            ):
+                return row
+        return None
 
     async def list(
         self,
@@ -191,8 +255,7 @@ class FakeIncidentReportingPort:
         reservation_id,
         title,
         description,
-        actor_user_id,
-        ip,
+        actor,
         now,
     ) -> uuid.UUID:
         incident_id = uuid.uuid4()
@@ -204,8 +267,10 @@ class FakeIncidentReportingPort:
                 "reservation_id": reservation_id,
                 "title": title,
                 "description": description,
-                "actor_user_id": actor_user_id,
-                "ip": ip,
+                # Recorded whole (`guest-portal-messaging` R4.1, D8), so a test can assert
+                # which of the two actors the pipeline handed down without this fake having
+                # an opinion about which one is legitimate.
+                "actor": actor,
             }
         )
         return incident_id
@@ -258,6 +323,11 @@ class FakeGuestRepository:
 @dataclass
 class FakeTenantConfigRepository:
     threshold: Decimal = Decimal("0.75")
+    # `notification-channel-routing` — pinned off so the resolver returns `{IN_APP}` only
+    # and this suite's single-row assertions stay valid. A test that wants both flags on
+    # passes them explicitly.
+    notification_email_enabled: bool = False
+    notification_whatsapp_enabled: bool = False
 
     async def get_or_create(self, tenant_id: uuid.UUID, now: datetime) -> TenantConfig:
         return TenantConfig(
@@ -266,6 +336,8 @@ class FakeTenantConfigRepository:
             created_at=now,
             updated_at=now,
             ai_confidence_threshold=self.threshold,
+            notification_email_enabled=self.notification_email_enabled,
+            notification_whatsapp_enabled=self.notification_whatsapp_enabled,
         )
 
 
@@ -299,6 +371,7 @@ def make_user(
     tenant_id: uuid.UUID,
     *,
     email: str = "manager@example.com",
+    phone: str | None = None,
     role: UserRole = UserRole.PROPERTY_MANAGER,
     status: UserStatus = UserStatus.ACTIVE,
 ) -> User:
@@ -307,6 +380,7 @@ def make_user(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         email=email,
+        phone=phone,
         password_hash="x" * 60,
         name="Manager",
         role=role,

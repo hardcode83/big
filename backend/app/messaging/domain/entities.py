@@ -208,6 +208,29 @@ class Conversation:
         self.status = status_target
         self.updated_at = now
 
+    def is_handed_over(self) -> bool:
+        """Whether a person already has this conversation (`PENDING_HUMAN`/`HUMAN_HANDLING`).
+
+        **On the entity so the two readers cannot diverge** (`guest-portal-messaging` D9). The
+        pipeline asks it to decide whether the AI should still answer; the portal's thread
+        reader asks it to decide whether to tell the guest a person will reply (R2.3). Those
+        are the same question about the same axis, and while it was a private helper of
+        `application/use_cases.py` the second reader would have had to restate the pair of
+        members — the shape in which the two answers drift.
+
+        It is a rule about a `Conversation`, so it belongs here rather than in `application/`,
+        by the same reading of `steering/backend-architecture.md` that moved `contact_kind_for`
+        into `domain/`.
+
+        **`RESOLVED` is not "handed over"**: the escalation is finished, and a new message
+        reopens the conversation with the axis back at `NONE` (D4), so the AI answers again —
+        which is right, because that is a new problem.
+        """
+        return self.escalation_status in (
+            ConversationEscalationStatus.PENDING_HUMAN,
+            ConversationEscalationStatus.HUMAN_HANDLING,
+        )
+
     def register_message(self, *, now: datetime) -> None:
         """Record that a message landed (R1.4).
 

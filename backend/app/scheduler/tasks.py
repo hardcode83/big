@@ -66,6 +66,16 @@ from app.pricing.infrastructure.repositories import (
     SqlAlchemyPriceRecommendationRepository,
     SqlAlchemyPricingRuleRepository,
 )
+from app.reviews.application.use_cases import ClassifyPendingReviewsUseCase
+from app.reviews.domain.ports import (
+    AIReviewAnalyzer,
+    AIReviewDraftGenerator,
+)
+from app.reviews.infrastructure.ai import MockReviewAnalyzer, MockReviewDraftGenerator
+from app.reviews.infrastructure.repositories import (
+    SqlAlchemyReviewRepository,
+    SqlAlchemyReviewResponseDraftRepository,
+)
 from app.properties.application.use_cases import AdvancePropertyStatesUseCase
 from app.properties.domain.transition_enums import PropertyStateTrigger
 from app.properties.infrastructure.repositories import (
@@ -151,6 +161,7 @@ async def _escalate(session: AsyncSession, tenant_id, now: datetime):
     use_case = EscalateBreachedSlasUseCase(
         notifications=SqlAlchemyNotificationLogRepository(session),
         users=SqlAlchemyUserRepository(session),
+        tenant_configs=SqlAlchemyTenantConfigRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
     return await use_case.execute(tenant_id=tenant_id, now=now)
@@ -205,6 +216,36 @@ async def _classify_incidents(session: AsyncSession, tenant_id, now: datetime):
     return await use_case.execute(tenant_id=tenant_id, now=now)
 
 
+async def _classify_reviews(
+    session: AsyncSession,
+    tenant_id,
+    now: datetime,
+    *,
+    analyzer: AIReviewAnalyzer,
+    draft_generator: AIReviewDraftGenerator,
+):
+    """`revenue-reviews` (R2, design D2, D16): put every unclassified `NEW` review
+    through the pipeline.
+
+    Same shape as `classify_incidents`: the use case commits per-review, the loop walks
+    the tenant, and a tenant whose pipeline is down all night still keeps what it
+    classified so far. `MockReviewAnalyzer` and `MockReviewDraftGenerator` are the
+    only implementers this change ships; a real provider replaces them at the same
+    wiring point.
+    """
+    use_case = ClassifyPendingReviewsUseCase(
+        reviews=SqlAlchemyReviewRepository(session),
+        drafts=SqlAlchemyReviewResponseDraftRepository(session),
+        analyzer=analyzer,
+        draft_generator=draft_generator,
+        configs=SqlAlchemyTenantConfigRepository(session),
+        audit=SqlAlchemyAuditLogRepository(session),
+        timeline=SqlAlchemyTimelineEventRepository(session),
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+    return await use_case.execute(tenant_id=tenant_id, now=now)
+
+
 async def _generate_price_recommendations(session: AsyncSession, tenant_id, now: datetime):
     """`revenue-pricing` R4.1: the whole portfolio's 60-day horizon, once a day.
 
@@ -224,6 +265,7 @@ async def _generate_price_recommendations(session: AsyncSession, tenant_id, now:
         # with no human watching, which is why the notification matters most here.
         users=SqlAlchemyUserRepository(session),
         notifications=SqlAlchemyNotificationLogRepository(session),
+        tenant_configs=SqlAlchemyTenantConfigRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
     return await use_case.execute(tenant_id=tenant_id, now=now, property_id=None, actor=None)
@@ -510,6 +552,37 @@ def classify_incidents() -> dict:
     return run_sync(
         _guarded("classify_incidents", CADENCES["classify_incidents"], _classify_incidents)
     )
+
+
+REVIEW_TASK = "classify_reviews"
+
+
+@celery_app.task(name=REVIEW_TASK)
+def classify_reviews() -> dict:
+    """`revenue-reviews` (R2, design D2): every `NEW` review through the pipeline.
+
+    Same cadence and same reasoning as `classify_incidents` — PRD §18 declares the
+    pipeline and says nothing about what triggers it, and the day a real AI provider
+    sits behind the port, the cadence is the ceiling on what it is asked.
+
+    The mocks are constructed here, at the wiring point, and a real provider replaces
+    them here too: `MockReviewAnalyzer` and `MockReviewDraftGenerator` are the only
+    implementers this change ships (`EXTERNAL_DEPENDENCY`).
+    """
+    return run_sync(
+        _guarded(
+            REVIEW_TASK,
+            CADENCES[REVIEW_TASK],
+            lambda session, tenant_id, now: _classify_reviews(
+                session,
+                tenant_id,
+                now,
+                analyzer=MockReviewAnalyzer(),
+                draft_generator=MockReviewDraftGenerator(),
+            ),
+        )
+    )
+
 
 
 @celery_app.task(name="provision_access_records")

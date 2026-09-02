@@ -335,6 +335,26 @@ jobs:
         working-directory: backend
         run: uv sync --frozen
 
+      - name: El grafo de migraciones tiene una sola cabeza
+        # Dos changes que ramifican de la misma revisión y se mergean por separado dejan dos
+        # hojas, y `alembic upgrade head` se niega a elegir una. Cada PR es verde por sí solo:
+        # el segundo en mergear no vuelve a pasar sus checks sobre el `main` que acaba de
+        # moverse, así que el primer sitio donde se ven las dos cabezas es este job en el push
+        # a `main` (2026-09-02, PRs #146 y #151). Se comprueba aquí con mensaje propio en vez
+        # de dejar que lo descubra el `upgrade head` de abajo, y `deploy-dev.yml` repite la
+        # comprobación sobre la imagen ANTES de tocar contenedores, que es lo que evita la
+        # caída. `alembic heads` solo lee el directorio de scripts; no toca la base de datos.
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          heads="$(uv run alembic heads)"
+          count="$(printf '%s\n' "$heads" | grep -c '(head)' || true)"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::el grafo de Alembic tiene ${count} cabezas; añade una revisión de merge (alembic merge) antes de mergear"
+            printf '%s\n' "$heads"
+            exit 1
+          fi
+
       - name: Migraciones sobre PostgreSQL limpio
         working-directory: backend
         run: uv run alembic upgrade head

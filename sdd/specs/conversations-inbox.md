@@ -133,7 +133,7 @@ con intent `MAINTENANCE_ISSUE`/`ACCESS_PROBLEM`, portal del huésped, transcripc
   |---|---|
   | `ConversationStatus` | `OPEN`, `RESOLVED`, `ESCALATED`, `CLOSED` |
   | `ConversationEscalationStatus` | `NONE`, `PENDING_HUMAN`, `HUMAN_HANDLING`, `RESOLVED` |
-  | `ConversationChannel` | `WHATSAPP`, `AIRBNB_MSG`, `BOOKING_MSG`, `EMAIL`, `PHONE_TRANSCRIPT`, `MANUAL` |
+  | `ConversationChannel` | `WHATSAPP`, `AIRBNB_MSG`, `BOOKING_MSG`, `EMAIL`, `PHONE_TRANSCRIPT`, `MANUAL`, `PORTAL` |
   | `MessageSenderType` | `GUEST`, `OWNER`, `MANAGER`, `AI`, `SYSTEM` |
 
 - THE SYSTEM SHALL etiquetar cada valor con una cadena traducida, no con el

@@ -8,16 +8,17 @@ schema's field list, the pagination bounds, and the `sender_type` contract of D1
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.messaging.domain.enums import (
+    ConversationChannel,
     ConversationEscalationStatus,
     ConversationStatus,
     MessageIntent,
     MessageSenderType,
 )
 from app.messaging.domain.entities import MAX_MESSAGE_CONTENT_LENGTH
-from app.messaging.infrastructure.models import MessageModel
+from app.messaging.infrastructure.models import ConversationModel, MessageModel
 from app.timeline.domain.enums import TimelineEventType
 from app.timeline.infrastructure.models import TimelineEventModel
 from tests.messaging.conftest import (  # noqa: F401
@@ -77,6 +78,43 @@ async def test_a_conversation_without_a_property_is_refused(api, world) -> None:
     )
 
     assert response.status_code == 422
+
+
+async def test_the_route_refuses_to_open_a_portal_conversation(api, world) -> None:
+    """R3.7 at the HTTP boundary: a `422`, not a `201`.
+
+    The schema still *accepts* the word — `channel` is typed as `ConversationChannel` and
+    `PORTAL` is a member of it since section 1 — so what refuses here is the use case, which
+    is where D14 puts the rule. That is the point of asserting it through the route as well as
+    against the use case: if somebody later moved the guard into the request schema the status
+    code would stay `422` and this test would keep passing, but the rule would have left the
+    layer `steering/backend-architecture.md` requires it to live in.
+    """
+    response = await api.post(
+        CONVERSATIONS,
+        json={"property_id": str(world.property.id), "channel": "PORTAL"},
+        headers=auth_header(api, world.manager),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+async def test_the_refused_portal_conversation_leaves_no_row(api, world, db_session) -> None:
+    """A `422` that had already written the row would be the exact failure R3.7 describes: a
+    thread the guest sees on their page without having written."""
+    await api.post(
+        CONVERSATIONS,
+        json={"property_id": str(world.property.id), "channel": "PORTAL"},
+        headers=auth_header(api, world.manager),
+    )
+
+    total = await db_session.scalar(
+        select(func.count()).select_from(ConversationModel).where(
+            ConversationModel.channel == ConversationChannel.PORTAL
+        )
+    )
+    assert total == 0
 
 
 async def test_a_property_of_another_tenant_is_refused(api, world, db_session) -> None:

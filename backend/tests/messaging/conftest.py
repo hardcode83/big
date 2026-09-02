@@ -8,7 +8,7 @@ The tests in `test_tenant_isolation.py` say so again where they use it.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest_asyncio
 
@@ -22,7 +22,8 @@ from app.messaging.domain.enums import (
 )
 from app.messaging.infrastructure.models import ConversationModel, MessageModel
 from app.properties.infrastructure.models import PropertyModel
-from app.tenants.infrastructure.models import TenantModel
+from app.reservations.infrastructure.models import ReservationModel
+from app.tenants.infrastructure.models import TenantConfigModel, TenantModel
 
 NOW = datetime(2026, 8, 16, 10, 0, tzinfo=UTC)
 
@@ -30,6 +31,17 @@ NOW = datetime(2026, 8, 16, 10, 0, tzinfo=UTC)
 async def seed_tenant(db_session, name: str) -> TenantModel:
     tenant = TenantModel(name=name, billing_email=f"{name.lower()}@example.com")
     db_session.add(tenant)
+    await db_session.flush()
+    # `notification-channel-routing` — pin the channel flags off so the resolver returns
+    # `{IN_APP}` only and this suite's single-row assertions stay valid. A test that wants
+    # both flags on seeds its own `TenantConfigModel` with the flags it needs.
+    db_session.add(
+        TenantConfigModel(
+            tenant_id=tenant.id,
+            notification_email_enabled=False,
+            notification_whatsapp_enabled=False,
+        )
+    )
     await db_session.flush()
     return tenant
 
@@ -57,6 +69,35 @@ async def seed_user(
         name=email.split("@")[0],
         role=role,
         status=status,
+    )
+    db_session.add(model)
+    await db_session.flush()
+    return model
+
+
+async def seed_reservation(
+    db_session,
+    tenant,
+    prop,
+    *,
+    check_in: date | None = None,
+    status: str = "CONFIRMED",
+):
+    """A stay for the portal thread to hang off (`guest-portal-messaging` section 3).
+
+    `conversations.reservation_id` is a real foreign key, so the portal repository methods —
+    which key on `(tenant_id, reservation_id)` — cannot be tested without one.
+    """
+    start = check_in or NOW.date()
+    model = ReservationModel(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        channel="DIRECT",
+        status=status,
+        check_in_date=start,
+        check_out_date=start + timedelta(days=2),
+        nights=2,
     )
     db_session.add(model)
     await db_session.flush()

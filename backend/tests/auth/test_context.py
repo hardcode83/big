@@ -47,6 +47,18 @@ def test_context_rejects_a_language_outside_the_enum() -> None:
         _context(preferred_language="es")
 
 
+def test_context_accepts_a_null_tenant_for_super_admin() -> None:
+    """`super-admin-identity` R2.2, design D2: `SUPER_ADMIN` has no tenant."""
+    context = _context(tenant_id=None, role=UserRole.SUPER_ADMIN)
+
+    assert context.tenant_id is None
+
+
+def test_context_still_rejects_a_non_uuid_non_none_tenant_id() -> None:
+    with pytest.raises(ValueError):
+        _context(tenant_id="not-a-uuid")
+
+
 def test_context_keeps_what_it_was_given() -> None:
     user_id, tenant_id = uuid.uuid4(), uuid.uuid4()
 

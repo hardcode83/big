@@ -38,7 +38,7 @@ import { RulesPanel } from "./rules-panel";
  */
 export function PricingView() {
   const { user } = useAuth();
-  const tenantId = user?.tenant_id;
+  const tenantId = user?.tenant_id ?? undefined;
   const {
     tenantId: filtersTenantId,
     activeTab,

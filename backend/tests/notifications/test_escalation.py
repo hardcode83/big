@@ -33,6 +33,11 @@ PRD_14_TYPES = (
 # Types this product has that PRD §14 does not, each with the change that added it and why.
 # A divergence is allowed to exist; being unnamed is what is not.
 DECLARED_DIVERGENCES = (
+    # `revenue-reviews` R6.2: notification fires when an owner/manager approves a draft
+    # response to a guest review. Same PRD §14 outside-the-catalogue reason — review
+    # approval is operational but PRD §14 pre-dates the reviews capability, so the type
+    # is added as a divergence and named here rather than silently slipped in.
+    "REVIEW_RESPONSE_APPROVED",
     # `auth-account-recovery` R6.1: password recovery is not an operational event, so §14's
     # catalogue — cleanings, incidents, technicians, guests, prices, SLA — has no slot for it.
     "PASSWORD_RESET_REQUESTED",
@@ -135,9 +140,14 @@ def test_every_type_without_a_defined_escalation_returns_none() -> None:
     # Unchanged by R3: the change moved what the technician branch *produces*, not which
     # types have an escalation. `SLA_BREACH` and `TECHNICIAN_NO_RESPONSE` are both produced
     # by this map and neither appears in it, which is what keeps R3.4 true for both.
+    #
+    # `REVIEW_RESPONSE_APPROVED` joined the catalog in `revenue-reviews` (design D9).
+    # Its entry has `sla_minutes=None` so the breach job never produces a candidate for
+    # it — the row exists to keep the catalog closed against the enum, not to be triggered.
     with_escalation = {
         NotificationType.CLEANING_TASK_ASSIGNED,
         NotificationType.TECHNICIAN_ASSIGNED,
+        NotificationType.REVIEW_RESPONSE_APPROVED,
     }
 
     for member in NotificationType:

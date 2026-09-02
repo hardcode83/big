@@ -23,12 +23,31 @@ consecuencias que conviene tener presentes al desplegar:
 
 ## Notificaciones
 
+### Por qué canal sale un aviso (`notification-channel-routing`)
+
+Desde este change, el canal ya no lo fija a mano cada escritor: lo decide
+`notifications/domain/channel_resolver.py` a partir de dos flags que el tenant ya podía tocar por
+`PATCH /api/v1/tenants/{id}` — `notification_email_enabled` (default `True`) y
+`notification_whatsapp_enabled` (default `False`) — y del contacto disponible del destinatario. El
+conjunto resuelto es siempre `{IN_APP}` más `EMAIL` si el flag está activo y el destinatario tiene
+`email`, más `WHATSAPP` si el flag está activo y tiene `phone`. Un canal cuyo contacto falta se
+descarta, nunca degrada a otro; queda una línea de log
+`notifications.channel_dropped_for_missing_contact` con el tipo y el canal, sin el valor del
+contacto. Si el tenant no tiene fila de `TenantConfig` recuperable, resuelve a `IN_APP` solo y
+registra `notifications.tenant_config_missing`.
+
+Cada canal resuelto escribe **su propia fila** en `notification_logs` — mismo tipo, destinatario y
+contenido, `channel` distinto — así que activar el email de un tenant no cambia lo que ve la
+bandeja (sigue acotada a `channel = IN_APP`, ver más abajo), solo añade filas nuevas por los demás
+canales. El plazo de SLA (`sla_deadline_at`) viaja únicamente en la fila `IN_APP`; las hermanas se
+escriben con `NULL` a propósito, para que `check_sla_breaches` no duplique el escalado.
+
 ### Canales
 
 | Canal | Adapter | Qué hace hoy |
 |---|---|---|
-| `EMAIL` / `CONSOLE` | `ConsoleEmailAdapter` | Registra la entrega en el log. SMTP real llega con `hardening-release` |
-| `WHATSAPP` | `MockWhatsAppAdapter` | Mock (PRD §14) |
+| `EMAIL` / `CONSOLE` | `ConsoleEmailAdapter` | Registra la entrega en el log. SMTP real llega con `smtp-delivery-adapter` |
+| `WHATSAPP` | `MockWhatsAppAdapter` | Mock (PRD §14). WhatsApp real llega con `whatsapp-cloud-adapter` |
 | `IN_APP` | `InAppNotificationAdapter` | No envía nada: **la fila es la entrega**, y la bandeja web es lo que la hace legible — y desde `notifications-inbox-web`, acusable |
 | `PUSH` | — | Sin adapter a propósito: una fila `PUSH` pasa a `SKIPPED` |
 

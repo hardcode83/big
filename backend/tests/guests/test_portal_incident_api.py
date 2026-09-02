@@ -1,9 +1,13 @@
 """`POST /api/v1/guest/incident/{token}` over HTTP (R5.1, R5.2, R5.3; design D15).
 
-The fourth and last route of PRD §23, and the only one of the four that **creates a row from a
-stranger's free text**. So the assertions that carry the weight are about what it refuses
-before writing anything, what the answer does not contain, and what the portal offers no way
-to do afterwards.
+One of the portal's two routes that **create a row from a stranger's free text** — the other is
+`POST /guest/messages/{token}`, which `guest-portal-messaging` added and which is covered by
+`test_portal_messages_api.py`. This docstring called it "the fourth and last route of PRD §23,
+and the only one of the four" until that landed; it was then wrong three times over, so what it
+states now is the property rather than the ordinal.
+
+The assertions that carry the weight are about what it refuses before writing anything, what the
+answer does not contain, and what the portal offers no way to do afterwards.
 
 The throttle is a fake, as in `test_portal_api.py`: what these tests need from it is the order
 the section 5 security panel made binding, and a fake is the only way to observe an order.

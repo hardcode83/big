@@ -162,6 +162,10 @@ tocar la base de datos a mano.
 - THE SYSTEM SHALL incluir en cada token el identificador de usuario, el `tenant_id`, el
   rol, el instante de emisión, el de expiración, un `jti` y el tipo (`access` o `refresh`);
   ambos llevan además `fam`.
+- **El claim `tenant_id` es `null` para `SUPER_ADMIN`** (change `super-admin-identity`,
+  R2.1): la clave sigue presente siempre — la verificación exige su presencia —, pero su
+  valor es JSON `null` en vez de una cadena cuando el rol no pertenece a ningún tenant. Todo
+  otro rol sigue llevando un `tenant_id` concreto.
 - El `jti` del token de refresh **es** la clave primaria de su fila en `user_sessions`, así
   que el token no se almacena ni en claro ni hasheado: la firma prueba autenticidad y la
   fila aporta el estado.
@@ -182,9 +186,11 @@ tocar la base de datos a mano.
   todo rol que puede autenticarse, el catálogo contiene hoy los que añadió `reservations`
   (`READ_RESERVATIONS`, `MANAGE_RESERVATIONS`), los cuatro de `user-management`
   (`READ_USERS`, `MANAGE_USERS`, `READ_TENANT_SETTINGS`, `MANAGE_TENANT_SETTINGS`), los dos de
-  `properties-crud` (`READ_PROPERTIES`, `MANAGE_PROPERTIES`), los cinco de `cleaning` y los
+  `properties-crud` (`READ_PROPERTIES`, `MANAGE_PROPERTIES`), los cinco de `cleaning`, los
   cuatro de `maintenance` (`READ_INCIDENTS`, `MANAGE_INCIDENTS`, `EXECUTE_INCIDENTS`,
-  `RESPOND_OWNER_APPROVALS`), todos diferenciados por rol.
+  `RESPOND_OWNER_APPROVALS`) y los cinco de `revenue-reviews` (`READ_REVIEWS`,
+  `CREATE_REVIEW`, `APPROVE_REVIEW`, `IGNORE_REVIEW`, `MARK_REVIEW_POSTED`), todos
+  diferenciados por rol.
 - **`TECHNICIAN` dejó de ser un rol sin capacidades el 2026-08-15.** Hasta `maintenance` tenía
   autoservicio y nada más: existía y no podía hacer nada. Ahora suma `READ_INCIDENTS` y
   `EXECUTE_INCIDENTS` —exactamente lo que necesita el ciclo del técnico— y NEVER SHALL poder
@@ -240,9 +246,19 @@ tocar la base de datos a mano.
   evento `do_orm_execute` de SQLAlchemy, activo **solo** en sesiones marcadas con el tenant
   de la petición. Tiene cinco límites documentados en `app/core/db.py` y por eso no
   sustituye al parámetro explícito: cubre solo SELECT/UPDATE/DELETE del ORM; no actúa en
-  sesiones sin marcar (bootstrap, el login anónimo —que lo necesita—, `POST /auth/refresh` y
+  sesiones sin marcar (bootstrap, el login anónimo —que lo necesita—, `POST /auth/refresh`,
   los dos endpoints anónimos de `auth-account-recovery`, `POST /auth/forgot-password` y
-  `POST /auth/reset-password`, que resuelven la cuenta antes de conocer su tenant;
+  `POST /auth/reset-password`, que resuelven la cuenta antes de conocer su tenant; **y toda
+  petición autenticada como `SUPER_ADMIN`** (change `super-admin-identity`, R1/R3) — el rol
+  no pertenece a ningún tenant por requisito de producto, así que `get_authenticated_request`
+  simplemente no marca la sesión cuando `context.tenant_id` es `None`. No es una lista de
+  rutas: alcanza a toda ruta autenticada que exija un permiso de `_SELF_SERVICE` — hoy
+  `GET /auth/me`, `POST /auth/logout`, `POST /auth/change-password` y las cuatro de
+  `/notifications` — y crece exactamente al ritmo de ese conjunto de permisos, sin ampliar
+  lo que el rol puede hacer (R4: `ROLE_PERMISSIONS[SUPER_ADMIN]` sigue siendo
+  `_SELF_SERVICE`, y `GRANTABLE_ROLES` lo sigue excluyendo). `login` y `refresh` son
+  anónimos y ya estaban en esta misma enumeración por su cuenta — no pasan por
+  `get_authenticated_request` y no forman parte de esta excepción;
   **las tareas Celery dejaron de estarlo con `celery-jobs`**, que abre
   una sesión marcada por tenant y enumera los tenants desde otra que nunca se marca; y
   `make seed-demo`, el primer llamante que **lee sin marcar y marca a media ejecución** — resuelve
@@ -417,8 +433,10 @@ tocar la base de datos a mano.
 
 - El producto no tiene registro público, así que THE SYSTEM SHALL proveer un comando
   ejecutable (`python -m app.cli.bootstrap`, o `make bootstrap` en local) que crea el
-  tenant inicial, su `TenantConfig` y dos usuarios (`TENANT_OWNER` y `PROPERTY_MANAGER`).
-- THE SYSTEM SHALL validar las ocho variables `BOOTSTRAP_*` **antes** de abrir transacción,
+  tenant inicial, su `TenantConfig` y tres usuarios (`TENANT_OWNER`, `PROPERTY_MANAGER` y,
+  desde `super-admin-identity`, `SUPER_ADMIN` — sin `tenant_id`, una identidad de
+  plataforma y no de este tenant).
+- THE SYSTEM SHALL validar las once variables `BOOTSTRAP_*` **antes** de abrir transacción,
   listando de golpe todas las que falten.
 - El comando es **convergente**, no idempotente, y la distinción es de `object-storage-provisioning`
   (2026-08-15): repetirlo no duplica nada y tolera un cambio de caja en el email, pero **sí deja el
@@ -438,12 +456,18 @@ tocar la base de datos a mano.
   accionable en lugar de un `IntegrityError` sobre un índice. Hace falta porque la
   idempotencia se apoya en el nombre del tenant y `tenants` no tiene unicidad en `name`:
   un typo crearía un segundo tenant y reintentaría las mismas direcciones.
+- **El tenant esperado de cada semilla depende de su rol** (`super-admin-identity` D6):
+  `TENANT_OWNER` y `PROPERTY_MANAGER` esperan el tenant que este mismo `run` acaba de
+  resolver o crear; `SUPER_ADMIN` espera `NULL`. Comparar siempre contra el tenant del
+  `run` — como hacía el comando antes de esa entrada — habría dado `None != tenant.id`
+  en cada re-ejecución una vez la cuenta `SUPER_ADMIN` existe, y por tanto un
+  `BootstrapConflictError` permanente sobre una cuenta que este mismo comando creó.
 - La comprobación pasa por el puerto `find_by_email_globally`, de modo que no introduce una
   consulta sin scope nueva: reutiliza una ya enumerada (§Identidad) en vez de escribir otra.
 - No es una migración de datos de Alembic (mezclaría esquema con contenido y no se puede
   reejecutar con seguridad) ni está enganchado a `make up`, que sigue arrancando sin pasos
   manuales.
-- El bootstrap crea **dos** cuentas y nada más. WHERE haga falta un tenant recorrible, THE SYSTEM
+- El bootstrap crea **tres** cuentas y nada más. WHERE haga falta un tenant recorrible, THE SYSTEM
   SHALL completarlo con `make seed-demo`, que añade una `CLEANER` y una `TECHNICIAN` desde las seis
   variables `SEED_*` —obligatorias y sin default en el árbol, como las `BOOTSTRAP_*_PASSWORD`— y
   resuelve al owner y al manager **por rol**, no por correo, para no crear un segundo
@@ -451,8 +475,25 @@ tocar la base de datos a mano.
   pasan por `CreateUserUseCase` —que genera la contraseña y por eso marca el flag— sino por
   `User.create` y el puerto, que es lo que el default `False` de la entidad existe para permitir.
   Comportamiento completo en la spec `seed-data-demo`.
-- A partir de esas cuatro cuentas, el alta de usuarios es por API (`POST /api/v1/users`, spec
-  `user-management`): ni el bootstrap ni el seed son la vía normal de crear gente.
+- A partir de esas cinco cuentas, el alta de usuarios es por API (`POST /api/v1/users`, spec
+  `user-management`): ni el bootstrap ni el seed son la vía normal de crear gente. `SUPER_ADMIN`
+  no cuenta entre las que esa vía puede crear o promover — `GRANTABLE_ROLES` lo sigue
+  excluyendo (`super-admin-identity` R4.2) —, así que el bootstrap sigue siendo su única
+  puerta de entrada.
+
+### `TenantConfig` y los conmutadores de canal
+
+- THE SYSTEM SHALL mantener, en `tenant_configs`, los flags `notification_email_enabled`
+  (default `True`) y `notification_whatsapp_enabled` (default `False`) como los dos
+  **interruptores de canal** que gobiernan `notifications/domain/channel_resolver.py`.
+  Son del tenant, no del usuario; el par se lee una vez por `execute` desde
+  `TenantConfigRepository.get_or_create(tenant_id, now)` y se pasa al resolutor.
+- WHERE el tenant no tenga fila de `tenant_configs` recuperable, THE SYSTEM SHALL
+  resolver a `{IN_APP}` únicamente (R1.5) y SHALL registrar
+  `notifications.tenant_config_missing` con `tenant_id` y `notification_type`.
+- Los flags entran y salen por `PATCH /api/v1/tenants/{id}` sobre `TenantConfig`,
+  están en `AUDITABLE_FIELDS` y tienen tests de mutación. Cambiarlos afecta a los
+  avisos que nazcan después, no a los ya escritos — un aviso es un hecho del momento.
 
 ### Secretos y configuración
 

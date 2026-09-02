@@ -128,6 +128,7 @@ del token. Cualquier otro valor —`AI` incluido— es un 422.
 | Canal | Qué pasa al enviar |
 |---|---|
 | `MANUAL` | la fila **es** la entrega: se lee en el panel |
+| `PORTAL` | la fila **es** la entrega: la lee el huésped en su página de estancia |
 | `WHATSAPP` | mock a consola (`MockWhatsAppAdapter`), al teléfono del huésped |
 | `EMAIL` | consola (`ConsoleEmailAdapter`), al correo del huésped |
 | `PHONE_TRANSCRIPT` | no tiene salida: entra por transcripción, no sale |
@@ -143,6 +144,40 @@ del token. Cualquier otro valor —`AI` incluido— es un 422.
 
 Si el huésped no tiene teléfono (para WhatsApp) o correo (para email), el envío falla con
 `INVALID_RECIPIENT` y la conversación escala. Es correcto: de verdad no podemos entregar.
+
+### `PORTAL`: el único canal con un emisor real, y el único que abre el huésped
+
+`PORTAL` lo estrena `guest-portal-messaging`, y se parece a `MANUAL` en que la fila *es* la
+entrega — pero **no es lo mismo, y por eso es un canal propio y no un `MANUAL` reutilizado**:
+`PanelOutboundAdapter` reporta entregado porque un operador va a leer la fila en el panel, y
+aquí quien la lee es el huésped en su navegador. Un canal que mintiera sobre dónde se lee un
+mensaje es exactamente lo que la tabla de arriba existe para evitar.
+
+Tres cosas que lo distinguen de todos los demás:
+
+- **El hilo lo abre el huésped, y solo él.** La conversación de portal la crea su primer
+  mensaje, y hay **como mucho una por estancia** (un índice único parcial lo garantiza, así que
+  dos mensajes simultáneos no producen dos hilos). `POST /api/v1/conversations` **rechaza**
+  `PORTAL` explícitamente: si se pudiera abrir desde la bandeja, el huésped vería en su página
+  un hilo que él no empezó.
+- **Es el primer emisor real del pipeline.** Hasta ahora la única puerta de entrada era un
+  operador transcribiendo lo que el huésped había dicho por otro medio. Ahora el huésped
+  escribe él mismo, desde `POST /api/v1/guest/messages/{token}`, y su mensaje corre el ciclo
+  entero de arriba —idioma, intent, escalación, respuesta o incidencia— sin nada nuevo en el
+  pipeline.
+- **El manager contesta desde la bandeja, con el flujo que ya existe.** No hay ruta nueva para
+  responder: `take_over` y la respuesta humana de siempre. Lo que el manager escriba lo lee el
+  huésped en su página al siguiente sondeo. En la bandeja el canal aparece traducido como
+  «Portal del huésped».
+
+Lo que el huésped **no** puede hacer desde ahí: escalar, resolver, cerrar o reabrir su
+conversación, ni ver ninguna otra. Y las conversaciones que un operador haya abierto para esa
+misma estancia en otro canal (`WHATSAPP`, `MANUAL`…) siguen siendo hilos distintos: este canal
+no las fusiona ni se las enseña.
+
+Qué ve el huésped de cada mensaje está en [`guest-portal.md`](guest-portal.md); el resumen es
+que **solo** se le dice si lo escribió él o «el alojamiento», nunca si contestó la IA o una
+persona.
 
 ## Cuando el envío falla
 
@@ -163,7 +198,10 @@ Tres columnas de `messages` son texto o JSON libre, y las tres están en el cens
 de `sdd/steering/security.md`, que es **el único sitio** donde vive ese contrato. En corto:
 
 - **`content` del huésped**: se guarda tal cual. No lo componemos nosotros, así que va bajo la
-  excepción 4 — acotado por tipo y por longitud, y nada más. `ASSUMPTION`: el tope son **4000
+  excepción 4 — acotado por tipo y por longitud, y nada más. Desde `guest-portal-messaging`
+  llega por dos caminos: transcrito por un operador, o **tecleado por el propio huésped desde
+  el portal**, que es una escritura anónima desde internet. El contrato es el mismo, porque
+  quien teclea es el mismo; lo que cambia es la audiencia, y eso está declarado en el censo. `ASSUMPTION`: el tope son **4000
   caracteres**, un número elegido y no medido — WhatsApp admite 4096 y los límites reales de
   Beds24 no están medidos todavía. Se descartaron 2000 (corto para una transcripción
   telefónica) y 10000 (holgado para un sumidero de la regla 11 sin necesidad demostrada).
@@ -183,7 +221,9 @@ abre una incidencia, y va **verbatim**.
 > **La advertencia simétrica**, la misma que llevan `guest-portal.md` y `maintenance.md`: lo
 > que el huésped diga se le enseña al operador tal cual. Si dicta su número de documento por
 > WhatsApp, ahí queda. No hay forma de estructurar una conversación, y pretender lo contrario
-> sería una fila del censo que miente.
+> sería una fila del censo que miente. Con el portal la advertencia no cambia de forma pero sí
+> de alcance: ahora el huésped teclea directamente, sin que nadie transcriba, así que ya no hay
+> una persona nuestra en medio que pudiera notar lo que está a punto de guardarse.
 
 ## Lo que la IA no puede decir
 

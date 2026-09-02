@@ -177,7 +177,15 @@ async def insert_reservation(session, tenant, prop, *, days_ago=1) -> Reservatio
 
 
 async def insert_task(
-    session, tenant, prop, template, *, reservation=None, status=None, cleaner=None
+    session,
+    tenant,
+    prop,
+    template,
+    *,
+    reservation=None,
+    status=None,
+    cleaner=None,
+    scheduled_start=None,
 ) -> CleaningTaskModel:
     from app.cleaning.domain.enums import CleaningTaskStatus
 
@@ -188,6 +196,7 @@ async def insert_task(
         reservation_id=reservation.id if reservation is not None else None,
         status=status or CleaningTaskStatus.CREATED,
         assigned_cleaner_id=cleaner.id if cleaner is not None else None,
+        scheduled_start=scheduled_start,
     )
     session.add(task)
     await session.flush()

@@ -17,14 +17,18 @@ atomic.
 """
 
 import uuid
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import Select, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tenancy import CrossTenantWriteError
 from app.messaging.domain.entities import Conversation, Message
 from app.messaging.domain.enums import (
+    ConversationChannel,
+    ConversationEscalationStatus,
     ConversationStatus,
     EscalationReason,
     MessageIntent,
@@ -233,6 +237,91 @@ class SqlAlchemyConversationRepository:
             )
         )
         await self._session.flush()
+
+    async def ensure_portal(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        reservation_id: uuid.UUID,
+        property_id: uuid.UUID,
+        guest_id: uuid.UUID | None,
+        language: str,
+        now: datetime,
+    ) -> Conversation:
+        """`INSERT … ON CONFLICT DO NOTHING`, then `SELECT` (D6).
+
+        **Not a `SELECT`-then-`add`.** Under two simultaneous messages from one guest that is
+        a check-then-insert, and the second caller opens a second thread for the same stay.
+        Here the database decides: the winner inserts, the loser's INSERT matches
+        `uq_conversations_portal_reservation` and does nothing, and — the property the design
+        depends on — the loser's transaction is **not** aborted, because `ON CONFLICT DO
+        NOTHING` is not an error. It blocks until the winner commits, then its `SELECT` reads
+        the winner's row under `READ COMMITTED`, PostgreSQL's default. Both messages land in
+        the same thread.
+
+        A `SELECT`-then-`add` could only be made safe with a `SAVEPOINT`, which has no
+        precedent in this tree; `on_conflict_do_nothing` has two
+        (`cleaning/infrastructure/repositories.py`, `pricing/infrastructure/repositories.py`).
+
+        The `SELECT` runs unconditionally rather than only on conflict, and reads back what
+        actually landed rather than returning the entity we tried to insert. On the winning
+        path they are the same row; on the losing path only the read is true, and branching on
+        `rowcount` to skip it would make the correct path the exceptional one.
+        """
+        await self._session.execute(
+            pg_insert(ConversationModel)
+            .values(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                property_id=property_id,
+                reservation_id=reservation_id,
+                guest_id=guest_id,
+                channel=ConversationChannel.PORTAL,
+                status=ConversationStatus.OPEN,
+                language=language,
+                last_message_at=None,
+                ai_enabled=True,
+                escalation_status=ConversationEscalationStatus.NONE,
+                created_at=now,
+                updated_at=now,
+            )
+            # Named by the index rather than by a constraint: a partial unique index is not a
+            # constraint object, so `constraint=` cannot address it. The column list plus the
+            # predicate is what makes the inference match `uq_conversations_portal_reservation`
+            # and not some other unique index over the same columns.
+            .on_conflict_do_nothing(
+                index_elements=[ConversationModel.tenant_id, ConversationModel.reservation_id],
+                index_where=ConversationModel.channel == ConversationChannel.PORTAL,
+            )
+        )
+        await self._session.flush()
+
+        conversation = await self.find_portal(tenant_id, reservation_id)
+        if conversation is None:
+            # Unreachable while the index exists: the INSERT either wrote the row or found one
+            # to conflict with. It is `raise` rather than `assert` because a silent `None`
+            # here would surface as a `500` two frames away, with nothing naming the cause.
+            raise ConversationNotFoundError()
+        return conversation
+
+    async def find_portal(
+        self, tenant_id: uuid.UUID, reservation_id: uuid.UUID
+    ) -> Conversation | None:
+        """The stay's portal thread, or `None`. Creates nothing (R2.5).
+
+        Filtered on `channel` as well as the tenant and the stay, so the other channels' rows
+        are not merely excluded from the answer — they are unreachable through this method,
+        which is what R3.5 asks of the portal's read path.
+        """
+        result = await self._session.execute(
+            select(ConversationModel).where(
+                ConversationModel.tenant_id == tenant_id,
+                ConversationModel.reservation_id == reservation_id,
+                ConversationModel.channel == ConversationChannel.PORTAL,
+            )
+        )
+        model = result.scalar_one_or_none()
+        return _to_conversation(model) if model is not None else None
 
     async def list(
         self,

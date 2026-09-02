@@ -6,9 +6,10 @@ anonymous by design, because the token in the path *is* the credential. Mixing t
 an unauthenticated route inside a router whose whole shape says "authenticated" — which
 `app/main.py` names as "esconder un endpoint sin autenticar dentro de una forma que dice lo
 contrario", and which survives review by looking ordinary. The entries this forces into
-`ANONYMOUS_ENDPOINTS` are the visible diff that decision has to pass through: **the four of
-PRD §23** — `GET /info/{token}`, `GET /checkin/{token}`, `POST /checkin/{token}` and
-`POST /incident/{token}`.
+`ANONYMOUS_ENDPOINTS` are the visible diff that decision has to pass through — today
+`GET /info/{token}`, `GET /checkin/{token}`, `POST /checkin/{token}`,
+`POST /incident/{token}` and, since `guest-portal-messaging`, `GET /messages/{token}` and
+`POST /messages/{token}`.
 
 **Thin in the exact sense D4 fixes.** What lives here is transport: the two rate limits, the
 translation of one domain exception into one constant `404`, and serialisation. The decision
@@ -46,7 +47,7 @@ routing (D7), so an oversized body is refused before this module is reached.
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import JSONResponse
 
 from app.auth.api.dependencies import get_client_ip, now_utc
@@ -57,6 +58,8 @@ from app.guests.api.portal_dependencies import (
     get_checkin_status_use_case,
     get_guest_portal_authenticator,
     get_guest_portal_throttle,
+    get_post_portal_guest_message_use_case,
+    get_read_portal_thread_use_case,
     get_report_guest_incident_use_case,
     get_stay_info_use_case,
     get_submit_guest_checkin_use_case,
@@ -64,7 +67,10 @@ from app.guests.api.portal_dependencies import (
 from app.guests.api.portal_schemas import (
     CheckinStatusResponse,
     CheckinSubmittedResponse,
+    GuestMessageResponse,
+    GuestThreadResponse,
     IncidentReportedResponse,
+    PostGuestMessageRequest,
     ReportIncidentRequest,
     StayInfoResponse,
     SubmitCheckinRequest,
@@ -77,9 +83,14 @@ from app.guests.application.portal import (
 )
 from app.guests.application.use_cases import DocumentInput
 from app.guests.domain.exceptions import GuestPortalUnauthorised
-from app.guests.domain.portal_ports import GuestSession
+from app.guests.domain.portal_ports import (
+    GuestPortalMessageSubmitter,
+    GuestPortalThreadReader,
+    GuestSession,
+)
 from app.guests.infrastructure.portal_throttle import RedisGuestPortalThrottle
 from app.maintenance.application.use_cases import ReportGuestIncidentUseCase
+from app.messaging.api.schemas import MAX_PAGE, MAX_PER_PAGE
 
 router = APIRouter(prefix="/guest", tags=["guest-portal"])
 
@@ -349,4 +360,105 @@ async def report_incident(
     return JSONResponse(
         status_code=status.HTTP_201_CREATED,
         content=IncidentReportedResponse.from_domain(incident).model_dump(mode="json"),
+    )
+
+
+@router.post(
+    "/messages/{token}",
+    response_model=GuestMessageResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=_PORTAL_RESPONSES,
+    summary="Write a message to the accommodation",
+    description=(
+        "Sends one message from the guest and runs the whole messaging pipeline over it: the "
+        "language is detected, the intent classified, and either an automatic answer is "
+        "written or a person is asked to take over. The stay's thread is created by this "
+        "first message and by nothing else. The body carries the text and nothing else — a "
+        "sender, a reservation or a conversation id in it is a `422`, never something quietly "
+        "ignored — and the acknowledgement is the message as it will appear in the thread. "
+        "Retrying sends a second message: the request is not deduplicated, so treat a `429` "
+        "as 'wait', never as 'it did not arrive'."
+    ),
+)
+async def post_guest_message(
+    token: str,
+    payload: PostGuestMessageRequest,
+    client_ip: ClientIpDep,
+    throttle: ThrottleDep,
+    authenticator: AuthenticatorDep,
+    submitter: Annotated[
+        GuestPortalMessageSubmitter, Depends(get_post_portal_guest_message_use_case)
+    ],
+) -> Response:
+    session = await _authorised(token, client_ip, throttle, authenticator)
+    if isinstance(session, JSONResponse):
+        return session
+
+    # Every identifier comes from the session the authoriser resolved (R1.3), and
+    # `PostGuestMessageRequest` forbids extra fields, so a body naming a tenant, a reservation
+    # or a `sender_type` is a `422` rather than something silently dropped.
+    #
+    # `client_ip` is not one of them: it is the address the request arrived from, which the
+    # caller cannot claim, and rule 9 of `steering/security.md` wants it in `actor_ip`. The
+    # sibling anonymous route above has always passed it; omitting it here gave the same
+    # anonymous actor two different audit trails for the same entity.
+    #
+    # **What bounds how many `audit_logs` rows a bearer can write is the per-token throttle
+    # `_authorised` already charged, and nothing else** (D8). A message classified as an
+    # incident opens one, and the pipeline writes an audit row per incident, so this route is
+    # the third of the de-facto cases rule 9's own exception describes: the rate limit is the
+    # bound. Said here because it is not visible from the pipeline's side.
+    message = await submitter.submit(
+        session,
+        content=payload.content,
+        client_ip=client_ip or None,
+        now=now_utc(),
+    )
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED,
+        content=GuestMessageResponse.from_domain(message).model_dump(mode="json"),
+    )
+
+
+@router.get(
+    "/messages/{token}",
+    response_model=GuestThreadResponse,
+    responses=_PORTAL_RESPONSES,
+    summary="The guest's own thread",
+    description=(
+        "One page of the stay's conversation, oldest first within the page. Every message is "
+        "attributed to the guest or to the accommodation and to nothing finer: which member "
+        "of staff wrote a reply, and whether it was written automatically, are not fields of "
+        "this response. Neither is the reason a conversation is waiting for a person — only "
+        "that it is. A stay whose guest has not written yet answers with an empty thread: "
+        "reading never opens a conversation. **Without `page` the most recent window is "
+        "returned**, since a thread is read from its end; `total`, `page` and `per_page` say "
+        "which window it is, and an explicit `page` still reaches the earlier ones."
+    ),
+)
+async def read_guest_thread(
+    token: str,
+    client_ip: ClientIpDep,
+    throttle: ThrottleDep,
+    authenticator: AuthenticatorDep,
+    reader: Annotated[
+        GuestPortalThreadReader, Depends(get_read_portal_thread_use_case)
+    ],
+    # `None` and not a defaulted `1`: D9 makes the unasked-for window the **last** page, so the
+    # use case has to be able to tell "no preference" from "page 1". The bounds are the ones
+    # `messaging/api/schemas.py` already declares, imported rather than restated — `page`
+    # becomes a SQL OFFSET, and one spelling of a ceiling is how two stay equal.
+    page: Annotated[int | None, Query(ge=1, le=MAX_PAGE)] = None,
+    per_page: Annotated[int, Query(ge=1, le=MAX_PER_PAGE)] = 50,
+) -> Response:
+    session = await _authorised(token, client_ip, throttle, authenticator)
+    if isinstance(session, JSONResponse):
+        return session
+
+    try:
+        thread = await reader.read(session, page=page, per_page=per_page)
+    except GuestPortalUnauthorised:
+        return await _unauthorised(throttle, client_ip)
+    return JSONResponse(
+        content=GuestThreadResponse.from_domain(thread).model_dump(mode="json")
     )

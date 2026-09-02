@@ -100,6 +100,33 @@ async def test_the_whole_flow_login_me_refresh_logout(api, db_session, tenant_a)
 
 
 @pytest.mark.asyncio
+async def test_the_whole_flow_login_me_refresh_logout_for_a_super_admin(api, db_session) -> None:
+    """`super-admin-identity` R2: none of the four answers `500` for a tenantless account."""
+    await insert_user(db_session, tenant=None, role=UserRole.SUPER_ADMIN, email="root@example.com")
+    tokens = (await _login(api, email="root@example.com")).json()
+    assert "access_token" in tokens
+
+    me = await api.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {tokens['access_token']}"}
+    )
+    assert me.status_code == 200
+    assert me.json()["tenant_id"] is None
+    assert me.json()["role"] == UserRole.SUPER_ADMIN.value
+
+    rotated = await api.post(
+        "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+    )
+    assert rotated.status_code == 200
+    assert rotated.json()["refresh_token"] != tokens["refresh_token"]
+
+    logout = await api.post(
+        "/api/v1/auth/logout",
+        headers={"Authorization": f"Bearer {rotated.json()['access_token']}"},
+    )
+    assert logout.status_code == 204
+
+
+@pytest.mark.asyncio
 async def test_me_never_exposes_the_password_hash(api, db_session, tenant_a) -> None:
     await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
     tokens = (await _login(api)).json()

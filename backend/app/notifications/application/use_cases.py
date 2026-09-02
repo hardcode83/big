@@ -40,6 +40,14 @@ from app.auth.domain.enums import UserRole
 from app.auth.domain.ports import UserRepository
 from app.auth.domain.recipients import RoleRecipients
 from app.core.unit_of_work import UnitOfWork
+from app.notifications.application.channel_dispatch import (
+    contact_for_channel,
+    dispatch_channels,
+)
+from app.notifications.domain.channel_resolver import (
+    RecipientContact,
+    resolve_channels,
+)
 from app.notifications.domain.entities import NotificationLog
 from app.notifications.domain.enums import NotificationChannel, NotificationStatus
 from app.notifications.domain.escalation import Escalation, escalation_for
@@ -47,6 +55,8 @@ from app.notifications.domain.exceptions import NotificationNotFoundError
 from app.notifications.domain.ports import NotificationAdapter
 from app.notifications.domain.repositories import NotificationLogRepository
 from app.notifications.domain.results import NotificationErrorCode, NotificationResult
+from app.tenants.domain.entities import TenantConfig
+from app.tenants.domain.repositories import TenantConfigRepository
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +92,7 @@ class EscalateBreachedSlasUseCase:
         *,
         notifications: NotificationLogRepository,
         users: UserRepository,
+        tenant_configs: TenantConfigRepository,
         uow: UnitOfWork,
     ) -> None:
         self._notifications = notifications
@@ -92,10 +103,18 @@ class EscalateBreachedSlasUseCase:
         # constructor already receives — widening the signature would make every wiring site
         # name a collaborator that carries no state and no configuration.
         self._recipients = RoleRecipients(users=users)
+        # `notification-channel-routing` (R1, R4): each escalation row goes through the
+        # resolver, which reads the tenant's `notification_*_enabled` flags.
+        self._tenant_configs = tenant_configs
         self._uow = uow
 
     async def execute(self, *, tenant_id: uuid.UUID, now: datetime) -> EscalationReport:
         report = EscalationReport()
+        # Per-execution cache: the tenant config is loaded once and reused across every
+        # candidate, matching the pattern the design recommends for `RoleRecipients`. Kept
+        # as a local, not `self.`, so two overlapping `execute()` calls on the same instance
+        # (different tenants) can never read or clobber each other's cached config.
+        tenant_config_cache: TenantConfig | None = None
         candidates = await self._notifications.list_sla_breach_candidates(tenant_id, now)
         if not candidates:
             return report
@@ -146,18 +165,34 @@ class EscalateBreachedSlasUseCase:
                 continue
 
             for recipient in recipients:
-                await self._notifications.add(
-                    tenant_id,
-                    _escalation_row(
-                        tenant_id=tenant_id,
-                        breached_id=candidate.id,
-                        breached_type=candidate.notification_type,
-                        escalation=escalation,
-                        recipient=recipient,
-                        now=now,
-                    ),
+                # `notification-channel-routing` (R1, R2, R4) — the escalation is now
+                # fanned out across the resolved channels. The TenantConfig is loaded
+                # once per `execute` and threaded through each recipient's resolver.
+                config = tenant_config_cache or await self._tenant_configs.get_or_create(
+                    tenant_id, now
                 )
-                report.rows_written += 1
+                tenant_config_cache = config
+                channels = resolve_channels(
+                    tenant_config=config,
+                    recipient=RecipientContact(
+                        email=recipient.email, phone=recipient.phone
+                    ),
+                    tenant_id=tenant_id,
+                    notification_type=escalation.notification_type.value,
+                    recipient_role=escalation.recipient_role.value,
+                )
+                rows = _escalation_rows(
+                    tenant_id=tenant_id,
+                    breached_id=candidate.id,
+                    breached_type=candidate.notification_type,
+                    escalation=escalation,
+                    recipient=recipient,
+                    now=now,
+                    channels=channels,
+                )
+                for row in rows:
+                    await self._notifications.add(tenant_id, row)
+                    report.rows_written += 1
             # Marked after the rows exist, so the invariant R5.3 protects can only fail in
             # the safe direction: never a breach marked without its escalation.
             await self._notifications.mark_breached(tenant_id, candidate)
@@ -217,7 +252,7 @@ class EscalateBreachedSlasUseCase:
         return list(resolved.users)
 
 
-def _escalation_row(
+def _escalation_rows(
     *,
     tenant_id: uuid.UUID,
     breached_id: uuid.UUID,
@@ -225,32 +260,49 @@ def _escalation_row(
     escalation: Escalation,
     recipient: User,
     now: datetime,
-) -> NotificationLog:
-    """The queued escalation.
+    channels: frozenset[NotificationChannel],
+) -> list[NotificationLog]:
+    """The queued escalation, fanned out across the recipient's resolved channels.
 
     **Takes the breached notification's id and type, never the entity.** That is what makes
     rule 11 of `steering/security.md` hold by construction: `subject` and `body` cannot
     forward the original's own `subject`/`body` — rule 11's single sanctioned carrier of a
-    masked access code — because they are not in scope here. The earlier version received
-    the whole `NotificationLog`, so the guarantee was one keystroke from being untrue and
-    rested on care rather than construction; the section-4 security panel named the gap.
-    The reader follows `related_id` to the original.
+    masked access code — because they are not in scope here. The reader follows
+    `related_id` to the original.
+
+    `notification-channel-routing` R2, R4: one row per resolved channel (the SLA-deadline
+    rule of R4.1 does not bind here because escalations have no deadline by design — see
+    `Escalation` and the policies in `notifications/domain/escalation.py`).
     """
-    return NotificationLog(
-        id=uuid.uuid4(),
-        tenant_id=tenant_id,
-        recipient_user_id=recipient.id,
-        recipient_contact=recipient.email,
-        channel=NotificationChannel.IN_APP,
-        notification_type=escalation.notification_type.value,
-        created_at=now,
-        updated_at=now,
-        subject="SLA breach",
-        body=f"A {breached_type} notification passed its SLA deadline "
-        f"({escalation.reason}). See notification log {breached_id}.",
-        status=NotificationStatus.PENDING,
-        related_type="notification_log",
-        related_id=breached_id,
+    def _builder(
+        *,
+        channel: NotificationChannel,
+        contact: str | None,
+        **_: object,
+    ) -> NotificationLog:
+        return NotificationLog(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            recipient_user_id=recipient.id,
+            recipient_contact=contact if contact is not None else recipient.email,
+            channel=channel,
+            notification_type=escalation.notification_type.value,
+            created_at=now,
+            updated_at=now,
+            subject="SLA breach",
+            body=(
+                f"A {breached_type} notification passed its SLA deadline "
+                f"({escalation.reason}). See notification log {breached_id}."
+            ),
+            status=NotificationStatus.PENDING,
+            related_type="notification_log",
+            related_id=breached_id,
+        )
+
+    return dispatch_channels(
+        recipient=recipient,
+        channels=channels,
+        log_builder=_builder,
     )
 
 
@@ -496,6 +548,10 @@ class ListOwnNotificationsUseCase:
     would make "delivered" a claim rather than a fact. Scoped to the requesting user, not
     just to the tenant: a manager and a cleaner in the same tenant must not see each
     other's notifications.
+
+    **`channel` defaults to `IN_APP` here** (`notification-channel-routing` R5, D4): the
+    inbox reads the in-app channel. The repository defaults the same way, so this is just
+    an explicit keyword the router can override when diagnosing.
     """
 
     def __init__(self, *, notifications: NotificationLogRepository) -> None:
@@ -509,9 +565,15 @@ class ListOwnNotificationsUseCase:
         page: int,
         per_page: int,
         unread: bool | None = None,
+        channel: NotificationChannel = NotificationChannel.IN_APP,
     ) -> NotificationPage:
         found = await self._notifications.list_for_recipient(
-            tenant_id, user_id, page=page, per_page=per_page, unread=unread
+            tenant_id,
+            user_id,
+            page=page,
+            per_page=per_page,
+            unread=unread,
+            channel=channel,
         )
         return NotificationPage(
             items=list(found.items), total=found.total, page=page, per_page=per_page
@@ -550,13 +612,25 @@ class MarkNotificationReadUseCase:
 
 
 class CountUnreadNotificationsUseCase:
-    """The bell's counter (R2.2, design D4). One `count(*)`, no page of rows."""
+    """The bell's counter (R2.2, design D4). One `count(*)`, no page of rows.
+
+    **`channel` defaults to `IN_APP`** (`notification-channel-routing` R5.2): the bell
+    counts in-app rows, and the repository's default is the same.
+    """
 
     def __init__(self, *, notifications: NotificationLogRepository) -> None:
         self._notifications = notifications
 
-    async def execute(self, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
-        return await self._notifications.count_unread(tenant_id, user_id)
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        channel: NotificationChannel = NotificationChannel.IN_APP,
+    ) -> int:
+        return await self._notifications.count_unread(
+            tenant_id, user_id, channel=channel
+        )
 
 
 class MarkAllNotificationsReadUseCase:

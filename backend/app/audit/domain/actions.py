@@ -377,6 +377,27 @@ EXPENSE_CREATED = "EXPENSE_CREATED"
 EXPENSE_UPDATED = "EXPENSE_UPDATED"
 EXPENSE_DELETED = "EXPENSE_DELETED"
 
+# `revenue-reviews` R1.7 / R3.5 — four actions for the four transitions of `Review.status`
+# the proposal enumerates, plus one for the draft-edit of `R3.5`. Each is written by the
+## corresponding use case in `app/reviews/application/use_cases.py` in the same transaction
+## as the row mutation, with `actor_user_id` from the token. The vocabulary closes here
+## because adding an action for an operation nothing else performs is the speculative
+## vocabulary this module's docstring argues against — same precedent
+## `AUDIT_LOG_PURGED` follows for `demo-tenant-audit-retention`.
+REVIEW_CREATED = "REVIEW_CREATED"
+REVIEW_APPROVED = "REVIEW_APPROVED"
+REVIEW_IGNORED = "REVIEW_IGNORED"
+REVIEW_POSTED_MANUALLY = "REVIEW_POSTED_MANUALLY"
+REVIEW_DRAFT_EDITED = "REVIEW_DRAFT_EDITED"
+
+# `revenue-reviews` — two entity types so the audit row's `entity_id` points at a real
+# primary key. The drafts entity sits separately from the reviews one because
+# `ix_audit_logs_tenant_id_entity_type_entity_id` is what makes "who did what to
+# THIS draft" a lookup, not a scan over `changes`. Same precedent
+# `ENTITY_CLEANING_PHOTO` follows for `cleaning-photos-storage`.
+ENTITY_REVIEW = "REVIEW"
+ENTITY_REVIEW_RESPONSE_DRAFT = "REVIEW_RESPONSE_DRAFT"
+
 ENTITY_TYPES = frozenset(
     {
         ENTITY_USER,
@@ -401,6 +422,8 @@ ENTITY_TYPES = frozenset(
         # `revenue-statements` — entities that earn their writers in §4.
         ENTITY_OWNER_STATEMENT,
         ENTITY_EXPENSE,
+        ENTITY_REVIEW,
+        ENTITY_REVIEW_RESPONSE_DRAFT,
     }
 )
 
@@ -471,5 +494,10 @@ ACTIONS = frozenset(
         EXPENSE_CREATED,
         EXPENSE_UPDATED,
         EXPENSE_DELETED,
+        REVIEW_CREATED,
+        REVIEW_APPROVED,
+        REVIEW_IGNORED,
+        REVIEW_POSTED_MANUALLY,
+        REVIEW_DRAFT_EDITED,
     }
 )

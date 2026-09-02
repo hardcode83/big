@@ -76,6 +76,10 @@ WITH_WRITER = frozenset(
         "PRICE_RECOMMENDATION",
         "SLA_BREACH",
         "PASSWORD_RESET_REQUESTED",
+        # `revenue-reviews` R6.2 — `ApproveReviewUseCase` writes one row per
+        # manager+owner recipient via `build_review_response_approved_log` in
+        # `app/reviews/domain/notifications.py`.
+        "REVIEW_RESPONSE_APPROVED",
     }
 )
 
@@ -280,12 +284,23 @@ CONSTRUCTION_SITES = {
     "maintenance/domain/notifications.py",
     "messaging/domain/notifications.py",
     "pricing/domain/notifications.py",
+    # `revenue-reviews` R6.2 — `ApproveReviewUseCase` calls
+    # `build_review_response_approved_log` once per manager/owner recipient; the builder
+    # lives next to the rule (rule 11 of `sdd/steering/security.md`) for the same reason
+    # the other modules' builders do — the **content** of what gets written is testable
+    # without a session and lives next to the rule that shapes it.
+    "reviews/domain/notifications.py",
     # Two writers that predate the builder convention and compose their row inline.
     "auth/application/recovery.py",
     "guests/application/use_cases.py",
     # The escalation policy (its `Escalation` entries) and the row its use case composes.
     "notifications/domain/escalation.py",
     "notifications/application/use_cases.py",
+    # The fan-out — the new construction site added by `notification-channel-routing`
+    # (R2). It iterates the resolved channel set and calls a builder once per channel,
+    # so it is a construction site of N rows, not of one. Added here for the same
+    # reason as every other entry: the census counts writers, and the fan-out is one.
+    "notifications/application/channel_dispatch.py",
     # Not a writer: the adapter's INSERT and its rehydration of a row back into an entity.
     "notifications/infrastructure/repositories.py",
     # Not a writer either, and not application code: the `celery-jobs` benchmark harness

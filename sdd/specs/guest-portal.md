@@ -3,10 +3,10 @@
 ## Purpose
 
 Da al huésped una página móvil en `/guest/[token]` para consultar su estancia, completar el
-check-in legal de PRD §17 y comunicar una incidencia, consumiendo las cuatro rutas anónimas que
-publica [`guest-portal-api`](guest-portal-api.md) a través del proxy same-origin. No crea
-identidad interna, sesión ni JWT para el huésped: el token de la ruta **es** la credencial, y la
-página se limita a leer y escribir los campos que los schemas ya publican.
+check-in legal de PRD §17, comunicar una incidencia y conversar con el alojamiento, consumiendo
+las seis rutas anónimas que publica [`guest-portal-api`](guest-portal-api.md) a través del proxy
+same-origin. No crea identidad interna, sesión ni JWT para el huésped: el token de la ruta **es**
+la credencial, y la página se limita a leer y escribir los campos que los schemas ya publican.
 
 El contrato de backend, seguridad y ciclo de vida del token vive en
 [`guest-portal-api`](guest-portal-api.md) y no se repite aquí; el *cómo se opera y se diagnostica*
@@ -72,11 +72,49 @@ interfaz web.
   respuesta publicada (`id`, `status`, `created_at`); THE SYSTEM SHALL mostrar la confirmación con
   el `status` traducido y `created_at`, y NEVER SHALL renderizar el `id` UUID.
 - THE SYSTEM NEVER SHALL ofrecer al huésped rutas ni controles para listar, leer, modificar,
-  asignar, clasificar o resolver incidencias: `GuestPortalDataSource` declara exactamente los
-  cuatro métodos del contrato y ninguno lee una incidencia, así que la ausencia es estructural.
+  asignar, clasificar o resolver incidencias: `GuestPortalDataSource` declara exactamente los seis
+  métodos del contrato y ninguno lee una incidencia, así que la ausencia es estructural.
 - IF la API responde `429 RATE_LIMITED` al comunicar una incidencia, THEN THE SYSTEM SHALL indicar
   que debe esperar antes de reintentar y NEVER SHALL presentar el reintento como confirmación de
   que la incidencia no se creó.
+
+### Conversación con el alojamiento
+
+- WHEN `/guest/[token]` autoriza, THE SYSTEM SHALL montar `ConversationSection` como cuarta
+  sección de la página, con su propio hilo, campo de envío y estados, bajo el mismo gate de
+  `info` que las otras tres: mientras `info` no ha autorizado NO SHALL renderizarse, y su fallo
+  NEVER SHALL derribar la sección de estancia, check-in ni incidencia — cada una tiene su propio
+  `useQuery`/`useMutation`, así que la independencia es estructural.
+- WHEN la pestaña está visible, THE SYSTEM SHALL re-consultar el hilo mediante
+  `GET /api/v1/guest/messages/{token}` cada `PORTAL_THREAD_POLL_MS` (15.000 ms, constante de
+  módulo), y SHALL detener el refresco en cuanto la pestaña deja de estarlo, pasando
+  `refetchIntervalInBackground: false` **explícito** — la librería no trae ese valor por defecto,
+  así que la garantía descansa en el flag, no en una ausencia. NEVER SHALL abrir WebSocket ni SSE.
+  El intervalo está dimensionado contra el presupuesto de `GUEST_PORTAL_RATE_LIMIT_PER_MINUTE`
+  (60), compartido ahora entre las **seis** rutas del portal.
+- THE SYSTEM SHALL enviar por `POST /api/v1/guest/messages/{token}` **exactamente** `{ content }`,
+  deshabilitar el botón de envío mientras la petición está en curso, y anunciar el progreso en una
+  región `role="alert" aria-live="polite"`, igual que `CheckinSection`/`IncidentSection`. WHEN el
+  envío tiene éxito, THE SYSTEM SHALL invalidar la clave de la consulta del hilo en lugar de
+  escribir la respuesta a mano, de modo que la re-lectura muestre el mensaje del huésped **y** la
+  respuesta automática, escrita por el backend en la misma transacción.
+- THE SYSTEM SHALL presentar cada mensaje como **«Tú»** o **«El alojamiento»** según el campo
+  `sender` agrupado que publica la API (`GUEST`/`PROPERTY`), y NEVER SHALL derivar en el cliente
+  ninguna distinción entre una respuesta automática y una humana: no hay dato en la proyección del
+  que derivarla.
+- WHERE el hilo declara `state = AWAITING_HUMAN`, THE SYSTEM SHALL mostrar una copia localizada de
+  «te responderá una persona», y NEVER SHALL mostrar razón de escalación alguna: la API no la
+  publica.
+- THE SYSTEM SHALL proporcionar estados accesibles y localizados de carga, hilo vacío, error de
+  autorización, validación (`422`), rate limit (`429`) y error genérico (`5xx`/red) para las dos
+  operaciones nuevas. Un `429` que falla la carga inicial o un sondeo usa una copia **distinta** de
+  la de envío —«no hemos podido actualizar la conversación», nunca «no sabemos si se recibió»—,
+  porque en una lectura el huésped no ha escrito nada; un sondeo fallido **conserva** el hilo ya
+  cargado en vez de sustituirlo por el estado de error, mostrando en su lugar un aviso de que lo
+  visible puede no estar al día. NEVER SHALL reintentar un `429` automáticamente ni presentar el
+  reintento como prueba de que el mensaje no se envió.
+- THE SYSTEM SHALL resolver todo el texto de esta sección por i18n bajo `guest:conversation.*`
+  (`locales/es/guest.json`, `locales/en/guest.json`), sin cadenas hardcodeadas.
 
 ### Estados accesibles, localización y mapeo de errores
 
@@ -85,7 +123,7 @@ interfaz web.
   como fallback; toda clave introducida existe en ambos catálogos y ninguna cadena está
   hardcodeada.
 - THE SYSTEM SHALL proporcionar estados accesibles y localizados de carga, vacío, error de
-  autorización, error de validación, rate limit y éxito para cada uno de los tres recorridos, y
+  autorización, error de validación, rate limit y éxito para cada uno de los cuatro recorridos, y
   SHALL mantener navegación mobile-first, foco y nombres accesibles para controles, campos,
   mensajes y regiones de estado.
 - THE SYSTEM SHALL renderizar `document_status`, `legal_registration_status` e `IncidentStatus`
@@ -106,7 +144,7 @@ interfaz web.
   `getHeaders`, de modo que estructuralmente no pueda emitir `Authorization: Bearer`; NEVER SHALL
   crear, guardar ni refrescar un JWT o sesión para el huésped, y `baseUrl: ""` enruta por el proxy
   same-origin `app/api/[...path]`.
-- THE SYSTEM SHALL consumir exclusivamente las cuatro rutas anónimas del portal y renderizar solo
+- THE SYSTEM SHALL consumir exclusivamente las seis rutas anónimas del portal y renderizar solo
   los campos publicados por los schemas de respuesta, ignorando cualquier campo adicional sin
   imponer validación runtime propia; cada sección de la página tiene su propio dato y estado, de
   modo que el fallo de una no derriba a las otras (salvo el gate de `info`).
@@ -130,13 +168,18 @@ interfaz web.
 - `frontend/features/guest-portal/data/{guest-portal-source.ts, dto.ts, index.ts, http/http-guest-portal-source.ts}`
   — interfaz `GuestPortalDataSource`, DTOs camelCase, punto de composición `getGuestPortalDataSource()`
   con cliente anónimo, e impl HTTP con mappers snake→camel y normalización de nullables.
-- `frontend/features/guest-portal/hooks/{query-keys.ts, use-stay-info.ts, use-checkin.ts, use-report-incident.ts}`
-  — `useQuery`/`useMutation` por sección, keys por token.
+- `frontend/features/guest-portal/hooks/{query-keys.ts, use-stay-info.ts, use-checkin.ts, use-report-incident.ts, use-conversation.ts}`
+  — `useQuery`/`useMutation` por sección, keys por token; `use-conversation.ts` declara además
+  `PORTAL_THREAD_POLL_MS`.
 - `frontend/features/guest-portal/components/{guest-portal-view.tsx, fields/guest-fields.tsx}` —
-  vista raíz con las secciones internas `StayInfoSection`/`CheckinSection`/`IncidentSection`, el
-  campo accesible `GuestField` (`input`/`textarea`/`select`) y `fieldErrorsFrom422`.
+  vista raíz con las secciones internas
+  `StayInfoSection`/`CheckinSection`/`IncidentSection`/`ConversationSection`, el campo accesible
+  `GuestField` (`input`/`textarea`/`select`) y `fieldErrorsFrom422`.
 - `frontend/features/guest-portal/index.ts` — export público (`GuestPortalView`).
 - `frontend/lib/api/retry-policy.ts` — la `retryPolicy` compartida con `features/dashboard`.
 - `frontend/lib/i18n/resources.ts`, `frontend/locales/{es,en}/guest.json` — namespace `guest` y
-  catálogos ES/EN.
+  catálogos ES/EN, incluida la clave `conversation.*`.
+- `frontend/locales/{es,en}/conversations.json` — `channel.PORTAL`, que la bandeja del manager usa
+  para no pintar el literal del enum; el resto de esa capacidad vive en
+  [`conversations-inbox`](conversations-inbox.md).
 - `docs/guest-portal.md` — operación y diagnóstico del portal.

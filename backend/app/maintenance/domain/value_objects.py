@@ -108,6 +108,19 @@ class IncidentSummary:
 
 
 @dataclass(frozen=True)
+class OpenIncidentCounts:
+    """The tenant-wide open-incident counts of `dashboard-operational-kpis` R3.
+
+    `total` is every incident in `OPEN_INCIDENT_STATUSES`; `urgent` is the subset of those
+    with `severity` in `{HIGH, CRITICAL}` — a breakdown, not a second independent count, so
+    `urgent` is always `<= total`.
+    """
+
+    total: int
+    urgent: int
+
+
+@dataclass(frozen=True)
 class OwnerApprovalSummary:
     """What the property dashboard is allowed to know about a pending approval.
 

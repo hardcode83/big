@@ -27,7 +27,10 @@ from app.audit.domain import actions as audit_actions
 from app.auth.domain.enums import UserRole
 from app.auth.domain.ports import UserRepository
 from app.auth.domain.recipients import RoleRecipients
+from app.notifications.application.channel_dispatch import dispatch_and_persist
+from app.notifications.domain.enums import NotificationType
 from app.notifications.domain.repositories import NotificationLogRepository
+from app.tenants.domain.repositories import TenantConfigRepository
 from app.pricing.domain.notifications import price_recommendation_notification
 from app.audit.domain.repositories import AuditLogRepository
 from app.audit.domain.services import AuditLogFactory
@@ -427,6 +430,7 @@ class GeneratePriceRecommendationsUseCase:
         audit: AuditLogRepository,
         users: UserRepository,
         notifications: NotificationLogRepository,
+        tenant_configs: TenantConfigRepository,
         uow: UnitOfWork,
     ) -> None:
         # This generator's correctness depends on abandoning its own failed unit (D9), so a
@@ -453,6 +457,9 @@ class GeneratePriceRecommendationsUseCase:
         self._audit = _AuditWriter(audit)
         self._notifications = notifications
         self._recipients = RoleRecipients(users=users)
+        # `notification-channel-routing` (R1, R4) — the `PRICE_RECOMMENDATION` fan-out
+        # reads the tenant's `notification_*_enabled` flags.
+        self._tenant_configs = tenant_configs
         self._uow = uow
 
     async def execute(
@@ -832,16 +839,19 @@ class GeneratePriceRecommendationsUseCase:
                 },
             )
 
+        config = await self._tenant_configs.get_or_create(tenant_id, now)
         for recipient in users:
-            await self._notifications.add(
-                tenant_id,
-                price_recommendation_notification(
-                    tenant_id=tenant_id,
-                    property_id=property.id,
-                    recipient_id=recipient.id,
-                    recipient_contact=recipient.email,
-                    now=now,
-                ),
+            await dispatch_and_persist(
+                notifications=self._notifications,
+                tenant_id=tenant_id,
+                recipient=recipient,
+                config=config,
+                notification_type=NotificationType.PRICE_RECOMMENDATION.value,
+                recipient_role=recipient.role.value,
+                log_builder=price_recommendation_notification,
+                property_id=property.id,
+                recipient_id=recipient.id,
+                now=now,
             )
 
     async def _occupancy_of(

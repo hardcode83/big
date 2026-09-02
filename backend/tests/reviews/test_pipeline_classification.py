@@ -1,0 +1,297 @@
+"""The classification pipeline (R2.1, R2.3, R2.4, R2.5; design D7, D16).
+
+Two halves:
+
+* The use case moves a review from `NEW` to `DRAFTED`, populates the three AI
+  fields, and persists a draft from the closed catalogue.
+* Below the tenant's confidence threshold it leaves the row with `sentiment = ...`,
+  `ai_summary = NULL` and `recurring_issues = []`, and writes
+  `REVIEW_CLASSIFIED_LOW_CONFIDENCE` instead.
+"""
+
+import uuid
+from datetime import UTC, datetime
+from decimal import Decimal
+
+import pytest
+from sqlalchemy import select
+
+from app.auth.domain.enums import UserRole
+from app.reviews.application.use_cases import ClassifyPendingReviewsUseCase
+from app.reviews.domain.enums import (
+    RecurringIssueTag,
+    ReviewChannel,
+    ReviewSentiment,
+)
+from app.reviews.domain.value_objects import GeneratedDraft, ReviewAnalysis
+from app.reviews.infrastructure.ai import MockReviewAnalyzer, MockReviewDraftGenerator
+from app.reviews.infrastructure.repositories import (
+    SqlAlchemyReviewRepository,
+    SqlAlchemyReviewResponseDraftRepository,
+)
+from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
+from app.tenants.infrastructure.models import TenantConfigModel
+from app.timeline.domain.repositories import TimelineFilters
+from tests.reviews.conftest import (
+    seed_draft,
+    seed_property,
+    seed_review,
+    seed_tenant,
+)
+
+
+async def _seed_tenant_with_config(db_session, *, threshold: Decimal):
+    from app.tenants.infrastructure.models import TenantModel
+
+    tenant = TenantModel(
+        name="TenantA",
+        billing_email="tenant-a@example.com",
+    )
+    db_session.add(tenant)
+    await db_session.flush()
+    config = TenantConfigModel(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        ai_confidence_threshold=threshold,
+    )
+    db_session.add(config)
+    await db_session.flush()
+    return tenant
+
+
+async def _setup(db_session, *, threshold=Decimal("0.75")):
+    from app.core.unit_of_work import SqlAlchemyUnitOfWork
+
+    from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
+    from app.timeline.infrastructure.repositories import (
+        SqlAlchemyTimelineEventRepository,
+        SqlAlchemyTimelineEventReader,
+    )
+
+    tenant = await _seed_tenant_with_config(db_session, threshold=threshold)
+    prop = await seed_property(db_session, tenant, "REDES11")
+    use_case = ClassifyPendingReviewsUseCase(
+        reviews=SqlAlchemyReviewRepository(db_session),
+        drafts=SqlAlchemyReviewResponseDraftRepository(db_session),
+        analyzer=MockReviewAnalyzer(),
+        draft_generator=MockReviewDraftGenerator(),
+        configs=SqlAlchemyTenantConfigRepository(db_session),
+        audit=SqlAlchemyAuditLogRepository(db_session),
+        timeline=SqlAlchemyTimelineEventRepository(db_session),
+        uow=SqlAlchemyUnitOfWork(db_session),
+    )
+    return tenant, prop, use_case
+
+
+@pytest.mark.asyncio
+async def test_a_review_created_by_posting_is_classified_on_the_next_tick(
+    db_session,
+) -> None:
+    """R2.1: `POST /reviews` lands as `NEW` with empty AI fields; the pipeline picks
+    it up on the next tick and populates the three fields plus a draft."""
+    tenant, prop, use_case = await _setup(db_session)
+    review = await seed_review(
+        db_session, tenant, prop, content="La casa estaba sucia", language="es"
+    )
+
+    now = datetime.now(UTC)
+    report = await use_case.execute(tenant_id=tenant.id, now=now)
+
+    assert report.scanned == 1
+    assert report.classified == 1
+    assert report.low_confidence == 0
+    assert report.failed == 0
+    assert report.manual_triage == 0
+
+    review_repo = SqlAlchemyReviewRepository(db_session)
+    refreshed = await review_repo.get(tenant.id, review.id)
+    assert refreshed.status.value == "DRAFTED"
+    assert refreshed.sentiment is not None
+    assert refreshed.ai_summary is not None
+    # The draft was persisted by the catalogue path; check it via the draft repo.
+    draft_repo = SqlAlchemyReviewResponseDraftRepository(db_session)
+    draft = await draft_repo.get_for_review(tenant.id, review.id)
+    assert draft is not None
+    assert draft.ai_generated is True
+
+
+@pytest.mark.asyncio
+async def test_low_confidence_clears_the_three_ai_fields_and_emits_low_confidence_event(
+    db_session,
+) -> None:
+    """R2.3: below the tenant's threshold the row carries `sentiment`, `ai_summary=None`,
+    `recurring_issues=[]`, and a `REVIEW_CLASSIFIED_LOW_CONFIDENCE` event exists."""
+    from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventReader
+
+    # A threshold of `0.99` means every mock verdict (max 0.95) lands below it.
+    tenant, prop, use_case = await _setup(db_session, threshold=Decimal("0.99"))
+    review = await seed_review(
+        db_session, tenant, prop, content="La casa estaba sucia", language="es"
+    )
+
+    now = datetime.now(UTC)
+    report = await use_case.execute(tenant_id=tenant.id, now=now)
+
+    assert report.scanned == 1
+    assert report.low_confidence == 1
+
+    review_repo = SqlAlchemyReviewRepository(db_session)
+    refreshed = await review_repo.get(tenant.id, review.id)
+    assert refreshed.status.value == "DRAFTED"  # still moves, the rule is "low-confidence but classified"
+    assert refreshed.ai_summary is None
+    assert refreshed.recurring_issues == ()
+
+    timeline_repo = SqlAlchemyTimelineEventReader(db_session)
+    page = await timeline_repo.list_for_property(
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        filters=TimelineFilters(),
+        page=1,
+        per_page=20,
+    )
+    event_types = [e.event_type.value for e in page.items]
+    assert "REVIEW_CLASSIFIED_LOW_CONFIDENCE" in event_types
+
+
+@pytest.mark.asyncio
+async def test_three_consecutive_failures_park_the_row_for_manual_triage(
+    db_session, monkeypatch
+) -> None:
+    """R2.4: the analyser fails three times, the row parks with `classification_attempts = 3`.
+
+    The mock does not raise today; we patch its `analyze_review` to raise and
+    assert the parking behaviour.
+    """
+    from app.core.unit_of_work import SqlAlchemyUnitOfWork
+
+    tenant, prop, use_case = await _setup(db_session)
+    review = await seed_review(
+        db_session, tenant, prop, content="La casa estaba sucia", language="es"
+    )
+
+    class _Boom:
+        async def analyze_review(self, *, content, language):
+            raise RuntimeError("synthetic failure")
+
+    # Replace the analyser with one that raises. The use case holds its own
+    # reference, so we patch the instance directly.
+    use_case._analyzer = _Boom()  # type: ignore[assignment]
+
+    now = datetime.now(UTC)
+    for _ in range(3):
+        await use_case.execute(tenant_id=tenant.id, now=now)
+
+    review_repo = SqlAlchemyReviewRepository(db_session)
+    refreshed = await review_repo.get(tenant.id, review.id)
+    assert refreshed.classification_attempts == 3
+
+
+@pytest.mark.asyncio
+async def test_a_classified_row_does_not_reappear_in_pending(db_session) -> None:
+    """D16 / D3: a successful classification removes the row from the queue."""
+    tenant, prop, use_case = await _setup(db_session)
+    review = await seed_review(
+        db_session, tenant, prop, content="La casa estaba sucia", language="es"
+    )
+    now = datetime.now(UTC)
+    await use_case.execute(tenant_id=tenant.id, now=now)
+
+    review_repo = SqlAlchemyReviewRepository(db_session)
+    pending = await review_repo.list_pending_classification(
+        tenant.id, limit=100
+    )
+    assert pending == []
+    # Sanity: the review we classified is no longer pending because
+    # `ai_summary IS NOT NULL` is now true.
+    refreshed = await review_repo.get(tenant.id, review.id)
+    assert refreshed.ai_summary is not None
+
+
+@pytest.mark.asyncio
+async def test_list_pending_classification_skips_rows_locked_by_another_transaction(
+    test_engine, db_session
+) -> None:
+    """`list_pending_classification` claims each row via `FOR UPDATE SKIP LOCKED` (D2/D16).
+
+    A second transaction that arrives while the first still holds the claim walks past
+    the locked rows instead of waiting (the SKIP LOCKED half) or returning them (the bare
+    FOR UPDATE half). The outer fence is the tenant lock `run_for_every_tenant` already
+    holds; this test pins the inner one at the repository boundary so a refactor that
+    drops the clause is caught red instead of becoming a production latency regression.
+
+    Two sessions on the same engine, no commit between the lock and the second read —
+    `expire_on_commit=False` keeps the test fixtures visible across both transactions
+    the way production's session-per-request keeps them.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.reviews.infrastructure.models import ReviewModel
+
+    tenant, prop, _ = await _setup(db_session)
+    await seed_review(db_session, tenant, prop, content="La casa estaba sucia", language="es")
+    await seed_review(db_session, tenant, prop, content="La wifi iba fatal", language="es")
+    await db_session.commit()
+
+    session_a = AsyncSession(test_engine, expire_on_commit=False)
+    trans_a = await session_a.begin()
+    try:
+        # First transaction takes `FOR UPDATE` on every pending row and holds the
+        # transaction open. The rows are locked until `trans_a.rollback()` runs.
+        locked = await session_a.execute(
+            select(ReviewModel)
+            .where(
+                ReviewModel.tenant_id == tenant.id,
+                ReviewModel.ai_summary.is_(None),
+                ReviewModel.classification_attempts < 3,
+            )
+            .with_for_update()
+        )
+        assert len(locked.scalars().all()) == 2
+
+        async with AsyncSession(test_engine, expire_on_commit=False) as session_b:
+            rows = await SqlAlchemyReviewRepository(
+                session_b
+            ).list_pending_classification(tenant.id, limit=10)
+            assert rows == [], (
+                "SKIP LOCKED should make the second transaction walk past the rows the "
+                "first holds; the second batch returned the same set instead."
+            )
+    finally:
+        await trans_a.rollback()
+        await session_a.close()
+
+
+def test_classify_pending_reviews_use_case_accepts_the_scheduler_wiring_kwargs() -> None:
+    """N1: the constructor takes `audit=` and the scheduler passes `audit=`.
+
+    The mismatch this test pins came up at the panel of the first round: the use case
+    constructor required `audit_factory=` while the scheduler wired `audit=`. After the
+    constructor change the wiring is one line, and this test freezes both ends so a
+    future refactor cannot reintroduce the drift — a redefinition that drops `audit=` or
+    renames it to `audit_factory=` makes the constructor call below raise TypeError,
+    with the kwargs the scheduler actually passes.
+    """
+    # The full set of kwargs `_classify_reviews` builds at
+    # `backend/app/scheduler/tasks.py::_classify_reviews`. Anything `_classify_reviews`
+    # passes has to be accepted by the constructor; a missing or renamed kwarg surfaces
+    # as a TypeError the moment the wiring is touched.
+    scheduler_kwargs = {
+        "reviews": object(),
+        "drafts": object(),
+        "analyzer": object(),
+        "draft_generator": object(),
+        "configs": object(),
+        "audit": object(),
+        "timeline": object(),
+        "uow": object(),
+    }
+
+    use_case = ClassifyPendingReviewsUseCase(**scheduler_kwargs)
+
+    # The constructor stored them, and `audit` is the slot the panel flagged — verify
+    # the same object the scheduler wired lands on the field the audit writer writes
+    # through. A regression that swaps `audit=` for `audit_factory=` either fails the
+    # constructor above or leaves this assertion red because `_audit` is unset.
+    assert use_case._audit is scheduler_kwargs["audit"]

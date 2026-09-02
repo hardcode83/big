@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from app.auth.domain.entities import User
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.ports import UserRepository
-from app.auth.domain.repositories import UserFilters
+from app.auth.domain.repositories import MAX_PAGE, UserFilters
 
 
 @dataclass(frozen=True)
@@ -56,12 +56,13 @@ class RoleRecipients:
     merely because a manager exists).
     """
 
-    #: A tenant's roster is small (PRD §1: two flats and a handful of people) and the roles
-    #: that receive notifications are the administrative ones, so one page is the whole
-    #: answer. The same bound and the same reasoning as the two implementations this
-    #: replaces, kept as a class attribute so a caller can assert against it instead of
-    #: rediscovering the number.
-    MAX_RECIPIENTS = 100
+    #: The page size for the loop below, **not a cap on the answer.** A tenant's roster is
+    #: usually small (PRD §1: two flats and a handful of people) but the cap the previous
+    #: implementation used (`100`) hid notifications for tenants with more than that many
+    #: administrative users. `MAX_PER_PAGE` is the same number the API enforces, so the
+    #: page request never errors on a per-page bound and `MAX_PAGE` (the loop bound) is the
+    #: only ceiling.
+    PAGE_SIZE = 100
 
     def __init__(self, *, users: UserRepository) -> None:
         self._users = users
@@ -89,19 +90,36 @@ class RoleRecipients:
         )
 
     async def active_holders(self, tenant_id: uuid.UUID, role: UserRole) -> Recipients:
-        """One page of the tenant's ACTIVE holders of `role`, counting what it left out.
+        """Every active holder of `role` on the tenant, paginated end-to-end (R6.2).
 
         Both the primary role and the owner fallback come through here, which is the fix the
         escalation job needed: when they were two inline queries only the first counted its
         truncation, so a tenant with more than one page of owners and no manager notified a
         subset with the counter still at zero.
+
+        The previous implementation asked for `per_page=100` and called it done; a tenant
+        whose roster is bigger (a portfolio group, a multi-region operator) silently dropped
+        everyone past page one. The loop walks until either the API reports zero items or the
+        accumulated list covers `page.total`. `MAX_PAGE` is the safety ceiling: at the default
+        `PAGE_SIZE` it caps the answer at ten million users, which is well past anything
+        realistic and stops a runaway roster from turning a tick into an unbounded read.
         """
-        page = await self._users.list(
-            tenant_id,
-            UserFilters(role=role, status=UserStatus.ACTIVE),
-            page=1,
-            per_page=self.MAX_RECIPIENTS,
-        )
+        accumulated: list[User] = []
+        total = 0
+        for page_number in range(1, MAX_PAGE + 1):
+            page = await self._users.list(
+                tenant_id,
+                UserFilters(role=role, status=UserStatus.ACTIVE),
+                page=page_number,
+                per_page=self.PAGE_SIZE,
+            )
+            # `total` is the same on every page (it's the unfiltered row count); the first
+            # assignment is the only one that changes anything.
+            total = page.total
+            accumulated.extend(page.items)
+            if not page.items or len(accumulated) >= total:
+                break
         return Recipients(
-            users=tuple(page.items), dropped=max(page.total - len(page.items), 0)
+            users=tuple(accumulated),
+            dropped=max(total - len(accumulated), 0),
         )

@@ -314,6 +314,13 @@ export interface paths {
      */
     post: operations["resolve_conversation_api_v1_conversations__conversation_id__resolve_post"];
   };
+  "/api/v1/dashboard/operational-kpis": {
+    /**
+     * Tenant-wide operational counts
+     * @description Three tenant-wide counts (`dashboard-operational-kpis` R1, R2, R3): today's live cleaning tasks, check-ins in the next 7 days, and open incidents with their urgent (HIGH/CRITICAL) breakdown. All three keys are always present, `null` included: a field comes back `null` when the caller's role lacks the permission that guards its source domain (`READ_CLEANING_TASKS`, `READ_RESERVATIONS`, `READ_INCIDENTS` respectively), indistinguishable from having nothing to count — the same 'agregar no concede' rule the other two dashboard routes apply. `open_incidents` is one nested object, redacted as a whole.
+     */
+    get: operations["get_operational_kpis_api_v1_dashboard_operational_kpis_get"];
+  };
   "/api/v1/dashboard/properties": {
     /**
      * The dashboard card of every property
@@ -383,6 +390,18 @@ export interface paths {
      * @description Everything the guest needs in order to arrive: dates and times, the property's public details, the arrival instructions and the support channel. Never the reservation's internal notes, its amounts, its external PMS or channel ids, another guest's data, or any credential — those are not fields of the projection, so no serialiser can reach them. Never a document number either, not even for the guest who supplied it.
      */
     get: operations["read_stay_info_api_v1_guest_info__token__get"];
+  };
+  "/api/v1/guest/messages/{token}": {
+    /**
+     * The guest's own thread
+     * @description One page of the stay's conversation, oldest first within the page. Every message is attributed to the guest or to the accommodation and to nothing finer: which member of staff wrote a reply, and whether it was written automatically, are not fields of this response. Neither is the reason a conversation is waiting for a person — only that it is. A stay whose guest has not written yet answers with an empty thread: reading never opens a conversation. **Without `page` the most recent window is returned**, since a thread is read from its end; `total`, `page` and `per_page` say which window it is, and an explicit `page` still reaches the earlier ones.
+     */
+    get: operations["read_guest_thread_api_v1_guest_messages__token__get"];
+    /**
+     * Write a message to the accommodation
+     * @description Sends one message from the guest and runs the whole messaging pipeline over it: the language is detected, the intent classified, and either an automatic answer is written or a person is asked to take over. The stay's thread is created by this first message and by nothing else. The body carries the text and nothing else — a sender, a reservation or a conversation id in it is a `422`, never something quietly ignored — and the acknowledgement is the message as it will appear in the thread. Retrying sends a second message: the request is not deduplicated, so treat a `429` as 'wait', never as 'it did not arrive'.
+     */
+    post: operations["post_guest_message_api_v1_guest_messages__token__post"];
   };
   "/api/v1/guests/{guest_id}/document": {
     /**
@@ -736,6 +755,13 @@ export interface paths {
      */
     get: operations["get_property_dashboard_api_v1_properties__property_id__dashboard_get"];
   };
+  "/api/v1/properties/{property_id}/reviews/summary": {
+    /**
+     * Per-property review summary
+     * @description R5.5 — sentiment histogram and top-N recurring-issue counts of the property's reviews in the last 90 days. `top_n` defaults to the tenant's `review_recurring_issues_top_n`.
+     */
+    get: operations["list_reviews_summary_for_property_api_v1_properties__property_id__reviews_summary_get"];
+  };
   "/api/v1/properties/{property_id}/state": {
     /**
      * A property's operational state
@@ -797,6 +823,42 @@ export interface paths {
      * @description PRD §17 step 4. Runs against `MockSESHospedajesAdapter` — real submission is a declared MVP non-goal (PRD §29) and needs credentials, a DPA with the provider and a retention policy first. Responds `409` unless the stay is `READY_TO_SUBMIT`, without invoking the adapter. On failure the stay becomes `FAILED` and the managers are notified.
      */
     post: operations["submit_legal_registration_api_v1_reservations__reservation_id__legal_registration_submit_post"];
+  };
+  "/api/v1/reviews": {
+    /**
+     * List reviews
+     * @description The inbox. Filtered by `property_id`, `channel`, `sentiment`, `status`, `rating_min`/`rating_max` and `date_from`/`date_to`, paginated with `page`/`per_page` (PRD §23). Ordered by `published_at` descending with **nulls last** — a review without a publication date must not sit above the ones that do.
+     */
+    get: operations["list_reviews_api_v1_reviews_get"];
+    /**
+     * Create a review
+     * @description R5.1 — the manager creates a review manually (no PMS adapter in this change). The pipeline runs asynchronously; the row is born `NEW` with `sentiment = NEUTRAL`, `ai_summary = NULL` and `recurring_issues = []`.
+     */
+    post: operations["create_review_api_v1_reviews_post"];
+  };
+  "/api/v1/reviews/{review_id}": {
+    /**
+     * Get a review
+     * @description R5.4 — one review, with the `404` indistinguishability of R1.3.
+     */
+    get: operations["get_review_api_v1_reviews__review_id__get"];
+  };
+  "/api/v1/reviews/{review_id}/response": {
+    /**
+     * Get the draft of a review
+     * @description R5.4 — the draft of one review, or `404` indistinguishably (the same response is the answer for 'no review', 'another tenant' and 'role cannot read').
+     */
+    get: operations["get_review_draft_api_v1_reviews__review_id__response_get"];
+    /**
+     * Regenerate the draft of a review
+     * @description R3.5 / D5 — replace the existing draft with a new one in a single transaction. `ai_generated` stays `TRUE`.
+     */
+    post: operations["regenerate_review_draft_api_v1_reviews__review_id__response_post"];
+    /**
+     * Act on the review response (approve / ignore / mark posted / edit)
+     * @description R3.5 / R4.2 — `action` picks the verb. `EDIT` requires `draft_content`; the others do not.
+     */
+    patch: operations["act_on_review_response_api_v1_reviews__review_id__response_patch"];
   };
   "/api/v1/tenants/{tenant_id}": {
     /**
@@ -1470,7 +1532,7 @@ export interface components {
      * ConversationChannel
      * @enum {string}
      */
-    ConversationChannel: "WHATSAPP" | "AIRBNB_MSG" | "BOOKING_MSG" | "EMAIL" | "PHONE_TRANSCRIPT" | "MANUAL";
+    ConversationChannel: "WHATSAPP" | "AIRBNB_MSG" | "BOOKING_MSG" | "EMAIL" | "PHONE_TRANSCRIPT" | "MANUAL" | "PORTAL";
     /**
      * ConversationEscalationStatus
      * @description ASSUMPTION: name invented — the PRD declares this enum inline
@@ -1811,6 +1873,28 @@ export interface components {
       /** Special Requests */
       special_requests?: string | null;
     };
+    /**
+     * CreateReviewRequest
+     * @description R5.1 — what the manager posts to `POST /reviews`.
+     */
+    CreateReviewRequest: {
+      channel: components["schemas"]["ReviewChannel"];
+      /** Content */
+      content?: string | null;
+      /** Language */
+      language?: string | null;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Rating */
+      rating?: number | string | null;
+      /** Reservation Id */
+      reservation_id?: string | null;
+      /** Reviewer Name */
+      reviewer_name?: string | null;
+    };
     /** CreateUserRequest */
     CreateUserRequest: {
       /** Email */
@@ -1862,11 +1946,8 @@ export interface components {
       /** Preferred Language */
       preferred_language: string;
       role: components["schemas"]["UserRole"];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
+      /** Tenant Id */
+      tenant_id: string | null;
     };
     /**
      * DecidePriceRecommendationRequest
@@ -2192,6 +2273,25 @@ export interface components {
      */
     GuestDocumentType: "DNI" | "NIE" | "PASSPORT" | "RESIDENCE_CARD" | "OTHER";
     /**
+     * GuestMessageResponse
+     * @description One message of the thread: who sent it, what it says, and when.
+     */
+    GuestMessageResponse: {
+      /** Content */
+      content: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      sender: components["schemas"]["PortalMessageSender"];
+    };
+    /**
      * GuestResponse
      * @description A name. Rule 4 of `steering/security.md` — nothing about the document, ever.
      */
@@ -2219,6 +2319,21 @@ export interface components {
       phone: string | null;
       /** Preferred Language */
       preferred_language: string;
+    };
+    /**
+     * GuestThreadResponse
+     * @description One page of the conversation, oldest first, with the window it came from.
+     */
+    GuestThreadResponse: {
+      /** Items */
+      items: components["schemas"]["GuestMessageResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      state: components["schemas"]["PortalThreadState"];
+      /** Total */
+      total: number;
     };
     /**
      * ImportReportResponse
@@ -2713,7 +2828,31 @@ export interface components {
      * inherits these names.
      * @enum {string}
      */
-    NotificationType: "CLEANING_TASK_ASSIGNED" | "CLEANING_NO_RESPONSE" | "CLEANING_COMPLETED" | "CLEANING_FAILED" | "INCIDENT_CREATED_CRITICAL" | "INCIDENT_CREATED_HIGH" | "OWNER_APPROVAL_REQUIRED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_NO_RESPONSE" | "GUEST_ESCALATION" | "LOCK_ALERT" | "CHECKIN_REMINDER_24H" | "CHECKIN_REMINDER_2H" | "CHECKOUT_REMINDER" | "PRICE_RECOMMENDATION" | "SLA_BREACH" | "PASSWORD_RESET_REQUESTED";
+    NotificationType: "CLEANING_TASK_ASSIGNED" | "CLEANING_NO_RESPONSE" | "CLEANING_COMPLETED" | "CLEANING_FAILED" | "INCIDENT_CREATED_CRITICAL" | "INCIDENT_CREATED_HIGH" | "OWNER_APPROVAL_REQUIRED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_NO_RESPONSE" | "GUEST_ESCALATION" | "LOCK_ALERT" | "CHECKIN_REMINDER_24H" | "CHECKIN_REMINDER_2H" | "CHECKOUT_REMINDER" | "PRICE_RECOMMENDATION" | "SLA_BREACH" | "REVIEW_RESPONSE_APPROVED" | "PASSWORD_RESET_REQUESTED";
+    /**
+     * OpenIncidentCountsResponse
+     * @description The `open_incidents` block of `GET /dashboard/operational-kpis` (R3).
+     */
+    OpenIncidentCountsResponse: {
+      /** Total */
+      total: number;
+      /** Urgent */
+      urgent: number;
+    };
+    /**
+     * OperationalKpisResponse
+     * @description `GET /api/v1/dashboard/operational-kpis` (`dashboard-operational-kpis` R1, R2, R3).
+     *
+     * All three top-level keys are always present, `null` included: `null` marks a role that
+     * may not read the source domain (R4.3), never omission.
+     */
+    OperationalKpisResponse: {
+      /** Cleanings Today */
+      cleanings_today: number | null;
+      open_incidents: components["schemas"]["OpenIncidentCountsResponse"] | null;
+      /** Upcoming Checkins */
+      upcoming_checkins: number | null;
+    };
     /**
      * OwnerApprovalStatus
      * @description ASSUMPTION: name invented — the PRD declares this enum inline
@@ -2949,6 +3088,52 @@ export interface components {
      * @enum {string}
      */
     PMSProvider: "MOCK" | "CHANNEX" | "BEDS24";
+    /**
+     * PortalMessageSender
+     * @description Who wrote a message, **grouped into two** (`guest-portal-messaging` R2.2, D4).
+     *
+     * Derived in the backend from `MessageSenderType`, whose five members collapse to these two.
+     * The collapse is the requirement, not an implementation detail: R2.2 forbids **publishing**
+     * whether a reply was written by the AI or by a person, and a vocabulary of two is what makes
+     * the distinction absent from the response rather than merely omitted by a serialiser.
+     *
+     * **It does not make the distinction unguessable, and this docstring used to claim it did.**
+     * A guest can still infer it from outside the payload — the automatic reply carries the same
+     * `created_at` as the message that triggered it, it arrives in the same poll, and its text
+     * comes from a closed catalogue. The residual is written down in `design.md` under R2.2
+     * rather than left as an overstatement next to the type. Raised by the security panel of
+     * sections 5-6.
+     *
+     * `PROPERTY` and not `HOST`/`MANAGER`: the guest is told *the accommodation* answered, which
+     * is true of an automatic reply and of a manager's, and names no role.
+     * @enum {string}
+     */
+    PortalMessageSender: "GUEST" | "PROPERTY";
+    /**
+     * PortalThreadState
+     * @description Whether a person has the conversation (R2.3, D4).
+     *
+     * An enum of two members and **not a boolean**, for two reasons D4 records: the front end
+     * switches on a name to pick its localised copy (R5.6), and a boolean called
+     * `awaiting_human` invites somebody to hang the *why* beside it — which is the escalation
+     * reason, and R2.3 says that is internal.
+     *
+     * `AWAITING_HUMAN` covers `PENDING_HUMAN` and `HUMAN_HANDLING` alike. The guest is told a
+     * person will reply; that a manager has already taken it over is our business, not theirs.
+     * @enum {string}
+     */
+    PortalThreadState: "AUTOMATIC" | "AWAITING_HUMAN";
+    /**
+     * PostGuestMessageRequest
+     * @description What `POST /guest/messages/{token}` accepts: the guest's own words, and nothing else.
+     *
+     * Surrounding whitespace is stripped first, so the bounds count characters after stripping and
+     * a whitespace-only message is a `422`.
+     */
+    PostGuestMessageRequest: {
+      /** Content */
+      content: string;
+    };
     /** PriceRecommendationPageResponse */
     PriceRecommendationPageResponse: {
       /** Items */
@@ -3395,10 +3580,34 @@ export interface components {
      * @enum {string}
      */
     PropertyStatus: "ACTIVE" | "INACTIVE";
+    /**
+     * RecurringIssueTag
+     * @description The closed set of labels `reviews.recurring_issues` may carry (R2.2, design D7).
+     *
+     * Nine members and not a `str` because the column is the only thing the manager uses to
+     * decide what to fix, and an invented label cannot reach it. PRD §18 names them in prose;
+     * this enum is the spelling the table accepts, and the test
+     * `tests/reviews/test_recurring_issues_vocabulary.py` walks `backend/app/reviews/infrastructure/`
+     * to ensure no adapter smuggles an unknown value past the constructor.
+     *
+     * `OTHER` is the degradation sink: an adapter that invents a tag is dropped to `OTHER`
+     * by `Review.__post_init__` with a `logger.warning`, so the catalogue can be widened
+     * deliberately rather than silently accumulating synonyms.
+     * @enum {string}
+     */
+    RecurringIssueTag: "WIFI" | "NOISE" | "CLEANLINESS" | "ACCESS" | "COMMUNICATION" | "LOCATION" | "VALUE" | "AMENITIES" | "OTHER";
     /** RefreshRequest */
     RefreshRequest: {
       /** Refresh Token */
       refresh_token: string;
+    };
+    /**
+     * RegenerateReviewDraftRequest
+     * @description R3.5 — the body of `POST /reviews/{id}/response` (regenerate the draft).
+     */
+    RegenerateReviewDraftRequest: {
+      /** Language */
+      language?: string | null;
     };
     /**
      * RegisterCodeRequest
@@ -3732,6 +3941,163 @@ export interface components {
       status: components["schemas"]["OwnerApprovalStatus"];
     };
     /**
+     * ReviewChannel
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (Review.channel) without a named block (§7.20). Not the same enum as
+     * ConversationChannel or NotificationChannel — different values.
+     * @enum {string}
+     */
+    ReviewChannel: "AIRBNB" | "BOOKING" | "GOOGLE" | "MANUAL" | "OTHER";
+    /**
+     * ReviewDraftResponse
+     * @description The draft of one review (R5.4).
+     */
+    ReviewDraftResponse: {
+      /** Ai Generated */
+      ai_generated: boolean;
+      /** Approved At */
+      approved_at: string | null;
+      /** Approved By */
+      approved_by: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Draft Content */
+      draft_content: string;
+      /** Edits Count */
+      edits_count: number;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Language */
+      language: string;
+      /**
+       * Review Id
+       * Format: uuid
+       */
+      review_id: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * ReviewPageResponse
+     * @description PRD §23 envelope for the listing endpoint.
+     */
+    ReviewPageResponse: {
+      /** Items */
+      items: components["schemas"]["ReviewResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+    };
+    /**
+     * ReviewResponse
+     * @description What an authenticated operator may see about one review.
+     *
+     * Fields are enumerated rather than dumped from the entity, so a `from_attributes`
+     * dump would never publish whatever `Review` grows next.
+     */
+    ReviewResponse: {
+      /** Ai Summary */
+      ai_summary: string | null;
+      channel: components["schemas"]["ReviewChannel"];
+      /** Classification Attempts */
+      classification_attempts: number;
+      /** Content */
+      content: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Language */
+      language: string | null;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Published At */
+      published_at: string | null;
+      /** Rating */
+      rating: string | null;
+      /** Recurring Issues */
+      recurring_issues: components["schemas"]["RecurringIssueTag"][];
+      /** Reservation Id */
+      reservation_id: string | null;
+      /** Reviewer Name */
+      reviewer_name: string | null;
+      sentiment: components["schemas"]["ReviewSentiment"] | null;
+      status: components["schemas"]["ReviewStatus"];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * ReviewResponseActionRequest
+     * @description R3.5 / R4.2 — the body of `PATCH /reviews/{id}/response`.
+     *
+     * `action = EDIT` carries a `draft_content`; the other three do not.
+     */
+    ReviewResponseActionRequest: {
+      /**
+       * Action
+       * @enum {string}
+       */
+      action: "APPROVE" | "IGNORE" | "MARK_POSTED" | "EDIT";
+      /** Draft Content */
+      draft_content?: string | null;
+    };
+    /**
+     * ReviewSentiment
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (Review.sentiment) without a named block (§7.20).
+     * @enum {string}
+     */
+    ReviewSentiment: "POSITIVE" | "NEUTRAL" | "NEGATIVE";
+    /**
+     * ReviewStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (Review.status) without a named block (§7.20).
+     * @enum {string}
+     */
+    ReviewStatus: "NEW" | "DRAFTED" | "APPROVED" | "POSTED_MANUALLY" | "IGNORED";
+    /**
+     * ReviewSummaryResponse
+     * @description R5.5 — the per-property card the dashboard renders.
+     */
+    ReviewSummaryResponse: {
+      /** By Recurring Issue */
+      by_recurring_issue: {
+        [key: string]: number;
+      };
+      /** By Sentiment */
+      by_sentiment: {
+        [key: string]: number;
+      };
+      /** Top N */
+      top_n: number;
+      /** Window Days */
+      window_days: number;
+    };
+    /**
      * RowErrorResponse
      * @description One row the import could not take, with what a person needs to fix it.
      */
@@ -3910,6 +4276,8 @@ export interface components {
       notification_whatsapp_enabled?: boolean | null;
       /** Owner Approval Threshold Eur */
       owner_approval_threshold_eur?: number | string | null;
+      /** Review Recurring Issues Top N */
+      review_recurring_issues_top_n?: number | null;
       /** Sla Critical Minutes */
       sla_critical_minutes?: number | null;
       /** Sla High Minutes */
@@ -3937,6 +4305,8 @@ export interface components {
       notification_whatsapp_enabled: boolean;
       /** Owner Approval Threshold Eur */
       owner_approval_threshold_eur: string;
+      /** Review Recurring Issues Top N */
+      review_recurring_issues_top_n: number;
       /** Sla Critical Minutes */
       sla_critical_minutes: number;
       /** Sla High Minutes */
@@ -4024,7 +4394,7 @@ export interface components {
      * TimelineEventType
      * @enum {string}
      */
-    TimelineEventType: "RESERVATION_IMPORTED" | "RESERVATION_CREATED_MANUAL" | "RESERVATION_UPDATED" | "RESERVATION_CANCELLED" | "CHECKIN_WINDOW_OPENED" | "CHECKOUT_WINDOW_REACHED" | "PROPERTY_STATE_CHANGED" | "ACCESS_CODE_PENDING" | "ACCESS_CODE_CREATED_EXTERNAL" | "ACCESS_CODE_MANUAL_ADDED" | "ACCESS_CODE_DELIVERED" | "GUEST_MESSAGE_RECEIVED" | "AI_RESPONSE_SENT" | "AI_ESCALATED_TO_HUMAN" | "HUMAN_RESPONSE_SENT" | "CLEANING_TASK_CREATED" | "CLEANER_ASSIGNED" | "CLEANER_ACCEPTED" | "CLEANER_REJECTED" | "CLEANING_STARTED" | "CLEANING_PHOTO_UPLOADED" | "CLEANING_COMPLETED" | "CLEANING_FAILED_VALIDATION" | "INCIDENT_CREATED" | "INCIDENT_CLASSIFIED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_ACCEPTED" | "TECHNICIAN_REJECTED" | "TECHNICIAN_EN_ROUTE" | "TECHNICIAN_STARTED" | "INCIDENT_RESOLVED" | "INCIDENT_CANCELLED" | "OWNER_APPROVAL_REQUIRED" | "OWNER_APPROVED_EXPENSE" | "OWNER_REJECTED_EXPENSE" | "LOCK_ALERT_RECEIVED" | "PRICE_RECOMMENDATION_CREATED" | "PRICE_UPDATED_EXTERNAL" | "LEGAL_REGISTRATION_SUBMITTED" | "REVIEW_IMPORTED" | "REVIEW_RESPONSE_DRAFTED" | "REVIEW_RESPONSE_APPROVED" | "SLA_BREACH_WARNING" | "NOTIFICATION_SENT" | "NOTIFICATION_FAILED" | "WEBHOOK_RECEIVED" | "GUEST_CHECKIN_COMPLETED" | "OWNER_STATEMENT_GENERATED";
+    TimelineEventType: "RESERVATION_IMPORTED" | "RESERVATION_CREATED_MANUAL" | "RESERVATION_UPDATED" | "RESERVATION_CANCELLED" | "CHECKIN_WINDOW_OPENED" | "CHECKOUT_WINDOW_REACHED" | "PROPERTY_STATE_CHANGED" | "ACCESS_CODE_PENDING" | "ACCESS_CODE_CREATED_EXTERNAL" | "ACCESS_CODE_MANUAL_ADDED" | "ACCESS_CODE_DELIVERED" | "GUEST_MESSAGE_RECEIVED" | "AI_RESPONSE_SENT" | "AI_ESCALATED_TO_HUMAN" | "HUMAN_RESPONSE_SENT" | "CLEANING_TASK_CREATED" | "CLEANER_ASSIGNED" | "CLEANER_ACCEPTED" | "CLEANER_REJECTED" | "CLEANING_STARTED" | "CLEANING_PHOTO_UPLOADED" | "CLEANING_COMPLETED" | "CLEANING_FAILED_VALIDATION" | "INCIDENT_CREATED" | "INCIDENT_CLASSIFIED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_ACCEPTED" | "TECHNICIAN_REJECTED" | "TECHNICIAN_EN_ROUTE" | "TECHNICIAN_STARTED" | "INCIDENT_RESOLVED" | "INCIDENT_CANCELLED" | "OWNER_APPROVAL_REQUIRED" | "OWNER_APPROVED_EXPENSE" | "OWNER_REJECTED_EXPENSE" | "LOCK_ALERT_RECEIVED" | "PRICE_RECOMMENDATION_CREATED" | "PRICE_UPDATED_EXTERNAL" | "LEGAL_REGISTRATION_SUBMITTED" | "REVIEW_IMPORTED" | "REVIEW_RESPONSE_DRAFTED" | "REVIEW_RESPONSE_APPROVED" | "REVIEW_CREATED" | "REVIEW_DRAFT_EDITED" | "REVIEW_CLASSIFIED_LOW_CONFIDENCE" | "REVIEW_IGNORED" | "REVIEW_POSTED_MANUALLY" | "SLA_BREACH_WARNING" | "NOTIFICATION_SENT" | "NOTIFICATION_FAILED" | "WEBHOOK_RECEIVED" | "GUEST_CHECKIN_COMPLETED" | "OWNER_STATEMENT_GENERATED";
     /**
      * TimelinePageResponse
      * @description The pagination envelope of PRD §23.
@@ -5940,6 +6310,32 @@ export interface operations {
     };
   };
   /**
+   * Tenant-wide operational counts
+   * @description Three tenant-wide counts (`dashboard-operational-kpis` R1, R2, R3): today's live cleaning tasks, check-ins in the next 7 days, and open incidents with their urgent (HIGH/CRITICAL) breakdown. All three keys are always present, `null` included: a field comes back `null` when the caller's role lacks the permission that guards its source domain (`READ_CLEANING_TASKS`, `READ_RESERVATIONS`, `READ_INCIDENTS` respectively), indistinguishable from having nothing to count — the same 'agregar no concede' rule the other two dashboard routes apply. `open_incidents` is one nested object, redacted as a whole.
+   */
+  get_operational_kpis_api_v1_dashboard_operational_kpis_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OperationalKpisResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * The dashboard card of every property
    * @description One card per property of the caller's tenant (PRD §9.1), in the pagination envelope of PRD §23, with the same `page`/`per_page` bounds as `GET /api/v1/properties`. Resolved in a fixed number of queries whatever the page size — never one per property. `operational_state` is the canonical literal and carries no colour: the colour mapping belongs to the client. `cleaning_status`, `next_action.label` and `last_event_label` arrive already composed in the authenticated user's language. A block whose source the caller's role may not read comes back `null`, indistinguishable from having none — `current_or_next_reservation` is always present as a key, `null` included. Amounts are decimal strings so no cent is lost to a float. This route is not in PRD §23; it is an explicit extension, which is why it sits under `/dashboard` rather than under `/properties`.
    */
@@ -6332,6 +6728,101 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["StayInfoResponse"];
+        };
+      };
+      /** @description This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The request body exceeded the ceiling applied to all of /api/v1/. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Rate limited. Retry in a minute. */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * The guest's own thread
+   * @description One page of the stay's conversation, oldest first within the page. Every message is attributed to the guest or to the accommodation and to nothing finer: which member of staff wrote a reply, and whether it was written automatically, are not fields of this response. Neither is the reason a conversation is waiting for a person — only that it is. A stay whose guest has not written yet answers with an empty thread: reading never opens a conversation. **Without `page` the most recent window is returned**, since a thread is read from its end; `total`, `page` and `per_page` say which window it is, and an explicit `page` still reaches the earlier ones.
+   */
+  read_guest_thread_api_v1_guest_messages__token__get: {
+    parameters: {
+      query?: {
+        page?: number | null;
+        per_page?: number;
+      };
+      path: {
+        token: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["GuestThreadResponse"];
+        };
+      };
+      /** @description This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The request body exceeded the ceiling applied to all of /api/v1/. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Rate limited. Retry in a minute. */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Write a message to the accommodation
+   * @description Sends one message from the guest and runs the whole messaging pipeline over it: the language is detected, the intent classified, and either an automatic answer is written or a person is asked to take over. The stay's thread is created by this first message and by nothing else. The body carries the text and nothing else — a sender, a reservation or a conversation id in it is a `422`, never something quietly ignored — and the acknowledgement is the message as it will appear in the thread. Retrying sends a second message: the request is not deduplicated, so treat a `429` as 'wait', never as 'it did not arrive'.
+   */
+  post_guest_message_api_v1_guest_messages__token__post: {
+    parameters: {
+      path: {
+        token: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PostGuestMessageRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["GuestMessageResponse"];
         };
       };
       /** @description This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body. */
@@ -8145,6 +8636,46 @@ export interface operations {
     };
   };
   /**
+   * Per-property review summary
+   * @description R5.5 — sentiment histogram and top-N recurring-issue counts of the property's reviews in the last 90 days. `top_n` defaults to the tenant's `review_recurring_issues_top_n`.
+   */
+  list_reviews_summary_for_property_api_v1_properties__property_id__reviews_summary_get: {
+    parameters: {
+      query?: {
+        window_days?: number;
+      };
+      path: {
+        property_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ReviewSummaryResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * A property's operational state
    * @description The light endpoint of PRD §23:1942, for refreshing an indicator without fetching the aggregate. Returns the canonical `PropertyOperationalState` literal — never translated — and the ISO-8601 UTC instant of the last transition, both **read** and neither recomputed: the state is whatever `PropertyStateMachine` last wrote. `last_transition_at` is `null` for a property that has never moved, because creation is not a transition. A property of another tenant answers `404`, indistinguishable from one that does not exist.
    */
@@ -8487,6 +9018,247 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["LegalRegistrationResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List reviews
+   * @description The inbox. Filtered by `property_id`, `channel`, `sentiment`, `status`, `rating_min`/`rating_max` and `date_from`/`date_to`, paginated with `page`/`per_page` (PRD §23). Ordered by `published_at` descending with **nulls last** — a review without a publication date must not sit above the ones that do.
+   */
+  list_reviews_api_v1_reviews_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        property_id?: string | null;
+        channel?: components["schemas"]["ReviewChannel"] | null;
+        sentiment?: components["schemas"]["ReviewSentiment"] | null;
+        status?: components["schemas"]["ReviewStatus"] | null;
+        rating_min?: number | null;
+        rating_max?: number | null;
+        date_from?: string | null;
+        date_to?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ReviewPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a review
+   * @description R5.1 — the manager creates a review manually (no PMS adapter in this change). The pipeline runs asynchronously; the row is born `NEW` with `sentiment = NEUTRAL`, `ai_summary = NULL` and `recurring_issues = []`.
+   */
+  create_review_api_v1_reviews_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateReviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["ReviewResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Get a review
+   * @description R5.4 — one review, with the `404` indistinguishability of R1.3.
+   */
+  get_review_api_v1_reviews__review_id__get: {
+    parameters: {
+      path: {
+        review_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ReviewResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Get the draft of a review
+   * @description R5.4 — the draft of one review, or `404` indistinguishably (the same response is the answer for 'no review', 'another tenant' and 'role cannot read').
+   */
+  get_review_draft_api_v1_reviews__review_id__response_get: {
+    parameters: {
+      path: {
+        review_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ReviewDraftResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Regenerate the draft of a review
+   * @description R3.5 / D5 — replace the existing draft with a new one in a single transaction. `ai_generated` stays `TRUE`.
+   */
+  regenerate_review_draft_api_v1_reviews__review_id__response_post: {
+    parameters: {
+      path: {
+        review_id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["RegenerateReviewDraftRequest"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ReviewDraftResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Act on the review response (approve / ignore / mark posted / edit)
+   * @description R3.5 / R4.2 — `action` picks the verb. `EDIT` requires `draft_content`; the others do not.
+   */
+  act_on_review_response_api_v1_reviews__review_id__response_patch: {
+    parameters: {
+      path: {
+        review_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReviewResponseActionRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ReviewResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

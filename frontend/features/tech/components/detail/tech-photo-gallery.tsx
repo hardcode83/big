@@ -43,7 +43,7 @@ export function TechPhotoGallery({ incidentId }: { incidentId: string }) {
   const query = useIncidentPhotos(incidentId);
 
   const onImageError = (photoId: string) => {
-    if (retried.current.has(photoId) || !user) {
+    if (retried.current.has(photoId) || !user || user.tenant_id === null) {
       return;
     }
     retried.current.add(photoId);

@@ -47,12 +47,15 @@ from app.dashboard.domain.read_models import (
     GuestBlock,
     IncidentBlock,
     NextActionBlock,
+    OpenIncidentCountsBlock,
+    OperationalKpis,
     PropertyDashboardCard,
     PropertyDetail,
     ReservationBlock,
 )
 from app.guests.domain.repositories import GuestRepository
 from app.maintenance.domain.repositories import IncidentReader, OwnerApprovalReader
+from app.maintenance.domain.value_objects import OpenIncidentCounts
 from app.properties.domain.entities import Property
 from app.properties.domain.exceptions import PropertyNotFoundError
 from app.properties.domain.repositories import PropertyFilters, PropertyRepository
@@ -68,6 +71,13 @@ from app.timeline.domain.repositories import TimelineEventReader
 # A property whose next stay is further out shows `null`, which is the honest answer for a
 # screen that asks "what is happening now".
 RESERVATION_LOOKAHEAD_DAYS = 90
+
+# ASSUMPTION (R2): the check-in window `GetOperationalKpisUseCase` counts is not in the PRD
+# nor the mockup — decided with Jose while writing the proposal. Its own constant, distinct
+# from `RESERVATION_LOOKAHEAD_DAYS` above (design D6): that one bounds "the one stay to show
+# on a card", this one is the literal count window R2.1 asks for, and conflating them would
+# make a future change to either silently change the other.
+UPCOMING_CHECKIN_WINDOW_DAYS = 7
 
 # EXTERNAL_DEPENDENCY (R2.4): `cleaning_photos` stores a `storage_key`, and turning one into
 # a URL is `StorageAdapter.get_signed_url`, which `cleaning-photos-storage` delivers. Rule 5
@@ -371,6 +381,57 @@ class GetPropertyDashboardUseCase:
                 for approval in approvals
             ),
         )
+
+
+class GetOperationalKpisUseCase:
+    """`GET /api/v1/dashboard/operational-kpis` (`dashboard-operational-kpis` R1, R2, R3).
+
+    Three tenant-wide counts, each gated on the permission that protects its source
+    domain (design D4): a role lacking a source's permission gets `None` for that field
+    and the query is **skipped entirely**, not run and then discarded — a role holding
+    none of the three costs zero domain queries.
+    """
+
+    def __init__(
+        self,
+        *,
+        cleaning: CleaningTaskRepository,
+        reservations: ReservationRepository,
+        incidents: IncidentReader,
+    ) -> None:
+        self._cleaning = cleaning
+        self._reservations = reservations
+        self._incidents = incidents
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, role: UserRole, today: date
+    ) -> OperationalKpis:
+        cleanings_today = (
+            await self._cleaning.count_live_for_day(tenant_id, today)
+            if is_allowed(role, Permission.READ_CLEANING_TASKS)
+            else None
+        )
+        upcoming_checkins = (
+            await self._reservations.count_check_ins_in_range(
+                tenant_id, today, today + timedelta(days=UPCOMING_CHECKIN_WINDOW_DAYS)
+            )
+            if is_allowed(role, Permission.READ_RESERVATIONS)
+            else None
+        )
+        open_incidents = (
+            _open_incident_counts_block(await self._incidents.count_open_for_tenant(tenant_id))
+            if is_allowed(role, Permission.READ_INCIDENTS)
+            else None
+        )
+        return OperationalKpis(
+            cleanings_today=cleanings_today,
+            upcoming_checkins=upcoming_checkins,
+            open_incidents=open_incidents,
+        )
+
+
+def _open_incident_counts_block(counts: OpenIncidentCounts) -> OpenIncidentCountsBlock:
+    return OpenIncidentCountsBlock(total=counts.total, urgent=counts.urgent)
 
 
 def _current_or_next_per_property(

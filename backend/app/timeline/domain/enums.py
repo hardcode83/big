@@ -65,6 +65,16 @@ class TimelineEventType(str, enum.Enum):
     REVIEW_IMPORTED = "REVIEW_IMPORTED"
     REVIEW_RESPONSE_DRAFTED = "REVIEW_RESPONSE_DRAFTED"
     REVIEW_RESPONSE_APPROVED = "REVIEW_RESPONSE_APPROVED"
+    # `revenue-reviews` (design D8). Three of the eight events this capability emits
+    # already live on the timeline — `REVIEW_IMPORTED`, `REVIEW_RESPONSE_DRAFTED`,
+    # `REVIEW_RESPONSE_APPROVED` — and the other five enter with this change. Each
+    # one names a distinct transition so a manager reading the feed can tell them apart
+    # (`PROPERTY_STATE_CHANGED` would have collapsed two machines).
+    REVIEW_CREATED = "REVIEW_CREATED"
+    REVIEW_DRAFT_EDITED = "REVIEW_DRAFT_EDITED"
+    REVIEW_CLASSIFIED_LOW_CONFIDENCE = "REVIEW_CLASSIFIED_LOW_CONFIDENCE"
+    REVIEW_IGNORED = "REVIEW_IGNORED"
+    REVIEW_POSTED_MANUALLY = "REVIEW_POSTED_MANUALLY"
     SLA_BREACH_WARNING = "SLA_BREACH_WARNING"
     NOTIFICATION_SENT = "NOTIFICATION_SENT"
     NOTIFICATION_FAILED = "NOTIFICATION_FAILED"

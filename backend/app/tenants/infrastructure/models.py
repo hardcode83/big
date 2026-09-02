@@ -58,3 +58,10 @@ class TenantConfigModel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     notification_whatsapp_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
     )
+    # `revenue-reviews` R5.5: bound on the per-property recurring-issues summary. The
+    # `CHECK (review_recurring_issues_top_n BETWEEN 1 AND 50)` lives in
+    # `r3v1ew5a02_revenue_reviews_tenant_config.py`; this model declares only the
+    # column and its server default.
+    review_recurring_issues_top_n: Mapped[int] = mapped_column(
+        Integer, default=5, server_default="5"
+    )

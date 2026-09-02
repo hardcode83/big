@@ -47,19 +47,24 @@ import re
 _WEBHOOK_PATH = re.compile(r"(/api/v1/webhooks/[^/\s]+/)[^\s?]+", re.IGNORECASE)
 
 # The guest portal, `/api/v1/guest/{action}/{token}` (`guest-portal-api` D8). The pattern
-# matches the URL *shape*, so it covers the four routes of PRD §23 without naming any of them
-# — which is the point of matching a shape and not a census: the fourth,
-# `POST /guest/incident/{token}`, was mounted later and needed no change here.
+# matches the URL *shape*, so it covers every route of that surface without naming — or
+# counting — any of them, which is the point of matching a shape and not a census. Twice
+# proven rather than asserted: `POST /guest/incident/{token}` was mounted later and needed no
+# change here, and so were `GET` and `POST /guest/messages/{token}` in
+# `guest-portal-messaging`. This comment used to say "the four routes of PRD §23"; a census in
+# prose beside a pattern that needs none is exactly what goes stale.
 # Same shape and same reasoning as the webhook one above: the token is the credential and it
 # travels in the path, so uvicorn writes it on every request. Without this, anyone with read
 # access to the log recovers every live stay — and unlike the webhook case there is no second
 # factor behind it, because the guest surface has no header secret (D2).
 #
-# The **action** is kept, exactly as the provider is kept above: `info`, `checkin` or
-# `incident` is not a secret and it is what an operator needs to read the log at all.
+# The **action** is kept, exactly as the provider is kept above: `info`, `checkin`, `incident`
+# or `messages` is not a secret and it is what an operator needs to read the log at all.
 #
-# Anchored on `/api/v1/guest/` plus one segment, so a **fifth** action added later is covered
-# without touching this file — the residual risk the design's own Risks section names.
+# Anchored on `/api/v1/guest/` plus one segment, so an action added later is covered without
+# touching this file — the residual risk the design's own Risks section names. This comment
+# used to promise that of "a **fifth** action"; `messages` arrived and was covered, which is
+# the promise kept rather than a number to maintain.
 _GUEST_PORTAL_PATH = re.compile(r"(/api/v1/guest/[^/\s]+/)[^\s?]+", re.IGNORECASE)
 
 REDACTED = "***"

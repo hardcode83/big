@@ -2,10 +2,11 @@
 
 ## Purpose
 
-Da al dashboard del propietario/manager (PRD §9, §10) su backend: cuatro endpoints de
+Da al dashboard del propietario/manager (PRD §9, §10) su backend: cinco endpoints de
 **lectura pura**, tenant-scoped y autenticados, que responden «¿qué pasa y quién tiene la
 próxima acción?» sin obligar al cliente a componer siete dominios. Son la colección de cards,
-el agregado de detalle de una propiedad, su estado operacional y su timeline filtrable.
+el agregado de detalle de una propiedad, su estado operacional, su timeline filtrable y los
+tres contadores operacionales a nivel de tenant.
 
 No crea ninguna tabla, ninguna columna y ninguna vía de escritura: compone lo que otras
 capacidades ya persisten. El *cómo se opera* está en
@@ -23,11 +24,12 @@ de estados en un hub que importa a los otros siete.
 
 ### Reparto de rutas
 
-- THE SYSTEM SHALL servir exactamente estas cuatro rutas de lectura, y ninguna de escritura:
+- THE SYSTEM SHALL servir exactamente estas cinco rutas de lectura, y ninguna de escritura:
 
   | Ruta | Router | Por qué ahí |
   |---|---|---|
   | `GET /api/v1/dashboard/properties` | `app/dashboard/api/router.py` | agregado multidominio, prefijo propio |
+  | `GET /api/v1/dashboard/operational-kpis` | `app/dashboard/api/router.py` | contadores multidominio a nivel de tenant, mismo prefijo |
   | `GET /api/v1/properties/{property_id}/dashboard` | `app/dashboard/api/router.py` | agregado multidominio, con la ruta que fija PRD §23:1943 |
   | `GET /api/v1/properties/{property_id}/state` | `app/properties/api/router.py` | lectura de un solo dominio, del módulo que posee la columna |
   | `GET /api/v1/timeline/{property_id}` | `app/timeline/api/router.py` | dominio propio, con la capa `api/` que estrena |
@@ -35,11 +37,13 @@ de estados en un hub que importa a los otros siete.
 - THE SYSTEM SHALL servir la colección bajo su propio prefijo `/dashboard` y no bajo
   `/properties`. `/properties/dashboard` y `/properties/{id}` compiten en FastAPI, que resuelve
   por orden de registro: `dashboard` se parsearía como `{id}` y la ruta respondería `422` en vez
-  de existir. Es la **única** de las cuatro que el PRD no nombra, así que es la única que puede
-  moverse; las dos de §23:1942-1943 se quedan literales.
+  de existir. Junto con `/dashboard/operational-kpis` —que tampoco existe en el PRD, al no
+  agregar ningún dato sobre una propiedad concreta— son las **únicas** dos rutas que el PRD no
+  nombra, así que son las únicas dos que pueden moverse; las dos de §23:1942-1943 se quedan
+  literales.
 - THE SYSTEM SHALL NOT exponer el timeline global `GET /api/v1/timeline` de PRD §23:1951: esta
   capacidad acota a la variante por propiedad, que es la que consume el detalle.
-- **La pantalla no se alimenta sólo de aquí, y estas cuatro rutas siguen siendo de lectura**: desde
+- **La pantalla no se alimenta sólo de aquí, y estas cinco rutas siguen siendo de lectura**: desde
   `blocked-transitions-web` la card del dashboard lee además
   `GET /api/v1/blocked-transitions` (`celery-jobs.md`) y, con permisos de escritura, llama a
   `cleaning` y `maintenance`. Ninguna de esas rutas es de esta capacidad y ninguna se añade aquí; se
@@ -91,6 +95,42 @@ de estados en un hub que importa a los otros siete.
   frontend fijan uno, y sin horizonte la consulta arrastraría toda la agenda futura).
 - WHEN la página de propiedades viene vacía, THE SYSTEM SHALL responder sin emitir ninguna de
   las consultas de composición.
+
+### Contadores operacionales (`GET /api/v1/dashboard/operational-kpis`)
+
+Tres cifras a nivel de **tenant**, no de propiedad: cuántas limpiezas hay hoy, cuántos
+check-ins llegan en los próximos días y cuántas incidencias siguen abiertas con su desglose
+de urgentes. Ninguna de las tres existía como agregado — cada dominio ya tenía el dato, pero
+no una vía de contarlo para todo el tenant de una vez.
+
+- WHEN se solicita el endpoint, THE SYSTEM SHALL contar las `CleaningTask` del tenant cuyo
+  `status` esté en `LIVE_STATUSES` (`CREATED, ASSIGNED, ACCEPTED, IN_PROGRESS`) y cuyo
+  `scheduled_start` caiga en el día de hoy (UTC), comparando contra el rango explícito
+  `[hoy, hoy + 1 día)` y nunca contra `func.date(scheduled_start)`, que invalidaría cualquier
+  índice sobre la columna.
+- WHEN se solicita el endpoint, THE SYSTEM SHALL contar las `Reservation` del tenant cuyo
+  `check_in_date` caiga entre hoy (UTC, inclusive) y hoy + 7 días (inclusive) —
+  `UPCOMING_CHECKIN_WINDOW_DAYS = 7`, una constante propia, distinta de
+  `RESERVATION_LOOKAHEAD_DAYS` (90 días, usada para "la reserva actual o próxima" de la
+  colección de cards; responden preguntas distintas y no comparten constante)— y SHALL excluir
+  las que estén en `CANCELLED` o `NO_SHOW`. (`ASSUMPTION`: la ventana de 7 días no está en el
+  PRD ni en la maqueta del dashboard rediseñado; decidida al proponer este endpoint.)
+- WHEN se solicita el endpoint, THE SYSTEM SHALL contar los `Incident` del tenant cuyo `status`
+  esté en `OPEN_INCIDENT_STATUSES` (`frozenset(IncidentStatus) - {RESOLVED, CANCELLED}`) y
+  SHALL desglosar, dentro de ese mismo conteo y en la misma consulta, cuántos tienen `severity`
+  en `{HIGH, CRITICAL}` como subconjunto "urgentes". (`ASSUMPTION`: el umbral
+  `HIGH`+`CRITICAL` frente a solo `CRITICAL` tampoco está en el PRD; misma decisión.)
+- IF el tenant no tiene ninguna limpieza/check-in/incidencia que contar, THEN THE SYSTEM SHALL
+  devolver `0` (o `{total: 0, urgent: 0}` para incidencias), nunca `null` — el `null` de este
+  endpoint está reservado para "no puedes verlo" (ver «Permisos: agregar no concede»).
+- THE SYSTEM SHALL devolver `open_incidents` como un único bloque anidado `{total, urgent}`,
+  redactado como unidad — nunca un campo presente y el otro `null` —, siguiendo la misma
+  convención que un permiso que protege más de un número a la vez (`financial`, `access` del
+  agregado de detalle).
+- THE SYSTEM SHALL resolver cada conteo con **una consulta por dominio, filtrada por
+  `tenant_id` sola**, sin enumerar las propiedades del tenant primero: a diferencia de la
+  colección de cards, este endpoint no desglosa por propiedad, así que no hay nada que
+  agrupar por lotes y el coste de la consulta no depende del tamaño de la cartera.
 
 ### Agregado de detalle (`GET /api/v1/properties/{property_id}/dashboard`)
 
@@ -227,7 +267,7 @@ de estados en un hub que importa a los otros siete.
 
 ### Permisos: agregar no concede
 
-- THE SYSTEM SHALL declarar `require(Permission.READ_PROPERTIES)` en las cuatro rutas, de modo
+- THE SYSTEM SHALL declarar `require(Permission.READ_PROPERTIES)` en las cinco rutas, de modo
   que `tests/test_route_authorization.py` las recorra.
 - WHERE el rol que llama carece del permiso que protege el **origen** de un bloque, THE SYSTEM
   SHALL devolver ese bloque como `null` en vez de entregarlo, aunque la ruta se haya superado:
@@ -247,6 +287,17 @@ de estados en un hub que importa a los otros siete.
   exponer ni la reserva, ni el huésped, ni el total de la reserva en el bloque financiero.
 - THE SYSTEM SHALL decidir la autorización **antes** de consultar el recurso, de modo que un rol
   sin permiso reciba la misma respuesta para un `id` real y para uno inventado.
+
+**Los contadores operacionales redactan igual, pero un paso antes.** Las otras cuatro rutas
+consultan el bloque y lo anulan después si el permiso de origen falta; `GET
+/api/v1/dashboard/operational-kpis` decide antes de consultar, no después: cada uno de sus
+tres conteos comprueba primero `READ_CLEANING_TASKS` / `READ_RESERVATIONS` / `READ_INCIDENTS`
+y **no emite la consulta en absoluto** si el rol carece del permiso — un rol sin ninguno de los
+tres (hoy, `SUPER_ADMIN`) cuesta cero consultas a los tres dominios, no una consulta
+descartada. El resultado observable es el mismo `null` de siempre; el mecanismo que llega a él
+es distinto porque aquí no hay una raíz ya autorizada (la propiedad, vía `READ_PROPERTIES`) de
+la que colgar el bloque — son tres conteos de tenant independientes, cada uno protegido por el
+permiso de su propio dominio de origen.
 
 **Alcance de esta regla, acotado el 2026-08-19 por `cleaner-task-context`.** Su sujeto es un
 **agregado sobre una raíz que el llamante ya puede leer entera**: `GET /properties/{id}/dashboard`
@@ -268,7 +319,10 @@ allí: pasa por esta sección.
 - IF el `property_id` no existe **o pertenece a otro tenant**, THEN THE SYSTEM SHALL responder
   `404` con un cuerpo **indistinguible** en ambos casos, en las tres rutas por propiedad.
 - THE SYSTEM SHALL demostrar con tests, con el tenant vecino realmente sembrado, que un usuario
-  del tenant A no lee propiedades, eventos ni agregados del tenant B por esta superficie.
+  del tenant A no lee propiedades, eventos ni agregados del tenant B por esta superficie. Los
+  contadores operacionales tienen su propio test de aislamiento **por conteo** (limpiezas,
+  check-ins, incidencias), sembrando en cada caso una fila del tenant vecino que el conteo
+  contaría si el filtro fallara.
 
 ### Composición por lotes, sin N+1
 
@@ -319,14 +373,22 @@ allí: pasa por esta sección.
 
 ## Key files
 
-- `backend/app/dashboard/api/` — `router.py` (las dos rutas del agregado), `schemas.py` (los
+- `backend/app/dashboard/api/` — `router.py` (las tres rutas del agregado), `schemas.py` (los
   modelos de respuesta y su `from_domain` explícito), `dependencies.py` (el wiring, que compone
   adaptadores ajenos).
-- `backend/app/dashboard/application/use_cases.py` — `GetDashboardCardsUseCase` y
-  `GetPropertyDashboardUseCase`: la composición por lotes y la redacción por permiso.
-- `backend/app/dashboard/domain/` — `read_models.py` (proyecciones `frozen`), `labels.py` (los
-  seis catálogos de etiquetas, exhaustivos sobre sus enums), `next_action.py` (la tabla de
-  próxima acción), `financials.py` (la regla de moneda).
+- `backend/app/dashboard/application/use_cases.py` — `GetDashboardCardsUseCase`,
+  `GetPropertyDashboardUseCase` y `GetOperationalKpisUseCase`: la composición por lotes (las
+  dos primeras) o por conteo directo (la tercera), y la redacción por permiso.
+- `backend/app/dashboard/domain/` — `read_models.py` (proyecciones `frozen`, incluida
+  `OperationalKpis`), `labels.py` (los seis catálogos de etiquetas, exhaustivos sobre sus
+  enums), `next_action.py` (la tabla de próxima acción), `financials.py` (la regla de moneda).
+- `backend/app/cleaning/domain/repositories.py` /
+  `backend/app/cleaning/infrastructure/repositories.py` — `count_live_for_day`.
+- `backend/app/reservations/domain/repositories.py` /
+  `backend/app/reservations/infrastructure/repositories.py` — `count_check_ins_in_range`.
+- `backend/app/maintenance/domain/repositories.py` /
+  `backend/app/maintenance/domain/value_objects.py` (`OpenIncidentCounts`) /
+  `backend/app/maintenance/infrastructure/repositories.py` — `count_open_for_tenant`.
 - `backend/app/timeline/api/` — `router.py`, `schemas.py`, `errors.py`, `dependencies.py`: la
   capa `api/` que el módulo estrena.
 - `backend/app/timeline/application/use_cases.py` — `GetPropertyTimelineUseCase`.

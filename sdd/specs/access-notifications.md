@@ -305,14 +305,29 @@ status = 'PENDING' AND sla_deadline_at < now()`.
 
 ### El censo de escritores, y la forma común de todos ellos
 
-Diecisiete miembros de `NotificationType`, **trece con escritor de producción y cuatro sin él**.
 Es el hogar del censo porque es el hogar del emisor; quién escribe qué lo atribuye la tabla de la
-regla 11 de `steering/security.md`, y esta sección cuenta cuántos y con qué forma.
+regla 11 de `steering/security.md` —este módulo no cuenta aquí para no duplicar la lista, y el
+test `test_writer_census.py` la mide sobre el AST completo, no sobre esta prosa.
 
 - THE SYSTEM SHALL escribir toda fila de `notification_logs` que nazca en el emisor con
-  `status = PENDING` y `channel = IN_APP`, y SHALL no intentar entregarla: la entrega es de
-  `dispatch_notifications`. La única excepción declarada sigue siendo `auth-account-recovery`,
-  que entrega síncronamente y nunca pasa por `PENDING`.
+  `status = PENDING`, y SHALL no intentar entregarla: la entrega es de `dispatch_notifications`.
+  La única excepción declarada sigue siendo `auth-account-recovery`, que entrega síncronamente
+  y nunca pasa por `PENDING`.
+- THE SYSTEM SHALL escribir **una fila por canal resuelto** por el resolutor de
+  `notifications/domain/channel_resolver.py`, que combina los flags `notification_email_enabled`
+  y `notification_whatsapp_enabled` del `TenantConfig` con los contactos disponibles del
+  destinatario (`User.email` y `User.phone`). El conjunto resuelto es siempre `{IN_APP}` ∪ (EMAIL
+  si flag y email utilizable) ∪ (WHATSAPP si flag y teléfono utilizable); un canal cuyo contacto
+  falta queda excluido, no degradado a otro, y la exclusión registra
+  `notifications.channel_dropped_for_missing_contact` con tipo y canal, sin valor del contacto
+  (regla 11). WHERE el tenant no tenga fila de `tenant_configs`, THE SYSTEM SHALL resolver a
+  `{IN_APP}` únicamente. Los autores que ya tenían `NotificationChannel.IN_APP` como literal dejan
+  de fijarlo a mano: el fan-out vive en `notifications/application/channel_dispatch.py` y
+  delega al builder del dominio una vez por canal con `(channel, contact)` ajustados al canal.
+- THE SYSTEM SHALL fijar `sla_deadline_at` únicamente en la fila cuyo canal es `IN_APP`; las filas
+  hermanas se escriben con `sla_deadline_at = NULL`. Combinado con `list_sla_breach_candidates`
+  que exige `sla_deadline_at IS NOT NULL`, esto es lo que mantiene una sola candidata a
+  `SLA_BREACH` por aviso abanicado.
 - THE SYSTEM SHALL resolver los destinatarios de un aviso operativo con **un solo** servicio de
   dominio, `RoleRecipients` (`backend/app/auth/domain/recipients.py`), que recibe el puerto
   `UserRepository` y expone `managers_or_owners(tenant_id)` y `active_holders(tenant_id, role)`,
@@ -360,6 +375,15 @@ regla 11 de `steering/security.md`, y esta sección cuenta cuántos y con qué f
      `notification_type=NotificationType.<X>` (sin `.value`), **sólo** en
      `notifications/domain/escalation.py`.
 
+  `notifications/application/channel_dispatch.py` **no es una tercera forma**: `dispatch_channels`
+  no construye ninguna fila por sí mismo, llama al `log_builder` que recibe una vez por canal
+  resuelto, y ese builder sigue siendo el sitio donde vive una de las dos formas de arriba —el
+  builder del dominio correspondiente, o el `_builder` interno de `_escalation_rows` en
+  `notifications/application/use_cases.py`, que compone `NotificationLog` con
+  `notification_type=escalation.notification_type.value` exactamente como antes del fan-out.
+  El censo por AST sigue viendo el mismo literal en el mismo sitio; lo único que cambió es
+  cuántas veces se llama al builder por aviso.
+
 **Por qué hacen falta las dos formas, y por qué se fija el callee.** Sin fijarlo, la primera casa
 también con las cuatro llamadas a `cancel_sla_deadline` que **borran** un plazo y no escriben
 nada, de modo que `CLEANING_TASK_ASSIGNED` y `TECHNICIAN_ASSIGNED` seguirían contando como
@@ -370,25 +394,24 @@ escritos aunque desapareciesen sus builders. Y sin la segunda, `SLA_BREACH` y
 `test_free_text_sink_contract.py` documenta sobre el suyo: un guardián que lee texto se sortea
 escribiendo el nombre en un comentario.
 
-**Los trece con escritor**: `CLEANING_TASK_ASSIGNED`, `CLEANING_NO_RESPONSE`, `CLEANING_COMPLETED`,
-`CLEANING_FAILED`, `INCIDENT_CREATED_CRITICAL`, `INCIDENT_CREATED_HIGH`, `OWNER_APPROVAL_REQUIRED`,
-`TECHNICIAN_ASSIGNED`, `TECHNICIAN_NO_RESPONSE`, `GUEST_ESCALATION`, `PRICE_RECOMMENDATION`,
-`SLA_BREACH` y `PASSWORD_RESET_REQUESTED`. **Los cuatro sin escritor**, cada uno con su dueño
-declarado: `LOCK_ALERT`, que espera una superficie de importación de cerraduras que no existe, y
-los tres recordatorios al huésped —`CHECKIN_REMINDER_24H`, `CHECKIN_REMINDER_2H`,
-`CHECKOUT_REMINDER`—, que son de `guest-scheduled-comms` y no tienen canal al huésped hasta que lo
-haya. Los dos tipos de texto libre que **no** son miembros del enum —`INCIDENT_REJECTED` y
-`LEGAL_REGISTRATION_FAILED`, sobre la columna `String(100)`— quedan fuera del censo por
-construcción: no hay `NotificationType.<X>` que casar.
+**Los catorce con escritor y los cuatro sin él** viven en la tabla de la regla 11 de
+`steering/security.md` — este módulo no los enumera aquí para no duplicar el censo; la única
+excepción nominal a PRD §14 que añade `revenue-reviews` es `REVIEW_RESPONSE_APPROVED`, con
+escritor declarado en `reviews/domain/notifications.py`. Los dos tipos de texto libre que **no**
+son miembros del enum —`INCIDENT_REJECTED` y `LEGAL_REGISTRATION_FAILED`, sobre la columna
+`String(100)`— quedan fuera del censo por construcción: no hay `NotificationType.<X>` que casar.
 
 ### La bandeja in-app
 
 - THE SYSTEM SHALL exponer `GET /api/v1/notifications` con el envelope paginado de PRD §23,
-  devolviendo **solo** las filas dirigidas al usuario del token, de más nueva a más vieja —es una
-  bandeja, no una cola. El identificador de usuario sale del JWT y no hay parámetro de ruta ni de
-  consulta que ensanche el alcance. `page` acota en `100.000` y `per_page` en `100`, por la misma
-  razón que `cleaning` y `reservations`: `page` se convierte en un `OFFSET` de SQL y un número de
-  veinte dígitos desbordaría `int8` como error de driver en vez de como `422`.
+  devolviendo **solo** las filas dirigidas al usuario del token **y** con
+  `channel = IN_APP`, de más nueva a más vieja —es una bandeja, no una cola. El identificador
+  de usuario sale del JWT y no hay parámetro de ruta ni de consulta que ensanche el alcance.
+  El acotamiento por `channel = IN_APP` es del repositorio, no del router: por diseño (D4),
+  el router no sabe de canales, y el default perezoso del repositorio fija el canal del inbox
+  para que un descuido accidental no lo burle. `page` acota en `100.000` y `per_page` en `100`,
+  por la misma razón que `cleaning` y `reservations`: `page` se convierte en un `OFFSET` de SQL
+  y un número de veinte dígitos desbordaría `int8` como error de driver en vez de como `422`.
 - THE SYSTEM SHALL aceptar `unread` como parámetro de consulta opcional que estrecha la página a
   `read_at IS NULL`, sin romper el envelope (`data`, `total`, `page`, `per_page`, `total_pages`) ni
   el orden. Ausente, la bandeja devuelve leídas y no leídas.
@@ -405,7 +428,8 @@ construcción: no hay `NotificationType.<X>` que casar.
   `POST /api/v1/notifications/read-all` (que responde **cuántas** movió) y
   `GET /api/v1/notifications/unread-count` (que responde `{"unread": <int>}`). Las cuatro rutas
   exigen `READ_OWN_NOTIFICATIONS` y **todas** derivan el destinatario del JWT, sin ningún parámetro
-  que ensanche el alcance.
+  que ensanche el alcance. `unread-count` acota por la misma `channel = IN_APP` que el listado, de
+  forma que el número de la campana y la longitud de la bandeja sean consistentes.
 - THE SYSTEM SHALL hacer el acuse **idempotente**: el `UPDATE` fija
   `read_at = COALESCE(read_at, <ahora>)`, así que un segundo acuse casa con la fila, reporta éxito y
   **no mueve** el instante — `read_at` registra la primera lectura, no la última visita.
@@ -523,12 +547,13 @@ sobre datos de registro policial, y llegan con la integración real.
 resuelve a nada: una presentación fallida avisa a los managers y no escala a nadie. Es deliberado
 —inventar un tipo del PRD sería peor— y queda anotado como deuda.
 
-El enum `NotificationType` ya no tiene dieciséis miembros sino **diecisiete**:
-`auth-account-recovery` añadió `PASSWORD_RESET_REQUESTED`, declarándolo como divergencia
-explícita de PRD §14 igual que esta capacidad declaró sus dos jobs frente a los cuatro de
-PRD §8.3. Ese decimoséptimo tampoco tiene escalado, y en su caso **no es deuda**: una
-recuperación de contraseña no tiene plazo que incumplir, así que su fila se escribe sin
-`sla_deadline_at` a propósito. Cuántos de los diecisiete tienen escritor —y qué guardián lo
+El enum `NotificationType` ya no tiene dieciséis miembros sino **dieciocho**: `auth-account-recovery`
+añadió `PASSWORD_RESET_REQUESTED` y `revenue-reviews` añadió `REVIEW_RESPONSE_APPROVED`,
+ambos declarados como divergencia explícita de PRD §14 igual que esta capacidad declaró sus dos
+jobs frente a los cuatro de PRD §8.3. Ninguno de los dos tiene escalado, y en ambos casos **no es
+deuda** — una recuperación de contraseña y una aprobación de respuesta son eventos sin plazo
+que incumplir —, así que sus filas se escriben sin `sla_deadline_at` a propósito. Qué guardián
+mide el conjunto de escritores y cómo lo hace
 mide— vive en «El censo de escritores», más arriba.
 
 ### Protección del dato de documento
@@ -684,13 +709,9 @@ y no una contradicción. Los nombres de los cuatro originales no se tocan.
   `notification-writers-gap`: `_POLICY` sigue teniendo las mismas dos entradas —lo que cambió es
   el tipo que **produce** una de ellas—, y `TECHNICIAN_NO_RESPONSE` ya era miembro sin escalado
   antes de tener escritor. Cada uno recibe el suyo en el change que le da un `sla_deadline_at`, no
-  aquí. El decimoséptimo miembro del enum (`PASSWORD_RESET_REQUESTED`, de
-  `auth-account-recovery`) no cuenta entre ellos: no tener plazo es su comportamiento correcto, no
-  una pieza pendiente.
-- **Cuatro tipos siguen sin escritor**, y ninguno es deuda de esta capacidad: `LOCK_ALERT` espera
-  una superficie de importación de cerraduras, y los tres recordatorios al huésped son de
-  `guest-scheduled-comms`. El test de censo los fija por nombre, así que la lista no puede
-  pudrirse en silencio como se pudrió antes de medirse.
+  aquí. Los dos miembros añadidos al enum como divergencia de PRD §14 —`PASSWORD_RESET_REQUESTED`
+  de `auth-account-recovery` y `REVIEW_RESPONSE_APPROVED` de `revenue-reviews`— no cuentan entre
+  los pendientes: no tener plazo es su comportamiento correcto, no una pieza pendiente.
 - **Valores de enum que nadie escribe todavía**: `LegalRegistrationStatus.MANUAL_REVIEW` no lo escribe nadie, y
   de `GuestDocumentStatus` solo se alcanza `PROVIDED` —`PENDING`, `VERIFIED` y `REJECTED` no tienen
   camino. `MockSESHospedajesAdapter.get_submission_status` solo devuelve `ACCEPTED` o `UNKNOWN`.

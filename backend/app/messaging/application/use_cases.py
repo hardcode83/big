@@ -61,10 +61,13 @@ from app.messaging.domain.value_objects import (
     DELIVERY_STATUS_FAILED,
     DELIVERY_STATUS_SENT,
     ConversationContext,
+    InboundMessageActor,
     MessageClassification,
     MessageMetadata,
     contact_kind_for,
 )
+from app.notifications.application.channel_dispatch import dispatch_and_persist
+from app.notifications.domain.enums import NotificationType
 from app.notifications.domain.repositories import NotificationLogRepository
 from app.properties.domain.clock_triggers import effective_bounds
 from app.properties.domain.repositories import PropertyRepository
@@ -99,26 +102,6 @@ _INCIDENT_INTENTS = (MessageIntent.MAINTENANCE_ISSUE, MessageIntent.ACCESS_PROBL
 SENDER_TYPE_BY_ROLE: dict[UserRole, MessageSenderType] = {
     UserRole.PROPERTY_MANAGER: MessageSenderType.MANAGER,
 }
-
-
-def _is_handed_over(conversation: Conversation) -> bool:
-    """Whether a person already has this conversation (`PENDING_HUMAN` or `HUMAN_HANDLING`).
-
-    **The AI stops answering once it has handed over**, and that is a rule this change had to
-    decide rather than inherit: R5.4 says only that a second notification must not be sent, and
-    the pipeline as first written kept auto-replying to every later message on a conversation a
-    manager was already holding — so the guest could receive the manager's answer and a
-    template contradicting it, and the manager would be arguing with their own system. The QA
-    panel of sections 5-6 constructed it.
-
-    `RESOLVED` is not "handed over": the escalation is finished, and a new message reopens the
-    conversation with the axis back at `NONE` (D4), so the AI answers again — which is right,
-    because that is a new problem.
-    """
-    return conversation.escalation_status in (
-        ConversationEscalationStatus.PENDING_HUMAN,
-        ConversationEscalationStatus.HUMAN_HANDLING,
-    )
 
 
 def _timeline_event(
@@ -217,8 +200,7 @@ class ProcessInboundGuestMessageUseCase:
         tenant_id: uuid.UUID,
         conversation_id: uuid.UUID,
         content: str,
-        actor_user_id: uuid.UUID,
-        ip: str | None,
+        actor: InboundMessageActor,
         now: datetime,
     ) -> Message:
         conversation = await self._resolve(tenant_id, conversation_id, now)
@@ -287,12 +269,12 @@ class ProcessInboundGuestMessageUseCase:
 
         if reason is not None:
             await self._escalate(tenant_id, conversation, reason, now)
-        elif conversation.ai_enabled and not _is_handed_over(conversation):
+        elif conversation.ai_enabled and not conversation.is_handed_over():
             await self._reply(tenant_id, conversation, message, classification, language, now)
 
         if classification.intent in _INCIDENT_INTENTS:
             await self._open_incident(
-                tenant_id, conversation, message, classification.intent, actor_user_id, ip, now
+                tenant_id, conversation, message, classification.intent, actor, now
             )
 
         await self._uow.commit()
@@ -482,17 +464,20 @@ class ProcessInboundGuestMessageUseCase:
             )
             return
 
+        config = await self._configs.get_or_create(tenant_id, now)
         for manager in managers.items:
-            await self._notifications.add(
-                tenant_id,
-                guest_escalation_notification(
-                    tenant_id=tenant_id,
-                    conversation_id=conversation.id,
-                    property_id=conversation.property_id,
-                    recipient_user_id=manager.id,
-                    recipient_contact=manager.email,
-                    now=now,
-                ),
+            await dispatch_and_persist(
+                notifications=self._notifications,
+                tenant_id=tenant_id,
+                recipient=manager,
+                config=config,
+                notification_type=NotificationType.GUEST_ESCALATION.value,
+                recipient_role=manager.role.value,
+                log_builder=guest_escalation_notification,
+                conversation_id=conversation.id,
+                property_id=conversation.property_id,
+                recipient_user_id=manager.id,
+                now=now,
             )
 
     # --- Step 7b: the automatic reply (R4.4, R6.5) ---------------------------------------
@@ -626,8 +611,7 @@ class ProcessInboundGuestMessageUseCase:
         conversation: Conversation,
         message: Message,
         intent: MessageIntent,
-        actor_user_id: uuid.UUID,
-        ip: str | None,
+        actor: InboundMessageActor,
         now: datetime,
     ) -> None:
         """Through the port, never by importing `maintenance` (D12).
@@ -635,6 +619,12 @@ class ProcessInboundGuestMessageUseCase:
         `title` from the closed catalogue in this module's own `domain/`, `description` the
         guest's message **verbatim** — the census is done by who writes the column, and this
         copies a value that is not ours without composing anything (D13).
+
+        `actor` travels whole rather than unpacked into a user id and an ip
+        (`guest-portal-messaging` D8): it is the only parameter of this pipeline the portal
+        could not satisfy, and the implementer needs all of it — the incident's reporter, the
+        audit row's actor and the timeline's actor type are three different derivations of the
+        same one answer.
         """
         await self._incidents.report(
             tenant_id=tenant_id,
@@ -642,8 +632,7 @@ class ProcessInboundGuestMessageUseCase:
             reservation_id=conversation.reservation_id,
             title=INCIDENT_TITLES[intent],
             description=message.content,
-            actor_user_id=actor_user_id,
-            ip=ip,
+            actor=actor,
             now=now,
         )
 
@@ -756,6 +745,10 @@ class CreateConversationUseCase:
     the precondition has to be honoured — and every `TimelineEvent` the conversation ever
     produces carries `property_id` forward, so getting it wrong is not recoverable by a later
     read. Raised by the tenancy panel of sections 5-6.
+
+    **`PORTAL` is refused outright** (`guest-portal-messaging` R3.7, D14): that thread is
+    opened by the guest's first message and by nothing else, so this route — the one place a
+    client names the channel — is where the door is closed.
     """
 
     def __init__(
@@ -799,6 +792,21 @@ class CreateConversationUseCase:
         `ondelete="RESTRICT"`, so a dangling anchor also pins the other tenant's guest row
         against deletion — a failure they cannot explain or clear from their own data.
         """
+        if channel is ConversationChannel.PORTAL:
+            # D14, R3.7. `PORTAL` became a valid member of the enum in section 1, which is
+            # exactly what made this route able to open one without anybody changing it — and
+            # the guest would then see, on their own page, a thread they never started. The
+            # partial unique index does not help: it forbids the *second* portal thread for a
+            # stay, not the first.
+            #
+            # Refused in the use case and not in the request schema because "who may open a
+            # portal thread" is a business rule, and `steering/backend-architecture.md` does
+            # not let those live in `api/`. Same shape as `RecordHumanReplyUseCase` refusing a
+            # role with no `sender_type` rather than inventing one.
+            raise MessagingValidationError(
+                "A PORTAL conversation is opened by the guest's first message and by no "
+                "other route"
+            )
         if await self._properties.get(tenant_id, property_id) is None:
             raise MessagingValidationError("Property does not exist")
         if (

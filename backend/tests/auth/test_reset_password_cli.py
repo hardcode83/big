@@ -19,7 +19,14 @@ from app.audit.domain import actions
 from app.audit.infrastructure.models import AuditLogModel
 from app.auth.domain.password_policy import assert_password_acceptable
 from app.auth.infrastructure.models import UserModel, UserSessionModel
-from app.cli.reset_password import AccountNotFoundError, apply_reset, main, reset_password
+from app.auth.domain.enums import UserRole
+from app.cli.reset_password import (
+    AccountNotFoundError,
+    SuperAdminRescueUnsupportedError,
+    apply_reset,
+    main,
+    reset_password,
+)
 from tests.auth.conftest import PASSWORD, insert_user
 
 
@@ -202,6 +209,33 @@ async def test_an_unknown_address_changes_nothing(db_session, tenant_a, hasher) 
 
     with pytest.raises(AccountNotFoundError, match="nobody@example.test"):
         await apply_reset(db_session, hasher, "nobody@example.test")
+
+    row = (
+        await db_session.execute(select(UserModel).where(UserModel.id == user.id))
+    ).scalar_one()
+    assert row.password_hash == before
+    assert (
+        await db_session.execute(
+            select(AuditLogModel).where(AuditLogModel.entity_id == user.id)
+        )
+    ).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_a_super_admin_is_refused_cleanly_instead_of_crashing(
+    db_session, hasher
+) -> None:
+    """`super-admin-identity` (review panel round 2): a `SUPER_ADMIN` has no tenant to
+    attribute the audit row to. Before this guard, `apply_reset` reached
+    `AuditLogFactory.build(tenant_id=None, ...)` and only failed at `commit()` as an
+    unmapped `IntegrityError` — the one recovery route this account could reach that
+    crashed instead of refusing. Nothing is touched: no password change, no audit row.
+    """
+    user = await insert_user(db_session, tenant=None, role=UserRole.SUPER_ADMIN, hasher=hasher)
+    before = user.password_hash
+
+    with pytest.raises(SuperAdminRescueUnsupportedError, match=user.email):
+        await apply_reset(db_session, hasher, user.email)
 
     row = (
         await db_session.execute(select(UserModel).where(UserModel.id == user.id))

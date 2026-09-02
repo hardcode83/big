@@ -8,6 +8,9 @@ class ConversationChannel(str, enum.Enum):
     EMAIL = "EMAIL"
     PHONE_TRANSCRIPT = "PHONE_TRANSCRIPT"
     MANUAL = "MANUAL"
+    #: The guest's own browser on `/guest/[token]`. Not `MANUAL`: there the row is the
+    #: delivery *for an operator watching the panel*, and here the reader is the guest.
+    PORTAL = "PORTAL"
 
 
 class ConversationStatus(str, enum.Enum):

@@ -31,13 +31,20 @@ from app.guests.domain.enums import (
     GuestDocumentType,
     LegalRegistrationStatus,
 )
-from app.guests.domain.portal_ports import StayInfo
+from app.guests.domain.portal_ports import (
+    PortalMessage,
+    PortalMessageSender,
+    PortalThread,
+    PortalThreadState,
+    StayInfo,
+)
 from app.maintenance.domain.entities import (
     MAX_INCIDENT_DESCRIPTION,
     MAX_INCIDENT_TITLE,
     Incident,
 )
 from app.maintenance.domain.enums import IncidentStatus
+from app.messaging.domain.entities import MAX_MESSAGE_CONTENT_LENGTH
 
 MAX_FULL_NAME = 300
 MAX_DOCUMENT_NUMBER = 100
@@ -239,4 +246,99 @@ class IncidentReportedResponse(BaseModel):
     def from_domain(cls, incident: Incident) -> "IncidentReportedResponse":
         return cls(
             id=incident.id, status=incident.status, created_at=incident.created_at
+        )
+
+
+# Why this model looks the way it does — a comment and not the docstring, for the reason
+# `SubmitCheckinRequest` and `ReportIncidentRequest` above give: a model docstring becomes the
+# schema's `description` in `/openapi.json`, which is itself in `ANONYMOUS_ENDPOINTS`.
+#
+# **One field, and `extra="forbid"` is what makes it one.** R1.5 names six values a caller must
+# not be able to express — `sender_type`, `tenant_id`, `reservation_id`, `property_id`,
+# `conversation_id` and `ai_generated` — and forbidding extras rejects all six, and everything
+# nobody has thought of yet, with a `422`. Dropping them silently would leave a caller believing
+# a `sender_type` they sent had been honoured. `sender_type` is `GUEST` by construction of the
+# route, and there is no parameter through which it could be anything else.
+#
+# **`MultiLineText` is not cosmetic.** `app/core/storable_text.py` refuses what PostgreSQL cannot
+# store — a `U+0000`, a lone surrogate — and without it those reach the driver as an unhandled
+# `500` instead of the `422` R1.6 asks for. Measured twice on the sibling portal routes.
+#
+# The maximum is `MAX_MESSAGE_CONTENT_LENGTH`, the same constant `Message.__post_init__` enforces
+# in the domain, imported rather than restated: R4.3 calls it "el límite de producto sobre el
+# texto", and two spellings of one product limit is how they drift. It is a different thing from
+# the per-token throttle (the limit on the *route*) and from `MaxBodySizeMiddleware`'s 1 MiB (the
+# limit on the *request*), and none of the three substitutes for another.
+class PostGuestMessageRequest(BaseModel):
+    """What `POST /guest/messages/{token}` accepts: the guest's own words, and nothing else.
+
+    Surrounding whitespace is stripped first, so the bounds count characters after stripping and
+    a whitespace-only message is a `422`.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    content: Annotated[
+        MultiLineText, Field(min_length=1, max_length=MAX_MESSAGE_CONTENT_LENGTH)
+    ]
+
+
+# Why this model looks the way it does. A comment and not the docstring, for the reason the two
+# request models above give: a model docstring becomes the schema's `description` in
+# `/openapi.json`, which is itself in `ANONYMOUS_ENDPOINTS`, so it is published to the same
+# caller D5 defends against — and which internal fields we are at pains to exclude, and why, is
+# not a consumer's business. The docstring keeps only what a consumer needs.
+#
+# A field-for-field mirror of `PortalMessage`, on the same grounds `StayInfoResponse` gives: the
+# projection is where the exclusion is enforced structurally (R2.2, R2.4, D4), so a response
+# model with its own opinion about which fields to include would reintroduce the decision the
+# projection exists to remove. There is no `sender_user_id`, no `ai_generated`, no
+# `confidence_score`, no `intent`, no `metadata` and no `conversation_id` — not omitted here,
+# but absent from the type this is built from.
+#
+# It is the body of the `201` **and** the item type of the thread, so what the write returns and
+# what the read returns cannot drift apart.
+class GuestMessageResponse(BaseModel):
+    """One message of the thread: who sent it, what it says, and when."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    sender: PortalMessageSender
+    content: str
+    created_at: datetime
+
+    @classmethod
+    def from_domain(cls, message: PortalMessage) -> "GuestMessageResponse":
+        return cls.model_validate(message)
+
+
+# Why this model looks the way it does — a comment and not the docstring, same rule as its
+# sibling above.
+#
+# A field-for-field mirror of `PortalThread` (D4, D9, R2.3, R2.4). No escalation reason and no
+# conversation id: R2.3 calls the reason internal, and neither is a field of the projection.
+# `state` is the closed two-member vocabulary, where `AWAITING_HUMAN` covers `PENDING_HUMAN` and
+# `HUMAN_HANDLING` alike — the guest is told a person will reply, and that a manager has already
+# taken it over is ours to know.
+#
+# `total`, `page` and `per_page` travel because D9 makes the default window the **last** page: a
+# client that does not know which window it holds cannot page backwards from it.
+class GuestThreadResponse(BaseModel):
+    """One page of the conversation, oldest first, with the window it came from."""
+
+    items: list[GuestMessageResponse]
+    total: int
+    page: int
+    per_page: int
+    state: PortalThreadState
+
+    @classmethod
+    def from_domain(cls, thread: PortalThread) -> "GuestThreadResponse":
+        return cls(
+            items=[GuestMessageResponse.from_domain(item) for item in thread.items],
+            total=thread.total,
+            page=thread.page,
+            per_page=thread.per_page,
+            state=thread.state,
         )

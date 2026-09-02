@@ -17,7 +17,8 @@
     "BOOKING_MSG": "Booking message",
     "EMAIL": "Email",
     "PHONE_TRANSCRIPT": "Phone transcript",
-    "MANUAL": "Manual"
+    "MANUAL": "Manual",
+    "PORTAL": "Guest portal"
   },
   "senderType": {
     "GUEST": "Guest",
