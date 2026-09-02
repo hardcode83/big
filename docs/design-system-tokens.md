@@ -1,14 +1,16 @@
 # Tema visual y capa de tokens del frontend
 
-El frontend expone una capa de tokens de marca (color, tipografía, ritmo y radios) y un conmutador de tema de tres estados visible en la topbar de los cinco shells. La especificación EARS y las decisiones viven en la propuesta y diseño del change — [`sdd/specs/design-system-tokens.md`](../sdd/specs/design-system-tokens.md) y [`sdd/changes/archive/2026-08-24-design-system-tokens/`](../sdd/changes/archive/2026-08-24-design-system-tokens/). Esta página describe el uso y la operativa.
+El frontend expone una capa de tokens de marca (color, tipografía, ritmo y radios) y un conmutador de tema de tres estados alcanzable desde la topbar de los cinco shells —directamente en la barra a partir de 640 px de ancho, y dentro del desplegable «Preferencias» por debajo—. La especificación EARS y las decisiones viven en la propuesta y diseño del change — [`sdd/specs/design-system-tokens.md`](../sdd/specs/design-system-tokens.md) y [`sdd/changes/archive/2026-08-24-design-system-tokens/`](../sdd/changes/archive/2026-08-24-design-system-tokens/). Esta página describe el uso y la operativa.
 
 ## Elegir tema
 
-La topbar de cada shell (`workspace`, `cleaner`, `technician`, `public`, `guest`) incluye un grupo de tres iconos a la izquierda del selector de idioma:
+La topbar de cada shell (`workspace`, `cleaner`, `technician`, `public`, `guest`) da acceso a un grupo de tres iconos, a la izquierda del selector de idioma:
 
 - **Sol** — fijar tema claro.
 - **Luna** — fijar tema oscuro.
 - **Monitor** — seguir al sistema operativo. Borra la cookie y devuelve el control a la preferencia del sistema.
+
+**Dónde están, según el ancho de la pantalla.** A partir de 640 px los tres iconos están en la propia barra, junto al selector de idioma. Por debajo —un móvil de 360 px, por ejemplo— no caben: la barra mostraría desplazamiento horizontal, así que el tema y el idioma se recogen detrás de un botón «Preferencias» (icono de ajustes) que abre un cajón inferior con los dos controles dentro, con los mismos nombres accesibles y el mismo efecto. La campana de notificaciones y el menú de usuario **no** se recogen: muestran estado e identidad, y esconderlos tras un toque quitaría información que ahora se ve de un vistazo. El reparto lo elige el CSS por media query, así que ensanchar la ventana devuelve los controles a la barra sin recargar.
 
 El botón activo se comunica por `aria-pressed` sobre la **preferencia elegida**, no sobre el tema resuelto: si el sistema operativo está en oscuro y el botón activo es «Monitor», la página se pinta oscura pero el botón presionado es «Monitor», porque eso es lo que la usuaria eligió. Cada icono tiene un tooltip con la palabra traducida (un icono solo no distingue «claro» de «sistema»).
 
@@ -50,7 +52,7 @@ El token primario canónico es `#006b5f` en claro y `#70d8c8` en oscuro. El cont
 
 ## Conmutador e idioma
 
-El conmutador de tema y el selector de idioma comparten el mismo slot `end` de la topbar y siguen el mismo patrón: cookie server-side, atributo en `<html>`, mutación en cliente al pulsar, sin provider ni estado global. El conmutador de idioma es ahora un único botón con tooltip (cambia de ES a EN o al revés), después del rediseño que vino con el change.
+El conmutador de tema y el selector de idioma comparten el mismo slot `end` de la topbar —y el mismo desplegable «Preferencias» cuando la pantalla es estrecha— y siguen el mismo patrón: cookie server-side, atributo en `<html>`, mutación en cliente al pulsar, sin provider ni estado global. El conmutador de idioma es ahora un único botón con tooltip (cambia de ES a EN o al revés), después del rediseño que vino con el change.
 
 ## Lo que NO hace
 
@@ -71,9 +73,10 @@ El conmutador de tema y el selector de idioma comparten el mismo slot `end` de l
 
 Para comprobar que el mecanismo está vivo:
 
-1. Abrir la topbar — los tres iconos están a la izquierda del selector de idioma, con un tooltip traducido al pasar el ratón.
+1. Abrir la topbar — los tres iconos están a la izquierda del selector de idioma, con un tooltip traducido al pasar el ratón. En una ventana de menos de 640 px hay que abrir antes el botón «Preferencias».
 2. Pulsar la luna — el fondo de la página cambia a oscuro en el mismo instante, sin recarga; la cookie `autohostai.theme=dark` aparece en las herramientas de cookies; el atributo `data-theme="dark"` aparece en `<html>`.
 3. Recargar la página — sigue oscuro, sin flash de claro.
 4. Pulsar el monitor — el fondo vuelve al tema del sistema operativo; la cookie se borra; el atributo desaparece.
 5. Cambiar la preferencia de tema del sistema operativo — la página cambia con el sistema.
 6. Repetir con sol, monitor y los tres navegadores objetivo.
+7. Estrechar la ventana por debajo de 640 px — los tres iconos se recogen en «Preferencias»; elegir un tema desde el cajón y volver a ensanchar **sin recargar** deja pulsado el botón correcto en la barra, porque las instancias leen el atributo de `<html>` y no un estado propio.

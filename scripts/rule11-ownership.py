@@ -273,7 +273,7 @@ MINIMUM_PYTHON_FILES = 700
 #: **The load-bearing figure is the in-scope one, and it is four** — recounted against the tree
 #: this change ships, not against the one it started from. Every meta-only match but four lies in
 #: an out-of-census tree or in one of the detector files. Three are
-#: `sdd/specs/access-notifications.md:372`, `:525` and `:689` — the three that had `main` red, all
+#: `sdd/specs/access-notifications.md:373`, `:526` and `:690` — the three that had `main` red, all
 #: of them attributions of `NotificationType` members and of no column this table governs. The
 #: fourth is `sdd/specs/rule11-ownership-guard.md:11`, the paragraph of this change's own new spec
 #: that says the contract does **not** live there: it fires `censo` plus `quién la escribe` while

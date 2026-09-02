@@ -130,9 +130,12 @@ antes**, porque ya no exige contenedor ni stack.
   cubre.
 - WHERE un bloque encaje únicamente por el **meta-vocabulario** del censo —las palabras que nombran
   el mecanismo, no ninguna columna—, THE SYSTEM SHALL no reportarlo. Recontado contra el árbol que
-  se entrega (2026-09-01): dentro del alcance no aporta ni un verdadero positivo, y aporta **cuatro**
-  falsos. Tres son los que tenían `main` en rojo —`sdd/specs/access-notifications.md:372`, `:525` y
-  `:689`—, atribuciones de miembros de `NotificationType` cazadas por accidente a través de una
+  se entrega, ya con `main` fusionado (2026-09-02): dentro del alcance no aporta ni un verdadero
+  positivo, y aporta **cuatro** falsos. Tres son los que tenían `main` en rojo
+  —`sdd/specs/access-notifications.md:373`, `:526` y `:690`; eran `:372`, `:525` y `:689` antes de
+  que la fusión de base insertara una línea encima, y el conjunto exacto lo fija por identidad
+  `test_the_declared_cost_of_dropping_the_meta_vocabulary_is_still_what_the_prose_says`—,
+  atribuciones de miembros de `NotificationType` cazadas por accidente a través de una
   palabra que habla del mecanismo; por eso esos tres bloques **no se reescribieron**: nunca fueron
   infractores. El cuarto es la línea 11 **de esta misma spec**, el párrafo que declara que el
   contrato no vive aquí: encaja por `censo` y por una de las trece redacciones del eje de propiedad,

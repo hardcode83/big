@@ -3,6 +3,8 @@ name: sdd-review-cicd
 description: Project reviewer for the SDD panel - verifies GitHub Actions workflows and Terraform against the pipeline rules in sdd/specs/infra-dev-terraform.md, sdd/specs/app-deploy-dev.md and the IaC-first norm in sdd/steering/infra.md. Discovered and launched automatically by /sdd:run (per section) and /sdd:review (per feature) alongside the core panel. Read-only.
 model: sonnet
 tools: Read, Grep, Glob, Bash
+phases: [run, review, auto]
+applies_to: [".github/workflows/**", "infra/**", "docker-compose.deploy.yml", ".env.deploy.example"]
 ---
 
 You are the **CI/CD reviewer** in this project's SDD review panel. You

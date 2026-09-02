@@ -92,8 +92,8 @@ def test_the_scan_catches_what_it_claims_to() -> None:
 def test_the_meta_vocabulary_alone_is_no_longer_a_sink() -> None:
     """D3, and the shape it was measured on.
 
-    The three blocks that put `main` in the red — `sdd/specs/access-notifications.md:372`, `:525`
-    and `:689` — matched the sink axis through the word `censo` and through nothing else. They
+    The three blocks that put `main` in the red — `sdd/specs/access-notifications.md:373`, `:526`
+    and `:690` — matched the sink axis through the word `censo` and through nothing else. They
     attribute members of the `NotificationType` enum, whose authority is that spec plus
     `backend/tests/notifications/test_writer_census.py`, not a column this table governs. A text
     *about* the guard is not a duplicated attribution of anything.
@@ -161,11 +161,20 @@ def test_the_declared_cost_of_dropping_the_meta_vocabulary_is_still_what_the_pro
     terms and the ownership redactions here cannot itself become an offender. That is exactly the
     trap the spec's bullet fell into, and the reason the spec now describes the match by reference
     instead of quoting it.
+
+    **A third drift, and this one is by design rather than by carelessness.** Three of the four
+    live in `sdd/specs/access-notifications.md`, a file this change does not own, so their line
+    numbers move whenever the base does. Merging `origin/main@078339d` in at ship time inserted one
+    line above all three and shifted them 372/525/689 -> 373/526/690: **the same three blocks, no
+    membership change**. This assertion caught it, which is the whole reason it asserts the set and
+    not the count — a count would have stayed green. So expect this to redden on a base sync, and
+    apply the rule above unchanged: read the set first. Membership intact means renumber here;
+    membership changed means something real happened to the census.
     """
     assert _meta_only_offenders() == [
-        "sdd/specs/access-notifications.md:372",
-        "sdd/specs/access-notifications.md:525",
-        "sdd/specs/access-notifications.md:689",
+        "sdd/specs/access-notifications.md:373",
+        "sdd/specs/access-notifications.md:526",
+        "sdd/specs/access-notifications.md:690",
         "sdd/specs/rule11-ownership-guard.md:11",
     ]
     # Zero true positives in scope is the half that decided D3, and it is the half worth pinning:
@@ -310,10 +319,12 @@ def test_what_this_guard_does_not_catch() -> None:
        `sdd/changes/archive/2026-08-08-access-notifications/design.md:169` is the measured
        example — but it lives in an out-of-census tree, so the cost **in scope today is zero
        blocks**. What was bought for it is four false positives: the three that had `main` red
-       (`sdd/specs/access-notifications.md:372`, `:525`, `:689`) and
+       (`sdd/specs/access-notifications.md:373`, `:526`, `:690`) and
        `sdd/specs/rule11-ownership-guard.md:11`, the paragraph of this change's own spec that
-       says where the contract lives. Recounted against the shipped tree on 2026-09-01; it was
-       three when D3 was decided, before that spec existed.
+       says where the contract lives. Recounted against the shipped tree on 2026-09-02, after the
+       base sync moved the three by one line; it was three when D3 was decided, before that spec
+       existed. The exact set is asserted above, which is what makes these numbers safe to write
+       down at all.
     7. **A census column named bare, without its table** — `payload` and `error` rather than
        `webhook_events.payload`. The sink axis matches the qualified column or the table name,
        so an unqualified mention of an ambiguous word like `payload` is invisible. This is the
