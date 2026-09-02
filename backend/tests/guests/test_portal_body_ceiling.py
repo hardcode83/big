@@ -159,9 +159,10 @@ async def test_the_ceiling_is_the_shared_one_and_not_a_fourth_knob() -> None:
     """D7: no `guest_portal_max_body_bytes`.
 
     A dial beside `REQUEST_MAX_BYTES`, `JSON_BODY_MAX_BYTES` and `CSV_IMPORT_MAX_BYTES` would
-    be one nobody tunes and a fourth home for the same fact. The portal's bodies are six small
-    fields and a short free-text description; if that ever stops being true, the repair is
-    another branch in the per-path provider of `app/main.py`.
+    be one nobody tunes and a fourth home for the same fact. The portal's bodies are all small —
+    the check-in's six fields, the incident's title and description, and the message's single
+    bounded `content`; if that ever stops being true, the repair is another branch in the
+    per-path provider of `app/main.py`.
     """
     assert not hasattr(settings, "guest_portal_max_body_bytes")
 

@@ -2,16 +2,19 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fireEvent, render, screen, waitFor } from "@/test/render";
+import { fireEvent, render, screen, waitFor, within } from "@/test/render";
 import { getA11yViolations } from "@/test/render";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import { ApiError } from "@/lib/api";
+import { PORTAL_THREAD_POLL_MS } from "../hooks/use-conversation";
 
 const source = vi.hoisted(() => ({
   getStayInfo: vi.fn(),
   getCheckinStatus: vi.fn(),
   submitCheckin: vi.fn(),
   reportIncident: vi.fn(),
+  getConversation: vi.fn(),
+  postMessage: vi.fn(),
 }));
 
 vi.mock("@/features/guest-portal/data", () => ({
@@ -39,6 +42,19 @@ const STAY = {
   supportChannel: "+34 600 000 000",
   timezone: "Europe/Madrid",
   wifiName: "CasaWifi",
+};
+
+const EMPTY_THREAD = { items: [], total: 0, page: 1, perPage: 50, state: "AUTOMATIC" as const };
+
+const THREAD = {
+  items: [
+    { id: "m1", sender: "GUEST" as const, content: "¿A qué hora puedo entrar?", createdAt: "2026-08-30T10:00:00Z" },
+    { id: "m2", sender: "PROPERTY" as const, content: "La entrada es a partir de las 15:00.", createdAt: "2026-08-30T10:00:01Z" },
+  ],
+  total: 2,
+  page: 1,
+  perPage: 50,
+  state: "AUTOMATIC" as const,
 };
 
 const CHECKIN_STATUS = {
@@ -73,7 +89,41 @@ beforeEach(() => {
   source.getCheckinStatus.mockResolvedValue(CHECKIN_STATUS);
   source.submitCheckin.mockResolvedValue({ documentStatus: "PROVIDED", legalRegistrationStatus: "SUBMITTED" });
   source.reportIncident.mockResolvedValue({ id: "11111111-1111-1111-1111-111111111111", status: "OPEN", createdAt: "2026-08-11T10:00:00Z" });
+  source.getConversation.mockResolvedValue(EMPTY_THREAD);
+  source.postMessage.mockResolvedValue({ id: "m1", sender: "GUEST", content: "Hola", createdAt: "2026-08-30T10:00:00Z" });
 });
+
+
+/**
+ * The conversation section's own live region.
+ *
+ * Scoped rather than global: the check-in and incident sections each own a `role="alert"` too,
+ * so `screen.getByRole("alert")` is ambiguous — which is correct page structure, not a bug. A
+ * test that reached for the first one would silently assert about another section's status.
+ */
+function conversationAlert() {
+  return within(screen.getByRole("region", { name: "Conversación" })).getByRole("alert");
+}
+
+/**
+ * `useConversation` uses the shared `retryPolicy`, which retries a `5xx` twice with React
+ * Query's exponential backoff — so the error state genuinely takes a few seconds to settle.
+ * That is the production behaviour these tests are about, so the wait is widened rather than
+ * the policy weakened.
+ */
+const RETRY_SETTLE_MS = 8000;
+
+/**
+ * Vitest's own per-test budget for the three tests that wait out `RETRY_SETTLE_MS`.
+ *
+ * `frontend/vitest.config.ts` sets no `testTimeout`, so the default is 5000 ms — **less** than
+ * the assertion timeout above. Widening only the inner `findByText` was therefore protection
+ * against exactly the slow-runner condition it could not survive: vitest would kill the test at
+ * 5 s before the 8 s allowance was ever reached. Raised together, and deliberately a little
+ * above it so the assertion is what fails (with a useful message) rather than the harness.
+ * Found by the CI/CD panel of sections 9-10.
+ */
+const RETRY_TEST_TIMEOUT_MS = RETRY_SETTLE_MS + 4000;
 
 describe("404 gate (R1.2, task 3.3)", () => {
   it("shows one uniform invalid-link state and hides check-in/incident, without internal detail", async () => {
@@ -320,4 +370,234 @@ describe("accessibility (R4.3, task 5.4)", () => {
     // page-has-heading-one is a best-practice rule; the portal uses section-level h2s by design (D5).
     expect(await getA11yViolations(document.body, ["page-has-heading-one"])).toEqual([]);
   });
+});
+
+describe("the conversation section (R5.1-R5.8, design D10)", () => {
+  it("renders the thread labelled only as the guest or the accommodation", async () => {
+    source.getConversation.mockResolvedValue(THREAD);
+    renderView();
+
+    expect(await screen.findByText("¿A qué hora puedo entrar?")).toBeInTheDocument();
+    expect(screen.getByText("La entrada es a partir de las 15:00.")).toBeInTheDocument();
+    expect(screen.getByText("Tú")).toBeInTheDocument();
+    expect(screen.getByText("El alojamiento")).toBeInTheDocument();
+  });
+
+  /**
+   * R5.5: the automatic reply and a manager's are the same `PROPERTY` on the wire, and the UI
+   * must not reintroduce the difference. Asserted as an absence over the whole rendered page,
+   * because the failure mode is a caption *appearing* — a later edit adding "asistente" or
+   * "respuesta automática" would keep every positive assertion above green.
+   */
+  it("never labels a reply as written by the AI or by a person", async () => {
+    source.getConversation.mockResolvedValue(THREAD);
+    renderView();
+    await screen.findByText("La entrada es a partir de las 15:00.");
+
+    for (const word of [/\bIA\b/i, /autom[áa]tic/i, /asistente/i, /bot/i, /manager/i, /gestor/i]) {
+      expect(document.body.textContent ?? "").not.toMatch(word);
+    }
+  });
+
+  it("shows the localized waiting copy and never an escalation reason", async () => {
+    source.getConversation.mockResolvedValue({ ...THREAD, state: "AWAITING_HUMAN" });
+    renderView();
+
+    expect(await screen.findByText("Te responderá una persona.")).toBeInTheDocument();
+    for (const word of [/escalad/i, /motivo/i, /confianza/i, /intent/i]) {
+      expect(document.body.textContent ?? "").not.toMatch(word);
+    }
+  });
+
+  it("invites a first message when the thread is empty, rather than showing an error", async () => {
+    renderView();
+
+    expect(
+      await screen.findByText("Todavía no has escrito nada. Escríbenos y te contestamos."),
+    ).toBeInTheDocument();
+  });
+
+  it("sends the message and announces progress in a live region", async () => {
+    let resolve: (value: unknown) => void = () => {};
+    source.postMessage.mockReturnValue(new Promise((r) => { resolve = r; }));
+    renderView();
+    await screen.findByLabelText("Tu mensaje");
+
+    fireEvent.change(screen.getByLabelText("Tu mensaje"), { target: { value: "Hola" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enviar mensaje" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Enviar mensaje" })).toBeDisabled());
+    expect(conversationAlert()).toHaveTextContent("Enviando…");
+
+    resolve({ id: "m1", sender: "GUEST", content: "Hola", createdAt: "2026-08-30T10:00:00Z" });
+    await waitFor(() => expect(source.postMessage).toHaveBeenCalledWith(TOKEN, { content: "Hola" }));
+  });
+
+  it("re-reads the thread after a send, which is what shows the reply", async () => {
+    source.getConversation.mockResolvedValueOnce(EMPTY_THREAD).mockResolvedValue(THREAD);
+    renderView();
+    await screen.findByLabelText("Tu mensaje");
+
+    fireEvent.change(screen.getByLabelText("Tu mensaje"), { target: { value: "Hola" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enviar mensaje" }));
+
+    expect(await screen.findByText("La entrada es a partir de las 15:00.")).toBeInTheDocument();
+  });
+
+  it("keeps what the guest typed when the send is rate limited", async () => {
+    source.postMessage.mockRejectedValue(
+      new ApiError({ code: "RATE_LIMITED", message: "Too many requests", status: 429, details: {} }),
+    );
+    renderView();
+    await screen.findByLabelText("Tu mensaje");
+
+    fireEvent.change(screen.getByLabelText("Tu mensaje"), { target: { value: "Hola" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enviar mensaje" }));
+
+    await waitFor(() =>
+      expect(conversationAlert()).toHaveTextContent(
+        "Espera antes de volver a intentarlo. No sabemos si se recibió lo que enviaste.",
+      ),
+    );
+    // R5.8: a cleared box would read as "it did not arrive", which we do not know.
+    expect(screen.getByLabelText("Tu mensaje")).toHaveValue("Hola");
+    expect(source.postMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an empty message before calling the API", async () => {
+    renderView();
+    await screen.findByLabelText("Tu mensaje");
+
+    fireEvent.click(screen.getByRole("button", { name: "Enviar mensaje" }));
+
+    expect(await screen.findByText("Este campo es obligatorio.")).toBeInTheDocument();
+    expect(source.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("shows a localized, retryable error when the thread cannot be loaded", async () => {
+    source.getConversation.mockRejectedValue(
+      new ApiError({ code: "INTERNAL", message: "boom", status: 500, details: {} }),
+    );
+    renderView();
+
+    expect(
+      await screen.findByText("No hemos podido cargar la conversación", undefined, {
+        timeout: RETRY_SETTLE_MS,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("No hemos podido completar la operación.")).toBeInTheDocument();
+  }, RETRY_TEST_TIMEOUT_MS);
+
+  /**
+   * R5.1: the conversation is the fourth section and must fail alone. A thread that errors
+   * leaves the stay, check-in and incident sections standing.
+   */
+  it("does not bring the other three sections down when it fails", async () => {
+    source.getConversation.mockRejectedValue(
+      new ApiError({ code: "INTERNAL", message: "boom", status: 500, details: {} }),
+    );
+    renderView();
+
+    await screen.findByText("No hemos podido cargar la conversación", undefined, {
+      timeout: RETRY_SETTLE_MS,
+    });
+    expect(screen.getByText("Casa Redes")).toBeInTheDocument();
+    expect(screen.getByText("Check-in")).toBeInTheDocument();
+    expect(screen.getByText("Comunicar una incidencia")).toBeInTheDocument();
+  }, RETRY_TEST_TIMEOUT_MS);
+
+  it("is not rendered at all while the link has not authorised", async () => {
+    source.getStayInfo.mockRejectedValue(
+      new ApiError({ code: "NOT_FOUND", message: "gone", status: 404, details: {} }),
+    );
+    renderView();
+
+    await screen.findByText("Este enlace no es válido");
+    expect(screen.queryByText("Conversación")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Tu mensaje")).not.toBeInTheDocument();
+  });
+
+  /** R5.9, task 10.7: the token is the credential, so it must never be rendered. */
+  it("never renders the token in visible text, in an attribute, or in an error", async () => {
+    source.getConversation.mockResolvedValue(THREAD);
+    source.postMessage.mockRejectedValue(
+      new ApiError({ code: "VALIDATION_ERROR", message: `bad ${TOKEN}`, status: 422, details: {} }),
+    );
+    const { container } = renderView();
+    await screen.findByLabelText("Tu mensaje");
+
+    fireEvent.change(screen.getByLabelText("Tu mensaje"), { target: { value: "Hola" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enviar mensaje" }));
+    await waitFor(() => expect(conversationAlert()).toHaveTextContent("Revisa los campos indicados."));
+
+    expect(document.body.textContent ?? "").not.toContain(TOKEN);
+    expect(container.innerHTML).not.toContain(TOKEN);
+    expect(document.title).not.toContain(TOKEN);
+  });
+
+  it("has no accessibility violations with a loaded thread", async () => {
+    source.getConversation.mockResolvedValue(THREAD);
+    const { container } = renderView();
+    await screen.findByText("La entrada es a partir de las 15:00.");
+
+    expect(await getA11yViolations(container)).toEqual([]);
+  });
+});
+
+describe("a poll that fails after the thread loaded (R5.8)", () => {
+  /**
+   * The defect the QA panel of sections 9-10 reproduced: branching on `thread.isError` alone
+   * blanked a conversation the guest was reading, because TanStack Query flips `status` to
+   * `error` on *any* failed fetch — including a background poll — even while good data is
+   * cached. The blast radius is real: the portal's six routes share one 60/min budget, so a
+   * `429` mid-conversation is the expected case, not a freak one.
+   */
+  it("keeps the visible history and says the refresh failed, instead of wiping it", async () => {
+    source.getConversation
+      .mockResolvedValueOnce(THREAD)
+      .mockRejectedValue(
+        new ApiError({ code: "RATE_LIMITED", message: "slow down", status: 429, details: {} }),
+      );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderView();
+      await screen.findByText("La entrada es a partir de las 15:00.");
+
+      // Let the poll fire, which is the path that produces the failure with data already held.
+      await vi.advanceTimersByTimeAsync(PORTAL_THREAD_POLL_MS + 100);
+      await waitFor(() => expect(source.getConversation.mock.calls.length).toBeGreaterThan(1));
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await waitFor(() =>
+      expect(screen.getByText("No hemos podido actualizar la conversación. Esto es lo último que recibimos.")).toBeInTheDocument(),
+    );
+    // The history is still there…
+    expect(screen.getByText("La entrada es a partir de las 15:00.")).toBeInTheDocument();
+    expect(screen.getByText("¿A qué hora puedo entrar?")).toBeInTheDocument();
+    // …and the send-oriented copy is NOT shown for what was only a read.
+    expect(document.body.textContent ?? "").not.toContain("No sabemos si se recibió lo que enviaste.");
+  });
+
+  it("still shows the full error state when the very first load fails", async () => {
+    source.getConversation.mockRejectedValue(
+      new ApiError({ code: "RATE_LIMITED", message: "slow down", status: 429, details: {} }),
+    );
+    renderView();
+
+    expect(
+      await screen.findByText("No hemos podido cargar la conversación", undefined, {
+        timeout: RETRY_SETTLE_MS,
+      }),
+    ).toBeInTheDocument();
+    // The **description**, not just the title. The first version of this test asserted only the
+    // title, and the i18n panel of sections 9-10 pointed out that a `429` here was still showing
+    // the send-oriented copy — a regression this test would have watched happen in silence. A
+    // first load is a plain `GET`: the guest has typed nothing, so nothing may have been sent.
+    expect(
+      screen.getByText("Demasiadas peticiones. Espera un momento y vuelve a intentarlo."),
+    ).toBeInTheDocument();
+    expect(document.body.textContent ?? "").not.toContain("No sabemos si se recibió lo que enviaste.");
+  }, RETRY_TEST_TIMEOUT_MS);
 });

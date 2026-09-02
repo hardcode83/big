@@ -354,6 +354,18 @@ export interface paths {
      */
     get: operations["read_stay_info_api_v1_guest_info__token__get"];
   };
+  "/api/v1/guest/messages/{token}": {
+    /**
+     * The guest's own thread
+     * @description One page of the stay's conversation, oldest first within the page. Every message is attributed to the guest or to the accommodation and to nothing finer: which member of staff wrote a reply, and whether it was written automatically, are not fields of this response. Neither is the reason a conversation is waiting for a person — only that it is. A stay whose guest has not written yet answers with an empty thread: reading never opens a conversation. **Without `page` the most recent window is returned**, since a thread is read from its end; `total`, `page` and `per_page` say which window it is, and an explicit `page` still reaches the earlier ones.
+     */
+    get: operations["read_guest_thread_api_v1_guest_messages__token__get"];
+    /**
+     * Write a message to the accommodation
+     * @description Sends one message from the guest and runs the whole messaging pipeline over it: the language is detected, the intent classified, and either an automatic answer is written or a person is asked to take over. The stay's thread is created by this first message and by nothing else. The body carries the text and nothing else — a sender, a reservation or a conversation id in it is a `422`, never something quietly ignored — and the acknowledgement is the message as it will appear in the thread. Retrying sends a second message: the request is not deduplicated, so treat a `429` as 'wait', never as 'it did not arrive'.
+     */
+    post: operations["post_guest_message_api_v1_guest_messages__token__post"];
+  };
   "/api/v1/guests/{guest_id}/document": {
     /**
      * Read a guest's full identity document
@@ -1425,7 +1437,7 @@ export interface components {
      * ConversationChannel
      * @enum {string}
      */
-    ConversationChannel: "WHATSAPP" | "AIRBNB_MSG" | "BOOKING_MSG" | "EMAIL" | "PHONE_TRANSCRIPT" | "MANUAL";
+    ConversationChannel: "WHATSAPP" | "AIRBNB_MSG" | "BOOKING_MSG" | "EMAIL" | "PHONE_TRANSCRIPT" | "MANUAL" | "PORTAL";
     /**
      * ConversationEscalationStatus
      * @description ASSUMPTION: name invented — the PRD declares this enum inline
@@ -2012,6 +2024,25 @@ export interface components {
      */
     GuestDocumentType: "DNI" | "NIE" | "PASSPORT" | "RESIDENCE_CARD" | "OTHER";
     /**
+     * GuestMessageResponse
+     * @description One message of the thread: who sent it, what it says, and when.
+     */
+    GuestMessageResponse: {
+      /** Content */
+      content: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      sender: components["schemas"]["PortalMessageSender"];
+    };
+    /**
      * GuestResponse
      * @description A name. Rule 4 of `steering/security.md` — nothing about the document, ever.
      */
@@ -2039,6 +2070,21 @@ export interface components {
       phone: string | null;
       /** Preferred Language */
       preferred_language: string;
+    };
+    /**
+     * GuestThreadResponse
+     * @description One page of the conversation, oldest first, with the window it came from.
+     */
+    GuestThreadResponse: {
+      /** Items */
+      items: components["schemas"]["GuestMessageResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      state: components["schemas"]["PortalThreadState"];
+      /** Total */
+      total: number;
     };
     /**
      * ImportReportResponse
@@ -2656,6 +2702,52 @@ export interface components {
      * @enum {string}
      */
     PMSProvider: "MOCK" | "CHANNEX" | "BEDS24";
+    /**
+     * PortalMessageSender
+     * @description Who wrote a message, **grouped into two** (`guest-portal-messaging` R2.2, D4).
+     *
+     * Derived in the backend from `MessageSenderType`, whose five members collapse to these two.
+     * The collapse is the requirement, not an implementation detail: R2.2 forbids **publishing**
+     * whether a reply was written by the AI or by a person, and a vocabulary of two is what makes
+     * the distinction absent from the response rather than merely omitted by a serialiser.
+     *
+     * **It does not make the distinction unguessable, and this docstring used to claim it did.**
+     * A guest can still infer it from outside the payload — the automatic reply carries the same
+     * `created_at` as the message that triggered it, it arrives in the same poll, and its text
+     * comes from a closed catalogue. The residual is written down in `design.md` under R2.2
+     * rather than left as an overstatement next to the type. Raised by the security panel of
+     * sections 5-6.
+     *
+     * `PROPERTY` and not `HOST`/`MANAGER`: the guest is told *the accommodation* answered, which
+     * is true of an automatic reply and of a manager's, and names no role.
+     * @enum {string}
+     */
+    PortalMessageSender: "GUEST" | "PROPERTY";
+    /**
+     * PortalThreadState
+     * @description Whether a person has the conversation (R2.3, D4).
+     *
+     * An enum of two members and **not a boolean**, for two reasons D4 records: the front end
+     * switches on a name to pick its localised copy (R5.6), and a boolean called
+     * `awaiting_human` invites somebody to hang the *why* beside it — which is the escalation
+     * reason, and R2.3 says that is internal.
+     *
+     * `AWAITING_HUMAN` covers `PENDING_HUMAN` and `HUMAN_HANDLING` alike. The guest is told a
+     * person will reply; that a manager has already taken it over is our business, not theirs.
+     * @enum {string}
+     */
+    PortalThreadState: "AUTOMATIC" | "AWAITING_HUMAN";
+    /**
+     * PostGuestMessageRequest
+     * @description What `POST /guest/messages/{token}` accepts: the guest's own words, and nothing else.
+     *
+     * Surrounding whitespace is stripped first, so the bounds count characters after stripping and
+     * a whitespace-only message is a `422`.
+     */
+    PostGuestMessageRequest: {
+      /** Content */
+      content: string;
+    };
     /** PriceRecommendationPageResponse */
     PriceRecommendationPageResponse: {
       /** Items */
@@ -6049,6 +6141,101 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["StayInfoResponse"];
+        };
+      };
+      /** @description This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The request body exceeded the ceiling applied to all of /api/v1/. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Rate limited. Retry in a minute. */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * The guest's own thread
+   * @description One page of the stay's conversation, oldest first within the page. Every message is attributed to the guest or to the accommodation and to nothing finer: which member of staff wrote a reply, and whether it was written automatically, are not fields of this response. Neither is the reason a conversation is waiting for a person — only that it is. A stay whose guest has not written yet answers with an empty thread: reading never opens a conversation. **Without `page` the most recent window is returned**, since a thread is read from its end; `total`, `page` and `per_page` say which window it is, and an explicit `page` still reaches the earlier ones.
+   */
+  read_guest_thread_api_v1_guest_messages__token__get: {
+    parameters: {
+      query?: {
+        page?: number | null;
+        per_page?: number;
+      };
+      path: {
+        token: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["GuestThreadResponse"];
+        };
+      };
+      /** @description This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The request body exceeded the ceiling applied to all of /api/v1/. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Rate limited. Retry in a minute. */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Write a message to the accommodation
+   * @description Sends one message from the guest and runs the whole messaging pipeline over it: the language is detected, the intent classified, and either an automatic answer is written or a person is asked to take over. The stay's thread is created by this first message and by nothing else. The body carries the text and nothing else — a sender, a reservation or a conversation id in it is a `422`, never something quietly ignored — and the acknowledgement is the message as it will appear in the thread. Retrying sends a second message: the request is not deduplicated, so treat a `429` as 'wait', never as 'it did not arrive'.
+   */
+  post_guest_message_api_v1_guest_messages__token__post: {
+    parameters: {
+      path: {
+        token: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PostGuestMessageRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["GuestMessageResponse"];
         };
       };
       /** @description This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body. */

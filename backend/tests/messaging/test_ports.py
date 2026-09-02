@@ -16,6 +16,7 @@ from app.messaging.domain.ports import (
     IncidentReportingPort,
     OutboundMessagePort,
 )
+from app.messaging.domain.entities import Conversation
 from app.messaging.domain.repositories import (
     ConversationFilters,
     ConversationPage,
@@ -23,7 +24,7 @@ from app.messaging.domain.repositories import (
     MessagePage,
     MessageRepository,
 )
-from app.messaging.domain.value_objects import ChannelSendResult
+from app.messaging.domain.value_objects import ChannelSendResult, InboundMessageActor
 
 
 def declared_methods(protocol: type) -> set[str]:
@@ -142,14 +143,20 @@ def test_the_incident_reporting_port_declares_one_method() -> None:
     assert declared_methods(IncidentReportingPort) == {"report"}
 
 
-def test_reporting_an_incident_requires_a_human_actor() -> None:
-    """D12: the actor is why this change needs **no** new exception to rule 9 of
-    `steering/security.md`. A guest's message arrives through the panel or the API with an
-    authenticated user at the keyboard, so `actor_user_id` is not optional."""
+def test_reporting_an_incident_requires_an_actor_of_either_kind() -> None:
+    """`guest-portal-messaging` R4.1, D8. Until that change this asserted a required
+    `actor_user_id: uuid.UUID`, on the reasoning that a guest's message always arrives with an
+    authenticated user at the keyboard. `POST /api/v1/guest/messages/{token}` is the second
+    door and there is no user behind it, so the parameter became an `InboundMessageActor` —
+    still required, and still exactly one actor, because the value object refuses the other
+    two shapes."""
     parameters = inspect.signature(IncidentReportingPort.report).parameters
 
-    assert parameters["actor_user_id"].annotation is uuid.UUID
-    assert parameters["actor_user_id"].default is inspect.Parameter.empty
+    assert parameters["actor"].annotation is InboundMessageActor
+    assert parameters["actor"].default is inspect.Parameter.empty
+    # The unpacked pair is gone: leaving either behind would be a second way to name an actor.
+    assert "actor_user_id" not in parameters
+    assert "ip" not in parameters
     # `reservation_id` is the optional one: a conversation need not have a booking (R5.6).
     assert parameters["reservation_id"].annotation == uuid.UUID | None
 
@@ -159,8 +166,21 @@ def test_reporting_an_incident_requires_a_human_actor() -> None:
 
 def test_the_conversation_repository_declares_only_what_this_change_consumes() -> None:
     """R1.1: "con **solo los métodos que este change consume**, y NEVER SHALL declarar métodos
-    especulativos". The discipline `domain-foundation-ops` records as a bet that paid off."""
-    assert declared_methods(ConversationRepository) == {"add", "get", "save", "list"}
+    especulativos". The discipline `domain-foundation-ops` records as a bet that paid off.
+
+    `ensure_portal` and `find_portal` are `guest-portal-messaging`'s widening (R2.5, R3.4, D6),
+    and they arrive with their consumers in the same change — which is the condition D2 sets
+    for widening a port at all. They are **two** methods and not one with a flag because R2.5
+    turns on the difference: reading a thread must create nothing.
+    """
+    assert declared_methods(ConversationRepository) == {
+        "add",
+        "get",
+        "save",
+        "list",
+        "ensure_portal",
+        "find_portal",
+    }
 
 
 def test_the_message_repository_declares_only_what_this_change_consumes() -> None:
@@ -224,3 +244,29 @@ def test_a_page_carries_its_total_for_the_client_to_paginate() -> None:
     """PRD §23 wants `total_pages`, which the client cannot compute without the total."""
     for page in (ConversationPage, MessagePage):
         assert set(page.__dataclass_fields__) == {"items", "total"}
+
+
+def test_neither_portal_method_is_optional_about_the_stay() -> None:
+    """D6, after the security panel of section 1: the partial unique index behind `ensure_portal`
+    cannot enforce R3.4 for a row whose `reservation_id` is NULL, because PostgreSQL treats
+    NULLs as distinct in a unique index. Typing the parameter is what closes that, so the type
+    is the guarantee and belongs in a test rather than in a comment."""
+    for method in (
+        ConversationRepository.ensure_portal,
+        ConversationRepository.find_portal,
+    ):
+        annotation = inspect.signature(method).parameters["reservation_id"].annotation
+        assert annotation is uuid.UUID, method.__name__
+
+
+def test_find_portal_may_answer_that_there_is_no_thread() -> None:
+    """R2.5: an empty thread is a `200`, so "no conversation yet" has to be expressible as a
+    value. `ensure_portal`, by contrast, always returns one."""
+    assert (
+        inspect.signature(ConversationRepository.find_portal).return_annotation
+        == Conversation | None
+    )
+    assert (
+        inspect.signature(ConversationRepository.ensure_portal).return_annotation
+        is Conversation
+    )

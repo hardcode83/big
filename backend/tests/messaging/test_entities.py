@@ -512,3 +512,42 @@ def test_the_not_found_error_has_exactly_one_message() -> None:
 
     with pytest.raises(TypeError):
         ConversationNotFoundError("Conversation belongs to another tenant")  # type: ignore[call-arg]
+
+
+# --- `is_handed_over`, the one predicate two readers share (`guest-portal-messaging` D9) ---
+
+
+@pytest.mark.parametrize(
+    ("escalation_status", "expected"),
+    [
+        (ConversationEscalationStatus.NONE, False),
+        (ConversationEscalationStatus.PENDING_HUMAN, True),
+        (ConversationEscalationStatus.HUMAN_HANDLING, True),
+        (ConversationEscalationStatus.RESOLVED, False),
+    ],
+)
+def test_is_handed_over_covers_every_member_of_the_axis(
+    escalation_status: ConversationEscalationStatus, expected: bool
+) -> None:
+    """Parametrized over the **whole** enum rather than over the two interesting members, so a
+    member added later has to be given a verdict here instead of silently falling to `False`.
+
+    `RESOLVED` answering `False` is the one worth stating: the escalation is over, a new
+    message reopens the conversation with the axis back at `NONE`, and the AI answers again.
+    """
+    conversation = make_conversation(escalation_status=escalation_status)
+
+    assert conversation.is_handed_over() is expected
+
+
+def test_the_axis_has_no_member_this_predicate_ignores() -> None:
+    """The guard on the test above: if `ConversationEscalationStatus` grows a member, the
+    parametrisation stops covering the enum and this fails, naming the gap."""
+    covered = {
+        ConversationEscalationStatus.NONE,
+        ConversationEscalationStatus.PENDING_HUMAN,
+        ConversationEscalationStatus.HUMAN_HANDLING,
+        ConversationEscalationStatus.RESOLVED,
+    }
+
+    assert covered == set(ConversationEscalationStatus)

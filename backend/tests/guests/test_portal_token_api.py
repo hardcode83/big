@@ -494,7 +494,12 @@ async def test_a_reservation_that_does_not_exist_answers_the_same_404(
 
 @pytest.mark.asyncio
 async def test_the_routes_require_authentication_at_all(api, db_session, tenant_a) -> None:
-    """Unlike the four portal routes, these two are ordinary authenticated endpoints."""
+    """Unlike the portal's anonymous routes, these two are ordinary authenticated endpoints.
+
+    Said without a count on purpose: the portal had four when this was written and has six since
+    `guest-portal-messaging`. What distinguishes these two is that they require a JWT at all,
+    which no number expresses.
+    """
     reservation = await _stay(db_session, tenant_a)
 
     assert (await api.post(_path(reservation))).status_code == 401

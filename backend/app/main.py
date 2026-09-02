@@ -169,8 +169,10 @@ def create_app() -> FastAPI:
     # its routes carry no `Authorization` header and declare no permission, because the token
     # in the path is the credential. Keeping them off `guests_router` — which declares
     # `AUTHENTICATED_RESPONSES` — is what stops an unauthenticated route from hiding inside a
-    # shape that says otherwise, and forces an entry per route in `ANONYMOUS_ENDPOINTS`:
-    # four, one per route of PRD §23.
+    # shape that says otherwise, and forces **an entry per route** in `ANONYMOUS_ENDPOINTS` —
+    # which is the property that matters, and the reason no number is given here: this comment
+    # said "four, one per route of PRD §23" until `guest-portal-messaging` mounted two more.
+    # The census is the authority on how many there are, and it is enforced by a test.
     app.include_router(guest_portal_router, prefix=API_V1_PREFIX)
     # `dashboard-api`: the read side of PRD §10. `timeline` had `domain/` and
     # `infrastructure/` since `timeline-state-machine` and no way to read an event back —

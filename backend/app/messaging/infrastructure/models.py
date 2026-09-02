@@ -3,7 +3,18 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Numeric, String, Uuid, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Uuid,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,6 +32,24 @@ class ConversationModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampM
     __table_args__ = (
         Index("ix_conversations_tenant_id_status", "tenant_id", "status"),
         Index("ix_conversations_reservation_id", "reservation_id"),
+        # At most one `PORTAL` thread per stay (`guest-portal-messaging` R3.4, D6). Declared
+        # here as well as in `80ea2e544b36` because the test suite builds its schema from this
+        # metadata and never runs the migrations — without this copy the index would not exist
+        # in the tests and the concurrency test of R3.4 would prove nothing while still passing.
+        #
+        # The predicate is a plain enum comparison (`text()` below is SQLAlchemy's raw-SQL
+        # helper, **not** a `::text` cast). It needs no autocommit block here, because
+        # `create_all` *creates* `conversation_channel` in the same transaction rather than
+        # extending it, and PostgreSQL 12+ allows using the labels of an enum created in the
+        # transaction that created it. Why the migration cannot do the same, and what it pays
+        # instead, is written once in `80ea2e544b36` and not re-derived here.
+        Index(
+            "uq_conversations_portal_reservation",
+            "tenant_id",
+            "reservation_id",
+            unique=True,
+            postgresql_where=text("channel = 'PORTAL'"),
+        ),
     )
 
     property_id: Mapped[uuid.UUID | None] = mapped_column(
