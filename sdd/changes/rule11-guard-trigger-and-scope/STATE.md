@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/rule11-guard-trigger-and-scope
 implementation_sha: e549ea8dff461f3aebcc92e3638c99e4a55f042d
 pr_number:
 pr_url:
