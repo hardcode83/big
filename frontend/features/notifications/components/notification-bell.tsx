@@ -56,7 +56,17 @@ export function NotificationBell({ profile }: { profile: ShellProfile }) {
         type="button"
         variant="ghost"
         size="icon"
-        className="relative"
+        // `tap-target` is not decoration on top of `size="icon"`, and it is the
+        // one topbar control that was missing it. `h-11 w-11` sets a width; as a
+        // flex item inside the topbar's `end` slot that width is only a starting
+        // point, and `min-width: auto` resolves to the icon's min-content — so
+        // once `shell-topbar-overflow-360` gave that slot `min-w-0`, the bell
+        // was the control that absorbed the squeeze. Measured in Chromium at
+        // 360px before this line existed: 22px wide on `/tech`, 25px on
+        // `/cleaner`, 42px on `/dashboard`, against the 44px that R3.1 of that
+        // change and `design-system-tokens.md:31` both require. `tap-target`'s
+        // `min-width` is what a flex item cannot shrink past.
+        className="tap-target relative"
         aria-label={accessibleName}
       >
         <Bell className="size-4" aria-hidden="true" />

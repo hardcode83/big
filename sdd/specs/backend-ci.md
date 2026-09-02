@@ -189,8 +189,9 @@ olvidar regenerar el contrato cortara la ejecución antes de la suite.
   que este check **no puede marcarse como obligatorio** todavía. Se ejecuta y reporta en
   cada PR, pero nada impide fusionar con él en rojo. Convertirlo en gate real exige GitHub
   Pro o hacer público el repositorio; queda como decisión pendiente.
-- No hay comando de lint ni de typecheck en el proyecto: `sdd/project.md` no declara ninguno
-  y este workflow no inventa uno.
+- El backend dispone de un comando reproducible de typecheck local (`uv run pyright .`,
+  documentado en `sdd/project.md`), pero este workflow no lo ejecuta ni lo convierte en
+  check obligatorio. La decisión de añadir un gate CI requiere un change/política aparte.
 - El frontend tiene su workflow independiente `frontend-tests`, descrito en
   `sdd/specs/frontend-ci.md`; `backend-tests` no duplica sus verificaciones.
 

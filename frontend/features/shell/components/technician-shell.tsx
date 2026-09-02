@@ -1,17 +1,13 @@
 import type { ReactNode } from "react";
 
-import { UserMenu } from "@/features/auth";
-import { NotificationBell } from "@/features/notifications";
-import { Separator } from "@/components/ui/separator";
 import { getServerT } from "@/lib/i18n/server";
 import { getServerTheme } from "@/lib/theme/server";
+import { AuthenticatedTopbarActions } from "./authenticated-topbar-actions";
 import { Brand } from "./brand";
-import { LocaleSwitcher } from "./locale-switcher";
 import { PageTitle } from "./page-title";
 import { ShellFrame } from "./shell-frame";
 import { ShellFooter } from "./shell-footer";
 import { SkipLink } from "./skip-link";
-import { ThemeSwitcher } from "./theme-switcher";
 import { Topbar } from "./topbar";
 
 /**
@@ -29,14 +25,14 @@ export async function TechnicianShell({ children }: { children: ReactNode }) {
       <PageTitle profile="technician" />
     </>
   );
+  /*
+   * The five controls used to be written out here, identically in the other two
+   * authenticated shells. `shell-topbar-overflow-360` (D3) collapsed the three
+   * copies into `AuthenticatedTopbarActions`, which also selects the narrow
+   * layout below `sm` so this shell stops overflowing at 360px (R1.1).
+   */
   const end = (
-    <>
-      <ThemeSwitcher initial={theme} />
-      <Separator orientation="vertical" className="mx-1 h-6" />
-      <LocaleSwitcher />
-      <NotificationBell profile={"technician"} />
-      <UserMenu />
-    </>
+    <AuthenticatedTopbarActions profile={"technician"} theme={theme} />
   );
   return (
     <ShellFrame

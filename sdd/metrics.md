@@ -75,6 +75,7 @@
 | blocked-transition-response-ids | new, tasks, run, review, ship, archive | 6367916 | 567328 | 131512414 | 111.7790 | 2026-08-26 | 2026-08-27 |
 | photo-cache-control-assertion-bound | new, design, tasks, run, review, ship, archive | 3375198 | 257671 | 35441337 | 43.6621 | 2026-08-24 | 2026-08-26 |
 | public-zone-hardening | new, design, tasks, run, review, ship, archive | 1351799 | 241955 | 54634461 | 40.1250 | 2026-08-26 | 2026-08-26 |
+| backend-pyright-tooling | run, review, ship, archive | 158509 | 357969 | 32089709 | 29.7672 | 2026-09-01 | 2026-09-01 |
 | blocked-transitions-web | new, design, tasks, run, review, ship, archive | 5840872 | 1000619 | 216249227 | 170.9211 | 2026-08-24 | 2026-08-29 |
 | frontend-auth-role-routing | new, design, tasks, run, review, ship, archive | 2901957 | 533239 | 111194635 | 83.4381 | 2026-08-27 | 2026-08-27 |
 | tech-app | new, design, tasks, run, review, ship, archive | 862707 | 2053252 | 395618497 | 307.6922 | 2026-08-19 | 2026-08-30 |
@@ -82,3 +83,5 @@
 | notifications-inbox-web | new, design, tasks, run, review, ship, archive | 462522 | 1377686 | 284998420 | 181.8444 | 2026-08-28 | 2026-08-29 |
 | reservation-property-identity | new, design, tasks, run, review, ship, archive | 2597769 | 332557 | 72084496 | 61.6039 | 2026-08-24 | 2026-08-30 |
 | super-admin-identity | new, design, tasks, run, review | 589661 | 719289 | 359240487 | 102.5144 | 2026-08-31 | — |
+| shell-topbar-overflow-360 | new, design, tasks, run, review, ship, archive | 622710 | 1301477 | 280668088 | 189.6256 | 2026-08-30 | 2026-09-01 |
+| cleaner-app | new, tasks, run, review, ship, archive | 1913125 | 420916 | 113055583 | 70.1061 | 2026-08-18 | 2026-08-31 |

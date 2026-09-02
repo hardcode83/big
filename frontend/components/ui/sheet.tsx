@@ -65,7 +65,22 @@ function SheetContent({
         {...props}
       >
         {children}
-        <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+        {/*
+          * The `data-slot` completes the set the rest of this file already uses,
+          * and it is what `topbar-overflow.browser.test.tsx` names to exempt this
+          * one control from its 44×44 floor. It renders 16×16 — an `X` icon with
+          * no padding — on all six surfaces that mount a `Sheet`, and has since
+          * before `shell-topbar-overflow-360`. That change measured it, decided
+          * it is not «un control que pasa al desplegable» (R3.1) but the sheet's
+          * own chrome shared with sheets it never touched, and recorded giving it
+          * a real touch target as a candidate for a future change rather than
+          * restyling six surfaces here. The exemption is keyed to this slot so it
+          * cannot spread to a second control by accident.
+          */}
+        <SheetPrimitive.Close
+          data-slot="sheet-close"
+          className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        >
           <X className="size-4" aria-hidden="true" />
           <span className="sr-only">{closeLabel}</span>
         </SheetPrimitive.Close>
