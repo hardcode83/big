@@ -112,15 +112,15 @@ describe("PropertyTimeline (R2, R4)", () => {
 });
 
 describe("PropertyTimeline — closed event-type vocabulary (R2.1, R2.2, R2.5, R2.6)", () => {
-  it("offers the 47 enum values, localized, with a placeholder option", () => {
+  it("offers the 48 enum values, localized, with a placeholder option", () => {
     usePropertyTimeline.mockReturnValue(resolved(page([entry])));
     renderTimeline();
 
     const options = Array.from(
       screen.getByLabelText<HTMLSelectElement>("Tipo").options,
     );
-    // 47 event types plus the "Tipo" placeholder.
-    expect(options).toHaveLength(48);
+    // 48 event types plus the "Tipo" placeholder.
+    expect(options).toHaveLength(49);
     expect(options[0].value).toBe("");
     expect(options.slice(1).map((o) => o.value)).toEqual([
       ...TIMELINE_EVENT_TYPES,
