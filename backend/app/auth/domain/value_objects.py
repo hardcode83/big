@@ -21,7 +21,9 @@ def normalize_email(value: str) -> str:
 @dataclass(frozen=True)
 class AccessTokenClaims:
     user_id: uuid.UUID
-    tenant_id: uuid.UUID
+    # `None` for a `SUPER_ADMIN` token (`super-admin-identity` R2.1, design D2/D4): the
+    # claim key is always present in the JWT payload, its value is `null`.
+    tenant_id: uuid.UUID | None
     role: UserRole
     token_id: uuid.UUID
     # The refresh family this access token was issued alongside (design D18).
@@ -35,7 +37,7 @@ class AccessTokenClaims:
 @dataclass(frozen=True)
 class RefreshTokenClaims:
     user_id: uuid.UUID
-    tenant_id: uuid.UUID
+    tenant_id: uuid.UUID | None
     role: UserRole
     token_id: uuid.UUID
     family_id: uuid.UUID

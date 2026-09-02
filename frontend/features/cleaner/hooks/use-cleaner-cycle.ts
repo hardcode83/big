@@ -63,7 +63,7 @@ export interface CleanerTaskCycleOptions {
 
 function useTenantId(): string | undefined {
   const { user } = useAuth();
-  return user?.tenant_id;
+  return user?.tenant_id ?? undefined;
 }
 
 export function useCleanerTaskCycleAction(

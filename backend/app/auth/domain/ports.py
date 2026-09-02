@@ -32,8 +32,14 @@ from app.auth.domain.value_objects import AccessTokenClaims, RefreshTokenClaims
 
 
 class UserRepository(Protocol):
-    async def get_active_by_id(self, tenant_id: uuid.UUID, user_id: uuid.UUID) -> User | None:
-        """The user, only if both the user and its tenant are ACTIVE (R4.5, design D7)."""
+    async def get_active_by_id(
+        self, tenant_id: uuid.UUID | None, user_id: uuid.UUID
+    ) -> User | None:
+        """The user, only if both the user and its tenant are ACTIVE (R4.5, design D7).
+
+        `tenant_id=None` is the `SUPER_ADMIN` path (`super-admin-identity` R2.2, design D2):
+        no `TenantModel` join, just `UserModel.tenant_id IS NULL AND status = ACTIVE`.
+        """
         ...
 
     async def find_by_email_globally(self, email: str) -> User | None:
@@ -125,7 +131,7 @@ class UserRepository(Protocol):
         ...
 
     async def touch_last_login(
-        self, tenant_id: uuid.UUID, user_id: uuid.UUID, now: datetime
+        self, tenant_id: uuid.UUID | None, user_id: uuid.UUID, now: datetime
     ) -> None:
         """Record a successful login, and nothing else (R1.2).
 
@@ -151,13 +157,20 @@ class SessionRepository(Protocol):
     either conditional (`consume`) or set-based (`revoke_family`).
     """
 
-    async def add(self, tenant_id: uuid.UUID, session: UserSession) -> None:
-        """`tenant_id` is the acting tenant; creating a session for another one is refused."""
+    async def add(self, tenant_id: uuid.UUID | None, session: UserSession) -> None:
+        """`tenant_id` is the acting tenant; creating a session for another one is refused.
+
+        `None` for a `SUPER_ADMIN` session (`super-admin-identity` R2, design D1/D2).
+        """
         ...
 
-    async def get(self, tenant_id: uuid.UUID, session_id: uuid.UUID) -> UserSession | None: ...
+    async def get(
+        self, tenant_id: uuid.UUID | None, session_id: uuid.UUID
+    ) -> UserSession | None: ...
 
-    async def consume(self, tenant_id: uuid.UUID, session_id: uuid.UUID, now: datetime) -> bool:
+    async def consume(
+        self, tenant_id: uuid.UUID | None, session_id: uuid.UUID, now: datetime
+    ) -> bool:
         """Mark a session used only if it is still usable; True if we won (R2.1, R2.2).
 
         The check and the write must be ONE statement, and it must test every condition
@@ -169,7 +182,7 @@ class SessionRepository(Protocol):
 
     async def revoke_family(
         self,
-        tenant_id: uuid.UUID,
+        tenant_id: uuid.UUID | None,
         family_id: uuid.UUID,
         reason: SessionRevokedReason,
         now: datetime,
@@ -179,7 +192,7 @@ class SessionRepository(Protocol):
 
     async def revoke_all_for_user(
         self,
-        tenant_id: uuid.UUID,
+        tenant_id: uuid.UUID | None,
         user_id: uuid.UUID,
         reason: SessionRevokedReason,
         now: datetime,
@@ -331,7 +344,7 @@ class TokenCodec(Protocol):
         self,
         *,
         user_id: uuid.UUID,
-        tenant_id: uuid.UUID,
+        tenant_id: uuid.UUID | None,
         role: UserRole,
         family_id: uuid.UUID,
         now: datetime,
@@ -341,7 +354,7 @@ class TokenCodec(Protocol):
         self,
         *,
         user_id: uuid.UUID,
-        tenant_id: uuid.UUID,
+        tenant_id: uuid.UUID | None,
         role: UserRole,
         session_id: uuid.UUID,
         family_id: uuid.UUID,

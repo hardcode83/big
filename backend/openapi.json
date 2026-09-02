@@ -2276,9 +2276,16 @@
             "$ref": "#/components/schemas/UserRole"
           },
           "tenant_id": {
-            "format": "uuid",
-            "title": "Tenant Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
           }
         },
         "required": [

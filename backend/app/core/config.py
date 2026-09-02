@@ -338,6 +338,14 @@ class Settings(BaseSettings):
     bootstrap_manager_email: str = ""
     bootstrap_manager_password: str = ""
 
+    # The third bootstrap seed (`super-admin-identity` R5.1): a `SUPER_ADMIN` with no
+    # tenant, so the identity model is verifiable end to end and not just declarable in
+    # the schema. Same pattern as the eight above — no defaults, real passwords only
+    # (steering/security.md #8).
+    bootstrap_super_admin_name: str = ""
+    bootstrap_super_admin_email: str = ""
+    bootstrap_super_admin_password: str = ""
+
     # Demo dataset (`make seed-demo`, change `seed-data-demo` design D4). Only the two
     # operational accounts: the owner and the manager are whoever BOOTSTRAP_* already named,
     # resolved by role, so re-declaring them here would let the two declarations disagree.
@@ -355,7 +363,7 @@ class Settings(BaseSettings):
     seed_technician_password: str = ""
 
     # The single password of the four demonstration accounts (`make demo-reset`, change
-    # `demo-user` design D3). No default, exactly like the eight BOOTSTRAP_*/SEED_* above: a
+    # `demo-user` design D3). No default, exactly like the BOOTSTRAP_*/SEED_* settings above: a
     # default here would be a known credential shipped in the tree, and the demo tenant lives in
     # a publicly reachable environment. Its floor is `PASSWORD_MIN_LENGTH`, checked by
     # `app/cli/demo_reset.py:build_plan` before any transaction opens rather than by a

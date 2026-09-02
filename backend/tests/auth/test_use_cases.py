@@ -138,6 +138,106 @@ async def test_login_persists_the_session_row(db_session, tenant_a, codec, hashe
     assert stored is not None and stored.family_id == claims.family_id
 
 
+class RaisingTenantStatusReader:
+    """Proves the tenant-active check is SKIPPED for `SUPER_ADMIN`, not merely passing.
+
+    `super-admin-identity` R2.1, design D2: `LoginUseCase._authenticate` must not even
+    call `is_active` when `user.tenant_id is None` — `self.tenants.is_active(None)` would
+    find no `tenants` row and always return `False`, locking every `SUPER_ADMIN` out. A
+    double that raises on any call turns "was it called" into a hard failure instead of a
+    silent pass.
+    """
+
+    async def is_active(self, tenant_id: uuid.UUID) -> bool:
+        raise AssertionError("is_active must not be called for a tenantless user")
+
+
+@pytest.mark.asyncio
+async def test_a_super_admin_logs_in_without_a_tenant_active_check(
+    db_session, codec, hasher
+) -> None:
+    await insert_user(
+        db_session,
+        tenant=None,
+        role=UserRole.SUPER_ADMIN,
+        email="root@example.com",
+        hasher=hasher,
+    )
+    use_case = LoginUseCase(
+        users=SqlAlchemyUserRepository(db_session),
+        tenants=RaisingTenantStatusReader(),
+        sessions=SqlAlchemySessionRepository(db_session),
+        hasher=hasher,
+        tokens=codec,
+        throttle=UnlimitedLoginThrottle(),
+        uow=FlushingUnitOfWork(db_session),
+    )
+
+    pair = await use_case.execute(
+        email="root@example.com", password=PASSWORD, client_ip=IP, now=utc_now()
+    )
+
+    access = codec.decode_access(pair.access_token)
+    assert access.tenant_id is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [UserStatus.INACTIVE, UserStatus.SUSPENDED])
+async def test_a_disabled_super_admin_is_still_refused(db_session, codec, hasher, status) -> None:
+    await insert_user(
+        db_session,
+        tenant=None,
+        role=UserRole.SUPER_ADMIN,
+        email="root@example.com",
+        hasher=hasher,
+        status=status,
+    )
+    use_case = LoginUseCase(
+        users=SqlAlchemyUserRepository(db_session),
+        tenants=RaisingTenantStatusReader(),
+        sessions=SqlAlchemySessionRepository(db_session),
+        hasher=hasher,
+        tokens=codec,
+        throttle=UnlimitedLoginThrottle(),
+        uow=FlushingUnitOfWork(db_session),
+    )
+
+    with pytest.raises(InvalidCredentialsError):
+        await use_case.execute(
+            email="root@example.com", password=PASSWORD, client_ip=IP, now=utc_now()
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_super_admin_with_a_wrong_password_is_still_refused(
+    db_session, codec, hasher
+) -> None:
+    await insert_user(
+        db_session,
+        tenant=None,
+        role=UserRole.SUPER_ADMIN,
+        email="root@example.com",
+        hasher=hasher,
+    )
+    use_case = LoginUseCase(
+        users=SqlAlchemyUserRepository(db_session),
+        tenants=RaisingTenantStatusReader(),
+        sessions=SqlAlchemySessionRepository(db_session),
+        hasher=hasher,
+        tokens=codec,
+        throttle=UnlimitedLoginThrottle(),
+        uow=FlushingUnitOfWork(db_session),
+    )
+
+    with pytest.raises(InvalidCredentialsError):
+        await use_case.execute(
+            email="root@example.com",
+            password="not the password",
+            client_ip=IP,
+            now=utc_now(),
+        )
+
+
 @pytest.mark.asyncio
 async def test_login_is_case_insensitive_on_the_address(db_session, tenant_a, codec, hasher) -> None:
     await insert_user(db_session, tenant=tenant_a, email="Owner@Example.com", hasher=hasher)

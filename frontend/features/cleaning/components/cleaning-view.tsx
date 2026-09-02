@@ -46,7 +46,7 @@ export function CleaningView() {
     adoptTenant,
   } = useCleaningFiltersStore();
   const { user } = useAuth();
-  const tenantId = user?.tenant_id;
+  const tenantId = user?.tenant_id ?? undefined;
 
   /**
    * Filters chosen in another session must not be re-sent in this one — one tenant's

@@ -31,7 +31,7 @@ import { pricingKeys } from "./query-keys";
  */
 function useTenantId(): string {
   const { user } = useAuth();
-  if (!user) {
+  if (!user || user.tenant_id === null) {
     throw new Error("The pricing view requires an authenticated tenant context");
   }
   return user.tenant_id;

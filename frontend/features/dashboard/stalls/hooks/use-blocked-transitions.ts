@@ -37,7 +37,7 @@ import { stallsKeys } from "./query-keys";
 
 function useTenantId(): string {
   const { user } = useAuth();
-  if (!user) {
+  if (!user || user.tenant_id === null) {
     throw new Error(
       "useBlockedTransitions requires an authenticated tenant context",
     );

@@ -1774,11 +1774,8 @@ export interface components {
       /** Preferred Language */
       preferred_language: string;
       role: components["schemas"]["UserRole"];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
+      /** Tenant Id */
+      tenant_id: string | null;
     };
     /**
      * DecidePriceRecommendationRequest

@@ -36,7 +36,10 @@ class User:
     """
 
     id: uuid.UUID
-    tenant_id: uuid.UUID
+    # `None` for `SUPER_ADMIN` only (`super-admin-identity` R1.1, design D2): the role has
+    # no tenant by product requirement, not by omission. Every other role keeps a concrete
+    # `tenant_id` — nothing in this entity enforces that pairing; the schema does (R1.2).
+    tenant_id: uuid.UUID | None
     name: str
     email: str
     password_hash: str
@@ -241,7 +244,9 @@ class UserSession:
     """
 
     id: uuid.UUID
-    tenant_id: uuid.UUID
+    # `None` for a `SUPER_ADMIN` session (`super-admin-identity` R2, design D1/D2): there is
+    # no tenant to attribute it to, the same reason `User.tenant_id` above is optional.
+    tenant_id: uuid.UUID | None
     user_id: uuid.UUID
     family_id: uuid.UUID
     expires_at: datetime
