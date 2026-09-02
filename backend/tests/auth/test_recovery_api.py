@@ -99,6 +99,43 @@ async def test_a_wrong_current_password_leaves_the_stored_hash_alone(
     assert (await _login(api, user.email, PASSWORD)).status_code == 200
 
 
+# --- SUPER_ADMIN cannot change its password through this endpoint (`super-admin-identity` D7) --
+
+
+@pytest.mark.asyncio
+async def test_a_super_admin_gets_a_clean_403_not_an_unmapped_500(api, db_session) -> None:
+    """Task 6.4: the refusal happens before any `AuditLog` row is written."""
+    from app.audit.infrastructure.models import AuditLogModel
+
+    admin = await insert_user(db_session, tenant=None, role=UserRole.SUPER_ADMIN)
+    before = len((await db_session.execute(select(AuditLogModel))).scalars().all())
+
+    response = await api.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": PASSWORD, "new_password": NEW_PASSWORD},
+        headers=auth_header(api, admin),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+    after = (await db_session.execute(select(AuditLogModel))).scalars().all()
+    assert len(after) == before, "SuperAdminSelfServiceUnsupportedError must fire before any audit write"
+
+
+@pytest.mark.asyncio
+async def test_a_super_admins_password_is_unchanged_after_the_refusal(api, db_session) -> None:
+    admin = await insert_user(db_session, tenant=None, role=UserRole.SUPER_ADMIN)
+
+    await api.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": PASSWORD, "new_password": NEW_PASSWORD},
+        headers=auth_header(api, admin),
+    )
+
+    assert (await _login(api, admin.email, PASSWORD)).status_code == 200
+    assert (await _login(api, admin.email, NEW_PASSWORD)).status_code == 401
+
+
 # --- the policy and the request shape (R1.4, R1.5, R1.7) ---------------------------
 
 
@@ -207,13 +244,21 @@ async def test_it_requires_a_token(api) -> None:
     assert response.status_code == 401
 
 
-@pytest.mark.parametrize("role", list(UserRole))
+@pytest.mark.parametrize(
+    "role", [role for role in UserRole if role is not UserRole.SUPER_ADMIN]
+)
 @pytest.mark.asyncio
 async def test_every_role_that_can_authenticate_may_change_its_own_password(
     api, db_session, tenant_a, role
 ) -> None:
     """R1.4: `MANAGE_OWN_SESSION` is what PRD §6 grants to every authenticating role, so a
-    CLEANER must be able to rotate their own credential exactly like a TENANT_OWNER."""
+    CLEANER must be able to rotate their own credential exactly like a TENANT_OWNER.
+
+    `SUPER_ADMIN` excluded on purpose: it holds `MANAGE_OWN_SESSION` too, but
+    `super-admin-identity` D7 refuses it a clean `403` instead — pinned separately by
+    `test_a_super_admin_gets_a_clean_403_not_an_unmapped_500` above, and it cannot be
+    seeded here anyway (`ck_users_super_admin_tenant_id_null` refuses a `SUPER_ADMIN`
+    row bound to a tenant)."""
     user = await insert_user(db_session, tenant=tenant_a, role=role)
 
     response = await api.post(
@@ -403,6 +448,23 @@ async def test_only_the_resolvable_account_gets_a_row(api, db_session, tenant_a)
     assert tokens[0].user_id == known.id
     assert len(rows) == 1
     assert rows[0].recipient_user_id == known.id
+
+
+@pytest.mark.asyncio
+async def test_a_super_admin_email_answers_202_and_writes_no_token(api, db_session) -> None:
+    """`super-admin-identity` D7 amendment: treated exactly like an unresolved address —
+    `password_reset_tokens.tenant_id` stays `NOT NULL`, so a token row would fail at
+    `commit()` as an unmapped `IntegrityError` if one were ever built."""
+    from app.auth.infrastructure.models import PasswordResetTokenModel
+
+    admin = await insert_user(db_session, tenant=None, role=UserRole.SUPER_ADMIN)
+
+    response = await _forgot(api, admin.email)
+
+    assert response.status_code == 202
+    assert (
+        await db_session.execute(select(PasswordResetTokenModel))
+    ).scalars().all() == []
 
 
 @pytest.mark.asyncio

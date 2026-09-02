@@ -114,8 +114,16 @@ async def test_the_listing_never_shows_another_tenants_users(
     response = await api.get("/api/v1/users", headers=auth_header(api, users_by_role_a[OWNER]))
 
     ids = {user["id"] for user in response.json()["data"]}
-    assert ids == {str(user.id) for user in users_by_role_a.values()}
-    assert not ids & {str(user.id) for user in users_by_role_b.values()}
+    # `SUPER_ADMIN` belongs to no tenant (`super-admin-identity` R1.1), so it is excluded
+    # from both sides of this comparison — it was never tenant A's to list.
+    tenanted_a = {
+        str(user.id) for role, user in users_by_role_a.items() if role is not UserRole.SUPER_ADMIN
+    }
+    tenanted_b = {
+        str(user.id) for role, user in users_by_role_b.items() if role is not UserRole.SUPER_ADMIN
+    }
+    assert ids == tenanted_a
+    assert not ids & tenanted_b
 
 
 @pytest.mark.parametrize("role", list(UserRole))

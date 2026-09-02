@@ -72,6 +72,42 @@ async def test_get_active_by_id_ignores_a_user_of_a_disabled_tenant(db_session) 
 
 
 @pytest.mark.asyncio
+async def test_get_active_by_id_of_none_finds_a_super_admin(db_session) -> None:
+    """`super-admin-identity` R2.2, design D2: no `TenantModel` join for `tenant_id=None`."""
+    admin = await insert_user(db_session, tenant=None, role=UserRole.SUPER_ADMIN)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    found = await repo.get_active_by_id(None, admin.id)
+
+    assert found is not None
+    assert found.id == admin.id
+    assert found.tenant_id is None
+    assert found.role is UserRole.SUPER_ADMIN
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [UserStatus.INACTIVE, UserStatus.SUSPENDED])
+async def test_get_active_by_id_of_none_ignores_a_disabled_super_admin(
+    db_session, status
+) -> None:
+    admin = await insert_user(db_session, tenant=None, role=UserRole.SUPER_ADMIN, status=status)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    assert await repo.get_active_by_id(None, admin.id) is None
+
+
+@pytest.mark.asyncio
+async def test_get_active_by_id_of_none_does_not_find_a_tenanted_user(
+    db_session, tenant_a
+) -> None:
+    """A `tenant_id IS NULL` predicate matches only `SUPER_ADMIN` rows, never a tenant's."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    assert await repo.get_active_by_id(None, user.id) is None
+
+
+@pytest.mark.asyncio
 async def test_find_by_email_globally_reaches_any_tenant(db_session, tenant_a, tenant_b) -> None:
     """Unscoped on purpose (design D16): login is anonymous, there is no tenant yet.
 

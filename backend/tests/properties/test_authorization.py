@@ -19,6 +19,7 @@ import uuid
 import pytest
 
 from app.auth.domain.enums import UserRole
+from app.core.db import TENANT_ID_SESSION_KEY
 from tests.properties.conftest import auth_header
 
 READERS = {UserRole.PROPERTY_MANAGER, UserRole.TENANT_OWNER}
@@ -26,13 +27,19 @@ MANAGERS = {UserRole.PROPERTY_MANAGER}
 ALL_ROLES = list(UserRole)
 
 
-async def _seed_property(api, users_by_role_a, create_payload, **overrides) -> str:
+async def _seed_property(api, users_by_role_a, create_payload, db_session, **overrides) -> str:
     response = await api.post(
         "/api/v1/properties",
         json=create_payload(**overrides),
         headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER]),
     )
     assert response.status_code == 201, response.text
+    # `super-admin-identity` R1.1: seeding marks `db_session` (shared across this test's
+    # simulated requests) to tenant A. A real request never sees that — `get_db_session`
+    # hands out a fresh session per request — so unmark here to match, or a `SUPER_ADMIN`
+    # check right after (`tenant_id IS NULL`) gets silently hidden by the stale tenant A
+    # filter instead of correctly resolving to its own tenantless row.
+    db_session.info.pop(TENANT_ID_SESSION_KEY, None)
     return response.json()["id"]
 
 
@@ -49,9 +56,9 @@ async def test_listing_is_allowed_for_readers_only(api, users_by_role_a, role: U
 @pytest.mark.parametrize("role", ALL_ROLES)
 @pytest.mark.asyncio
 async def test_reading_the_detail_is_allowed_for_readers_only(
-    api, users_by_role_a, create_payload, role: UserRole
+    api, db_session, users_by_role_a, create_payload, role: UserRole
 ) -> None:
-    property_id = await _seed_property(api, users_by_role_a, create_payload)
+    property_id = await _seed_property(api, users_by_role_a, create_payload, db_session)
 
     response = await api.get(
         f"/api/v1/properties/{property_id}", headers=auth_header(api, users_by_role_a[role])
@@ -78,9 +85,9 @@ async def test_creating_is_allowed_for_managers_only(
 @pytest.mark.parametrize("role", ALL_ROLES)
 @pytest.mark.asyncio
 async def test_patching_is_allowed_for_managers_only(
-    api, users_by_role_a, create_payload, role: UserRole
+    api, db_session, users_by_role_a, create_payload, role: UserRole
 ) -> None:
-    property_id = await _seed_property(api, users_by_role_a, create_payload)
+    property_id = await _seed_property(api, users_by_role_a, create_payload, db_session)
 
     response = await api.patch(
         f"/api/v1/properties/{property_id}",
@@ -108,14 +115,14 @@ async def test_no_endpoint_is_reachable_without_a_token(api) -> None:
 
 @pytest.mark.asyncio
 async def test_a_forbidden_answer_never_reveals_whether_the_resource_exists(
-    api, users_by_role_a, create_payload
+    api, db_session, users_by_role_a, create_payload
 ) -> None:
     """R1.7: authorisation is decided BEFORE the resource is looked up.
 
     A `CLEANER` must get the same body for a real id and an invented one, or the difference is an
     oracle for enumerating the tenant's portfolio.
     """
-    property_id = await _seed_property(api, users_by_role_a, create_payload)
+    property_id = await _seed_property(api, users_by_role_a, create_payload, db_session)
     headers = auth_header(api, users_by_role_a[UserRole.CLEANER])
 
     real = await api.get(f"/api/v1/properties/{property_id}", headers=headers)

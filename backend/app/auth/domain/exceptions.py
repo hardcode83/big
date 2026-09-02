@@ -136,3 +136,17 @@ class UnassignableRoleError(AuthDomainError):
     visibility is deferred to `saas-cross-tenant`. Granting it from inside a tenant would
     pre-empt that decision with a role whose scope this capability cannot bound.
     """
+
+
+# --- platform identity (`super-admin-identity`) -------------------------------------
+
+
+class SuperAdminSelfServiceUnsupportedError(AuthDomainError):
+    """A `SUPER_ADMIN` reached a self-service operation that needs a tenant (R2.4, design D7).
+
+    `POST /auth/change-password` writes an `AuditLog` row, and `audit_logs.tenant_id` is
+    `NOT NULL` — unlike `users`/`user_sessions`, this change does not touch it (`AuditLog`'s
+    tenant scoping belongs to whichever change first needs a `SUPER_ADMIN` action audited).
+    Answers `403`: the credential is not what is refused, the operation is — the account
+    genuinely cannot reach a state a retry with different input would fix.
+    """

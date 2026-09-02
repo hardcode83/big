@@ -23,6 +23,7 @@ from app.auth.domain.exceptions import (
     PasswordUnchangedError,
     SelfRoleChangeError,
     SessionReuseDetectedError,
+    SuperAdminSelfServiceUnsupportedError,
     TooManyAttemptsError,
     UnassignableRoleError,
     UserNotFoundError,
@@ -59,6 +60,10 @@ _MAPPING: tuple[tuple[type[AuthDomainError], int, ErrorCode], ...] = (
     # `403` and not `401`: the credential was accepted. What is refused is operating with a
     # password that still has to be changed (R5.4).
     (PasswordChangeRequiredError, 403, ErrorCode.PASSWORD_CHANGE_REQUIRED),
+    # `super-admin-identity` D7: `403 FORBIDDEN` for the same reason as the three
+    # `422`s above minus the retry — this account cannot reach a state a retry with
+    # different input would fix, so `403` fits better than `422`.
+    (SuperAdminSelfServiceUnsupportedError, 403, ErrorCode.FORBIDDEN),
 )
 
 

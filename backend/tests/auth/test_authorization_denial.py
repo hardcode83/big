@@ -25,7 +25,7 @@ from app.auth.domain.policy import Permission
 from app.auth.infrastructure.token_codec import JwtTokenCodec
 from app.core.db import get_db_session
 from app.main import create_app
-from tests.auth.conftest import insert_user, utc_now
+from tests.auth.conftest import insert_user, tenant_for_role, utc_now
 
 SECRET = "s" * 64
 
@@ -78,7 +78,7 @@ def _token(codec: JwtTokenCodec, user) -> str:
 async def test_a_role_without_the_permission_gets_403_and_the_body_does_not_run(
     guarded_app, db_session, tenant_a, codec, monkeypatch: pytest.MonkeyPatch, role: UserRole
 ) -> None:
-    user = await insert_user(db_session, tenant=tenant_a, role=role)
+    user = await insert_user(db_session, tenant=tenant_for_role(role, tenant_a), role=role)
     # Strip the permission from this role only, so the denial is reachable while the
     # rest of the catalogue stays as PRD §6 defines it.
     monkeypatch.setattr(
@@ -160,7 +160,7 @@ async def test_a_role_missing_from_the_catalogue_is_denied(
     guarded_app, db_session, tenant_a, codec, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Deny by default: an unmapped role must not fall through as allowed."""
-    user = await insert_user(db_session, tenant=tenant_a, role=UserRole.SUPER_ADMIN)
+    user = await insert_user(db_session, tenant=None, role=UserRole.SUPER_ADMIN)
     monkeypatch.setattr(policy, "ROLE_PERMISSIONS", {})
 
     response = await guarded_app.get(

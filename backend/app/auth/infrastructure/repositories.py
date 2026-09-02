@@ -81,12 +81,30 @@ class SqlAlchemyUserRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def get_active_by_id(self, tenant_id: uuid.UUID, user_id: uuid.UUID) -> User | None:
+    async def get_active_by_id(
+        self, tenant_id: uuid.UUID | None, user_id: uuid.UUID
+    ) -> User | None:
         """One joined query per authenticated request (design D7).
 
         Both the user and its tenant must be ACTIVE, so suspending either takes
         effect immediately instead of waiting for the access token to expire.
+
+        `tenant_id=None` is the `SUPER_ADMIN` path (`super-admin-identity` R2.2, design
+        D2): there is no tenant to join against — an INNER JOIN against nothing would
+        always return empty — so this branch skips it and filters
+        `UserModel.tenant_id IS NULL` instead, still requiring `status == ACTIVE`.
         """
+        if tenant_id is None:
+            result = await self._session.execute(
+                select(UserModel).where(
+                    UserModel.tenant_id.is_(None),
+                    UserModel.id == user_id,
+                    UserModel.status == UserStatus.ACTIVE,
+                )
+            )
+            model = result.scalar_one_or_none()
+            return _to_user(model) if model is not None else None
+
         result = await self._session.execute(
             select(UserModel)
             .join(TenantModel, TenantModel.id == UserModel.tenant_id)
@@ -328,7 +346,7 @@ class SqlAlchemyUserRepository:
         )
 
     async def touch_last_login(
-        self, tenant_id: uuid.UUID, user_id: uuid.UUID, now: datetime
+        self, tenant_id: uuid.UUID | None, user_id: uuid.UUID, now: datetime
     ) -> None:
         """One column, one statement (R1.2).
 
@@ -364,7 +382,7 @@ class SqlAlchemySessionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def add(self, tenant_id: uuid.UUID, user_session: UserSession) -> None:
+    async def add(self, tenant_id: uuid.UUID | None, user_session: UserSession) -> None:
         if user_session.tenant_id != tenant_id:
             raise ValueError("Cannot create a session for another tenant")
         self._session.add(
@@ -381,7 +399,9 @@ class SqlAlchemySessionRepository:
             )
         )
 
-    async def get(self, tenant_id: uuid.UUID, session_id: uuid.UUID) -> UserSession | None:
+    async def get(
+        self, tenant_id: uuid.UUID | None, session_id: uuid.UUID
+    ) -> UserSession | None:
         result = await self._session.execute(
             select(UserSessionModel).where(
                 UserSessionModel.tenant_id == tenant_id, UserSessionModel.id == session_id
@@ -390,7 +410,9 @@ class SqlAlchemySessionRepository:
         model = result.scalar_one_or_none()
         return _to_session(model) if model is not None else None
 
-    async def consume(self, tenant_id: uuid.UUID, session_id: uuid.UUID, now: datetime) -> bool:
+    async def consume(
+        self, tenant_id: uuid.UUID | None, session_id: uuid.UUID, now: datetime
+    ) -> bool:
         """Mark a session used, but only if it is still usable (R2.1, R2.2).
 
         Conditional on purpose. Reading the row and then writing it is a
@@ -427,7 +449,7 @@ class SqlAlchemySessionRepository:
 
     async def revoke_family(
         self,
-        tenant_id: uuid.UUID,
+        tenant_id: uuid.UUID | None,
         family_id: uuid.UUID,
         reason: SessionRevokedReason,
         now: datetime,
@@ -450,7 +472,7 @@ class SqlAlchemySessionRepository:
 
     async def revoke_all_for_user(
         self,
-        tenant_id: uuid.UUID,
+        tenant_id: uuid.UUID | None,
         user_id: uuid.UUID,
         reason: SessionRevokedReason,
         now: datetime,

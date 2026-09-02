@@ -37,7 +37,7 @@ class JwtTokenCodec:
         self,
         *,
         user_id: uuid.UUID,
-        tenant_id: uuid.UUID,
+        tenant_id: uuid.UUID | None,
         role: UserRole,
         family_id: uuid.UUID,
         now: datetime,
@@ -56,7 +56,7 @@ class JwtTokenCodec:
         self,
         *,
         user_id: uuid.UUID,
-        tenant_id: uuid.UUID,
+        tenant_id: uuid.UUID | None,
         role: UserRole,
         session_id: uuid.UUID,
         family_id: uuid.UUID,
@@ -76,7 +76,7 @@ class JwtTokenCodec:
         claims = self._decode(token, ACCESS_TOKEN_TYPE)
         return AccessTokenClaims(
             user_id=_uuid_claim(claims, "sub"),
-            tenant_id=_uuid_claim(claims, "tenant_id"),
+            tenant_id=_optional_uuid_claim(claims, "tenant_id"),
             role=_role_claim(claims),
             token_id=_uuid_claim(claims, "jti"),
             family_id=_uuid_claim(claims, "fam"),
@@ -88,7 +88,7 @@ class JwtTokenCodec:
         claims = self._decode(token, REFRESH_TOKEN_TYPE)
         return RefreshTokenClaims(
             user_id=_uuid_claim(claims, "sub"),
-            tenant_id=_uuid_claim(claims, "tenant_id"),
+            tenant_id=_optional_uuid_claim(claims, "tenant_id"),
             role=_role_claim(claims),
             token_id=_uuid_claim(claims, "jti"),
             family_id=_uuid_claim(claims, "fam"),
@@ -99,14 +99,18 @@ class JwtTokenCodec:
     def _base_claims(
         self,
         user_id: uuid.UUID,
-        tenant_id: uuid.UUID,
+        tenant_id: uuid.UUID | None,
         role: UserRole,
         now: datetime,
         ttl: timedelta,
     ) -> dict[str, Any]:
         return {
             "sub": str(user_id),
-            "tenant_id": str(tenant_id),
+            # `SUPER_ADMIN` carries no tenant (`super-admin-identity` R2.1, design D4): the
+            # claim key stays present so a reader sees "null", not "absent" — NOT because
+            # PyJWT's `require=[...]` below demands it (it does not; `tenant_id` is
+            # deliberately excluded from that list, see `_decode`).
+            "tenant_id": str(tenant_id) if tenant_id is not None else None,
             "role": role.value,
             "iat": int(now.timestamp()),
             "exp": int((now + ttl).timestamp()),
@@ -121,9 +125,17 @@ class JwtTokenCodec:
                 token,
                 self._secret,
                 algorithms=[JWT_ALGORITHM],
-                options={
-                    "require": ["sub", "tenant_id", "role", "type", "jti", "fam", "iat", "exp"]
-                },
+                # `tenant_id` is deliberately NOT in `require` (`super-admin-identity` D4,
+                # amended): PyJWT's `_validate_required_claims` tests `payload.get(claim) is
+                # None`, so it cannot tell "key absent" from "key present with value null" —
+                # it would reject every SUPER_ADMIN token as malformed. Dropping it DOES
+                # widen what decodes: a token whose payload omits the key entirely — before,
+                # rejected outright by `require` — now decodes via `_optional_uuid_claim`
+                # below as `tenant_id=None`. That is safe for reasons this exclusion does not
+                # itself provide: minting any token still needs the HS256 signing secret, and
+                # the resulting identity is re-validated against the database on every
+                # request (`get_active_by_id(tenant_id, user_id)`).
+                options={"require": ["sub", "role", "type", "jti", "fam", "iat", "exp"]},
             )
         except jwt.InvalidTokenError as exc:
             # Covers expired, bad signature, malformed, alg mismatch and missing
@@ -146,6 +158,24 @@ def _uuid_claim(claims: dict[str, Any], name: str) -> uuid.UUID:
     # The isinstance check is load-bearing: uuid.UUID(123) raises AttributeError,
     # which would escape as a 500 instead of the 401 R2.5 demands for a malformed
     # token. PyJWT type-checks `sub` and `jti` but not our own claims.
+    if not isinstance(value, str):
+        raise InvalidTokenError(f"Claim {name} is not a valid identifier")
+    try:
+        return uuid.UUID(value)
+    except ValueError as exc:
+        raise InvalidTokenError(f"Claim {name} is not a valid identifier") from exc
+
+
+def _optional_uuid_claim(claims: dict[str, Any], name: str) -> uuid.UUID | None:
+    """Like `_uuid_claim`, except JSON `null` is a legitimate value (`tenant_id` only).
+
+    Used only for `tenant_id`: `user_id`, `role`, `jti` and `fam` can never legitimately
+    be absent, so they keep the strict `_uuid_claim`/`_role_claim` (`super-admin-identity`
+    design D4).
+    """
+    value = claims.get(name)
+    if value is None:
+        return None
     if not isinstance(value, str):
         raise InvalidTokenError(f"Claim {name} is not a valid identifier")
     try:

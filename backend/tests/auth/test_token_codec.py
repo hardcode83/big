@@ -129,6 +129,48 @@ def test_decoding_returns_the_claims_as_domain_types() -> None:
     assert isinstance(claims.token_id, uuid.UUID)
 
 
+def test_access_token_issued_with_a_null_tenant_round_trips_as_none() -> None:
+    """`super-admin-identity` R2.1, design D4: `SUPER_ADMIN` carries no tenant."""
+    codec = _codec()
+
+    token = _access(codec, tenant_id=None, role=UserRole.SUPER_ADMIN)
+
+    assert _raw_claims(token)["tenant_id"] is None
+    assert codec.decode_access(token).tenant_id is None
+
+
+def test_refresh_token_issued_with_a_null_tenant_round_trips_as_none() -> None:
+    codec = _codec()
+
+    token = _refresh(codec, tenant_id=None, role=UserRole.SUPER_ADMIN)
+
+    assert _raw_claims(token)["tenant_id"] is None
+    assert codec.decode_refresh(token).tenant_id is None
+
+
+def test_a_non_string_non_null_tenant_id_claim_is_still_rejected() -> None:
+    """`_optional_uuid_claim` accepts `None`, but nothing else that is not a `str`."""
+    codec = _codec()
+    now = datetime.now(UTC)
+    token = jwt.encode(
+        {
+            "sub": str(uuid.uuid4()),
+            "tenant_id": 123,
+            "role": UserRole.SUPER_ADMIN.value,
+            "type": "access",
+            "jti": str(uuid.uuid4()),
+            "fam": str(uuid.uuid4()),
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(minutes=15)).timestamp()),
+        },
+        SECRET,
+        algorithm=JWT_ALGORITHM,
+    )
+
+    with pytest.raises(InvalidTokenError):
+        codec.decode_access(token)
+
+
 def test_a_refresh_token_is_rejected_where_an_access_token_is_expected() -> None:
     codec = _codec()
 
@@ -246,12 +288,18 @@ def test_a_token_without_a_family_is_rejected(token_type: str) -> None:
         decode(familyless)
 
 
-@pytest.mark.parametrize("bogus_tenant", [123, {}, [], None, True])
+@pytest.mark.parametrize("bogus_tenant", [123, {}, [], True])
 def test_a_non_string_identifier_claim_is_rejected_as_invalid_not_as_a_crash(
     bogus_tenant: object,
 ) -> None:
     # uuid.UUID(123) raises AttributeError, which would surface as a 500 instead
     # of the 401 R2.5 requires for a malformed token.
+    #
+    # `None` is deliberately NOT in this list any more (`super-admin-identity` design D4):
+    # it is the legitimate `SUPER_ADMIN` value for this one claim, asserted by
+    # `test_access_token_issued_with_a_null_tenant_round_trips_as_none` above. Every other
+    # value here is still rejected — `_optional_uuid_claim` only widens what counts as
+    # "present", not what counts as "a valid identifier".
     token = jwt.encode(
         {
             "sub": str(uuid.uuid4()),

@@ -15,6 +15,11 @@ therefore full access to the database. What it adds over an `UPDATE` by hand is 
 operation goes through the entity, revokes the sessions, lifts the account lock and leaves an
 audit row — four things a manual statement does not do.
 
+**Does not cover `SUPER_ADMIN`** (`super-admin-identity`): that account has no tenant to
+attribute the audit row to, so this command refuses it cleanly rather than crashing at
+`commit()`. The operator recourse for that one account is the direct-SQL `UPDATE` this
+command exists to make unnecessary for everyone else.
+
 Deliberately NOT a Makefile target (design D12, open question 4): this is a rescue operation,
 and a `make` verb would make it look like part of normal development.
 
@@ -53,6 +58,20 @@ class AccountNotFoundError(Exception):
     """No account carries that address anywhere in the installation."""
 
 
+class SuperAdminRescueUnsupportedError(Exception):
+    """A `SUPER_ADMIN` has no tenant to attribute the audit row to (`super-admin-identity`).
+
+    Same shape as design D7 and its amendment: `AuditLogFactory.build(tenant_id=None, ...)`
+    below would queue an `INSERT` that only fails at `commit()` as an unmapped
+    `IntegrityError` — `audit_logs.tenant_id` stays `NOT NULL`, untouched by that change.
+    Refused up front with an operator-facing message instead. Found by the review panel
+    (2026-09-02, round 2): this command is the documented "rescue path for an account
+    nobody else can recover," and until this guard it was the one recovery route a
+    `SUPER_ADMIN` could reach that crashed instead of refusing cleanly — see the corrected
+    accepted-limitation note in `design.md`.
+    """
+
+
 async def apply_reset(session, hasher, email: str) -> tuple[uuid.UUID, str]:
     """The database half: issue the temporary password and record everything.
 
@@ -68,6 +87,13 @@ async def apply_reset(session, hasher, email: str) -> tuple[uuid.UUID, str]:
     user = await users.find_by_email_globally(email)
     if user is None:
         raise AccountNotFoundError(f"No account exists for {email}")
+
+    if user.tenant_id is None:
+        raise SuperAdminRescueUnsupportedError(
+            f"{email} is a SUPER_ADMIN account with no tenant; this command cannot audit "
+            "the reset (audit_logs.tenant_id is NOT NULL). Rotate its password_hash "
+            "directly in the database instead."
+        )
 
     was_temporary = user.must_change_password
     temporary = generate_temporary_password()
@@ -169,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         user_id, temporary, lock_cleared = asyncio.run(reset_password(args.email))
-    except AccountNotFoundError as exc:
+    except (AccountNotFoundError, SuperAdminRescueUnsupportedError) as exc:
         print(f"reset_password: {exc}", file=sys.stderr)
         return 1
 

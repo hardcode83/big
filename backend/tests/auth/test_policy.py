@@ -18,6 +18,22 @@ def test_policy_entries_are_immutable_sets() -> None:
         assert isinstance(permissions, frozenset)
 
 
+def test_super_admin_holds_exactly_self_service_and_nothing_else() -> None:
+    """`super-admin-identity` R4.1: giving the role identity must not widen what it can do.
+
+    Direct pin against `_SELF_SERVICE`, not derived from `is_allowed` checks elsewhere —
+    those prove individual permissions are absent, not that the set is exactly this one.
+    """
+    assert ROLE_PERMISSIONS[UserRole.SUPER_ADMIN] == policy._SELF_SERVICE
+    assert ROLE_PERMISSIONS[UserRole.SUPER_ADMIN] == frozenset(
+        {
+            Permission.READ_OWN_PROFILE,
+            Permission.MANAGE_OWN_SESSION,
+            Permission.READ_OWN_NOTIFICATIONS,
+        }
+    )
+
+
 SELF_SERVICE = (Permission.READ_OWN_PROFILE, Permission.MANAGE_OWN_SESSION)
 
 # The matrix of PRD §6, written out rather than derived from the catalogue: a table that

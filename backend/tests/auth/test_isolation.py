@@ -50,6 +50,14 @@ from tests.auth.doubles import UnlimitedLoginThrottle
 
 SECRET = "s" * 64
 
+# `SUPER_ADMIN` excluded (`super-admin-identity` R1.1/R1.2): it can never belong to a
+# tenant — the database enforces this now (`ck_users_super_admin_tenant_id_null`), so
+# inserting it WITH one to test cross-tenant isolation would fail the insert outright,
+# not merely exercise a state that can no longer occur. Its own isolation property (a
+# session that never binds to any tenant) is pinned separately, by
+# `test_a_super_admin_request_leaves_the_session_unmarked` below.
+_TENANTED_ROLES = [role for role in UserRole if role is not UserRole.SUPER_ADMIN]
+
 
 @pytest.fixture
 def codec() -> JwtTokenCodec:
@@ -78,7 +86,7 @@ async def api(db_session, codec):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", list(UserRole), ids=lambda r: r.value)
+@pytest.mark.parametrize("role", _TENANTED_ROLES, ids=lambda r: r.value)
 async def test_a_user_of_another_tenant_is_unreachable_for_every_role(
     db_session, tenant_a, tenant_b, role: UserRole
 ) -> None:
@@ -91,7 +99,7 @@ async def test_a_user_of_another_tenant_is_unreachable_for_every_role(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", list(UserRole), ids=lambda r: r.value)
+@pytest.mark.parametrize("role", _TENANTED_ROLES, ids=lambda r: r.value)
 async def test_no_role_can_write_over_another_tenants_user(
     db_session, tenant_a, tenant_b, role: UserRole
 ) -> None:
@@ -108,7 +116,7 @@ async def test_no_role_can_write_over_another_tenants_user(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", list(UserRole), ids=lambda r: r.value)
+@pytest.mark.parametrize("role", _TENANTED_ROLES, ids=lambda r: r.value)
 async def test_no_role_can_touch_another_tenants_session(
     db_session, tenant_a, tenant_b, role: UserRole
 ) -> None:
@@ -150,7 +158,7 @@ async def test_the_two_tenants_really_are_populated(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", list(UserRole), ids=lambda r: r.value)
+@pytest.mark.parametrize("role", _TENANTED_ROLES, ids=lambda r: r.value)
 async def test_a_token_naming_another_tenant_is_refused_for_every_role(
     api, db_session, tenant_a, tenant_b, codec, role: UserRole
 ) -> None:
@@ -322,6 +330,30 @@ async def test_an_authenticated_request_marks_its_session_before_querying(
     ).status_code == 200
 
     assert db_session.info.get(TENANT_ID_SESSION_KEY) == tenant_a.id
+
+
+@pytest.mark.asyncio
+async def test_a_super_admin_request_leaves_the_session_unmarked(api, db_session, codec) -> None:
+    """`super-admin-identity` R3.1, design D3: no tenant, so nothing to bind the session to.
+
+    Same state as the bootstrap, the anonymous login lookup and `POST /auth/refresh` —
+    `_scope_statement_to_tenant` stays inactive for the rest of this session.
+    """
+    admin = await insert_user(db_session, tenant=None, role=UserRole.SUPER_ADMIN)
+    token = codec.issue_access(
+        user_id=admin.id,
+        tenant_id=None,
+        role=UserRole.SUPER_ADMIN,
+        family_id=uuid.uuid4(),
+        now=utc_now(),
+    )
+    db_session.info.pop(TENANT_ID_SESSION_KEY, None)
+
+    response = await api.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json()["tenant_id"] is None
+    assert TENANT_ID_SESSION_KEY not in db_session.info
 
 
 @pytest.mark.asyncio
