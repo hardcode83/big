@@ -1,11 +1,11 @@
 ---
 schema: 1
-state: ACTIVE
-local_review: PENDING
+state: LOCAL_VERIFIED
+local_review: APPROVED
 repository:
 base_branch:
 head_branch:
-implementation_sha:
+implementation_sha: e549ea8dff461f3aebcc92e3638c99e4a55f042d
 pr_number:
 pr_url:
 pr_state:
