@@ -1,14 +1,14 @@
 ---
 schema: 1
-state: READY_FOR_PR
+state: PR_OPEN
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: hardcode83/super-admin-identity
 implementation_sha: 7abeefb01dc5dc237680c3d721aaffe973cf8eaf
-pr_number:
-pr_url:
-pr_state:
+pr_number: 146
+pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/146
+pr_state: OPEN
 merge_evidence:
 merge_sha:
 ---
