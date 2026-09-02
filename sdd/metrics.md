@@ -90,4 +90,5 @@
 | rule11-guard-trigger-and-scope | new, design, tasks, run, review, ship, archive | 2605754 | 3120937 | 598433744 | 423.8289 | 2026-08-31 | 2026-09-02 |
 | shell-topbar-overflow-360 | new, design, tasks, run, review, ship, archive | 622710 | 1301477 | 280668088 | 189.6256 | 2026-08-30 | 2026-09-01 |
 | cleaner-app | new, tasks, run, review, ship, archive | 1913125 | 420916 | 113055583 | 70.1061 | 2026-08-18 | 2026-08-31 |
+| revenue-statements | design, new, run, tasks, review, archive | 6370569 | 987638 | 228543231 | 170.2758 | 2026-08-26 | 2026-09-02 |
 | revenue-reviews | new, design, tasks, run, review, ship, archive | 13772896 | 653169 | 267912705 | 222.0495 | 2026-09-01 | 2026-09-02 |

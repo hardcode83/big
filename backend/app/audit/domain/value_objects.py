@@ -454,6 +454,36 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     # entry on `REDACT_ONLY_FIELDS` — `deleted_count` is an `int` and `cutoff` is the
     # `cutoff.isoformat()` string the command writes.
     "AUDIT_LOG": frozenset({"deleted_count", "cutoff"}),
+    # `revenue-statements` D7. `OWNER_STATEMENT` writes only `status` (status moves) and `notes`
+    # (the regla-11 sumidero that lives on `redacted()`, never literally). The eleven money
+    # columns are not in `AUDITABLE_FIELDS` because no API mutation touches them: their only
+    # writer is `GenerateOwnerStatementUseCase`, which writes a fresh `DRAFT` — no update,
+    # no diff, no audit row.
+    "OWNER_STATEMENT": frozenset({"status", "notes"}),
+    # `EXPENSE` writes everything an API mutation can move on this entity. **`description`
+    # is on the redact-only denylist** (regla 11 excepción 3 — `PROPERTY_MANAGER`-authored
+    # prose): it is in `AUDITABLE_FIELDS` so the `ChangeSet.redacted()` path is reachable,
+    # and in `REDACT_ONLY_FIELDS["EXPENSE"]` so `ChangeSet.diff("description", …)` raises
+    # `AuditContractError`. The structural guarantee is the per-entity denylist, not the
+    # use case's discipline. **`approved_by` is a write target** — the reconciliation
+    # job of D4 sets it when an `OwnerApproval(OTHER, APPROVED)` lands; that mutation
+    # has actor=None from the clock and is therefore an internal `_AuditWriter` write,
+    # but the field itself is auditable when set by a manager through
+    # `PATCH /api/v1/expenses/{id}` — which today the spec refuses, but the allowlist
+    # matches the field shape either way.
+    "EXPENSE": frozenset(
+        {
+            "category",
+            "amount",
+            "currency",
+            "date",
+            "description",
+            "statement_id",
+            "incident_id",
+            "approved_by",
+            "receipt_storage_key",
+        }
+    ),
     # `revenue-reviews` R1.7 / R3.5. Two entity types so the audit row's `entity_id`
     # points at a real primary key. `REVIEW`'s auditable surface is what R1.7's
     # transitions can name in `changes` — a diff over `status` is the only thing the
@@ -496,6 +526,22 @@ REDACT_ONLY_FIELDS: Mapping[str, frozenset[str]] = {
             "event_rules",
         }
     ),
+    # `revenue-statements` D7. Two new entries, both regla-11 sumideros written by
+    # `PROPERTY_MANAGER` under excepción 3:
+    #
+    # `expenses.description` — the manager types it freely; the audit row carries
+    # `{"changed": true}` only. Same mechanism as `pricing_rules.event_rules`.
+    #
+    # `owner_statements.notes` — same shape: free text under excepción 3, `redacted()` is
+    # the only legal form. **The structural refusal (the `diff()` raise) is what makes
+    # the rule enforceable, not the writer's discipline** — `auth-account-recovery` and
+    # `tech-incident-context` both rely on it for `password_reset_tokens.email_body`,
+    # `incidents.assignment_note`, `incidents.materials`, and any future prose column
+    # the manager types. Without the name-level refusal, a regression to `diff()` would
+    # store the literal value, which is the gap `rule11-ownership-single-source` patched
+    # for `pricing_rules` two months ago.
+    "EXPENSE": frozenset({"description"}),
+    "OWNER_STATEMENT": frozenset({"notes"}),
 }
 
 _REDACTED_MARKER = {"changed": True}

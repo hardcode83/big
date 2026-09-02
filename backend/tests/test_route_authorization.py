@@ -528,6 +528,15 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/conversations/{conversation_id}/messages",
         "/api/v1/conversations/{conversation_id}/escalate",
         "/api/v1/conversations/{conversation_id}/resolve",
+        # `revenue-statements`: the seven authenticated paths for owner statements and
+        # tenant expenses (PRD §23), asserted per role in `tests/statements/test_api.py`.
+        "/api/v1/owner-statements",
+        "/api/v1/owner-statements/generate",
+        "/api/v1/owner-statements/{statement_id}",
+        "/api/v1/owner-statements/{statement_id}/export.csv",
+        "/api/v1/owner-statements/{statement_id}/export.pdf",
+        "/api/v1/expenses",
+        "/api/v1/expenses/{expense_id}",
     }
 
 
