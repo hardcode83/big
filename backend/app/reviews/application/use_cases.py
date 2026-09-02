@@ -15,7 +15,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from app.audit.domain import actions as audit_actions
+from app.audit.domain.repositories import AuditLogRepository
 from app.audit.domain.services import AuditLogFactory
+from app.audit.domain.value_objects import ChangeSet
 from app.auth.domain.enums import UserRole
 from app.auth.domain.ports import UserRepository
 from app.auth.domain.repositories import UserFilters
@@ -158,12 +161,12 @@ class CreateReviewUseCase:
         self,
         *,
         reviews: ReviewRepository,
-        audit_factory: AuditLogFactory,
+        audit: AuditLogRepository,
         timeline: TimelineEventRepository,
         uow: UnitOfWork,
     ) -> None:
         self._reviews = reviews
-        self._audit_factory = audit_factory
+        self._audit = audit
         self._timeline = timeline
         self._uow = uow
 
@@ -235,6 +238,25 @@ class CreateReviewUseCase:
         )
         await self._timeline.add(
             tenant_id, TimelineEventFactory.create(timeline_event)
+        )
+
+        # R1.7: audit the create in the same transaction as the row. `changes` is empty
+        # because the row is a fresh insert — the entity's columns carry the diff, and a
+        # `null → <value>` replay would just duplicate them. The rule-11 audit row
+        # identifies the review by `entity_id`, and the `changes` shape (empty here) is
+        # what rule 9 prescribes for inserts.
+        await self._audit.add(
+            tenant_id,
+            AuditLogFactory.build(
+                tenant_id=tenant_id,
+                action=audit_actions.REVIEW_CREATED,
+                entity_type=audit_actions.ENTITY_REVIEW,
+                entity_id=review.id,
+                actor_user_id=actor_user_id,
+                actor_ip=actor_ip,
+                changes=ChangeSet(audit_actions.ENTITY_REVIEW),
+                now=now,
+            ),
         )
 
         await self._uow.commit()
@@ -314,7 +336,7 @@ class ApproveReviewUseCase:
         *,
         reviews: ReviewRepository,
         drafts: ReviewResponseDraftRepository,
-        audit_factory: AuditLogFactory,
+        audit: AuditLogRepository,
         timeline: TimelineEventRepository,
         notifications: NotificationLogRepository,
         users: UserRepository,
@@ -322,7 +344,7 @@ class ApproveReviewUseCase:
     ) -> None:
         self._reviews = reviews
         self._drafts = drafts
-        self._audit_factory = audit_factory
+        self._audit = audit
         self._timeline = timeline
         self._notifications = notifications
         self._users = users
@@ -393,6 +415,26 @@ class ApproveReviewUseCase:
             ),
         )
 
+        # R1.7: audit the approve in the same transaction as the row and the notification.
+        # The draft row carries `approved_by`/`approved_at` (R3.6), but the **vocabulary**
+        # rule 9 demands is the `REVIEW_APPROVED` action and `ENTITY_REVIEW` — the audit
+        # log is about the review, not about the draft (which has its own
+        # `ENTITY_REVIEW_RESPONSE_DRAFT` for edits).
+        await self._audit.add(
+            tenant_id,
+            AuditLogFactory.build(
+                tenant_id=tenant_id,
+                action=audit_actions.REVIEW_APPROVED,
+                entity_type=audit_actions.ENTITY_REVIEW,
+                entity_id=review.id,
+                actor_user_id=actor_user_id,
+                actor_ip=actor_ip,
+                changes=ChangeSet(audit_actions.ENTITY_REVIEW)
+                .diff("status", ReviewStatus.DRAFTED.value, ReviewStatus.APPROVED.value),
+                now=now,
+            ),
+        )
+
         await self._uow.commit()
         return review
 
@@ -407,12 +449,12 @@ class IgnoreReviewUseCase:
         self,
         *,
         reviews: ReviewRepository,
-        audit_factory: AuditLogFactory,
+        audit: AuditLogRepository,
         timeline: TimelineEventRepository,
         uow: UnitOfWork,
     ) -> None:
         self._reviews = reviews
-        self._audit_factory = audit_factory
+        self._audit = audit
         self._timeline = timeline
         self._uow = uow
 
@@ -447,6 +489,27 @@ class IgnoreReviewUseCase:
                 )
             ),
         )
+
+        # R1.7: audit the ignore. The status diff carries the from-state in
+        #  — a  or  is the only thing that
+        # makes the row attributable to a particular actor in the trail, and 
+        # is what the index  answers
+        # before the action does.
+        await self._audit.add(
+            tenant_id,
+            AuditLogFactory.build(
+                tenant_id=tenant_id,
+                action=audit_actions.REVIEW_IGNORED,
+                entity_type=audit_actions.ENTITY_REVIEW,
+                entity_id=review.id,
+                actor_user_id=actor_user_id,
+                actor_ip=actor_ip,
+                changes=ChangeSet(audit_actions.ENTITY_REVIEW)
+                .diff("status", review.status.value, ReviewStatus.IGNORED.value),
+                now=now,
+            ),
+        )
+
         await self._uow.commit()
         return review
 
@@ -462,12 +525,12 @@ class MarkPostedManuallyUseCase:
         self,
         *,
         reviews: ReviewRepository,
-        audit_factory: AuditLogFactory,
+        audit: AuditLogRepository,
         timeline: TimelineEventRepository,
         uow: UnitOfWork,
     ) -> None:
         self._reviews = reviews
-        self._audit_factory = audit_factory
+        self._audit = audit
         self._timeline = timeline
         self._uow = uow
 
@@ -502,6 +565,28 @@ class MarkPostedManuallyUseCase:
                 )
             ),
         )
+
+        # R1.7: audit the manual posting. The `status` field goes from APPROVED to
+        # POSTED_MANUALLY (the only legal move); the row's `published_at` is the actor's
+        # witness, not the audit's. Posting is a person action, not a system call —
+        # `R4.4` documents that no PMS adapter is invoked here.
+        await self._audit.add(
+            tenant_id,
+            AuditLogFactory.build(
+                tenant_id=tenant_id,
+                action=audit_actions.REVIEW_POSTED_MANUALLY,
+                entity_type=audit_actions.ENTITY_REVIEW,
+                entity_id=review.id,
+                actor_user_id=actor_user_id,
+                actor_ip=actor_ip,
+                changes=ChangeSet(audit_actions.ENTITY_REVIEW)
+                .diff(
+                    "status", ReviewStatus.APPROVED.value, ReviewStatus.POSTED_MANUALLY.value
+                ),
+                now=now,
+            ),
+        )
+
         await self._uow.commit()
         return review
 
@@ -612,13 +697,13 @@ class EditReviewDraftUseCase:
         *,
         reviews: ReviewRepository,
         drafts: ReviewResponseDraftRepository,
-        audit_factory: AuditLogFactory,
+        audit: AuditLogRepository,
         timeline: TimelineEventRepository,
         uow: UnitOfWork,
     ) -> None:
         self._reviews = reviews
         self._drafts = drafts
-        self._audit_factory = audit_factory
+        self._audit = audit
         self._timeline = timeline
         self._uow = uow
 
@@ -660,6 +745,28 @@ class EditReviewDraftUseCase:
                 )
             ),
         )
+
+        # R3.5: audit the draft edit. The audit row points at the **draft**, not the
+        # review — R3.5's vocabulary is `REVIEW_DRAFT_EDITED` and the entity that the
+        # actor edited is the draft. `entity_id` is `draft.id`; rule 9's `entity_type`
+        # is `ENTITY_REVIEW_RESPONSE_DRAFT`. `edits_count` travels in `changes` because
+        # it is the value the actor changed by acting, and the audit row's diff is
+        # what the rule-9 query answers.
+        await self._audit.add(
+            tenant_id,
+            AuditLogFactory.build(
+                tenant_id=tenant_id,
+                action=audit_actions.REVIEW_DRAFT_EDITED,
+                entity_type=audit_actions.ENTITY_REVIEW_RESPONSE_DRAFT,
+                entity_id=draft.id,
+                actor_user_id=actor_user_id,
+                actor_ip=actor_ip,
+                changes=ChangeSet(audit_actions.ENTITY_REVIEW_RESPONSE_DRAFT)
+                .diff("edits_count", str(draft.edits_count - 1), str(draft.edits_count)),
+                now=now,
+            ),
+        )
+
         await self._uow.commit()
         return draft
 
@@ -742,7 +849,7 @@ class ClassifyPendingReviewsUseCase:
         analyzer: AIReviewAnalyzer,
         draft_generator: AIReviewDraftGenerator,
         configs: TenantConfigRepository,
-        audit_factory: AuditLogFactory,
+        audit: AuditLogRepository,
         timeline: TimelineEventRepository,
         uow: UnitOfWork,
         batch_size: int = _DEFAULT_CLASSIFY_BATCH_SIZE,
@@ -752,7 +859,7 @@ class ClassifyPendingReviewsUseCase:
         self._analyzer = analyzer
         self._draft_generator = draft_generator
         self._configs = configs
-        self._audit_factory = audit_factory
+        self._audit = audit
         self._timeline = timeline
         self._uow = uow
         self._batch_size = batch_size

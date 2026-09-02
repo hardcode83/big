@@ -28,6 +28,7 @@ from app.reviews.infrastructure.repositories import (
     SqlAlchemyReviewRepository,
     SqlAlchemyReviewResponseDraftRepository,
 )
+from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.tenants.infrastructure.models import TenantConfigModel
 from app.timeline.domain.repositories import TimelineFilters
 from tests.reviews.conftest import (
@@ -76,7 +77,7 @@ async def _setup(db_session, *, threshold=Decimal("0.75")):
         analyzer=MockReviewAnalyzer(),
         draft_generator=MockReviewDraftGenerator(),
         configs=SqlAlchemyTenantConfigRepository(db_session),
-        audit_factory=None,  # R1.7 audit deferred to a follow-up (matches dependencies.py)
+        audit=SqlAlchemyAuditLogRepository(db_session),
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
     )

@@ -203,6 +203,57 @@ async def test_summary_never_includes_another_tenants_review(
     assert body["by_recurring_issue"] == {}
 
 
+@pytest.mark.asyncio
+async def test_aggregate_counts_exclude_other_tenants_rows(db_session) -> None:
+    """R2.5 — the aggregates (`count_by_sentiment_for_property` and
+    `aggregate_recurring_issues_for_property`) must scope by `tenant_id`. Without a
+    direct test, a repository that dropped the `WHERE tenant_id = :tenant_id`
+    clause would still pass the summary endpoint test above because that test seeds
+    only one property's reviews — the bug would slip through until a second tenant
+    shipped a review. This test seeds both tenants, runs both aggregates for
+    each, and verifies the OTHER tenant's rows are not in the totals.
+    """
+    from app.reviews.infrastructure.repositories import (
+        SqlAlchemyReviewRepository,
+    )
+
+    a, b, a_review, b_review, *_ = await two_tenants(db_session)
+    repo = SqlAlchemyReviewRepository(db_session)
+
+    # Tenant A's aggregates — the property `a_prop` carries `a_review` only.
+    a_sentiment = await repo.count_by_sentiment_for_property(
+        a.id, a_review.property_id, window_days=90
+    )
+    a_recurring = await repo.aggregate_recurring_issues_for_property(
+        a.id, a_review.property_id, window_days=90, top_n=5
+    )
+    assert sum(a_sentiment.values()) == 1
+    assert a_sentiment[ReviewSentiment.NEUTRAL] == 1
+    assert sum(a_recurring.values()) == 1
+
+    # The same call from tenant B — even though the property id is different
+    # (`b_prop`), this asserts tenant A's `WHERE tenant_id = :tenant_id` clause
+    # is not silently widened. Both aggregates for tenant B's property carry
+    # only `b_review`.
+    b_sentiment = await repo.count_by_sentiment_for_property(
+        b.id, b_review.property_id, window_days=90
+    )
+    b_recurring = await repo.aggregate_recurring_issues_for_property(
+        b.id, b_review.property_id, window_days=90, top_n=5
+    )
+    assert sum(b_sentiment.values()) == 1
+    assert b_sentiment[ReviewSentiment.NEUTRAL] == 1
+    assert sum(b_recurring.values()) == 1
+
+    # Cross-check: tenant A querying tenant B's property returns zero rows
+    # even though the property exists. R1.3's indistinguishability promise is
+    # what this exercises at the aggregate level.
+    cross_a_to_b = await repo.aggregate_recurring_issues_for_property(
+        a.id, b_review.property_id, window_days=90, top_n=5
+    )
+    assert cross_a_to_b == {}
+
+
 # --- helpers ---
 
 
@@ -221,12 +272,17 @@ async def test_the_session_these_tests_run_on_is_not_tenant_marked(db_session) -
     from app.core.db import TENANT_ID_SESSION_KEY
     from app.reviews.infrastructure.models import ReviewModel
 
-    # Earlier requests in this file might have left a marker behind if they didn't
-    # route through the HTTP override that pops it at request end (this test uses
-    # `db_session` directly, not the HTTP client). Pop it explicitly so the query
-    # below sees both tenants' rows — otherwise the listener filters to one and
-    # the assertion fails for a reason orthogonal to what this test pins.
-    db_session.info.pop(TENANT_ID_SESSION_KEY, None)
+    # The tripwire asserts the marker is **absent**. A `pop()` here would silently
+    # make the test pass even when the session IS marked — the opposite of the
+    # property under test, and the precise gap the section-1 security panel of
+    # `messaging` flagged in `tenant-isolation-tests-need-unmarked-session`:
+    # on a marked session the listener filters the SELECT below to one tenant,
+    # the assertion fails for the wrong reason, and the file becomes decorative.
+    assert TENANT_ID_SESSION_KEY not in db_session.info, (
+        "db_session is marked: the listener will filter the SELECT below, the "
+        "isolation tests above become decorative, and rule 1 of "
+        "`sdd/steering/security.md` is unenforced for this module"
+    )
 
     # Seed two tenants with reviews directly in this test so the assertion holds in
     # isolation as well as after the rest of the file has run. The point of the test

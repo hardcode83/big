@@ -49,10 +49,23 @@ _review_analyzer = MockReviewAnalyzer()
 _review_draft_generator = MockReviewDraftGenerator()
 
 
+def _audit(session: AsyncSession) -> SqlAlchemyAuditLogRepository:
+    """One audit repository per request (R1.7, rule 9 of `sdd/steering/security.md`).
+
+    All five review use cases that transition a row — Create, Approve, Ignore,
+    MarkPostedManually, EditReviewDraft — share this single construction. The class is
+    constructed per-call rather than per-process because the session is bound to the
+    request that owns it, and the listener that scopes ORM reads by tenant is what makes
+    the `WHERE tenant_id = :tenant_id` clauses the repositories write effective for
+    this module too.
+    """
+    return SqlAlchemyAuditLogRepository(session)
+
+
 def get_create_review_use_case(session: SessionDep) -> CreateReviewUseCase:
     return CreateReviewUseCase(
         reviews=SqlAlchemyReviewRepository(session),
-        audit_factory=None,  # R1.7 audit deferred to a follow-up; not blocking for the BE
+        audit=_audit(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
@@ -74,7 +87,7 @@ def get_approve_review_use_case(session: SessionDep) -> ApproveReviewUseCase:
     return ApproveReviewUseCase(
         reviews=SqlAlchemyReviewRepository(session),
         drafts=SqlAlchemyReviewResponseDraftRepository(session),
-        audit_factory=None,  # R1.7 audit deferred to a follow-up
+        audit=_audit(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         notifications=SqlAlchemyNotificationLogRepository(session),
         users=SqlAlchemyUserRepository(session),
@@ -85,7 +98,7 @@ def get_approve_review_use_case(session: SessionDep) -> ApproveReviewUseCase:
 def get_ignore_review_use_case(session: SessionDep) -> IgnoreReviewUseCase:
     return IgnoreReviewUseCase(
         reviews=SqlAlchemyReviewRepository(session),
-        audit_factory=None,  # R1.7 audit deferred to a follow-up
+        audit=_audit(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
@@ -96,7 +109,7 @@ def get_mark_posted_manually_use_case(
 ) -> MarkPostedManuallyUseCase:
     return MarkPostedManuallyUseCase(
         reviews=SqlAlchemyReviewRepository(session),
-        audit_factory=None,  # R1.7 audit deferred to a follow-up
+        audit=_audit(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
@@ -118,7 +131,7 @@ def get_edit_review_draft_use_case(session: SessionDep) -> EditReviewDraftUseCas
     return EditReviewDraftUseCase(
         reviews=SqlAlchemyReviewRepository(session),
         drafts=SqlAlchemyReviewResponseDraftRepository(session),
-        audit_factory=None,  # R1.7 audit deferred to a follow-up
+        audit=_audit(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
@@ -143,7 +156,7 @@ def get_classify_pending_reviews_use_case(
         analyzer=_review_analyzer,
         draft_generator=_review_draft_generator,
         configs=SqlAlchemyTenantConfigRepository(session),
-        audit_factory=None,  # R1.7 audit deferred to a follow-up
+        audit=_audit(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
