@@ -143,6 +143,7 @@ async def _escalate(session: AsyncSession, tenant_id, now: datetime):
     use_case = EscalateBreachedSlasUseCase(
         notifications=SqlAlchemyNotificationLogRepository(session),
         users=SqlAlchemyUserRepository(session),
+        tenant_configs=SqlAlchemyTenantConfigRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
     return await use_case.execute(tenant_id=tenant_id, now=now)
@@ -246,6 +247,7 @@ async def _generate_price_recommendations(session: AsyncSession, tenant_id, now:
         # with no human watching, which is why the notification matters most here.
         users=SqlAlchemyUserRepository(session),
         notifications=SqlAlchemyNotificationLogRepository(session),
+        tenant_configs=SqlAlchemyTenantConfigRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
     return await use_case.execute(tenant_id=tenant_id, now=now, property_id=None, actor=None)

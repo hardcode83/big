@@ -201,7 +201,7 @@ async def test_checkin_window_hours_defaults_without_a_row_and_writes_nothing(db
     `get_or_create` would insert one here, which on `GET /api/v1/blocked-transitions` is a write
     performed by a role that does not hold `MANAGE_TENANT_SETTINGS` (design D5).
     """
-    tenant = await insert_tenant(db_session, name="MAGNO")
+    tenant = await insert_tenant(db_session, name="MAGNO", with_notification_config=False)
     repo = SqlAlchemyTenantConfigRepository(db_session)
 
     hours = await repo.checkin_window_hours(tenant.id)

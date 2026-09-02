@@ -9,7 +9,7 @@ only protection there is, which is why it gets a test of its own rather than bei
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.audit.domain import actions
 from app.audit.infrastructure.models import AuditLogModel
@@ -46,8 +46,19 @@ async def test_reading_returns_the_tenant_with_its_config_nested(
 async def test_the_config_row_is_created_on_first_read(
     api, db_session, tenant_a, users_by_role_a
 ) -> None:
-    """R5.7: `tests/auth/conftest.py` seeds tenants WITHOUT a config, like a non-bootstrap one."""
+    """R5.7: a tenant with no config row gets one lazily, like a non-bootstrap one.
+
+    `tests/auth/conftest.py`'s `insert_tenant` now seeds a config row by default
+    (`notification-channel-routing`, so the channel-fan-out suite's single-row assertions
+    stay valid elsewhere) — this test's whole point is the row's *absence*, so it deletes
+    the one `tenant_a` seeded before exercising the lazy-creation path.
+    """
     from app.tenants.infrastructure.models import TenantConfigModel
+
+    await db_session.execute(
+        delete(TenantConfigModel).where(TenantConfigModel.tenant_id == tenant_a.id)
+    )
+    await db_session.flush()
 
     before = (
         await db_session.execute(

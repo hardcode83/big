@@ -456,6 +456,20 @@ tocar la base de datos a mano.
 - A partir de esas cuatro cuentas, el alta de usuarios es por API (`POST /api/v1/users`, spec
   `user-management`): ni el bootstrap ni el seed son la vía normal de crear gente.
 
+### `TenantConfig` y los conmutadores de canal
+
+- THE SYSTEM SHALL mantener, en `tenant_configs`, los flags `notification_email_enabled`
+  (default `True`) y `notification_whatsapp_enabled` (default `False`) como los dos
+  **interruptores de canal** que gobiernan `notifications/domain/channel_resolver.py`.
+  Son del tenant, no del usuario; el par se lee una vez por `execute` desde
+  `TenantConfigRepository.get_or_create(tenant_id, now)` y se pasa al resolutor.
+- WHERE el tenant no tenga fila de `tenant_configs` recuperable, THE SYSTEM SHALL
+  resolver a `{IN_APP}` únicamente (R1.5) y SHALL registrar
+  `notifications.tenant_config_missing` con `tenant_id` y `notification_type`.
+- Los flags entran y salen por `PATCH /api/v1/tenants/{id}` sobre `TenantConfig`,
+  están en `AUDITABLE_FIELDS` y tienen tests de mutación. Cambiarlos afecta a los
+  avisos que nazcan después, no a los ya escritos — un aviso es un hecho del momento.
+
 ### Secretos y configuración
 
 - THE SYSTEM SHALL leer toda su configuración vía `Settings(BaseSettings)`.

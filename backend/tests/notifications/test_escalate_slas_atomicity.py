@@ -28,6 +28,7 @@ from app.notifications.infrastructure.models import NotificationLogModel
 from app.notifications.infrastructure.repositories import SqlAlchemyNotificationLogRepository
 from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
 from app.tenants.infrastructure.models import TenantModel
+from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
 
 NOW = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
 
@@ -47,9 +48,22 @@ class ExplodingOnSecondMark(SqlAlchemyNotificationLogRepository):
 
 
 async def _seed(db_session):
+    from app.tenants.infrastructure.models import TenantConfigModel
+
     tenant = TenantModel(name="TenantA", billing_email="a@example.com")
     db_session.add(tenant)
     await db_session.flush()
+    # Pin the channel flags so the resolver returns `{IN_APP}` only — same shape the
+    # test was written for. The repo's `with_defaults` would land here with email
+    # on, which is correct in production but fanned the assertion out by a factor
+    # of 2.
+    db_session.add(
+        TenantConfigModel(
+            tenant_id=tenant.id,
+            notification_email_enabled=False,
+            notification_whatsapp_enabled=False,
+        )
+    )
     db_session.add(
         UserModel(
             tenant_id=tenant.id,
@@ -80,6 +94,7 @@ def _use_case(db_session, *, notifications=None):
     return EscalateBreachedSlasUseCase(
         notifications=notifications or SqlAlchemyNotificationLogRepository(db_session),
         users=SqlAlchemyUserRepository(db_session),
+        tenant_configs=SqlAlchemyTenantConfigRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
     )
 
@@ -243,3 +258,74 @@ async def test_the_same_flow_holds_on_a_session_bound_the_way_production_binds_i
         )
     assert untouched == their_breach_count
     assert theirs_escalations == 0
+
+
+async def _seed_fanned_out_breach(
+    db_session, tenant, *, notification_type: str, minutes_late: int
+) -> None:
+    """Three sibling rows of one fanned-out notification, the shape `dispatch_channels`
+    produces with both tenant flags on (R4.1): only the IN_APP row carries
+    `sla_deadline_at`, and all three share `related_id`/`related_type`/`notification_type`.
+    """
+    related_id = uuid.uuid4()
+    deadline = NOW - timedelta(minutes=minutes_late)
+    for channel, deadline_value in (
+        (NotificationChannel.IN_APP, deadline),
+        (NotificationChannel.EMAIL, None),
+        (NotificationChannel.WHATSAPP, None),
+    ):
+        db_session.add(
+            NotificationLogModel(
+                tenant_id=tenant.id,
+                recipient_contact="cleaner@example.com",
+                channel=channel,
+                notification_type=notification_type,
+                related_type="cleaning_task",
+                related_id=related_id,
+                status=NotificationStatus.SENT,
+                sla_deadline_at=deadline_value,
+            )
+        )
+    await db_session.flush()
+
+
+@pytest.mark.asyncio
+async def test_a_fanned_out_notification_with_both_flags_on_is_a_single_candidate(
+    db_session,
+) -> None:
+    """R4.3 against the real query, not a Python filter over synthetic rows.
+
+    Two notification types abanicados across all three channels — `CLEANING_TASK_ASSIGNED`
+    and `TECHNICIAN_ASSIGNED`, the two types R4.3 names because they are the only ones with
+    an SLA deadline. `list_sla_breach_candidates` must return exactly one row per
+    notification: the IN_APP sibling, the only one with `sla_deadline_at IS NOT NULL`. A
+    query that forgot that predicate, or a unique constraint that let two IN_APP rows share
+    one `related_id`, would surface here as `len(candidates) == 3` per notification instead
+    of one — the EMAIL and WHATSAPP siblings would count too.
+    """
+    tenant = TenantModel(name="TenantFanOut", billing_email="fanout@example.com")
+    db_session.add(tenant)
+    await db_session.flush()
+    await _seed_fanned_out_breach(
+        db_session,
+        tenant,
+        notification_type=NotificationType.CLEANING_TASK_ASSIGNED.value,
+        minutes_late=30,
+    )
+    await _seed_fanned_out_breach(
+        db_session,
+        tenant,
+        notification_type=NotificationType.TECHNICIAN_ASSIGNED.value,
+        minutes_late=10,
+    )
+    await db_session.commit()
+
+    repository = SqlAlchemyNotificationLogRepository(db_session)
+    candidates = await repository.list_sla_breach_candidates(tenant.id, NOW)
+
+    assert len(candidates) == 2
+    assert {c.channel for c in candidates} == {NotificationChannel.IN_APP}
+    assert {c.notification_type for c in candidates} == {
+        NotificationType.CLEANING_TASK_ASSIGNED.value,
+        NotificationType.TECHNICIAN_ASSIGNED.value,
+    }

@@ -1,0 +1,569 @@
+# Tasks: rule11-guard-trigger-and-scope
+
+Orden elegido para que el árbol quede sano en cada corte: la guardia nueva **convive** con la vieja
+hasta que las dos comparaciones de R1.5 estén registradas (1.4 y 1.5); sólo entonces se borra el
+fichero de `backend/tests/` (4.1). Las secciones 1-3 dejan el sistema con guardia nueva, gatillo y
+suite propia; la 4 retira la superficie vieja; la 5 alinea autoridad y documentación; la 6 es la
+mitad de la demostración en rojo de R4 que se puede hacer sin una Pull Request — la otra mitad, la
+del check run, es obligación sobre la PR abierta declarada en la spec, con su acta en el §
+«Registro de evidencia sobre la PR», y no una tarea de aquí.
+
+## 1. La guardia se muda a `scripts/`, con su alcance como dato <!-- panel: PASS 2026-08-31 -->
+
+- [x] 1.1 Crear `scripts/rule11-ownership.py` portando la lógica de
+  `backend/tests/test_rule11_ownership.py` **sin tocar todavía ningún eje**: `_markdown_blocks`,
+  `_python_blocks`, `_offending_blocks`, `SINK_TERMS` (los 21 de hoy, intactos),
+  `OWNERSHIP_PATTERNS` (los 13), `AUTHORITY`, `TABLE_HEADER`, `MINIMUM_MARKDOWN_FILES`. Raíz del
+  árbol con **un solo origen** (`Path(__file__).resolve().parents[1]`): el candidato `/workspace/`
+  desaparece con el bind mount (D1). Forma de guardia ejecutable copiada de
+  `scripts/compose-ports.py`: `GuardError`, `main() -> int`, `if __name__ == "__main__"`. Cada
+  hallazgo imprime **fichero, línea y la frase exacta** que disparó el eje, conducta conservada
+  literal. Sólo stdlib (`ast`, `re`, `pathlib`): ni Postgres, ni Redis, ni `.env`, ni secret.
+  [R1.3, R2.5]
+
+- [x] 1.2 Sustituir `_prose_roots()`, `_code_files()`, `EXCLUDED_DIRECTORIES` y
+  `DECLARED_EXCEPTIONS` por la tupla `SCOPE` de `ScopeEntry(path, kind, reason)` con el `Kind` de
+  D4 (`AUTHORITY`, `CENSUS_PROSE`, `CENSUS_CODE`, `OUT_OF_CENSUS`, `EXCEPTION`) en
+  `scripts/rule11-ownership.py`. `_prose_files()` y `_code_files()` se derivan de `SCOPE` y **no
+  queda ninguna ruta literal fuera de ella**. Entradas de partida: la autoridad
+  (`sdd/steering/security.md`), `sdd/` y `docs/` como censo de prosa, `backend/app`,
+  `backend/alembic/versions` y `backend/tests` como censo de código, `sdd/changes` y `docs/adr`
+  fuera de censo con su motivo actual conservado palabra por palabra, y la excepción del propio
+  fichero de la guardia apuntando ya a `scripts/rule11-ownership.py`. `reason` obligatoria y no
+  vacía en todas. [R2.1]
+
+- [x] 1.3 Añadir a `SCOPE` las dos entradas `OUT_OF_CENSUS` de D5 —`sdd/roadmap.md` y
+  `sdd/roadmap`— con su motivo escrito (una entrada de roadmap **declara trabajo no hecho**, así
+  que decir que una columna todavía no tiene escritor es su función y no una reafirmación del
+  censo), y **borrar** la excepción declarada `sdd/roadmap/rule11-ownership-single-source.md`, que
+  queda cubierta por la exclusión y por tanto muerta. [R2.2]
+
+- [x] 1.4 **Primera comparación de R1.5: la mudanza, con el eje sin tocar.** Con `SINK_TERMS`
+  todavía completo, correr las dos vías sobre este mismo árbol y **pegar las dos salidas aquí
+  abajo**: la vieja (`docker compose exec backend uv run pytest tests/test_rule11_ownership.py`) y
+  la nueva (`python3 scripts/rule11-ownership.py`). Deben reportar **el mismo censo**: los tres
+  bloques de `sdd/specs/access-notifications.md` (372, 525 y 689). Esta igualdad es la que prueba
+  que la mudanza no movió el conjunto escaneado — la de 1.5 no puede probarlo porque ambas darán
+  cero. Registrar también el número de ficheros recorridos por cada vía. [R1.5]
+
+  **Medido el 2026-08-31 en este worktree, con `SINK_TERMS` completo en las dos vías.**
+
+  Vía vieja — `docker compose exec -T backend uv run pytest tests/test_rule11_ownership.py -q`:
+
+  ```
+  E       AssertionError: these blocks name a rule 11 sink AND say who writes it:
+  E           sdd/specs/access-notifications.md:372 — 'sin escritor'
+  E           sdd/specs/access-notifications.md:525 — 'tienen escritor'
+  E           sdd/specs/access-notifications.md:689 — 'sin escritor'
+  1 failed, 4 passed in 43.23s
+  ```
+
+  Vía nueva — `python3 scripts/rule11-ownership.py`:
+
+  ```
+  fichero: sdd/specs/access-notifications.md:372   frase: 'sin escritor'
+  fichero: sdd/specs/access-notifications.md:525   frase: 'tienen escritor'
+  fichero: sdd/specs/access-notifications.md:689   frase: 'sin escritor'
+  infractores: 3
+  EXIT=1
+  ```
+
+  **Censo idéntico: 3 = 3, los mismos tres bloques y las mismas tres frases.**
+
+  Ficheros recorridos: la vieja **180 markdown + 789 python = 969**; la nueva **94 + 800 = 894**.
+  La diferencia no es ruido y se comprobó por diferencia de conjuntos, no por resta: los 86
+  markdown que sólo ve la vieja son **exactamente** el árbol del roadmap (`sdd/roadmap.md` más
+  los 85 de `sdd/roadmap/`), que es la exclusión de 1.3; los 11 python que sólo ve la nueva son
+  **exactamente** `scripts/*.py`, que entra en censo porque la guardia se muda ahí y sin él su
+  propia excepción sería una entrada muerta. Ningún otro fichero cambia de lado en ninguna de las
+  dos direcciones. Coste medido de añadir `scripts/` al censo: **0 bloques** — ningún script
+  distinto de la propia guardia encaja los dos ejes.
+
+  La cifra de python sube a **801** en 1.5 y no es deriva: entre las dos medidas se creó
+  `scripts/test_rule11_ownership.py` (tarea 2.1), que el censo de código recorre como cualquier
+  otro. Cada número está medido contra el árbol que había en su momento.
+
+- [x] 1.5 **D3 y la segunda comparación.** Quitar del eje de sumideros los **cinco** términos de
+  meta-vocabulario (`regla 11`, `rule 11`, `censo`, `sumidero de texto en claro`, `cleartext
+  sink`), dejando sólo las columnas y tablas del censo, en `scripts/rule11-ownership.py` **y** en el
+  fichero viejo (que se borra en 4.1). Re-correr las dos vías y pegar las salidas: **cero
+  infractores por las dos**. Escribir en el docstring del módulo por qué salen los cinco: medido el
+  2026-08-31 no aportan ni un verdadero positivo dentro del alcance y aportan los tres falsos
+  positivos de `main`; **volver a medirlo contra el árbol al implementar**, no copiar la cifra del
+  design. [R1.5, R2.6, R3.1]
+
+  **Medido el 2026-08-31, re-contado contra el árbol y no copiado del design** (que decía 49/38 y
+  16; el árbol se ha movido desde entonces). Sobre el corpus entero —1442 ficheros, árboles
+  excluidos incluidos, para no juzgar con la muestra recortada—: **50 bloques encajan el eje de
+  sumideros por una columna o tabla del censo** y **20 lo encajan sólo por meta-vocabulario**. De
+  esos 20, diecisiete ya estaban fuera de censo o exentos (catorce bajo `sdd/changes/`, uno bajo
+  `sdd/roadmap/`, y uno en cada uno de los dos ficheros de la guardia); los **tres** restantes son
+  `sdd/specs/access-notifications.md:372`, `:525` y `:689`. Cero verdaderos positivos en alcance,
+  tres falsos.
+
+  **Recontado el 2026-09-01 sobre el árbol que se entrega: son cuatro, no tres.** El añadido es
+  `sdd/specs/rule11-ownership-guard.md:11`, el párrafo que la spec de la tarea 5.3 crea para decir
+  que el contrato no vive allí (encaja por `censo` + `quién la escribe` sin atribuir nada). Sigue
+  siendo cero verdaderos positivos, así que no mueve la decisión; lo que sí deja escrito es que la
+  spec nueva da verde gracias a este mismo estrechamiento. Las dos cifras de arriba —94 markdown y
+  801 python— también son de aquel día, y cuadran con las **95/800 de la rama sola** el 2026-09-01:
+  entró la spec nueva y salió el fichero viejo que 4.1 borra. (El árbol que se entrega da **98/800**,
+  porque el `sync-base` de `/sdd:ship` trajo tres specs de `main` después de escribirse esto; la
+  cifra viva y su porqué están en la fila 7.1 de la § 7.)
+
+  Vía nueva — `python3 scripts/rule11-ownership.py`:
+
+  ```
+  ficheros markdown recorridos: 94
+  ficheros python recorridos: 801
+  veredicto: ningún bloque fuera de la tabla de la regla 11 declara quién escribe un sumidero del censo
+  EXIT=0
+  ```
+
+  Vía vieja — `docker compose exec -T backend uv run pytest tests/test_rule11_ownership.py -q`:
+  `5 passed in 45.72s`.
+
+  **Cero por las dos: 0 = 0.** Al quitar los cinco términos del fichero viejo, su
+  `test_every_declared_exception_still_earns_its_place` se puso en rojo nombrando
+  `sdd/roadmap/rule11-ownership-single-source.md` — la excepción que D5 predijo que quedaría
+  muerta. Se retiró también allí, y por eso la vía vieja vuelve a estar entera en verde mientras
+  las dos conviven.
+
+- [x] 1.6 Fallo cerrado con mensaje propio (D7), en `scripts/rule11-ownership.py`: `GuardError` +
+  salida ≠ 0 en los cuatro puntos — árbol de prosa no alcanzable (mensaje **reescrito**: habla de
+  checkout incompleto, ya no de `make down && make up`), `SyntaxError` en un `.py` del alcance
+  nombrando fichero y error, menos de `MINIMUM_MARKDOWN_FILES` markdown visibles con la cifra vista,
+  y `SCOPE` vacía o entrada `CENSUS_*` que no resuelve. Nunca verde en vacío y nunca `skip`: un
+  `skip` se lee como «no aplica», que es lo peor que puede decir un control de seguridad cuando su
+  entrada ha desaparecido. [R1.4, R4.3]
+
+## 2. Las meta-pruebas de la guardia <!-- panel: PASS 2026-08-31 -->
+
+- [x] 2.1 Crear `scripts/test_rule11_ownership.py` cargando el módulo con
+  `importlib.util.spec_from_file_location` (la forma exacta de `scripts/test_compose_ports.py`,
+  obligada porque el nombre kebab-case no es importable) y portando las cinco pruebas de hoy: el
+  centinela del árbol visible, el censo sin infractores, `test_the_scan_catches_what_it_claims_to`
+  (los cuatro positivos —markdown, bullet partido en dos líneas, docstring y tirada de `#`— y los
+  negativos de un solo eje), `test_what_this_guard_does_not_catch` y
+  `test_every_declared_exception_still_earns_its_place`. Comprobar que los cuatro positivos siguen
+  encajando tras D3: los cuatro nombran una columna real del censo. [R1.4, R2.5]
+
+- [x] 2.2 Prueba de `SCOPE` en `scripts/test_rule11_ownership.py`: toda entrada resuelve a una ruta
+  que el escaneo recorre, toda `reason` es no vacía, y una entrada muerta —exclusión o excepción que
+  ya no corresponde a una ruta recorrida— pone la prueba **en rojo nombrando la entrada**, que es lo
+  que hoy hace `test_every_declared_exception_still_earns_its_place` sólo para las excepciones.
+  [R2.4]
+
+- [x] 2.3 Prueba de alcance vacío en `scripts/test_rule11_ownership.py` (R4.3): con `SCOPE` vacía y
+  con el árbol de prosa ausente, la guardia levanta `GuardError` en vez de reportar «cero
+  infractores». Es el fallo peor de todos porque es silencioso. [R4.3, R1.4]
+
+- [x] 2.4 Re-medir y reescribir las cifras de `test_what_this_guard_does_not_catch` en
+  `scripts/test_rule11_ownership.py`, **contando contra el árbol y sin incrementar el número
+  anterior**: (a) el residual 5 dice «36 bloques» en `sdd/changes/` y está desfasado —el design
+  midió 49 con el eje viejo y 38 con el de D3, y esas dos cifras también hay que re-medirlas
+  porque dependen del árbol—; (b) el coste medido de la exclusión del roadmap, que R2.3 manda
+  registrar aquí igual que la de `sdd/changes/` registra la suya; (c) el **residual nuevo** que abre
+  D3 —una atribución que nombra la columna por referencia sin nombrarla deja de encajar— con su
+  ejemplo medido y su coste de hoy en alcance; (d) la aclaración de D6 sobre el residual 8, que se
+  queda: la atribución de un **miembro de enum** no es la de un **sumidero** para este guardián, y
+  los tres bloques de `main` eran ese caso cazado por accidente a través de la palabra `censo`.
+  [R2.3, R3.4]
+
+- [x] 2.5 Ancla prosa↔`SCOPE` (D11), en `scripts/test_rule11_ownership.py`: leer la sección
+  «Sumideros de texto en claro (regla 11)» de `sdd/steering/security.md`, localizarla por su
+  encabezado literal y su frase de alcance por un marcador estable, y afirmar **en las dos
+  direcciones** que toda ruta que la frase nombra está en `SCOPE` y toda entrada de `SCOPE` está
+  nombrada en la frase. Ancla **rutas**, no cifras y no motivos, y sólo esa frase, no la sección
+  entera. Si el marcador no aparece, la prueba falla **en alto nombrándolo** — nunca pasa en vacío.
+  [R5.1, R5.2]
+
+**Panel de las secciones 1-2** (se revisaron juntas: la guardia y sus meta-pruebas son un solo
+par y ninguna es evaluable sin la otra). Arquitecto, seguridad, QA y documentación; tenencia e
+i18n no se lanzaron por no tener superficie en el diff —ni consultas por tenant ni cadenas de
+UI— y CI/CD entra en la sección 3, que es donde llega el workflow.
+
+Dos rondas de arreglo. La primera cerró seis hallazgos de seguridad y uno de documentación; la
+segunda, el que abrió la primera: `assert_no_dead_entry` se había quedado en un subconjunto de
+lo que comprobaba la suite, y con `backend/app` declarado `OUT_OF_CENSUS` el escaneo pasaba de
+801 ficheros python a 408 y seguía diciendo «cero infractores» con código 0. Está en `b395416`,
+con las tres comprobaciones por árbol y `MINIMUM_PYTHON_FILES`.
+
+**Dos hallazgos rechazados, con la evidencia por la que se rechazan**, para que no vuelvan a
+levantarse: el revisor de documentación afirmó que `scripts/` no se escanea —citando el
+`_code_files()` del fichero **viejo**, que en efecto sólo recorre los tres árboles del backend—
+y que los dos ficheros de `scripts/` no existen. El guardián nuevo deriva su recorrido de
+`SCOPE`: recorre 801 ficheros de código, doce de ellos `scripts/*.py`, y los dos ficheros están
+en `d05cca6` (712 y 471 líneas). Lo midió también QA por su cuenta.
+
+**Un hallazgo aplicado fuera del tope de dos rondas y sin revisión posterior**, y consta porque
+el tope existe por algo: F7, que el revisor levantó al verificar la segunda ronda. Era una frase
+del residual 5d que atribuía a `assert_no_dead_entry` un caso que no puede ver —borrar la
+*entrada* de un árbol de censo, en vez de excluirlo—, con el arreglo ya dictado por el propio
+revisor. Se verificó ejecutándolo antes de escribirlo: quitar la entrada de
+`backend/alembic/versions` retira 17 ficheros y sale en verde. Es corrección de prosa sobre un
+residual, no de conducta.
+
+## 3. El gatillo: la guardia se ejecuta donde tiene que hablar <!-- panel: PASS 2026-08-31 -->
+
+- [x] 3.1 `Makefile`: target `check-rule11-ownership: python3 scripts/rule11-ownership.py`, junto a
+  `check-compose-ports` y `check-version-parity`, **fuera de `$(COMPOSE)`** y añadido a `.PHONY`.
+  Con su comentario diciendo por qué queda fuera (es una herramienta host-side de stdlib: no
+  necesita el stack, y meterla en `$(COMPOSE)` la ataría a un contenedor que ya no monta el árbol de
+  prosa). [R1.3]
+
+- [x] 3.2 Crear `.github/workflows/rule11-ownership.yml`: `on: pull_request: {}` +
+  `push: branches: [main]` + `workflow_dispatch: {}`, **sin `paths:`** y **sin detección de área
+  dentro** (D2 — un gate de área sería un segundo sitio donde equivocarse sobre el alcance, que es
+  el defecto que este change arregla); `permissions: contents: read`; `concurrency` por `github.ref`
+  con `cancel-in-progress`; **un solo job llamado `rule11-ownership`**, porque el check run toma el
+  nombre del job y no el del workflow; `timeout-minutes: 10`. Pasos: `actions/checkout` con el mismo
+  SHA pineado que `compose-ports.yml`, `astral-sh/setup-uv` (sólo para el paso de la suite),
+  `make check-rule11-ownership`, y
+  `uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/test_rule11_ownership.py -q`.
+  Ni Postgres, ni Redis, ni `.env`, ni secrets, y que eso sea **verificable leyendo el fichero**.
+  Cabecera explicando el gatillo, la prohibición de `paths:` de `sdd/specs/backend-ci.md` y por qué
+  no hay gate de área. [R1.1, R1.2, R1.3]
+
+- [x] 3.3 Dejar `.github/workflows/compose-ports.yml` **sin cambios** y comprobar que su paso
+  `pytest scripts/ -q` recoge también `scripts/test_rule11_ownership.py`. Se deja el glob ancho a
+  propósito: estrecharlo crearía una lista que el próximo script hay que acordarse de ampliar.
+  [R1.1]
+
+- [x] 3.4 Comprobar que el check nuevo es **distinto** del de `backend-tests`: nombre de job propio,
+  workflow propio, y que un PR de sola prosa lo ejecuta mientras `backend-tests-suite` sigue
+  saliendo `skipped` — que es exactamente la forma del run 33409418091 que dejó pasar el defecto.
+  [R1.1]
+
+  **Verificado estructuralmente el 2026-08-31**, que es lo que se puede probar sin push; los ids de
+  run se registran en el § «Registro de evidencia sobre la PR» de abajo. El gate de `backend-tests.yml:186` es
+  `case "$f" in backend/* | .github/workflows/backend-tests.yml)`, así que un diff de sola prosa
+  deja `backend=false` y `backend-tests-suite` en `skipped`. El workflow nuevo no tiene `paths:`
+  en `on:` ni puerta de área ninguna —comprobado parseando el YAML— así que corre igual. Y el
+  nombre del job, `rule11-ownership`, no colisiona con ninguno de los diez workflows del
+  repositorio: los de `backend-tests.yml` son `backend-tests-detect`, `backend-tests-suite` y
+  `backend-tests`.
+
+## 4. Retirar la superficie vieja <!-- panel: PASS 2026-08-31 -->
+
+- [x] 4.1 Borrar `backend/tests/test_rule11_ownership.py`, **una vez registradas las dos
+  comparaciones de 1.4 y 1.5**. Comprobar que nada más lo importa y correr la suite del backend:
+  misma cifra de partida menos ese fichero, sin fallos nuevos. Medir la cifra de partida **antes** de
+  borrar. [R1.5]
+
+- [x] 4.2 `docker-compose.yml`: retirar `./sdd:/workspace/sdd:ro` y `./docs:/workspace/docs:ro` con
+  el comentario que las justifica (hoy líneas 111-122). **No tocar** los otros **tres** montajes de
+  `/workspace/` (`deploy-dev.yml`, `demo-reset.yml`, `.env.example`), que tienen consumidores vivos.
+  *(La tarea decía «cuatro» y son **tres** en `docker-compose.yml`, contados en el fichero: eran
+  cinco y quedan tres. «Cuatro» sólo se sostiene contando además el `deploy-dev.yml` que declara
+  `docker-compose.worktree.yml`, que es un fichero distinto del que la tarea nombra.)*
+  Verificar antes de borrar que ningún otro fichero bajo `backend/` lee `/workspace/sdd` ni
+  `/workspace/docs`. [R1.3]
+
+- [x] 4.3 Actualizar las **cuatro citas vivas** de la ruta vieja, ninguna funcional:
+  `sdd/specs/incident-photos.md:396`, `backend/tests/cli/test_demo_reset.py:292` y `:2774`, y
+  `backend/tests/notifications/test_writer_census.py:113`. Ojo con las dos de `test_demo_reset.py`:
+  no basta con repathear, porque citan la **forma de dos candidatos** de `_prose_roots()`, que este
+  change elimina — hay que reescribir la frase o apuntar al ejemplo que siga siendo cierto. Los
+  registros bajo `sdd/changes/archive/` **no se tocan**: son inmutables. [R5.2]
+
+- [x] 4.4 Recontar los recuentos que el target nuevo falsea, **contra el `Makefile` y sin
+  incrementar el número anterior**: `Makefile:344` («es el tercero de los **cuatro** targets
+  host-side que no lo usan», enumerándolos), `Makefile:401` («es el **cuarto** target host-side») y
+  el `SHALL` de `sdd/specs/local-environment.md:458`, que enumera «los **cuatro** targets que
+  delegan en un script host-side —`check-version-parity`, `compose-stacks`, `check-compose-ports` y
+  `ports`—» y ahora tiene uno más. La cuenta de los **diez** targets que invocan `docker compose`
+  desde el `Makefile` no cambia: `check-rule11-ownership` no invoca Compose. [R5.3]
+
+**4.4 se adelantó a la sección 3**, y consta el motivo: es 3.1 —el target nuevo— lo que falsea
+esos tres recuentos, así que recontarlos en la sección 4 habría dejado el árbol mintiendo entre
+dos commits. Recontados contra el `Makefile` y contra la propia frase, no incrementados: los
+targets host-side fuera de `$(COMPOSE)` pasan de cuatro a **cinco**, `check-compose-ports` sigue
+siendo el tercero y `ports` el cuarto, y los que quedan fuera **por decisión** pasan de tres a
+**cuatro**, con su bullet propio en `sdd/specs/local-environment.md`. La cuenta de los targets que invocan `docker compose`
+desde el `Makefile` no se mueve por este change —`check-rule11-ownership` no invoca Compose— pero
+**estaba mal, y se vio al recontarla en vez de arrastrarla**: eran once y no diez. El que faltaba
+es `check-frontend-build`, que invoca `$(COMPOSE) exec -T` en su receta y no aparecía ni en esa
+enumeración ni en la de los host-side. Lo levantó el panel de la sección 3, y con razón: 4.4 se
+presentaba como un recuento, así que dar «diez» por bueno sin contarlo era exactamente lo que la
+obligación de R5.3 prohíbe.
+
+  **Y preguntar por los hermanos encontró otro**, fuera del alcance de este change y corregido
+  igualmente porque estaba en un fichero que este change ya abre y era falso de forma
+  comprobable: `sdd/specs/local-environment.md` decía que el worker ejecuta «las **ocho** tareas
+  periódicas … las **cuatro** nombradas por PRD §8.3». Son **nueve** y **cinco**: `revenue-pricing`
+  añadió `generate_price_recommendations` y no actualizó esta frase, mientras que
+  `sdd/specs/celery-jobs.md` —la autoridad, citada en la misma frase— sí lo dice bien. Contado
+  contra `backend/app/scheduler/tasks.py`: nueve `@celery_app.task`. Se corrige aquí y consta que
+  es una corrección ajena a este change, no un recuento suyo.
+
+  La prosa de procedencia del recuento salió además **fuera del bullet `SHALL`**, a un párrafo
+  propio: es la convención que esta misma spec sigue para la nota de `compose-ports-guard`, y
+  metida dentro obligaba a leer la historia del error para encontrar la afirmación normativa.
+
+  **Medido el 2026-08-31, las dos pasadas completas y con marcador de fin** (los intentos previos
+  murieron por memoria y hubo que distinguir «terminó» de «la mataron»):
+
+  ```
+  antes:    9218 passed, 41 skipped in 750.58s   EXIT=0
+  después:  9213 passed, 41 skipped in 737.50s   EXIT=0
+  ```
+
+  **9218 − 5 = 9213**, que son exactamente los cinco tests del fichero borrado. Ni un fallo nuevo
+  y los `skipped` no se mueven. Antes de borrar se comprobó con python —no con `grep`, que en este
+  repo esconde coincidencias— que **ningún fichero lo importa**: el único acierto era una frase de
+  docstring en `scripts/test_rule11_ownership.py`.
+
+  Con el fichero se fueron **a la vez** su entrada transitoria de `SCOPE` y su mención en la frase
+  de alcance de `sdd/steering/security.md`. No es limpieza opcional: el ancla de D11 verifica las
+  rutas en las dos direcciones, así que borrar sólo el fichero habría puesto la prueba en rojo
+  nombrando la entrada muerta — que es exactamente para lo que se escribió.
+
+  **4.3, y por qué dos de las cuatro no se repathearon.** `test_writer_census.py:113` e
+  `incident-photos.md:396` sí apuntan ya al camino nuevo. Las dos de `test_demo_reset.py` (292 y
+  2774) **no citaban la ruta sino la forma de dos candidatos** de `_prose_roots()`, que este change
+  elimina: repathearlas habría dejado una frase describiendo algo inexistente. Se reescriben para
+  decir lo que sigue siendo cierto — esa forma sobrevive ahí porque **esa** suite sigue corriendo
+  dentro del contenedor, y el guardián dejó de necesitarla al salir de él.
+
+  Comprobado después: no queda ninguna cita viva de la ruta vieja ni de los dos montajes. Los tres
+  aciertos restantes son legítimos —una frase histórica en el docstring del fichero nuevo y dos
+  entradas de `sdd/roadmap.md`, que está fuera de censo y sólo escribe `/sdd:archive`.
+
+## 5. La autoridad, la spec y las docs <!-- panel: PASS 2026-08-31 -->
+
+- [x] 5.1 `sdd/steering/security.md`, § «Sumideros de texto en claro (regla 11)»: reescribir contra
+  `SCOPE` la línea 126 (qué recorre el guardián y desde dónde se ejecuta) y la 128 (qué excluye y
+  cuáles son sus excepciones declaradas, de las que la del roadmap desaparece). Nombrar el check run
+  `rule11-ownership` y la vía local `make check-rule11-ownership`, y citar la spec nueva. La frase de
+  alcance queda en la forma exacta que el ancla de 2.5 lee, con su marcador estable. [R5.1, R5.2]
+
+- [x] 5.2 En esa misma sección, **recontar contra la tabla y no incrementar** sus recuentos —
+  columnas del censo, filas, ejes del guardián y excepciones declaradas — y corregir los que hayan
+  quedado desviados. Es obligación que la propia sección se impone, y ya envejeció cuatro veces.
+  [R5.3]
+
+- [x] 5.3 Crear `sdd/specs/rule11-ownership-guard.md` (D8), con requisitos EARS: propósito, gatillo
+  sin `paths:` y sin gate de área, check run propio y su **estado** (se ejecuta y reporta **sin** ser
+  obligatorio para fusionar mientras el repositorio no tenga protección de rama compatible, igual
+  que `api-contract`, `compose-ports` y `frontend-tests` y por el mismo motivo de plan de GitHub),
+  fallo cerrado en sus cuatro puntos, dónde vive el alcance (`SCOPE`, **citado como fuente, no
+  reproducido**), la vía local y el coste declarado de D1. Y la decisión de D6 escrita: la
+  atribución de un **miembro de enum** no es la de un **sumidero** para este guardián, y por eso los
+  tres bloques de `sdd/specs/access-notifications.md` no eran infractores. Criterio operativo, que se
+  comprueba al terminar: **la spec no contiene ninguna lista que `SCOPE` o la tabla de la regla 11 ya
+  contengan**. [R1.1, R3.4, R5.2]
+
+- [x] 5.4 `sdd/project.md` § Commands: añadir la vía local `make check-rule11-ownership` (host,
+  `python3`, sin Docker y sin stack levantado) y el **coste declarado de D1** — el `pytest` del
+  backend ya no ejecuta el guardián, así que un docstring infractor en `backend/app/**` se ve en CI
+  y no en la suite local. [R1.3]
+
+- [x] 5.5 `README.md`: añadir `make check-rule11-ownership` al bloque de comandos (hoy líneas 29-35,
+  junto a `check-version-parity` y `check-compose-ports`), con una línea de qué comprueba. Lo exige
+  `sdd/steering/documentation.md`: un comando de Makefile nuevo actualiza el README raíz. [R1.3]
+
+- [x] 5.6 Confirmar por escrito que `sdd/specs/access-notifications.md` **no se toca**: las líneas
+  372, 525 y 689 se quedan exactamente como están (D6), no se reubica ningún hecho porque ya está en
+  su sitio, y **R3.3 no se ejerce** — el fichero no se declara excepción. Verificar con la guardia
+  nueva que ninguna de las tres se reporta. [R3.1, R3.2, R3.3]
+
+  **5.2, recontado contra la tabla el 2026-08-31 y no incrementado.** Dos cifras estaban
+  desviadas y las dos se corrigen: la tabla tiene **veintinueve** filas y decía «veintiocho», y
+  `messages.content` ocupa **cuatro** filas y no tres. Es el mismo hecho por dos sitios — el cuarto
+  escritor de esa columna es el seed de demostración, que entró después de que `messaging-ai`
+  escribiera «el primer caso de una columna con tres escritores» y no tocó ninguna de las dos
+  frases. Las otras dos cifras **sí** cuadran: veintiuna columnas distintas (parseando la primera
+  celda de cada fila y descontando los tres cualificadores de escritor, que no son columnas) y las
+  veintiuna vivas.
+
+  **5.6 verificado, no afirmado.** `git diff origin/main -- sdd/specs/access-notifications.md` sale
+  vacío; la guardia nueva reporta **0** bloques en ese fichero; y el fichero **no** figura en
+  `SCOPE`, así que R3.3 no se ejerce por ninguna vía. Las líneas 372, 525 y 689 siguen literalmente
+  donde estaban.
+
+  **5.3 cumple el criterio operativo de D8, comprobado y no supuesto**: la spec nueva no cita **ni
+  uno** de los términos del censo (verificado contra `SINK_TERMS`) y no reproduce la enumeración de
+  alcance —para el contrato remite a la regla 11, y para el alcance a `SCOPE`—. La guardia la
+  recorre como a cualquier otro documento y reporta cero. Y resuelve la referencia colgante que el
+  panel de la sección 3 levantó: `sdd/specs/local-environment.md` ya la citaba.
+
+## 6. Demostración en rojo, en la mitad que no necesita una Pull Request (R4)
+
+**Lo que esta sección puede cerrar y lo que no, y por qué la frontera está donde está.** R4 pide dos
+cosas distintas: que la *guardia* se ponga en rojo por cada forma que dice cazar, y que el *check
+run* lo haga. La primera se demuestra en local y está cerrada abajo. La segunda **no puede existir
+antes de que haya una Pull Request**: el workflow dispara en `pull_request` y en `push: branches:
+[main]`, así que empujar la rama de la feature no produce ningún run.
+
+Esa mitad **ya no vive aquí**. Se intentó como tareas y chocó con dos gates independientes —el de
+ship rechaza un `BLOCKED.md` no vacío, y el de ciclo de vida rechaza una tarea sin marcar—, que es
+lo que acabó de probar que una lista pre-PR no es su sitio. Ahora es una **obligación declarada de la capacidad, sobre la PR abierta y antes del merge**, en
+[`sdd/specs/rule11-ownership-guard.md` § Obligaciones sobre la Pull Request abierta, antes del merge](../../specs/rule11-ownership-guard.md), y su acta
+es el § «Registro de evidencia sobre la PR», que va justo antes de la § 7:
+los dos ids de run por vía de diff (R4.1), el check en rojo por bloque inyectado y su verde al
+revertir (R4.2), y el cero sobre la rama fusionada con `main` (R3.1). Quien abra la PR de este change
+las registra allí y ancla con `mark-recertified`.
+
+La premisa contraria que traían D10 y la antigua tarea 6.1 —«la rama produce los dos de forma
+natural»— era falsa; quedó corregida en review el 2026-09-01, y en D10 está por qué no se ensancha
+el `push:`.
+
+- [x] 6.2a **El binario en rojo por cada una de las tres formas.** No necesita PR, así que se cierra
+  aquí. Medido el 2026-09-01 en este worktree: tres sondas creadas dentro del alcance —una `.md` en
+  `sdd/specs/`, un docstring y una tirada de `#` en `backend/app/`— y borradas acto seguido. El
+  binario las caza **las tres** y nombra fichero, línea y frase de cada eje:
+
+  ```
+  these blocks name a rule 11 sink AND say who writes it:
+
+  fichero: sdd/specs/__r4_probe.md:3
+  frase: 'sin escritor'
+  bloque: La columna `audit_logs.changes` sigue sin escritor: nadie la rellena todavía.
+
+  fichero: backend/app/__r4_probe_doc.py:1
+  frase: 'sin escritor'
+  bloque: Sonda R4.2 en docstring. `webhook_events.payload` sigue sin escritor en esta capa.
+
+  fichero: backend/app/__r4_probe_hash.py:1
+  frase: 'primer escritor'
+  bloque: Sonda R4.2 en tirada de almohadillas. `messages.content` tiene su primer escritor en esta capability.
+
+  infractores: 3
+  ```
+
+  Salida del script **1**, y del `make` **2** (que es como `make` propaga el fallo de la receta).
+  Retiradas las tres sondas, `make check-rule11-ownership` vuelve a **0** con 95 markdown y 800
+  python — cifras **de la rama sola el 2026-09-01**, que es cuando se midió esto; el árbol que se
+  entrega da 98/800 tras el `sync-base`, y la cifra viva está en la fila 7.1.
+  Lo que esto **no** prueba: que el *check run* se ponga rojo. Por eso era obligación sobre la PR
+  —**ya cumplida**, ver el § de abajo: runs `33623489251` (markdown) y `33623440585` (docstring y
+  tirada de `#`), con su verde al revertir en `33623610089`.
+  Y no lo descargan las ocho vías de fallo cerrado de la sección 5 — ésas son cadena rota (R1.4,
+  R4.3), no un bloque infractor: otro camino de código. [R4.2]
+
+## Registro de evidencia sobre la PR
+
+**Este § es el destino único** que `sdd/specs/rule11-ownership-guard.md` § «Obligaciones sobre la
+Pull Request abierta, antes del merge» nombra para la evidencia que sólo puede existir con la PR
+abierta. Está aquí, y no en un comentario de la Pull Request, porque R4.2 exige que la demostración
+quede registrada **en el change**: un comentario no está en el árbol, no se puede grepear y
+desaparece con la PR.
+
+No lleva casillas a propósito. Una casilla sin marcar bloquea `mark-local-verified`, y esta evidencia
+no puede existir antes de que ese comando ya haya corrido — es la lección que costó dos gates. Se
+rellena tras `/sdd:ship`, y luego `/sdd:review` recertifica con `mark-recertified`.
+
+| Obligación | Requisito | Id de run | Base medida | Resultado |
+|---|---|---|---|---|
+| Diff de sola prosa (`sdd/**` o `docs/**`), en PR desechable con base en la rama | R4.1 | [`33622941695`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33622941695) | — | **`rule11-ownership` pass en 19 s**, y en el mismo evento **`backend-tests-suite` `skipped`** — el contraste entero. PR sonda #149, commit `27c4533`, diff = `docs/__r4_probe.md` y nada más |
+| Diff de sólo `backend/**`, en PR desechable con base en la rama | R4.1 | [`33622993073`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33622993073) | — | **pass en 20 s.** PR sonda #150, commit `b784214`, diff = `backend/app/__r4_probe.py` y nada más; el censo subió a 801 python por el propio fichero sonda. Aquí `backend-tests-detect` resolvió `backend=true (diff-touches-backend)` y **despachó** `backend-tests-suite` —la vía que ya funcionaba antes del change—, aunque su conclusión propia acabó en `cancelled` porque la concurrencia la cortó al llegar el commit rojo tres minutos después: se ejecutó, no salió verde, y esta fila no le atribuye conclusión |
+| Check en rojo por bloque en markdown | R4.2 | [`33623489251`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33623489251) | — | **fail en 12 s**, nombrando `docs/__r4_probe.md:16` y la frase `'sin escritor'`, `infractores: 1`, `Error 1` del `make`. Y en ese mismo **evento** —no en este run, que es el del workflow `rule11-ownership`; el de `backend-tests` es `33623489487`, donde el job de consolidación anotó literalmente «el diff no toca `backend/**` … así que la suite NO se ejecutó»— **`backend-tests-suite` salió `skipped`** mientras este check se ponía rojo: es el bloque que la superficie vieja no habría visto |
+| Check en rojo por bloque en docstring o tirada de `#` | R4.2 | [`33623440585`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33623440585) | — | **fail en 12 s**, las dos formas en un run: `backend/app/__r4_probe.py:19` con `'sin escritor'` (docstring) y `:22` con `'primer escritor'` (tirada de `#`), `infractores: 2` |
+| Verde al revertir el bloque inyectado | R4.2 | [`33623610089`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33623610089) | — | **pass en 21 s** sobre el revert `857e06a` de la sonda #149. El rojo era del bloque y no del entorno |
+| Cero infractores sobre la base fusionada, en un run **posterior** a la última fusión de `main` | R3.1 | [`33621908289`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33621908289) | `078339d3c87121dfc5ebbda828e293d0a4893af0` | **pass**, 98 markdown + 800 python, cero infractores. Evento `pull_request` sobre `headSha` `1578215`, que **contiene** el merge de sync de `main@078339d`; run creado a las 10:54:59Z, posterior a esa fusión, y `main` no se ha movido desde entonces (punta `078339d`, 06:10:13Z), así que el merge ref incluye la base actual |
+
+La columna **Base medida** lleva el SHA del commit de fusión de `main` sobre el que corrió ese
+run, y existe porque sin ella un id honesto y un id caducado son indistinguibles: GitHub no
+re-dispara `pull_request` cuando la base avanza, así que el id sólo vale si es posterior a la
+última fusión. En las filas que no miden la base fusionada va `—`.
+
+Anotar además, en el run de sola prosa, que `backend-tests-suite` sale `skipped` y este check **no**:
+es el defecto que este change corrige y conviene verlo escrito, no darlo por sabido. **Anotado y
+observado dos veces**, en la fila 1 (verde) y en la fila 3 (rojo), y la segunda es la que cierra el
+argumento: un bloque infractor en `docs/**` puso el check en rojo **en el mismo run en que
+`backend-tests-suite` se saltaba**. Con la superficie vieja ese bloque no habría producido señal
+ninguna — que es literalmente lo que le pasó a `f86a83f` en el run 33409418091.
+
+**Las seis filas se cerraron el 2026-09-02**, con las dos PR sonda #149 y #150 abiertas contra esta
+rama y cerradas sin fusionar después de anotar los ids; sus ramas
+(`probe/rule11-r4-prose`, `probe/rule11-r4-backend`) se borraron. Los ficheros de sonda
+—`docs/__r4_probe.md` y `backend/app/__r4_probe.py`— **nunca estuvieron en esta rama** y no
+aparecen en el diff de la PR #148. Cada rojo se verificó primero con el binario en local y sólo
+después se empujó, para que el rojo de CI probara el check run y no un accidente del entorno.
+
+**Las dos primeras filas no se rellenan desde la PR de este change, y por eso dicen «PR desechable».**
+El diff de una PR es `base...head`, y el de esta toca `sdd/**`, `scripts/`, `Makefile`,
+`docker-compose.yml` y `backend/tests/**` a la vez: no es «sola prosa» ni «sólo `backend/**`» por
+construcción, así que esas dos filas serían inalcanzables si se midieran sobre ella. Se toman de dos
+Pull Requests desechables **cuya base es la rama de este change**, no `main`, y **cuyo diff
+`base...head` no sale de un solo árbol**, de modo que `backend-tests-detect` resuelve el área sobre
+ese mismo diff — que es lo que hace cierta la anotación de `backend-tests-suite` `skipped`. **Cada
+sonda llevó más de un commit**, y no pasa nada: #149 tres (benigno, bloque infractor, revert) y #150
+dos, todos dentro de su árbol. La condición es el árbol y no el número de commits; reutilizarlas
+para el rojo de R4.2 ahorró dos PR y costó que algún run del commit anterior saliera `cancelled`
+por `concurrency`, que es lo que la fila 2 anota. Se cierran tras registrar los ids.
+El mecanismo y su motivo viven en `sdd/specs/rule11-ownership-guard.md` § «Obligaciones sobre la Pull
+Request abierta, antes del merge»; aquí sólo se registra el resultado. Lo levantó el panel de review
+del 2026-09-02, que midió que la lectura anterior no era satisfacible.
+
+## 7. Verification
+**Cifras reales y no recordadas, y cada una fechada contra el árbol en que se midió.** La pasada
+original es del **2026-08-31**; las filas que las rondas de review volvieron a medir sobre el árbol
+que se entrega llevan su propia fecha en la celda, porque una cifra sin el árbol contra el que se
+contó no se puede distinguir de una heredada (R5.3). Las salidas largas se escribieron a fichero con
+marcador de fin: los pipes truncan y el filtro de `rtk` colapsa pytest a un falso
+«PASS (0) FAIL (0)».
+
+| | resultado |
+|---|---|
+| 7.1 `make check-rule11-ownership` | salida **0**, **98 markdown + 800 python**, cero infractores — re-medido el **2026-09-02 sobre el SHA que se ancla**, ya con `main` fusionado. **El censo se mueve por dos vías y sólo una es nuestra**: los ficheros que el propio change añade o borra (94→95 markdown al entrar la spec nueva; 800→801→800 python al crearse las meta-pruebas y borrarse el guardián viejo, con el salto explicado en `:82-84` y la salida de la 1.5 pegada en `:115-116`), **y el avance de la base**, que trajo tres specs de `main` en el `sync-base` de `/sdd:ship` y llevó el markdown de 95 a **98**. La segunda vía es la que dejó obsoletas dos redacciones de esta misma celda el mismo día, así que la cifra va fechada **y** atribuida al SHA sobre el que se midió. El desglose que CI observa está en la fila de R3.1 del § «Registro de evidencia sobre la PR», con su id de run y su base |
+| 7.2 `pytest scripts/ -q` | **247 passed** (2026-09-02) — eran 246 en la pasada de run; la review añadió una prueba, la que ancla el coste declarado de D3. Llegó a 248 con el guardián del gatillo, retirado el 2026-09-02 (ver D2). Esta cifra se mueve con cada prueba nueva, así que va fechada |
+| 7.3 suite del backend | **9213 passed, 41 skipped** — contra la partida de **9218/41**, exactamente los 5 tests del fichero borrado |
+| 7.4 `check-compose-ports` · `check-version-parity` | **0** y **0** |
+| 7.5 `make down && make up` | los seis servicios arriba sin los dos bind mounts, y la suite **verde dentro del contenedor recreado**: los mismos 9213/41 en 21:47 |
+| 7.6 los dos tests de frontend que leen por encima de `/app` | **2 ficheros, 17 tests, todos verdes**, incluido `build-identity-contract.test.ts`, que lee `docker-compose.yml` entero |
+| 7.7 barrido de citas | sin citas vivas de la ruta vieja; la del roadmap queda encargada a `/sdd:archive` |
+
+**7.3 y 7.5 se midieron dos veces a propósito**, y la segunda es la que vale: la primera pasada
+corrió en el contenedor que aún tenía los montajes, y la segunda en uno recreado sin ellos. Las dos
+dan la misma cifra, así que retirar los montajes no cambió el resultado de ninguna prueba.
+
+**Lo que la sección 7 NO puede cerrar** y no se disimula: nada de aquí demuestra que el *check run*
+se ponga rojo y verde donde debe. Eso son las obligaciones sobre la PR abierta —§ «Registro de
+evidencia sobre la PR», arriba—, y sus ids no podían existir hasta que `/sdd:ship` abriera la PR.
+**Ya existen**: las seis filas de ese § están rellenas con runs reales del 2026-09-02, así que lo
+que la sección 7 no puede cerrar **está cerrado allí**, no pendiente. Esta frase se conserva porque
+explica por qué la evidencia vive en dos sitios y no en uno.
+
+
+- [x] 7.1 `make check-rule11-ownership` → cero infractores y salida 0.
+- [x] 7.2 `uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/ -q` en verde —
+  recoge las meta-pruebas nuevas y las de los otros cuatro scripts, que es lo mismo que hará
+  `compose-ports.yml`.
+- [x] 7.3 Suite del backend: `docker compose exec backend uv run pytest` (o
+  `docker compose run --rm backend uv run pytest` con el stack parado). Comparar contra la cifra de
+  partida medida en 4.1: un fichero menos, ningún fallo nuevo.
+- [x] 7.4 `make check-compose-ports` y `make check-version-parity` en verde — `docker-compose.yml` se
+  ha tocado en 4.2.
+- [x] 7.5 `make down && make up` en este worktree: el stack levanta sin los dos bind mounts
+  retirados, y la suite del backend sigue verde dentro del contenedor.
+- [x] 7.6 Los dos tests de frontend que leen el árbol por encima de `/app` siguen verdes tras tocar
+  `docker-compose.yml` — en particular `lib/config/build-identity-contract.test.ts`, que lo lee
+  entero. Requiere los `docker compose cp` que documenta `sdd/project.md` § Worktree bootstrap.
+- [x] 7.7 Repasar que ningún documento vivo cita ya `backend/tests/test_rule11_ownership.py`
+  (grepeando el árbol completo, `sdd/changes/archive/` aparte) ni describe un guardián que no
+  existe. **Medido ya, y quedan dos que este change no puede arreglar**, las dos en
+  `sdd/roadmap.md` y las dos por el mismo motivo: la regla 1 del toolkit reserva la escritura del
+  roadmap a `/sdd:archive`. **Quedan las dos encargadas a `/sdd:archive`**, que al archivar este
+  change debe repathearlas a `scripts/rule11-ownership.py`:
+
+  - **línea 219**, la entrada `template-label-sink-census`, que dice que
+    `tests/test_rule11_ownership.py` vigila el censo;
+  - **línea 177**, la entrada de registro de *este* change, que describe en presente lo que
+    `backend/tests/test_rule11_ownership.py` escanea. La levantó el panel de review el 2026-09-01
+    y aquí sólo se contaba una; que sea nuestra propia entrada no la hace menos viva ni menos
+    apuntada a un fichero borrado.
+
+  Las demás coincidencias del árbol son legítimas: una frase histórica en el docstring del fichero
+  nuevo, los registros de este change, y `sdd/changes/archive/`, que es inmutable.
+
+  **Y un tercer encargo a `/sdd:archive`, del mismo tipo y por el mismo motivo** —lo levantaron el
+  architect y el qa en la ronda de review del 2026-09-02—: **re-medir la cifra del residual 5** de
+  `scripts/test_rule11_ownership.py`, que hoy dice **38 bloques bajo `sdd/changes/archive/`**
+  (medido el 2026-09-02). El `mv` de este change llevará allí sus **3** bloques de R4.2 —la salida
+  de sondas pegada en la tarea 6.2a, arriba— y la cifra pasará a **41**. Nadie se pondría en rojo:
+  ningún test ancla ese numeral, y el único recuento anclado del módulo es el de los cuatro
+  encajes meta-only. Así que el paso es: tras mover el directorio, re-correr el detector sobre
+  `sdd/changes/archive/**/*.md` y escribir la cifra que salga, **contándola y no incrementándola**
+  (R5.3). Es la consecuencia declarada de que el residual cite un corpus que crece.

@@ -40,6 +40,14 @@ muerto a mitad reenvía hasta ese techo y no más.
 5. **Qué es «entregado»**. SMTP acepta, no entrega: un `250` no es un buzón. Hay que decidir si `SENT`
    significa «aceptado por el relay» —lo honesto y lo barato— y declararlo, en vez de dejar que el nombre
    sugiera otra cosa; los rebotes son webhook del proveedor y quedan fuera.
+6. **El default heredado de `notification_email_enabled` deja de ser inocuo aquí.** `TenantConfig.
+   notification_email_enabled` vale `True` por defecto desde `domain-foundation-financial`/`tenants-base` —
+   anterior a `notification-channel-routing` y fuera de su alcance. Mientras el adapter de `EMAIL` era
+   `ConsoleEmailAdapter` ese default no tenía efecto observable (revisado y aceptado como riesgo en la ronda
+   de fixes de `/sdd:review` de `notification-channel-routing`, ver su `design.md` archivado, sección
+   "Risks & mitigations"). Con un adapter real, un tenant que nunca tocó el conmutador empieza a recibir
+   email de verdad el primer aviso que dispare, sin haberlo pedido. Antes de activar el adapter real: decidir
+   si el default se invierte (opt-in) o si se acepta explícitamente para el catálogo de tenants existente.
 
 **Depende de `notification-channel-routing`** y el orden importa: sin ella ninguna fila nace con
 `channel = EMAIL` salvo el reset de contraseña, así que un adapter real entregaría un caso de prueba y nada
