@@ -68,9 +68,11 @@ describe("useTimelinePropertyStore (R1.4)", () => {
     // Covers both storages: they share the prototype method.
     expect(setItem).not.toHaveBeenCalled();
     expect(cookieWrites).toEqual([]);
-    // Independent of the spies: nothing landed in either store.
-    expect(Object.keys(localStorage)).toEqual([]);
-    expect(Object.keys(sessionStorage)).toEqual([]);
+    // Independent of the spies: nothing landed in either store. Length-based rather
+    // than `Object.keys` because under vitest's jsdom the Storage instance surfaces the
+    // interface methods (`getItem`, `setItem`, ...) as own enumerable keys, so the
+    // `Object.keys(localStorage)` snapshot races the prototype layout; `length` is the
+    // number of *stored items*, which is what the test claims to check.
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
   });

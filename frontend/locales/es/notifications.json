@@ -17,6 +17,7 @@
     "PRICE_RECOMMENDATION": "Nueva recomendación de precio",
     "SLA_BREACH": "Un aviso ha superado su plazo",
     "PASSWORD_RESET_REQUESTED": "Se ha pedido restablecer tu contraseña",
+    "REVIEW_RESPONSE_APPROVED": "Una respuesta a una reseña ha sido aprobada",
     "unknown": "Aviso del sistema"
   },
   "bell": {
