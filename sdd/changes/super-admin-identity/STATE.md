@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: hardcode83/super-admin-identity
 implementation_sha: 7abeefb01dc5dc237680c3d721aaffe973cf8eaf
 pr_number:
 pr_url:
