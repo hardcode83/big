@@ -25,6 +25,7 @@ say so.
 
 import uuid
 from collections.abc import Sequence
+from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -250,6 +251,24 @@ class SqlAlchemyCleaningTaskRepository:
         return Page(
             items=tuple(_to_task(model) for model in rows.scalars()), total=int(total or 0)
         )
+
+    async def count_live_for_day(self, tenant_id: uuid.UUID, day: date) -> int:
+        """`func.count()` over an explicit `[day, day + 1 day)` range, never
+        `func.date(scheduled_start)` — a function-wrapped predicate defeats any index on the
+        column (`dashboard-operational-kpis` design risk)."""
+        day_start = datetime.combine(day, time.min, tzinfo=UTC)
+        day_end = day_start + timedelta(days=1)
+        total = await self._session.scalar(
+            select(func.count())
+            .select_from(CleaningTaskModel)
+            .where(
+                CleaningTaskModel.tenant_id == tenant_id,
+                CleaningTaskModel.status.in_(sorted(LIVE_STATUSES, key=lambda s: s.value)),
+                CleaningTaskModel.scheduled_start >= day_start,
+                CleaningTaskModel.scheduled_start < day_end,
+            )
+        )
+        return int(total or 0)
 
 
 class SqlAlchemyCleaningChecklistTemplateRepository:

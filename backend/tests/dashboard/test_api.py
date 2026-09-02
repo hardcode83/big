@@ -1,14 +1,24 @@
-"""The two dashboard endpoints over the real app (`dashboard-api` R1, R2, task 6.3)."""
+"""The dashboard endpoints over the real app (`dashboard-api` R1, R2; `dashboard-operational-
+kpis` R1-R4, task 6.4)."""
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from app.auth.domain.enums import UserRole
+from app.cleaning.domain.enums import CleaningTaskStatus
+from app.cleaning.infrastructure.models import CleaningTaskModel
+from app.maintenance.domain.enums import IncidentSeverity, IncidentSource, IncidentStatus
+from app.maintenance.infrastructure.models import IncidentModel
 from app.properties.infrastructure.models import PropertyModel
-from tests.dashboard.conftest import auth_header, insert_property
+from app.reservations.domain.enums import ReservationChannel, ReservationStatus
+from app.reservations.infrastructure.models import ReservationModel
+from tests.cleaning.conftest import insert_template
+from tests.dashboard.conftest import TODAY, auth_header, insert_property
 
 COLLECTION = "/api/v1/dashboard/properties"
+OPERATIONAL_KPIS = "/api/v1/dashboard/operational-kpis"
 READERS = {UserRole.PROPERTY_MANAGER, UserRole.TENANT_OWNER}
 
 
@@ -223,5 +233,108 @@ async def test_only_property_readers_may_call_the_aggregate(
     response = await api.get(
         _detail_url(property_a), headers=auth_header(api, users_by_role_a[role])
     )
+
+    assert response.status_code == (200 if role in READERS else 403)
+
+
+# --- operational KPIs (`dashboard-operational-kpis` R1, R2, R3, R4) ------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_three_keys_are_always_present_null_included(
+    api, users_by_role_a
+) -> None:
+    """R4.3: the door-gate role (`TENANT_OWNER`/`PROPERTY_MANAGER`) holds all three source
+    permissions, so this pins presence and shape; the `null` case is proven at the use-case
+    level (`test_operational_kpis.py`), since no seeded role here has `READ_PROPERTIES`
+    without also holding all three source permissions."""
+    response = await api.get(OPERATIONAL_KPIS, headers=_owner(api, users_by_role_a))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"cleanings_today", "upcoming_checkins", "open_incidents"}
+
+
+@pytest.mark.asyncio
+async def test_an_empty_tenant_gets_zeroes_not_nulls(api, users_by_role_a) -> None:
+    body = (await api.get(OPERATIONAL_KPIS, headers=_owner(api, users_by_role_a))).json()
+
+    assert body["cleanings_today"] == 0
+    assert body["upcoming_checkins"] == 0
+    assert body["open_incidents"] == {"total": 0, "urgent": 0}
+
+
+@pytest.mark.asyncio
+async def test_a_happy_path_response_returns_the_right_numbers(
+    api, db_session, tenant_a, property_a, users_by_role_a
+) -> None:
+    template = await insert_template(db_session, tenant_a, name="Estándar")
+    db_session.add(
+        CleaningTaskModel(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            property_id=property_a.id,
+            checklist_template_id=template.id,
+            status=CleaningTaskStatus.IN_PROGRESS,
+            scheduled_start=datetime.combine(TODAY, datetime.min.time(), tzinfo=UTC),
+        )
+    )
+    db_session.add(
+        ReservationModel(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            property_id=property_a.id,
+            channel=ReservationChannel.DIRECT,
+            status=ReservationStatus.CONFIRMED,
+            check_in_date=TODAY + timedelta(days=3),
+            check_out_date=TODAY + timedelta(days=5),
+            nights=2,
+            adults=2,
+        )
+    )
+    db_session.add(
+        IncidentModel(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            property_id=property_a.id,
+            source=IncidentSource.GUEST,
+            title="Boiler is dead",
+            description="No hot water.",
+            status=IncidentStatus.OPEN,
+            severity=IncidentSeverity.CRITICAL,
+        )
+    )
+    db_session.add(
+        IncidentModel(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            property_id=property_a.id,
+            source=IncidentSource.GUEST,
+            title="Squeaky door",
+            description="The balcony door squeaks.",
+            status=IncidentStatus.OPEN,
+            severity=IncidentSeverity.LOW,
+        )
+    )
+    await db_session.flush()
+
+    body = (await api.get(OPERATIONAL_KPIS, headers=_owner(api, users_by_role_a))).json()
+
+    assert body["cleanings_today"] == 1
+    assert body["upcoming_checkins"] == 1
+    assert body["open_incidents"] == {"total": 2, "urgent": 1}
+
+
+@pytest.mark.asyncio
+async def test_both_dashboard_routes_refuse_an_anonymous_request_including_kpis(api) -> None:
+    assert (await api.get(OPERATIONAL_KPIS)).status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", list(UserRole))
+async def test_only_property_readers_may_call_the_operational_kpis(
+    api, users_by_role_a, role: UserRole
+) -> None:
+    response = await api.get(OPERATIONAL_KPIS, headers=auth_header(api, users_by_role_a[role]))
 
     assert response.status_code == (200 if role in READERS else 403)

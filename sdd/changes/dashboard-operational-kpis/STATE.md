@@ -4,10 +4,10 @@ state: PR_OPEN
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
-head_branch: sdd/notification-channel-routing
-implementation_sha: caee4eccf4d8f635dc1aba8db5a00c9e91d602bc
-pr_number: 143
-pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/143
+head_branch: hardcode83/dashboard-operational-kpis
+implementation_sha: 1ed458dc5be03951a41a4adec309dc1f647c9296
+pr_number: 145
+pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/145
 pr_state: OPEN
 merge_evidence:
 merge_sha:
