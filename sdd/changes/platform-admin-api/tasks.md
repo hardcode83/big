@@ -12,7 +12,7 @@
 - [x] 1.6 Añadir `Permission.MANAGE_PLATFORM = "MANAGE_PLATFORM"` al enum en `backend/app/auth/domain/policy.py` (mismo `str, enum.Enum`, sin herencia), y un bundle `_PLATFORM = frozenset({Permission.MANAGE_PLATFORM})` para `SUPER_ADMIN`. Extender `ROLE_PERMISSIONS[UserRole.SUPER_ADMIN]` con `_SELF_SERVICE | _PLATFORM`. `TENANT_OWNER`, `PROPERTY_MANAGER`, `CLEANER`, `TECHNICIAN` no se tocan. Ningún otro `_SOMETHING_*` arrastra `MANAGE_PLATFORM`. [R5.1, R5.2, D3, D6]
 - [x] 1.7 Tests en `backend/tests/auth/test_policy.py`: actualizar `test_super_admin_holds_exactly_self_service_and_nothing_else` para que pine `ROLE_PERMISSIONS[UserRole.SUPER_ADMIN] == _SELF_SERVICE | _PLATFORM` (en vez del pin actual `_SELF_SERVICE`, que la tarea 1.6 invalida) — el cambio de pin es la parte que la lista de tareas omitía; `is_allowed(SUPER_ADMIN, MANAGE_PLATFORM) is True`; `is_allowed(role, MANAGE_PLATFORM) is False` para los otros cuatro roles; `Permission.MANAGE_PLATFORM` es miembro del enum; `MANAGE_PLATFORM` no aparece en `ROLE_PERMISSIONS` de ningún rol que no sea `SUPER_ADMIN`. [R5.2, R5.3, D6]
 
-## 2. Platform module — `CreateTenantUseCase` and the SUPER_ADMIN-side audit seam <!-- hard -->
+## 2. Platform module — `CreateTenantUseCase` and the SUPER_ADMIN-side audit seam <!-- hard --> <!-- panel: PASS 2026-09-02 -->
 
 <!-- The seam is load-bearing (D5): `SUPER_ADMIN`'s session stays unmarked
      (`super-admin-identity`), so `audit_logs.tenant_id` MUST come from the use case,
@@ -21,12 +21,12 @@
      and the loser has to surface as `TenantAlreadyExistsError` mapped to 409 without
      leaking the `IntegrityError`. -->
 
-- [ ] 2.1 Crear `backend/app/platform/__init__.py` vacío y `backend/app/platform/domain/__init__.py` vacío. Crear `backend/app/platform/domain/exceptions.py` con `TenantAlreadyExistsError`, mapeada a `409` con `ErrorCode.CONFLICT` por el handler del módulo (no por el genérico — `tenant` no la ve, así que tiene su propio `register_platform_error_handlers`). [R1.4, R2.3, D2]
-- [ ] 2.2 Crear `backend/app/platform/application/use_cases.py` con `CreateTenantUseCase.__init__(tenants, configs, audit, uow)` y `execute(*, actor_user_id, actor_ip, command, now) -> TenantSettings`. Orquesta: (a) `tenant = Tenant.create(...)`; (b) `config = TenantConfig.with_defaults(tenant_id=tenant.id, now=now)`; (c) `await self._tenants.add(tenant, config)` (la traducción de `IntegrityError` vive en el repo); (d) escribe una fila `audit_logs` con `action=TENANT_CREATED`, `entity_type=ENTITY_TENANT`, `entity_id=tenant.id`, `tenant_id=tenant.id` (del path/entidad, **nunca** del actor — D5), `actor_user_id`, `actor_ip`, y `changes` describiendo los cinco campos del cuerpo vía `ChangeSet(ENTITY_TENANT).diff(name, None, t.name).diff(billing_email, None, ...).diff(country, ...).diff(timezone, ...).diff(default_language, ...)`; (e) `await self._uow.commit()`. Si cualquier paso falla, **no** se llama `commit()` y la transacción aborta — R2.3, R4.2. Devuelve `TenantSettings(tenant=tenant, config=config)`. [R1.1, R2.1, R2.3, R4.1, D2, D5]
-- [ ] 2.3 Test unitario en `backend/tests/platform/test_use_cases.py` (con fakes de los puertos, sin DB): un `TenantRepository`/`TenantConfigRepository`/`AuditLogRepository`/`UnitOfWork` falsos verifican que (a) `Tenant.create` se llama con los cinco campos del comando y un `now`, (b) `tenants.add` se llama con `(tenant, config)`, (c) `audit.add` se llama con un `AuditLog` cuyos `tenant_id`/`entity_id` son los del tenant recién creado (no `None`), (d) `uow.commit()` se llama una vez y solo si los pasos anteriores no fallaron. [R2.3, R4.2, D5]
-- [ ] 2.4 Test unitario: si `tenants.add` lanza `TenantAlreadyExistsError`, `uow.commit()` NO se llama (verificado por el fake), y la excepción se propaga sin envolver. [R2.3, R-2]
-- [ ] 2.5 Test de integración en `backend/tests/platform/test_use_cases.py` (mismo fichero, marcador `@pytest.mark.asyncio` y la fixture `db_session`): sembrar la BD vacía; ejecutar `CreateTenantUseCase(...).execute(...)` con `actor_user_id=super_admin.id`, `actor_ip="127.0.0.1"`, un nombre único y los cinco campos; verificar que (a) hay una fila en `tenants` con `status=ACTIVE`, (b) hay una fila en `tenant_configs` con `tenant_id=tenants.id`, (c) hay una fila en `audit_logs` con `action=TENANT_CREATED`, `entity_type=TENANT`, `entity_id=tenant.id`, `tenant_id=tenant.id`, `actor_user_id=super_admin.id`, `actor_ip="127.0.0.1"`, y `changes` contiene los cinco `diff`. [R1.1, R2.1, R2.4, D5]
-- [ ] 2.6 Test de integración (concurrencia / R-2): sembrar la BD con un tenant de nombre `T`; lanzar `CreateTenantUseCase` con el mismo `name="T"` y `actor_user_id=super_admin.id`; debe terminar en `TenantAlreadyExistsError` y NO dejar una segunda fila en `tenants` ni una segunda fila de auditoría con `action=TENANT_CREATED` para `name="T"`. El test de concurrencia de dos corutinas se cubre en la sección N con dos requests simultáneos al router. [R1.2, R-2]
+- [x] 2.1 Crear `backend/app/platform/__init__.py` vacío y `backend/app/platform/domain/__init__.py` vacío. Crear `backend/app/platform/domain/exceptions.py` con `TenantAlreadyExistsError`, mapeada a `409` con `ErrorCode.CONFLICT` por el handler del módulo (no por el genérico — `tenant` no la ve, así que tiene su propio `register_platform_error_handlers`). [R1.4, R2.3, D2]
+- [x] 2.2 Crear `backend/app/platform/application/use_cases.py` con `CreateTenantUseCase.__init__(tenants, configs, audit, uow)` y `execute(*, actor_user_id, actor_ip, command, now) -> TenantSettings`. Orquesta: (a) `tenant = Tenant.create(...)`; (b) `config = TenantConfig.with_defaults(tenant_id=tenant.id, now=now)`; (c) `await self._tenants.add(tenant, config)` (la traducción de `IntegrityError` vive en el repo); (d) escribe una fila `audit_logs` con `action=TENANT_CREATED`, `entity_type=ENTITY_TENANT`, `entity_id=tenant.id`, `tenant_id=tenant.id` (del path/entidad, **nunca** del actor — D5), `actor_user_id`, `actor_ip`, y `changes` describiendo los cinco campos del cuerpo vía `ChangeSet(ENTITY_TENANT).diff(name, None, t.name).diff(billing_email, None, ...).diff(country, ...).diff(timezone, ...).diff(default_language, ...)`; (e) `await self._uow.commit()`. Si cualquier paso falla, **no** se llama `commit()` y la transacción aborta — R2.3, R4.2. Devuelve `TenantSettings(tenant=tenant, config=config)`. [R1.1, R2.1, R2.3, R4.1, D2, D5]
+- [x] 2.3 Test unitario en `backend/tests/platform/test_use_cases.py` (con fakes de los puertos, sin DB): un `TenantRepository`/`TenantConfigRepository`/`AuditLogRepository`/`UnitOfWork` falsos verifican que (a) `Tenant.create` se llama con los cinco campos del comando y un `now`, (b) `tenants.add` se llama con `(tenant, config)`, (c) `audit.add` se llama con un `AuditLog` cuyos `tenant_id`/`entity_id` son los del tenant recién creado (no `None`), (d) `uow.commit()` se llama una vez y solo si los pasos anteriores no fallaron. [R2.3, R4.2, D5]
+- [x] 2.4 Test unitario: si `tenants.add` lanza `TenantAlreadyExistsError`, `uow.commit()` NO se llama (verificado por el fake), y la excepción se propaga sin envolver. [R2.3, R-2]
+- [x] 2.5 Test de integración en `backend/tests/platform/test_use_cases.py` (mismo fichero, marcador `@pytest.mark.asyncio` y la fixture `db_session`): sembrar la BD vacía; ejecutar `CreateTenantUseCase(...).execute(...)` con `actor_user_id=super_admin.id`, `actor_ip="127.0.0.1"`, un nombre único y los cinco campos; verificar que (a) hay una fila en `tenants` con `status=ACTIVE`, (b) hay una fila en `tenant_configs` con `tenant_id=tenants.id`, (c) hay una fila en `audit_logs` con `action=TENANT_CREATED`, `entity_type=TENANT`, `entity_id=tenant.id`, `tenant_id=tenant.id`, `actor_user_id=super_admin.id`, `actor_ip="127.0.0.1"`, y `changes` contiene los cinco `diff`. [R1.1, R2.1, R2.4, D5]
+- [x] 2.6 Test de integración (concurrencia / R-2): sembrar la BD con un tenant de nombre `T`; lanzar `CreateTenantUseCase` con el mismo `name="T"` y `actor_user_id=super_admin.id`; debe terminar en `TenantAlreadyExistsError` y NO dejar una segunda fila en `tenants` ni una segunda fila de auditoría con `action=TENANT_CREATED` para `name="T"`. El test de concurrencia de dos corutinas se cubre en la sección N con dos requests simultáneos al router. [R1.2, R-2]
 
 ## 3. Platform module — `CreateUserInTenantUseCase` (validate tenant, delegate)
 
@@ -115,3 +115,34 @@
   after the failed `add`; the `db_session` fixture in this suite is transactional, and
   without the commit the rollback wipes the seed. Both are intentional and the
   docstring records why.
+- `CreateTenantUseCase.__init__` declares `configs` even though `execute()` never calls
+  it; section 4 will wire `get_create_tenant_use_case` to inject
+  `SqlAlchemyTenantConfigRepository` for the GET path, and re-declaring the constructor
+  signature now would break that wiring.
+- `TenantAlreadyExistsError` is re-exported from `backend/app/platform/domain/exceptions.py`
+  (`from app.tenants.domain.exceptions import TenantAlreadyExistsError`); section 4's
+  `register_platform_error_handlers` imports it from there, so the platform module has
+  one canonical location. The exception class itself stays in `tenants/domain/` because
+  `TenantRepository.add` raises it (R-2, section 1's decision).
+- `_AuditWriter` from `app.auth.application.user_admin` is used (not the `AuditLogFactory`
+  directly) so the chokepoint that enforces `action`/`entity_type`/`changes`/`now`
+  contracts runs the same path `CreateUserUseCase` does. The audit row is built with
+  `tenant_id=tenant.id` (the NEW tenant's id, never the actor's) — design D5 requires
+  this for the `SUPER_ADMIN` actor because its session is unmarked and the global
+  tenant filter cannot supply `audit_logs.tenant_id` from the session.
+- The unit tests use fakes for all four ports (`_FakeTenantRepository`,
+  `_FakeTenantConfigRepository`, `_FakeAuditLogRepository`, `_FakeUnitOfWork`). They
+  record calls, not state, and the assertions check `tenant_repo.add_called_with`,
+  `audit_repo.entries`, `uow.commits`. The `_FakeTenantConfigRepository`'s `get_or_create`
+  is a guard: it raises `AssertionError` if `execute()` ever reaches for it, so a future
+  drift (e.g. someone adding a "load existing config" call) fails loudly in tests rather
+  than silently passing.
+- The 2.6 integration test (`test_create_use_case_with_duplicate_name_raises_and_writes_nothing`)
+  calls `await db_session.rollback()` after the second `execute()` raises
+  `TenantAlreadyExistsError`. Without it the session is in `PendingRollbackError` state
+  and the subsequent `select(TenantModel)...` query fails. Same pattern as the section-1
+  test the implementation notes already cite.
+- The 2.5 integration test seeds the `SUPER_ADMIN` actor inline (via `UserModel` with
+  `tenant_id=None`) because `tests/auth/conftest.py` does not yet have a `super_admin`
+  fixture; section 5 will add one and the 2.5 test can stop carrying that helper. Until
+  then the row satisfies `audit_logs.actor_user_id`'s FK.
