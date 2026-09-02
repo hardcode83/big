@@ -182,8 +182,11 @@ def test_what_this_guard_does_not_catch() -> None:
 
     Every item is a shape that exists in the tree today or that defeated an earlier version of
     a sibling guard — not a list of good intentions. **Every count below was recounted against
-    the tree on 2026-08-31, not carried forward**: the previous version of this docstring said
-    "36 blocks" and "about sixteen", and both had gone stale.
+    the tree, never carried forward**: the previous version of this docstring said "36 blocks"
+    and "about sixteen", and both had gone stale. The baseline pass was 2026-08-31; **each item
+    that a later round re-measured carries its own date**, and that per-item date is the
+    authoritative one — a single date on this paragraph would be the same stale-header defect the
+    counts themselves exist to prevent.
 
     1. **Paraphrase.** An attribution with none of the ownership vocabulary ("esta capability
        estrena la columna", "desde aquí se rellena") is invisible. The axis is a vocabulary,
@@ -205,15 +208,36 @@ def test_what_this_guard_does_not_catch() -> None:
        (`security.md`): out of scope by that proposal's decision, and named here rather than
        left for the green to imply.
     5. **The out-of-census trees and the declared exceptions of `SCOPE`**, and the magnitude is
-       worth stating rather than implying. Recounted 2026-08-31: `sdd/changes/` holds **38
-       blocks that fire both axes**, and **all thirty-eight are frozen under `archive/`** —
-       including `2026-08-01-user-management/proposal.md`, which still carries verbatim the
-       "primer escritor real de `audit_logs`" sentence the sweep removed from
-       `sdd/specs/user-management.md`. The exclusion is right (a change record is the same
+       worth stating rather than implying. The figure the concession rests on is the **frozen**
+       half of `sdd/changes/`: recounted 2026-09-02, `sdd/changes/archive/` holds **38 blocks
+       that fire both axes** — including `2026-08-01-user-management/proposal.md`, which still
+       carries verbatim the "primer escritor real de `audit_logs`" sentence the sweep removed
+       from `sdd/specs/user-management.md`. The exclusion is right (a change record is the same
        document before and after the `mv`), but it means the largest prose corpus in the
        repository is exempt from the thesis that prose cannot be made to stay true. That is a
        measured concession, not a formality. `docs/adr/` holds **0**, as it did when it was
        excluded: immutability is its whole motive, not a block count.
+
+       **The total over all of `sdd/changes/` is deliberately not the number quoted here, and
+       the reason is a defect this docstring itself committed.** The tree also holds the registry
+       of every change still in flight, and a change writes into its own registry until the day
+       it is archived — so the total moves under whoever quotes it. An earlier version of this
+       item said `sdd/changes/` held 38 blocks and that "all thirty-eight are frozen under
+       `archive/`"; both halves were true when written and the second was falsified **by this
+       very change**, which then pasted the offending output of its own R4.2 probes into
+       `sdd/changes/rule11-guard-trigger-and-scope/tasks.md` and took the total to 41. Quoting
+       the frozen subtree is not a smaller claim: it is the only half the argument for the
+       exclusion ever used, and no **edit** to the live tree moves it.
+
+       **What does move it is the `mv` itself, and that has an owner rather than a promise.** The
+       `mv` freezes what each archived document *says*; it does not freeze how many documents
+       there are. So archiving this very change will carry its 3 live blocks into
+       `sdd/changes/archive/` and take this figure to 41 — and nothing would go red, because no
+       test anchors it (the only anchored count in this module is the four meta-only offenders
+       above). Re-measuring it is therefore assigned to `/sdd:archive` in task 7.7 of
+       `sdd/changes/rule11-guard-trigger-and-scope/tasks.md`, alongside the two roadmap citations
+       it already owes. A count over a growing corpus needs a named owner for the next growth, not
+       a claim of permanence: that claim is what went stale twice here already.
     5b. **The roadmap trees**, `sdd/roadmap.md` and `sdd/roadmap/**`, excluded by this change.
        Measured cost 2026-08-31: **0 blocks** fire both axes across the eighty-six documents of
        that tree — **1** did before the sink axis lost its meta-vocabulary, and that one was
@@ -225,8 +249,10 @@ def test_what_this_guard_does_not_catch() -> None:
 
        **And it costs more than the two exclusions it sits beside, which is worth saying plainly
        rather than leaving to the analogy.** `docs/adr/` is immutable by convention and
-       `sdd/changes/archive/` is frozen by the `mv`, so what they exempt stops changing. Roadmap
-       notes do not: they are edited after the work they describe has shipped. So an attribution
+       `sdd/changes/archive/` is frozen by the `mv`, so what they exempt stops being **rewritten**
+       — the corpus still grows with each `mv`, which is why item 5's figure has an owner rather
+       than a permanence claim. Roadmap notes are the case neither of those covers: they are
+       edited after the work they describe has shipped. So an attribution
        written into `sdd/roadmap/<x>.md` — "`audit_logs.changes` la heredará esta entrada: será su
        primer escritor vivo" — fires both axes when scanned and is exempt **permanently**,
        including after that writer becomes real, which is exactly the "quién heredará" case rule

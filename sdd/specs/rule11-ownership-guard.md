@@ -193,6 +193,19 @@ podrá comprobar que se cumplió.
   prosa, y otro cuyo diff sea sólo `backend/**`. En el de sola prosa, `backend-tests-suite` sale
   `skipped` y este check **no** — que es exactamente el defecto que esta capacidad corrige, así que
   conviene anotarlo junto a los ids y no darlo por sabido.
+
+  **Y la PR del propio change no puede dar ninguno de los dos ids, así que la obligación nombra el
+  vehículo en vez de dejarlo al lector.** El diff de una PR es `base...head`, que es lo que mide
+  `backend-tests.yml` para decidir el área; y una PR que altere el gatillo, el alcance o el eje de
+  este guardián toca siempre `scripts/` y casi siempre `sdd/**` y `backend/**` a la vez, así que su
+  diff no es «sólo prosa» ni «sólo `backend/**`» por construcción. Los dos ids se toman de **dos
+  Pull Requests desechables de un solo commit cuya base es la rama de la PR principal**, no `main`:
+  así el diff de cada una es exactamente su commit —una que toque sólo `sdd/**` o `docs/**`, otra
+  que toque sólo `backend/**`—, su head arrastra ya el workflow, y `backend-tests-detect` evalúa ese
+  mismo diff, que es lo que hace **cierta** la anotación de `backend-tests-suite` `skipped`. Se
+  cierran tras registrar los ids. Medir el diff del *push* que provoca un `synchronize` sobre la PR
+  principal no vale: el área que `backend-tests` resuelve sigue siendo la del diff completo de la
+  PR, así que el contraste que este punto manda anotar no se observaría.
 - **El check en rojo por cada forma que dice cazar.** Un commit temporal con un bloque infractor en
   markdown y otro en un docstring o tirada de `#`, el id de run con el check en rojo, y el verde al
   revertirlo. Que la *función* y el *binario* los cazan se prueba en local con las meta-pruebas y con
@@ -211,8 +224,16 @@ podrá comprobar que se cumplió.
   cubre, y es el motivo de que este punto siga siendo obligación de una persona: GitHub **no**
   re-dispara `pull_request` cuando se mueve la **base**, así que una PR cuyo último evento precede a
   un avance de `main` arrastra un verde caducado. De ahí que el id que se registra deba ser de un run
-  **posterior** a la última fusión de `main` en la rama — es decir, del que provoca `/sdd:ship` al
-  sincronizar la base, o de uno forzado después a propósito.
+  **posterior** a la última fusión de `main` en la rama, y sólo hay una forma de conseguirlo: **un
+  evento nuevo del head** —el push con el que `/sdd:ship` sincroniza la base, o un commit vacío
+  después—, porque es lo único que produce **un run nuevo cuyo `github.sha` es el merge commit
+  calculado contra la base de ahora**. (GitHub sí recompone el test-merge cuando la base se mueve;
+  lo que no hace es lanzar un run que lo mida, y es el run lo que aquí se registra.)
+  **Un re-run no vale**:
+  reutiliza el `github.sha` y el payload del evento original, así que `actions/checkout` vuelve al
+  merge ref viejo (cuando GitHub no lo ha dejado ya inalcanzable). **Un `workflow_dispatch` tampoco**:
+  corre sobre el ref de la rama y no sobre `refs/pull/<n>/merge`, es decir mide la rama sola, que es
+  justamente lo que este punto prohíbe.
 
 Y una distinción que no conviene perder, porque confundirla ya descargó un requisito por el camino
 equivocado: las vías de **fallo cerrado** del binario (alcance vacío, árbol ausente, fichero

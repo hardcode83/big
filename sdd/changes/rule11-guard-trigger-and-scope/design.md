@@ -151,9 +151,12 @@ nombre del check run sale del *job*, no del workflow — y **ninguna detección 
 R1.1 pide que el guardián corra cuando el diff toque cualquier ruta que escanea; correr siempre
 lo satisface trivialmente y por construcción. Y es lo correcto aquí por un motivo que no es
 sólo comodidad: un gate de área es **un segundo sitio donde equivocarse sobre el alcance**, que
-es literalmente el defecto que este change arregla. El escaneo tarda ~1 s sobre 969 ficheros, así
-que los tres jobs de `backend-tests.yml` no se pagan — el mismo razonamiento que
-`api-contract.yml` y `compose-ports.yml` escriben en su cabecera.
+es literalmente el defecto que este change arregla. El escaneo tarda ~1 s sobre los **895** ficheros
+que recorre —95 markdown + 800 python, medidos sobre el árbol que se entrega el 2026-09-02; los 969
+que decía esta frase eran el corpus **anterior** al change, cuando el alcance aún incluía lo que D4
+reordena—, así que los tres jobs de `backend-tests.yml` no se pagan; el mismo razonamiento que
+`api-contract.yml` y `compose-ports.yml` escriben en su cabecera, y la cifra de orden de magnitud
+(«~900») que la del propio workflow ya usa.
 
 `push: branches: [main]` no es decorativo: es lo que habría puesto en rojo el run 33409418091,
 donde `backend-tests-suite` salió `skipped` sobre el commit `f86a83f` que introdujo los tres
@@ -345,9 +348,25 @@ reducción pequeña y real de su superficie de lectura.
 (`test_the_scan_catches_what_it_claims_to` cubre markdown, docstring y tirada de `#`), así que
 lo que R4 aporta de nuevo es probar que **el check run** se pone rojo. El plan:
 
-1. **R4.1 — las dos formas de diff.** Los dos runs se toman de **eventos `pull_request` sobre la
-   PR ya abierta**, uno por cada forma de diff (sólo prosa y sólo `backend/**`), y se registran
-   sus ids en `tasks.md`.
+1. **R4.1 — las dos formas de diff.** Los dos runs se toman de **dos Pull Requests desechables de
+   un solo commit cuya base es la rama de este change** —una que toque sólo prosa, otra que toque
+   sólo `backend/**`—, y se registran sus ids en el § «Registro de evidencia sobre la PR» del
+   `tasks.md`.
+
+   > **Corregido por segunda vez en review (2026-09-02), y esta vez por medición del mecanismo.**
+   > El paso decía que los dos runs se tomaban de «eventos `pull_request` sobre la PR ya abierta,
+   > uno por cada forma de diff». Eso no es alcanzable: el diff de una PR es `base...head`, que es
+   > lo que `backend-tests.yml` mide para resolver el área, y la PR de este change toca `sdd/**`,
+   > `scripts/`, `Makefile`, `docker-compose.yml` y `backend/tests/**` a la vez — nunca es «sólo
+   > prosa» ni «sólo `backend/**`», y ninguna PR que altere el gatillo, el alcance o el eje puede
+   > serlo, porque siempre toca `scripts/`. Leerlo como «el diff del *push* que provoca el
+   > `synchronize`» sí permite rellenar las filas, pero entonces la anotación que la obligación
+   > manda escribir —que `backend-tests-suite` sale `skipped` y este check no— es **falsa**, porque
+   > `backend-tests-detect` sigue evaluando el diff completo de la PR. De ahí el vehículo: dos PR de
+   > un solo commit con base en la rama, cuyo head ya arrastra el workflow, donde el diff de cada
+   > una **es** su commit y el contraste se observa de verdad. Se cierran tras registrar los ids.
+   > El mecanismo vive en `sdd/specs/rule11-ownership-guard.md` § «Obligaciones sobre la Pull
+   > Request abierta, antes del merge», que es su home; aquí sólo consta la decisión.
 
    > **Corregido en review (2026-09-01), y era un error de este design y no del `tasks.md`.**
    > Este paso decía «basta un push a la rama … la rama de este change produce los dos de forma
@@ -437,8 +456,9 @@ Rejected:
 | Spec | `sdd/specs/rule11-ownership-guard.md` | **Nueva** (D8): gatillo, check run, fallo cerrado, vía local, estado del check, y la decisión de D6 sobre miembro de enum vs columna |
 | Autoridad | `sdd/steering/security.md` | § regla 11: la línea 126 (qué recorre) y la 128 (qué excluye, sus excepciones) se reescriben contra `SCOPE`; se nombra el check run y se cita la spec nueva. **Los cuatro recuentos de la cabecera se recuentan contra la tabla** (R5.3) |
 | Docs | `sdd/project.md` | La vía local `make check-rule11-ownership` en § Commands |
+| Docs | `README.md` | Una línea en el bloque de comandos con el target nuevo, junto a `check-compose-ports` y `check-version-parity`. Lo pide `sdd/steering/documentation.md` § «README raíz al día por change» («si el change añade un módulo/servicio, **comando de Makefile**, o cambia la estructura de carpetas → actualizar … el README»), y su tarea es la 5.5. *(Fila añadida en review el 2026-09-02: el fichero estaba en el diff y esta sección no lo listaba, rompiendo su propia cláusula de completitud.)* |
 | Refs | `sdd/specs/incident-photos.md`, `backend/tests/cli/test_demo_reset.py` (×2), `backend/tests/notifications/test_writer_census.py` | Cuatro citas de la ruta vieja, todas en prosa y ninguna funcional: apuntan al nuevo camino. Los archivos bajo `sdd/changes/archive/` **no se tocan** (inmutables) |
-| Specs | `sdd/specs/local-environment.md` | Dos recuentos que el target nuevo falsea (tarea 4.4). **Y un tercero fuera de alcance**, aceptado: la frase de las tareas periódicas decía ocho y son nueve. No lo pide ningún R# ni D# —el change no falsea ese número—, se corrigió al pasar por allí y se recontó contra `backend/app/scheduler/schedule.py` (`CADENCES` 8 + `DAILY_JOBS` 1); queda anotado aquí para que ningún fichero del diff quede sin referente |
+| Specs | `sdd/specs/local-environment.md` | Dos recuentos que el target nuevo falsea (tarea 4.4). **Y dos correcciones más, ajenas a este change**, aceptadas y anotadas aquí para que ningún cambio del diff quede sin referente — a ninguna la pide un R# o un D#, porque el change no falsea ninguno de los dos números: (a) la frase de las tareas periódicas decía ocho y son **nueve**, recontadas contra `backend/app/scheduler/schedule.py` (`CADENCES` 8 + `DAILY_JOBS` 1); (b) «los diez targets que invocan `docker compose`» son **once**, recontados contra el `Makefile` — el que faltaba es `check-frontend-build`, y el desvío quedó escrito en la tarea 4.4 (`tasks.md:281-287`). *(Esta celda decía «un tercero» y eran dos: lo levantó el panel de review del 2026-09-02, y la corrección es del mismo tipo que las que enumera.)* |
 | Roadmap | `sdd/roadmap.md` | **Sólo la entrada de registro de `/sdd:new`** (la del propio change y el `needs:` que declara que `guest-portal-messaging` lo necesita). Ningún estado derivado: la regla 1 del toolkit reserva a `/sdd:archive` el tick y todo lo que `/sdd:status` deduce. **Corregido en review (2026-09-01)**: esta fila decía «no lo toca este change», y el diff lo toca — el registro entró dentro del commit de implementación `d05cca6` en vez de quedarse en el de bootstrap, que es lo que hizo la afirmación falsa |
 
 ## Data & interfaces
@@ -482,32 +502,12 @@ Sin esquema, sin migración, sin endpoint, sin variable de entorno, sin string d
 
 ## Roadmap candidates
 
-Cuatro seguimientos levantados por el panel de review el 2026-09-01, ninguno bloqueante y ninguno
-en alcance de este change. Se registran aquí para que `/sdd:archive` los promueva.
+**Seis** seguimientos, recontados contra las viñetas de abajo al escribir esta frase (R5.3):
+cuatro los levantó el panel de review del 2026-09-01 y dos el del 2026-09-02. Ninguno es
+bloqueante y ninguno está en alcance de este change. Se registran aquí para que `/sdd:archive` los
+promueva.
 
-- **Generalizar el guardián del gatillo a los workflows hermanos.** `compose-ports.yml` y
-  `api-contract.yml` declaran el mismo invariante en sus propias cabeceras y su bloque `on:` es
-  **idéntico carácter por carácter** al de `rule11-ownership.yml`, pero nada fija su forma: un
-  `paths:` añadido a cualquiera de los dos reintroduce esta misma clase de defecto sin que nada se
-  ponga en rojo. La forma natural es una tabla de `(ruta, forma esperada)` recorrida por la prueba
-  que ya existe. *(Se aplazó primero con el motivo de que los disparadores de `api-contract.yml`
-  podían diferir; el panel leyó el fichero y no difieren, así que ese motivo era falso y el
-  candidato cubre a los dos hermanos por igual.)*
-- **Dar mecanismo a la comprobación de la base fusionada (R3.1).** Hoy es obligación declarada con
-  su acta en el registro de evidencia. Cubre parcialmente el automatismo —`actions/checkout` mide
-  el *merge ref* en cada evento de la PR, y `push: branches: [main]` mide después del merge—, pero
-  GitHub no re-dispara `pull_request` cuando la base avanza, así que queda una ventana de verde
-  caducado. Su sitio natural es un paso de `/sdd:ship` o de `/sdd:archive` del toolkit, no este
-  árbol.
-- **Atar `SINK_TERMS` a la tabla del censo.** Una columna que la tabla gobierna y la tupla no
-  recoge es invisible, y ya pasó una vez con `revenue-pricing`. Está declarado como residual 3;
-  al irse el meta-vocabulario ese punto ciego perdió su red accidental, así que el paso mecánico
-  siguiente es una prueba que difunda las columnas de la tabla contra la tupla.
-- **Comentario recíproco en `compose-ports.yml`.** Su paso `pytest scripts/ -q` sin filtrar es hoy
-  el respaldo que mantiene vivo al guardián del gatillo si alguien estrecha el disparador de
-  `rule11-ownership.yml`. Esa dependencia sólo está escrita en un sentido, así que quien acote esa
-  invocación por velocidad —una limpieza local perfectamente razonable— no vería que retira el
-  único camino redundante.
+El primero es el que los demás presuponen, así que va primero.
 
 - **Anclar D2 con una prueba, por el flujo de eventos de `yaml.parse`.** Es el hueco que las
   cuatro versiones retiradas no cerraron, y sigue abierto: un `paths:` o una puerta de área añadidos
@@ -519,6 +519,34 @@ en alcance de este change. Se registran aquí para que `/sdd:archive` los promue
   `safe_load` normaliza. **Y una advertencia de secuencia**: no generalizar el ancla a
   `compose-ports.yml` ni a `api-contract.yml` hasta que esté cerrada, o propaga el hueco a tres
   ficheros en vez de uno.
+- **Extender ese ancla, una vez exista, a los workflows hermanos.** `compose-ports.yml` y
+  `api-contract.yml` declaran el mismo invariante en sus propias cabeceras y su bloque `on:` es
+  **idéntico carácter por carácter** al de `rule11-ownership.yml`, pero nada fija su forma: un
+  `paths:` añadido a cualquiera de los dos reintroduce esta misma clase de defecto sin que nada se
+  ponga en rojo. La forma natural es una tabla de `(ruta, forma esperada)`. **No hay hoy ninguna
+  prueba que extender** —la que existió se retiró entera en `b7773ee`, ver D2—, así que este
+  candidato **depende del anterior** y no se puede empezar por él; la advertencia de secuencia de
+  arriba es exactamente esta. *(Se aplazó primero con el motivo de que los disparadores de
+  `api-contract.yml` podían diferir; el panel leyó el fichero y no difieren, así que ese motivo era
+  falso y el candidato cubre a los dos hermanos por igual.)*
+- **Dar mecanismo a la comprobación de la base fusionada (R3.1).** Hoy es obligación declarada con
+  su acta en el registro de evidencia. Cubre parcialmente el automatismo —`actions/checkout` mide
+  el *merge ref* en cada evento de la PR, y `push: branches: [main]` mide después del merge—, pero
+  GitHub no re-dispara `pull_request` cuando la base avanza, así que queda una ventana de verde
+  caducado. Su sitio natural es un paso de `/sdd:ship` o de `/sdd:archive` del toolkit, no este
+  árbol.
+- **Atar `SINK_TERMS` a la tabla del censo.** Una columna que la tabla gobierna y la tupla no
+  recoge es invisible, y ya pasó una vez con `revenue-pricing`. Está declarado como residual 3;
+  al irse el meta-vocabulario ese punto ciego perdió su red accidental, así que el paso mecánico
+  siguiente es una prueba que difunda las columnas de la tabla contra la tupla.
+- **Comentario recíproco en `compose-ports.yml`.** Su paso `pytest scripts/ -q` sin filtrar es hoy
+  el **segundo camino que ejecuta las meta-pruebas de esta guardia**
+  (`scripts/test_rule11_ownership.py`), además del paso propio de `rule11-ownership.yml`. Esa
+  dependencia sólo está escrita en un sentido, así que quien acote esa invocación por velocidad
+  —una limpieza local perfectamente razonable— no vería que retira el único camino redundante.
+  *(La redacción anterior decía que ese glob «mantiene vivo al guardián del gatillo»; ese guardián
+  se retiró entero en `b7773ee` y esa dependencia no existe. Lo que el glob sostiene son las
+  meta-pruebas, que sí existen y sí se recogen ahí: `pytest scripts/ -q` son 247 tests.)*
 - **Declarar el idioma de registro de cada superficie en `sdd/project.md` § Conventions.** Coste: una
   línea. § Conventions cubre hoy los mensajes del backend y las strings de UI, y no dice nada de
   `scripts/` ni de `.github/workflows/`, así que cada script nuevo elige idioma imitando al fichero
@@ -529,11 +557,31 @@ en alcance de este change. Se registran aquí para que `/sdd:archive` los promue
 
 ## Risks & mitigations
 
-- **La cifra del residual 5 está desfasada, y se descubrió al medir.** Dice «`sdd/changes/`
-  holds **36 blocks that fire both axes**»; medido el 2026-08-31 son **49** con el eje actual y
+- **La cifra del residual 5 está desfasada, y se descubrió al medir.** Decía «`sdd/changes/`
+  holds **36 blocks that fire both axes**»; medido el 2026-08-31 son **49** con el eje viejo y
   **38** con el de D3. Mitigación: se recuenta contra la fuente al escribirlo, no se incrementa
   —la obligación que R5.3 impone a la cabecera de la regla 11 vale igual aquí—, y se re-mide en
   el momento de implementar, porque el número depende del árbol.
+
+  **Y recontar no bastó: la mitigación tuvo que cambiar de forma, no de numeral.** El panel del
+  2026-09-02 midió que el residual, ya recontado a 38, volvía a ser falso — decía «38 en
+  `sdd/changes/`, y los treinta y ocho congelados bajo `archive/`», y a HEAD son **41**, con **3**
+  vivos: la salida de las sondas de R4.2 que la tarea 6.2a pegó en el `tasks.md` de este mismo
+  change. Es decir, **el change falsificó su propio recuento al escribir su propia evidencia**, que
+  es la patología de la que trata su tesis. Escribir 41 la habría reabierto en la edición
+  siguiente. Así que el residual pasa a citar el **subárbol congelado** —`sdd/changes/archive/`,
+  **38** bloques el 2026-09-02—, que es la única mitad en la que el argumento de la exclusión se
+  apoyó nunca y la única que ninguna **edición** del árbol vivo mueve.
+
+  **Y hasta ahí llega la forma; el resto necesitaba un dueño, que es la segunda mitad de la
+  lección.** El panel del 2026-09-02 midió también que el `mv` de `/sdd:archive` **hace crecer el
+  corpus** aunque congele lo que cada documento dice: al archivar este change, sus tres bloques de
+  R4.2 pasan a `archive/` y la cifra «congelada» se va a 41, sin que nada se ponga en rojo porque
+  ningún test la ancla. De modo que la re-medición queda **encargada a `/sdd:archive`** en la tarea
+  7.7, junto a las dos citas del roadmap que ya le debíamos. Lección general, en sus dos mitades:
+  un recuento sobre un árbol en el que el propio change escribe no se estabiliza recontándolo —hay
+  que cambiar qué se cuenta—, y un recuento sobre un corpus que crece necesita un dueño para el
+  crecimiento siguiente, no una afirmación de permanencia.
 - **El `pytest` del backend pierde el guardián** (coste declarado en D1). Mitigación: la vía
   local pasa a ser más barata que hoy y se documenta en dos sitios (spec nueva y
   `sdd/project.md`). Riesgo residual aceptado: un docstring infractor se ve en CI y no en la

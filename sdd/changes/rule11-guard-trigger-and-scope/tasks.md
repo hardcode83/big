@@ -450,8 +450,8 @@ rellena tras `/sdd:ship`, y luego `/sdd:review` recertifica con `mark-recertifie
 
 | Obligación | Requisito | Id de run | Base medida | Resultado |
 |---|---|---|---|---|
-| Diff de sola prosa (`sdd/**` o `docs/**`) | R4.1 | *pendiente* | — | — |
-| Diff de sólo `backend/**` | R4.1 | *pendiente* | — | — |
+| Diff de sola prosa (`sdd/**` o `docs/**`), en PR desechable con base en la rama | R4.1 | *pendiente* | — | — |
+| Diff de sólo `backend/**`, en PR desechable con base en la rama | R4.1 | *pendiente* | — | — |
 | Check en rojo por bloque en markdown | R4.2 | *pendiente* | — | — |
 | Check en rojo por bloque en docstring o tirada de `#` | R4.2 | *pendiente* | — | — |
 | Verde al revertir el bloque inyectado | R4.2 | *pendiente* | — | — |
@@ -465,14 +465,28 @@ re-dispara `pull_request` cuando la base avanza, así que el id sólo vale si es
 Anotar además, en el run de sola prosa, que `backend-tests-suite` sale `skipped` y este check **no**:
 es el defecto que este change corrige y conviene verlo escrito, no darlo por sabido.
 
+**Las dos primeras filas no se rellenan desde la PR de este change, y por eso dicen «PR desechable».**
+El diff de una PR es `base...head`, y el de esta toca `sdd/**`, `scripts/`, `Makefile`,
+`docker-compose.yml` y `backend/tests/**` a la vez: no es «sola prosa» ni «sólo `backend/**`» por
+construcción, así que esas dos filas serían inalcanzables si se midieran sobre ella. Se toman de dos
+Pull Requests de un solo commit **cuya base es la rama de este change**, no `main`, de modo que el
+diff de cada una es exactamente su commit y `backend-tests-detect` evalúa ese mismo diff — que es lo
+que hace cierta la anotación de `backend-tests-suite` `skipped`. Se cierran tras registrar los ids.
+El mecanismo y su motivo viven en `sdd/specs/rule11-ownership-guard.md` § «Obligaciones sobre la Pull
+Request abierta, antes del merge»; aquí sólo se registra el resultado. Lo levantó el panel de review
+del 2026-09-02, que midió que la lectura anterior no era satisfacible.
+
 ## 7. Verification
-**Ejecutado el 2026-08-31, cifras reales y no recordadas.** Las salidas largas se escribieron a
-fichero con marcador de fin: los pipes truncan y el filtro de `rtk` colapsa pytest a un falso
+**Cifras reales y no recordadas, y cada una fechada contra el árbol en que se midió.** La pasada
+original es del **2026-08-31**; las filas que las rondas de review volvieron a medir sobre el árbol
+que se entrega llevan su propia fecha en la celda, porque una cifra sin el árbol contra el que se
+contó no se puede distinguir de una heredada (R5.3). Las salidas largas se escribieron a fichero con
+marcador de fin: los pipes truncan y el filtro de `rtk` colapsa pytest a un falso
 «PASS (0) FAIL (0)».
 
 | | resultado |
 |---|---|
-| 7.1 `make check-rule11-ownership` | salida **0**, 95 markdown + 800 python, cero infractores |
+| 7.1 `make check-rule11-ownership` | salida **0**, 95 markdown + 800 python, cero infractores (**2026-09-02**) — el 2026-08-31, ya creadas las meta-pruebas, el árbol daba **94/801**, la salida que está pegada en la tarea **1.5** (`:115-116`); antes de crearlas, en la 1.4, eran 94/800, y el porqué del salto está escrito en `:82-84`. El censo se mueve con cada fichero que el propio change añade o borra —entró la spec nueva, salió el guardián viejo—, así que cada cifra va fechada |
 | 7.2 `pytest scripts/ -q` | **247 passed** (2026-09-02) — eran 246 en la pasada de run; la review añadió una prueba, la que ancla el coste declarado de D3. Llegó a 248 con el guardián del gatillo, retirado el 2026-09-02 (ver D2). Esta cifra se mueve con cada prueba nueva, así que va fechada |
 | 7.3 suite del backend | **9213 passed, 41 skipped** — contra la partida de **9218/41**, exactamente los 5 tests del fichero borrado |
 | 7.4 `check-compose-ports` · `check-version-parity` | **0** y **0** |
@@ -519,3 +533,13 @@ evidencia sobre la PR», arriba—, y sus ids no existen hasta que `/sdd:ship` a
 
   Las demás coincidencias del árbol son legítimas: una frase histórica en el docstring del fichero
   nuevo, los registros de este change, y `sdd/changes/archive/`, que es inmutable.
+
+  **Y un tercer encargo a `/sdd:archive`, del mismo tipo y por el mismo motivo** —lo levantaron el
+  architect y el qa en la ronda de review del 2026-09-02—: **re-medir la cifra del residual 5** de
+  `scripts/test_rule11_ownership.py`, que hoy dice **38 bloques bajo `sdd/changes/archive/`**
+  (medido el 2026-09-02). El `mv` de este change llevará allí sus **3** bloques de R4.2 —la salida
+  de sondas pegada en la tarea 6.2a, arriba— y la cifra pasará a **41**. Nadie se pondría en rojo:
+  ningún test ancla ese numeral, y el único recuento anclado del módulo es el de los cuatro
+  encajes meta-only. Así que el paso es: tras mover el directorio, re-correr el detector sobre
+  `sdd/changes/archive/**/*.md` y escribir la cifra que salga, **contándola y no incrementándola**
+  (R5.3). Es la consecuencia declarada de que el residual cite un corpus que crece.
