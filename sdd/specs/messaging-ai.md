@@ -7,9 +7,19 @@ mensajes, detecta el idioma, clasifica la intención con un puerto de IA propio,
 desde un catálogo cerrado de plantillas cuando está seguro, y entrega la conversación a una
 persona cuando no debe contestar. Es el único escritor de `conversations` y `messages`, y el
 primero de `NotificationType.GUEST_ESCALATION` y de los cuatro eventos de mensajería del
-timeline. Los mensajes entran por el panel o por la API: **no hay ingesta automática desde
-OTA** — eso llega con `beds24-messaging-adapter`, y `PMSMessagingPort` sigue siendo el puerto
-sin métodos que fijó [`pms-provider-resolution.md`](pms-provider-resolution.md).
+timeline. **No hay ingesta automática desde OTA** — eso llega con `beds24-messaging-adapter`,
+y `PMSMessagingPort` sigue siendo el puerto sin métodos que fijó
+[`pms-provider-resolution.md`](pms-provider-resolution.md).
+
+El pipeline tiene **dos puertas de entrada**, y es el mismo pipeline entero para las dos —no hay
+una segunda copia. La primera es `POST /api/v1/conversations/{id}/messages` (R7), donde un
+manager autenticado transcribe lo que le dijo el huésped. La segunda, desde
+[`guest-portal-messaging`](guest-portal-api.md), es anónima: el propio huésped escribe desde su
+token de estancia contra `POST /api/v1/guest/messages/{token}`, una ruta que este módulo no
+declara y cuyo contrato de autorización, límites y esquema vive en
+[`guest-portal-api.md`](guest-portal-api.md). Lo que sí es de aquí es el actor que el pipeline
+acepta en cada camino (R4) y el canal `PORTAL`, cuya conversación es una por estancia y la abre
+solo el primer mensaje del huésped (R1, R6, R7).
 
 ## Requirements
 
@@ -43,6 +53,19 @@ sin métodos que fijó [`pms-provider-resolution.md`](pms-provider-resolution.md
 - THE SYSTEM SHALL tratar `messages` como **append-only**: `Message` es un dataclass `frozen`
   y nada edita una fila después de escribirla. `Conversation` sí es mutable, porque tiene
   ciclo de vida.
+- THE SYSTEM SHALL garantizar **como mucho una** `Conversation` de canal `PORTAL` por estancia
+  —índice único parcial sobre `conversations (tenant_id, reservation_id) WHERE channel =
+  'PORTAL'`— y SHALL resolverla sin carrera: `ConversationRepository.ensure_portal(...)` hace
+  `INSERT … ON CONFLICT DO NOTHING` seguido de `SELECT`, de modo que el perdedor de dos mensajes
+  simultáneos del mismo huésped no aborta su transacción — bloquea, no inserta y lee la fila del
+  ganador, y los dos mensajes acaban en el mismo hilo. Ninguno de los dos métodos comitea: el
+  camino del portal comparte el `commit()` único de R4. `reservation_id` es obligatorio en la
+  firma —nunca `| None`— porque PostgreSQL no colisiona `NULL` contra `NULL` en un índice único,
+  así que la garantía depende de que el llamante nunca pase uno vacío.
+- THE SYSTEM SHALL exponer `ConversationRepository.find_portal(...)` como lectura pura —
+  devuelve la conversación de canal `PORTAL` de la estancia o `None`, y NEVER SHALL crearla: leer
+  no abre conversación. Filtra por `channel = PORTAL` además de por tenant, de modo que los
+  hilos `WHATSAPP` o `MANUAL` de la misma estancia no sean ni devueltos ni alcanzables desde ahí.
 
 ### R2 — Puerto `AIAdapter` y clasificación
 
@@ -110,7 +133,10 @@ sin métodos que fijó [`pms-provider-resolution.md`](pms-provider-resolution.md
   constante comprobada; `to_dict()` emite solo las presentes.
 - THE SYSTEM SHALL impedir la propagación: el `TimelineEvent` de un mensaje SHALL llevar
   título constante e identificadores en `metadata`, y NEVER SHALL copiar el contenido del
-  mensaje a `timeline_events` ni a `audit_logs.changes`.
+  mensaje a `timeline_events` ni a `audit_logs.changes`. La garantía es del `Message`, no del
+  camino de entrada: `test_free_text_sink_contract.py` la comprueba igual para un mensaje que
+  llega transcrito por un manager y para uno que escribe directamente el portador de un token
+  del portal (`guest-portal-messaging`).
 - THE SYSTEM SHALL rechazar un `content` de más de `MAX_MESSAGE_CONTENT_LENGTH` (4000
   caracteres) en la propia entidad, además de en el esquema Pydantic. `ASSUMPTION`: el número
   no está medido contra el canal real; `beds24-messaging-adapter` lo ajustará con datos. Son
@@ -123,7 +149,22 @@ sin métodos que fijó [`pms-provider-resolution.md`](pms-provider-resolution.md
 - WHEN se registra un mensaje con `sender_type = GUEST`, THE SYSTEM SHALL, en este orden:
   detectar su idioma, clasificar el intent con `AIAdapter`, persistir el mensaje con ambos y
   emitir `TimelineEvent(GUEST_MESSAGE_RECEIVED)`. La clasificación precede a la persistencia
-  porque `Message` es `frozen` y necesita `intent` e idioma en construcción.
+  porque `Message` es `frozen` y necesita `intent` e idioma en construcción. Este pipeline es
+  **el mismo, entero y sin una segunda copia**, tanto si el mensaje lo transcribe un manager
+  autenticado en `POST /conversations/{id}/messages` como si lo escribe directamente el
+  portador de un token en `POST /api/v1/guest/messages/{token}` — lo único que cambia entre
+  los dos caminos es el actor que lo dispara (ver más abajo).
+- THE SYSTEM SHALL identificar a quien dispara el pipeline con `InboundMessageActor` —value
+  object `frozen` de `messaging/domain/value_objects.py`, con `user_id: uuid.UUID | None`,
+  `token_hash: str | None` e `ip: str | None`—, y SHALL exigir en su construcción
+  **exactamente uno** de `user_id`/`token_hash`: ninguno de los dos a la vez, ninguno de los
+  dos ausente. `ProcessInboundGuestMessageUseCase.execute` y `IncidentReportingPort.report`
+  reciben este actor en lugar del `actor_user_id: uuid.UUID` + `ip` que tenían antes de
+  `guest-portal-messaging` — el cambio es lo que le abre la puerta a un portador de token sin
+  ensanchar el pipeline a admitir un actor sin identidad. `IncidentReportingPort` (implementado
+  en `maintenance`) deriva de él el reportante del `Incident` (`reported_by_user_id` **o**
+  `reported_by_guest_token`), el actor del `AuditLog` (`actor_user_id` **o**
+  `actor_guest_token_hash`) y el `TimelineActorType` (`USER` **o** `GUEST`).
 - THE SYSTEM SHALL ejecutar todo el procesamiento de un mensaje entrante en **una sola
   transacción**, de modo que no quede el mensaje persistido sin evento de timeline ni la
   conversación escalada sin notificación. Desde fuera no hay estado intermedio observable.
@@ -218,9 +259,17 @@ sin métodos que fijó [`pms-provider-resolution.md`](pms-provider-resolution.md
 - THE SYSTEM SHALL declarar `OutboundMessagePort` en `messaging`, y los casos de uso SHALL
   depender de él y nunca de un adapter concreto.
 - THE SYSTEM SHALL registrar los adapters en un `dict` construido con antelación y visible,
-  no por despacho dinámico: `MANUAL` → `PanelOutboundAdapter`, `WHATSAPP` →
-  `MockWhatsAppAdapter`, `EMAIL` → `ConsoleEmailAdapter` (el que ya gobierna
-  `access-notifications`), `PHONE_TRANSCRIPT` → `InboundOnlyAdapter`.
+  no por despacho dinámico: `MANUAL` → `PanelOutboundAdapter`, `PORTAL` →
+  `PortalOutboundAdapter`, `WHATSAPP` → `MockWhatsAppAdapter`, `EMAIL` → `ConsoleEmailAdapter`
+  (el que ya gobierna `access-notifications`), `PHONE_TRANSCRIPT` → `InboundOnlyAdapter`.
+- THE SYSTEM SHALL tratar `PORTAL` como `MANUAL`: la entrega **es** la fila que ya se persistió,
+  así que `PortalOutboundAdapter.send` es un no-op que devuelve éxito — verdadero porque
+  `GET /api/v1/guest/messages/{token}` existe y es lo que el huésped lee (`guest-portal-api.md`),
+  igual que `PanelOutboundAdapter` es verdadero porque `GET /conversations/{id}/messages` existe
+  para el manager. Son dos clases y no una segunda entrada apuntando a `PanelOutboundAdapter`
+  porque cada una nombra el endpoint que sostiene su promesa, y son promesas distintas.
+- THE SYSTEM SHALL dejar `PORTAL` sin entrada en `contact_kind_for`: el portal no direcciona a
+  nadie, es el propio huésped quien vuelve a su página — misma ausencia que `MANUAL`.
 - IF el canal de la conversación es `AIRBNB_MSG` o `BOOKING_MSG`, THEN THE SYSTEM SHALL fallar
   con `PMSChannelUnavailableError`, y NEVER SHALL caer en silencio a consola. Esos dos canales
   no tienen entrada en el registro a propósito: existen solo a través de `PMSMessagingPort`.
@@ -264,6 +313,14 @@ sin métodos que fijó [`pms-provider-resolution.md`](pms-provider-resolution.md
   el `sender_type` del cuerpo, que es un `Literal`: con `"GUEST"` corre el pipeline completo;
   omitido, el llamante contesta él mismo y el `sender_type` se deriva de su rol. Cualquier otro
   valor SHALL ser `422` — un cliente no puede declarar que un mensaje lo escribió la IA.
+- THE SYSTEM NEVER SHALL admitir `POST /api/v1/conversations` con `channel = PORTAL`, y SHALL
+  rechazarlo con `MessagingValidationError` en el caso de uso —no en el esquema, porque «quién
+  puede abrir un hilo de portal» es una regla de negocio y `steering/backend-architecture.md`
+  no la deja vivir en `api/`. `PORTAL` es un miembro válido del enum desde R1/R6, así que sin
+  este rechazo la ruta lo aceptaría sin tocar nada, y crearía un hilo que el huésped vería en
+  su página sin haber escrito él mismo: el índice único de R1 no lo impide, porque solo prohíbe
+  el *segundo* hilo de portal de una estancia, no el primero. La única vía legítima para abrir
+  uno es el primer mensaje del propio huésped, vía `ensure_portal` (R1).
 - THE SYSTEM SHALL mantener `backend/openapi.json` y `frontend/lib/api/generated/openapi.d.ts`
   regenerados en el mismo PR — las dos mitades del puente que exige `steering/documentation.md`.
 
@@ -273,15 +330,34 @@ sin métodos que fijó [`pms-provider-resolution.md`](pms-provider-resolution.md
   transiciones, `Message` `frozen`), `enums.py` (los catorce intents, las siete razones de
   escalación), `escalation.py` (la política pura y su orden), `templates.py` (el catálogo
   cerrado), `value_objects.py` (`MessageMetadata`, `MessageClassification`, `GeneratedResponse`,
-  `ChannelSendResult`), `ports.py` (`AIAdapter`, `OutboundMessagePort`, `IncidentReportingPort`),
-  `repositories.py`, `language.py`, `notifications.py`, `exceptions.py`.
-- `backend/app/messaging/application/use_cases.py` — el pipeline del mensaje entrante y los
-  siete casos de uso de la bandeja.
+  `ChannelSendResult`, `InboundMessageActor`), `ports.py` (`AIAdapter`, `OutboundMessagePort`,
+  `IncidentReportingPort`), `repositories.py` (incluye `ensure_portal`/`find_portal`),
+  `language.py`, `notifications.py`, `exceptions.py`.
+- `backend/app/messaging/application/use_cases.py` — el pipeline del mensaje entrante, el
+  rechazo de `POST /conversations` con `channel = PORTAL`, y los siete casos de uso de la
+  bandeja.
+- `backend/app/messaging/application/portal.py` — `PostPortalGuestMessageUseCase` y
+  `ReadPortalThreadUseCase`, los implementadores de los dos puertos que declara
+  `guests/domain/portal_ports.py` (`guest-portal-api.md`): resuelven/crean la conversación
+  `PORTAL` y proyectan `Message` a lo que el huésped puede ver, sin instanciar `Message` ellos
+  mismos.
 - `backend/app/messaging/api/` — `router.py` (las siete rutas y sus permisos), `schemas.py`,
   `dependencies.py` (la única capa que conoce `messaging` y `maintenance` a la vez), `errors.py`.
 - `backend/app/messaging/infrastructure/` — `ai.py` (`MockAIAdapter`), `channels.py` (el
-  registro de canales), `repositories.py` (el `JOIN` que aísla `messages`), `models.py`.
+  registro de canales, incluido `PortalOutboundAdapter`), `repositories.py` (el `JOIN` que aísla
+  `messages`, y `ensure_portal`/`find_portal`), `models.py` (el índice único parcial de
+  `PORTAL`, declarado también aquí porque la suite construye su esquema con `create_all` y no
+  corre las migraciones).
+- `backend/alembic/versions/2b28c6b3f82a_guest_portal_messaging.py` — el miembro de enum
+  `PORTAL` (`ALTER TYPE … ADD VALUE` en `autocommit_block()`, porque un predicado de índice no
+  puede usar una etiqueta añadida en la misma transacción) y el índice único parcial de R1.
+  Re-encadenada tras el merge (commit `b9d21e0`) porque el PR #152 sincronizó su base antes de
+  que aterrizaran otros dos merges con migración propia (#146, #151), y `main` volvió a quedar
+  con dos cabezas; el id cambió de `80ea2e544b36` a este por la misma razón que la primera
+  re-cadena documentó: una BD de worktree ya sellada con el id viejo debe fallar alto, no
+  creerse en cabeza y saltarse en silencio el DDL de las otras dos ramas.
 - `backend/tests/messaging/` — incluye `test_tenant_isolation.py`,
-  `test_free_text_sink_contract.py`, `test_pipeline_atomicity.py` y `test_escalation.py`.
+  `test_free_text_sink_contract.py`, `test_pipeline_atomicity.py`, `test_escalation.py` y
+  `test_portal_use_cases.py`.
 - `docs/messaging-ai.md` — cómo se opera la capability.
 - `docs/diagrams/2026-08-16_autohost-flujo-mensaje-entrante.png` — el pipeline.

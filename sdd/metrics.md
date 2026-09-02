@@ -78,7 +78,7 @@
 | backend-pyright-tooling | run, review, ship, archive | 158509 | 357969 | 32089709 | 29.7672 | 2026-09-01 | 2026-09-01 |
 | blocked-transitions-web | new, design, tasks, run, review, ship, archive | 5840872 | 1000619 | 216249227 | 170.9211 | 2026-08-24 | 2026-08-29 |
 | frontend-auth-role-routing | new, design, tasks, run, review, ship, archive | 2901957 | 533239 | 111194635 | 83.4381 | 2026-08-27 | 2026-08-27 |
-| guest-portal-messaging | new, design, tasks, run, review, ship | 570697 | 1558467 | 368118623 | 231.8098 | 2026-08-29 | — |
+| guest-portal-messaging | new, design, tasks, run, review, ship, archive | 678030 | 1766192 | 471196075 | 261.3980 | 2026-08-29 | 2026-09-02 |
 | tech-app | new, design, tasks, run, review, ship, archive | 862707 | 2053252 | 395618497 | 307.6922 | 2026-08-19 | 2026-08-30 |
 | notification-writers-gap | new, design, tasks, run, review, ship, archive | 347258 | 1298780 | 286206103 | 183.4083 | 2026-08-29 | 2026-08-30 |
 | notifications-inbox-web | new, design, tasks, run, review, ship, archive | 462522 | 1377686 | 284998420 | 181.8444 | 2026-08-28 | 2026-08-29 |
