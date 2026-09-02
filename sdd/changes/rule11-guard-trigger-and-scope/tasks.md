@@ -450,12 +450,12 @@ rellena tras `/sdd:ship`, y luego `/sdd:review` recertifica con `mark-recertifie
 
 | Obligación | Requisito | Id de run | Base medida | Resultado |
 |---|---|---|---|---|
-| Diff de sola prosa (`sdd/**` o `docs/**`), en PR desechable con base en la rama | R4.1 | *pendiente* | — | — |
-| Diff de sólo `backend/**`, en PR desechable con base en la rama | R4.1 | *pendiente* | — | — |
-| Check en rojo por bloque en markdown | R4.2 | *pendiente* | — | — |
-| Check en rojo por bloque en docstring o tirada de `#` | R4.2 | *pendiente* | — | — |
-| Verde al revertir el bloque inyectado | R4.2 | *pendiente* | — | — |
-| Cero infractores sobre la base fusionada, en un run **posterior** a la última fusión de `main` | R3.1 | *pendiente* | *pendiente* | — |
+| Diff de sola prosa (`sdd/**` o `docs/**`), en PR desechable con base en la rama | R4.1 | [`33622941695`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33622941695) | — | **`rule11-ownership` pass en 19 s**, y en el mismo evento **`backend-tests-suite` `skipped`** — el contraste entero. PR sonda #149, commit `27c4533`, diff = `docs/__r4_probe.md` y nada más |
+| Diff de sólo `backend/**`, en PR desechable con base en la rama | R4.1 | [`33622993073`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33622993073) | — | **pass en 20 s.** PR sonda #150, commit `b784214`, diff = `backend/app/__r4_probe.py` y nada más; aquí `backend-tests-suite` sí corre, que es la vía que ya funcionaba antes del change |
+| Check en rojo por bloque en markdown | R4.2 | [`33623489251`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33623489251) | — | **fail en 12 s**, nombrando `docs/__r4_probe.md:16` y la frase `'sin escritor'`, `infractores: 1`, `Error 1` del `make`. Y en ese mismo run **`backend-tests-suite` salió `skipping`**: es el bloque que la superficie vieja no habría visto |
+| Check en rojo por bloque en docstring o tirada de `#` | R4.2 | [`33623440585`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33623440585) | — | **fail en 12 s**, las dos formas en un run: `backend/app/__r4_probe.py:19` con `'sin escritor'` (docstring) y `:22` con `'primer escritor'` (tirada de `#`), `infractores: 2` |
+| Verde al revertir el bloque inyectado | R4.2 | [`33623610089`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33623610089) | — | **pass en 21 s** sobre el revert `857e06a` de la sonda #149. El rojo era del bloque y no del entorno |
+| Cero infractores sobre la base fusionada, en un run **posterior** a la última fusión de `main` | R3.1 | [`33621908289`](https://github.com/autohostai-labs/AutoHostAI/actions/runs/33621908289) | `078339d3c87121dfc5ebbda828e293d0a4893af0` | **pass**, 98 markdown + 800 python, cero infractores. Evento `pull_request` sobre `headSha` `1578215`, que **contiene** el merge de sync de `main@078339d`; run creado a las 10:54:59Z, posterior a esa fusión, y `main` no se ha movido desde entonces (punta `078339d`, 06:10:13Z), así que el merge ref incluye la base actual |
 
 La columna **Base medida** lleva el SHA del commit de fusión de `main` sobre el que corrió ese
 run, y existe porque sin ella un id honesto y un id caducado son indistinguibles: GitHub no
@@ -463,7 +463,18 @@ re-dispara `pull_request` cuando la base avanza, así que el id sólo vale si es
 última fusión. En las filas que no miden la base fusionada va `—`.
 
 Anotar además, en el run de sola prosa, que `backend-tests-suite` sale `skipped` y este check **no**:
-es el defecto que este change corrige y conviene verlo escrito, no darlo por sabido.
+es el defecto que este change corrige y conviene verlo escrito, no darlo por sabido. **Anotado y
+observado dos veces**, en la fila 1 (verde) y en la fila 3 (rojo), y la segunda es la que cierra el
+argumento: un bloque infractor en `docs/**` puso el check en rojo **en el mismo run en que
+`backend-tests-suite` se saltaba**. Con la superficie vieja ese bloque no habría producido señal
+ninguna — que es literalmente lo que le pasó a `f86a83f` en el run 33409418091.
+
+**Las seis filas se cerraron el 2026-09-02**, con las dos PR sonda #149 y #150 abiertas contra esta
+rama y cerradas sin fusionar después de anotar los ids; sus ramas
+(`probe/rule11-r4-prose`, `probe/rule11-r4-backend`) se borraron. Los ficheros de sonda
+—`docs/__r4_probe.md` y `backend/app/__r4_probe.py`— **nunca estuvieron en esta rama** y no
+aparecen en el diff de la PR #148. Cada rojo se verificó primero con el binario en local y sólo
+después se empujó, para que el rojo de CI probara el check run y no un accidente del entorno.
 
 **Las dos primeras filas no se rellenan desde la PR de este change, y por eso dicen «PR desechable».**
 El diff de una PR es `base...head`, y el de esta toca `sdd/**`, `scripts/`, `Makefile`,
