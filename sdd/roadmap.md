@@ -206,7 +206,7 @@ Categorías:
 - [x] reservation-property-identity — [BE] **la lista de reservas identifica la vivienda con un UUID pelado**, porque `ReservationResponse` tiene 27 campos y de la propiedad solo `property_id`: sin nombre ni código interno. Mismo problema y misma forma que ya resolvieron `cleaner-task-context` y `tech-incident-context`. Descubierto analizando el export de Stitch … → changes/archive/2026-08-30-reservation-property-identity/
   needs: reservations, properties-crud · size: M · kind: feature
 - [ ] dashboard-operational-kpis — [BE] **las tres tarjetas de KPI del dashboard rediseñado** (limpiezas de hoy, próximos check-ins, incidencias abiertas con su desglose de urgentes): conteos a nivel de tenant que hoy no sirve ninguna ruta. Salió de `visual-restyle-workspace` D4, que censa los agregados existentes y por qué no llegan.
-  needs: dashboard-api, cleaning, maintenance, reservations · size: M · kind: feature
+  needs: dashboard-api, cleaning, maintenance, reservations · informs-from: visual-restyle-workspace · size: M · kind: feature
 - [ ] dashboard-occupancy-series — [BE] **la serie de ocupación semanal** del dashboard rediseñado: no existe ninguna serie temporal ni tasa de ocupación en el contrato. La decisión de entrada es qué cuenta como noche ocupada (reserva confirmada, bloqueo del propietario, fuera de servicio). Salió de `visual-restyle-workspace` D4.
   needs: dashboard-api, reservations · size: M · kind: feature
 - [ ] dashboard-activity-feed — [BE] **el feed de actividad cross-propiedad** del dashboard rediseñado: la lectura de timeline que ya existe, pero por tenant en vez de por propiedad. Ojo al radio de agregación que acota la regla 11 de `steering/security.md`. Salió de `visual-restyle-workspace` D4.

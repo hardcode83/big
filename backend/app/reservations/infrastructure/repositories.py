@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tenancy import CrossTenantWriteError
 from app.reservations.domain.entities import UPDATABLE_FIELDS, Reservation
+from app.reservations.domain.enums import ReservationStatus
 from app.reservations.domain.exceptions import DuplicateExternalReservationError
 from app.reservations.domain.repositories import Page, ReservationFilters
 from app.reservations.infrastructure.models import ReservationModel
@@ -177,6 +178,25 @@ class SqlAlchemyReservationRepository:
             )
             .values(**values)
         )
+
+    async def count_check_ins_in_range(
+        self, tenant_id: uuid.UUID, date_from: date, date_to: date
+    ) -> int:
+        total = await self._session.scalar(
+            select(func.count())
+            .select_from(ReservationModel)
+            .where(
+                ReservationModel.tenant_id == tenant_id,
+                ReservationModel.check_in_date >= date_from,
+                ReservationModel.check_in_date <= date_to,
+                ReservationModel.status.not_in(_EXCLUDED_CHECK_IN_STATUSES),
+            )
+        )
+        return int(total or 0)
+
+
+# `dashboard-operational-kpis` R2.2: a check-in that never happens is not "checking in".
+_EXCLUDED_CHECK_IN_STATUSES = (ReservationStatus.CANCELLED, ReservationStatus.NO_SHOW)
 
 
 def _conditions(tenant_id: uuid.UUID, filters: ReservationFilters) -> list:

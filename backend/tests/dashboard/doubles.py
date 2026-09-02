@@ -21,7 +21,11 @@ from app.cleaning.domain.value_objects import CleaningTaskSummary
 from app.guests.domain.value_objects import GuestSummary
 from app.guests.domain.enums import GuestDocumentStatus, LegalRegistrationStatus
 from app.maintenance.domain.enums import IncidentCategory, IncidentSeverity, OwnerApprovalRelatedType
-from app.maintenance.domain.value_objects import IncidentSummary, OwnerApprovalSummary
+from app.maintenance.domain.value_objects import (
+    IncidentSummary,
+    OpenIncidentCounts,
+    OwnerApprovalSummary,
+)
 from app.properties.domain.entities import Property
 from app.properties.domain.enums import PropertyOperationalState, PropertyStatus
 from app.properties.domain.repositories import Page as PropertyPage
@@ -136,6 +140,15 @@ class FakeReservationRepository:
             and item.check_out_date >= date_from
         ]
 
+    async def count_check_ins_in_range(self, tenant_id, date_from, date_to) -> int:
+        self.calls.append(("count_check_ins_in_range", tenant_id, date_from, date_to))
+        return sum(
+            1
+            for item in self.by_tenant.get(tenant_id, [])
+            if date_from <= item.check_in_date <= date_to
+            and item.status not in (ReservationStatus.CANCELLED, ReservationStatus.NO_SHOW)
+        )
+
 
 @dataclass
 class FakeGuestRepository:
@@ -161,11 +174,21 @@ class FakeCleaningRepository:
             item for item in self.by_tenant.get(tenant_id, []) if item.property_id in wanted
         ]
 
+    async def count_live_for_day(self, tenant_id, day: date) -> int:
+        self.calls.append(("count_live_for_day", tenant_id, day))
+        return len(self.by_tenant.get(tenant_id, []))
+
 
 @dataclass
 class FakeIncidentReader:
     counts: dict[uuid.UUID, dict[uuid.UUID, int]] = field(default_factory=dict)
     open_by_property: dict[uuid.UUID, list[IncidentSummary]] = field(default_factory=dict)
+    open_for_tenant: dict[uuid.UUID, OpenIncidentCounts] = field(default_factory=dict)
+    calls: list[tuple] = field(default_factory=list)
+
+    async def count_open_for_tenant(self, tenant_id) -> OpenIncidentCounts:
+        self.calls.append(("count_open_for_tenant", tenant_id))
+        return self.open_for_tenant.get(tenant_id, OpenIncidentCounts(total=0, urgent=0))
 
     async def count_open_for_properties(self, tenant_id, property_ids) -> dict[uuid.UUID, int]:
         wanted = set(property_ids)

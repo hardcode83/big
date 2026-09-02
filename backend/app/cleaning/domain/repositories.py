@@ -25,6 +25,7 @@ bare identifier, so no implementation of it can be written without the tenant.
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Protocol
 
 from app.cleaning.domain.entities import (
@@ -152,6 +153,21 @@ class CleaningTaskRepository(Protocol):
         per_page: int,
     ) -> Page:
         """Filtered, ordered and paginated. The order must be stable (`created_at`, `id`)."""
+        ...
+
+    async def count_live_for_day(self, tenant_id: uuid.UUID, day: date) -> int:
+        """How many tasks are live and scheduled for `day` (`dashboard-operational-kpis` R1).
+
+        Tenant-wide, not batched by property — unlike `list_live_for_properties`, whose
+        caller needs one status per property, this one answers "how many, in total" and has
+        no reason to enumerate properties first.
+
+        Same `LIVE_STATUSES` criterion as `list_live_for_properties`, and for the same
+        reason it is not a parameter: which statuses count as live is the domain's decision,
+        and letting a caller choose would put a second copy of it in the caller.
+
+        Returns `0`, never `None`, when nothing is scheduled for `day`.
+        """
         ...
 
 
