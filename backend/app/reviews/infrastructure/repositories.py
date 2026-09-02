@@ -23,7 +23,11 @@ from sqlalchemy.dialects.postgresql import JSONB  # noqa: F401  (kept for future
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tenancy import CrossTenantWriteError
-from app.reviews.domain.entities import Review, ReviewResponseDraft
+from app.reviews.domain.entities import (
+    Review,
+    ReviewResponseDraft,
+    _coerce_recurring_issues,
+)
 from app.reviews.domain.enums import (
     RecurringIssueTag,
     ReviewSentiment,
@@ -70,13 +74,12 @@ def _to_review(model: ReviewModel) -> Review:
 
     The schema accepts any `recurring_issues` JSONB value; the entity's `_coerce_...`
     is what gates the closed tag list. Re-running the coercer at the boundary is the
-    read-side half of the rule-11 guarantee (D7).
+    read-side half of the rule-11 guarantee (D7): a row that landed before the entity
+    guard existed, or one written by a writer that bypassed the type, would otherwise
+    raise `ValueError` here and blow the whole read instead of degrading to `OTHER`
+    with the warning D7 names. Reusing `_coerce_recurring_issues` keeps the read path
+    and the write path on the same degradation rule (R2.2, D7).
     """
-    recurring: list[RecurringIssueTag] | None = (
-        [RecurringIssueTag(value) for value in model.recurring_issues]
-        if model.recurring_issues is not None
-        else None
-    )
     return Review(
         id=model.id,
         tenant_id=model.tenant_id,
@@ -92,7 +95,7 @@ def _to_review(model: ReviewModel) -> Review:
         ai_summary=model.ai_summary,
         # The entity accepts a tuple; the coercer handles any list value the schema
         # would have stored, degrading unknown tags to `OTHER` with a warning.
-        recurring_issues=tuple(recurring) if recurring is not None else (),
+        recurring_issues=_coerce_recurring_issues(model.recurring_issues),
         status=model.status,
         published_at=model.published_at,
         created_at=model.created_at,
