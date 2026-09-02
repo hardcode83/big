@@ -28,15 +28,15 @@
 - [x] 2.5 Test de integración en `backend/tests/platform/test_use_cases.py` (mismo fichero, marcador `@pytest.mark.asyncio` y la fixture `db_session`): sembrar la BD vacía; ejecutar `CreateTenantUseCase(...).execute(...)` con `actor_user_id=super_admin.id`, `actor_ip="127.0.0.1"`, un nombre único y los cinco campos; verificar que (a) hay una fila en `tenants` con `status=ACTIVE`, (b) hay una fila en `tenant_configs` con `tenant_id=tenants.id`, (c) hay una fila en `audit_logs` con `action=TENANT_CREATED`, `entity_type=TENANT`, `entity_id=tenant.id`, `tenant_id=tenant.id`, `actor_user_id=super_admin.id`, `actor_ip="127.0.0.1"`, y `changes` contiene los cinco `diff`. [R1.1, R2.1, R2.4, D5]
 - [x] 2.6 Test de integración (concurrencia / R-2): sembrar la BD con un tenant de nombre `T`; lanzar `CreateTenantUseCase` con el mismo `name="T"` y `actor_user_id=super_admin.id`; debe terminar en `TenantAlreadyExistsError` y NO dejar una segunda fila en `tenants` ni una segunda fila de auditoría con `action=TENANT_CREATED` para `name="T"`. El test de concurrencia de dos corutinas se cubre en la sección N con dos requests simultáneos al router. [R1.2, R-2]
 
-## 3. Platform module — `CreateUserInTenantUseCase` (validate tenant, delegate)
+## 3. Platform module — `CreateUserInTenantUseCase` (validate tenant, delegate) <!-- panel: PASS 2026-09-02 -->
 
-- [ ] 3.1 Añadir `TenantNotActiveError` en `backend/app/platform/domain/exceptions.py`, mapeada a `404` (mismo trato que un tenant inexistente — R3.3). La clase `TenantAlreadyExistsError` ya está del paso 2.1. [R3.3, R3.4]
-- [ ] 3.2 Crear `backend/app/platform/application/use_cases.py::CreateUserInTenantUseCase` con `__init__(tenants, create_user: CreateUserUseCase)` (composición, no duplicación — D3). `execute(*, tenant_id, actor_user_id, actor_ip, command, now) -> CreatedUser`: (a) `tenant = await self._tenants.get(tenant_id)`; (b) si `tenant is None` o `tenant.status is not TenantStatus.ACTIVE`, lanzar `TenantNotActiveError` (404 indistinguible de inexistente); (c) delegar en `self._create_user.execute(tenant_id=tenant_id, actor_user_id=actor_user_id, actor_ip=actor_ip, command=command, now=now)` y devolver su `CreatedUser` tal cual. NO duplicar hashing, generación de password temporal, `must_change_password=True` ni el `ChangeSet` — `CreateUserUseCase` ya lo hace y la auditoría sale con `tenant_id=<path>` por la firma del parámetro (D5, R4.3). [R3.1, R3.3, R4.3, D3]
-- [ ] 3.3 Test unitario en `backend/tests/platform/test_use_cases.py`: con un `TenantRepository` fake que devuelve `None` para el `tenant_id`, `execute` lanza `TenantNotActiveError` y `create_user.execute` NO se llama. [R3.3]
-- [ ] 3.4 Test unitario: con un `TenantRepository` fake que devuelve un `Tenant(status=TenantStatus.SUSPENDED)`, `execute` lanza `TenantNotActiveError` y `create_user.execute` NO se llama. [R3.3]
-- [ ] 3.5 Test unitario: con un `TenantRepository` fake que devuelve un `Tenant(status=TenantStatus.ACTIVE)`, `execute` llama a `create_user.execute(tenant_id=<path>, actor_user_id=<actor>, actor_ip=<ip>, command=<cmd>, now=<now>)` y devuelve su `CreatedUser` sin tocar el resultado (incluida la contraseña temporal). [R3.1, R4.3]
-- [ ] 3.6 Test de integración en `backend/tests/platform/test_use_cases.py`: sembrar `tenant_a` (status ACTIVE) y un `super_admin` sin tenant; ejecutar `CreateUserInTenantUseCase(...).execute(tenant_id=tenant_a.id, ..., command=CreateUserCommand(name="...", email="...", role=UserRole.PROPERTY_MANAGER))`; verificar (a) hay una fila nueva en `users` con `tenant_id=tenant_a.id`, `role=PROPERTY_MANAGER`, `must_change_password=True`, `status=ACTIVE`; (b) hay una fila en `audit_logs` con `action=USER_CREATED`, `entity_type=USER`, `entity_id=<new_user.id>`, `tenant_id=tenant_a.id` (del path, no del actor — el actor es SUPER_ADMIN sin tenant), `actor_user_id=super_admin.id`, `actor_ip`, y `changes` con `email`, `role`, `password` (redactado a `{"changed": true}` por la regla 11 que ya aplica `CreateUserUseCase`). [R4.1, R4.3, D5]
-- [ ] 3.7 Test de integración con un tenant `SUSPENDED`: ejecutar el mismo flujo debe terminar en `TenantNotActiveError` y NO crear fila de `users` ni fila de `audit_logs` con `USER_CREATED`. [R3.3, R4.2]
+- [x] 3.1 Añadir `TenantNotActiveError` en `backend/app/platform/domain/exceptions.py`, mapeada a `404` (mismo trato que un tenant inexistente — R3.3). La clase `TenantAlreadyExistsError` ya está del paso 2.1. [R3.3, R3.4]
+- [x] 3.2 Crear `backend/app/platform/application/use_cases.py::CreateUserInTenantUseCase` con `__init__(tenants, create_user: CreateUserUseCase)` (composición, no duplicación — D3). `execute(*, tenant_id, actor_user_id, actor_ip, command, now) -> CreatedUser`: (a) `tenant = await self._tenants.get(tenant_id)`; (b) si `tenant is None` o `tenant.status is not TenantStatus.ACTIVE`, lanzar `TenantNotActiveError` (404 indistinguible de inexistente); (c) delegar en `self._create_user.execute(tenant_id=tenant_id, actor_user_id=actor_user_id, actor_ip=actor_ip, command=command, now=now)` y devolver su `CreatedUser` tal cual. NO duplicar hashing, generación de password temporal, `must_change_password=True` ni el `ChangeSet` — `CreateUserUseCase` ya lo hace y la auditoría sale con `tenant_id=<path>` por la firma del parámetro (D5, R4.3). [R3.1, R3.3, R4.3, D3]
+- [x] 3.3 Test unitario en `backend/tests/platform/test_use_cases.py`: con un `TenantRepository` fake que devuelve `None` para el `tenant_id`, `execute` lanza `TenantNotActiveError` y `create_user.execute` NO se llama. [R3.3]
+- [x] 3.4 Test unitario: con un `TenantRepository` fake que devuelve un `Tenant(status=TenantStatus.SUSPENDED)`, `execute` lanza `TenantNotActiveError` y `create_user.execute` NO se llama. [R3.3]
+- [x] 3.5 Test unitario: con un `TenantRepository` fake que devuelve un `Tenant(status=TenantStatus.ACTIVE)`, `execute` llama a `create_user.execute(tenant_id=<path>, actor_user_id=<actor>, actor_ip=<ip>, command=<cmd>, now=<now>)` y devuelve su `CreatedUser` sin tocar el resultado (incluida la contraseña temporal). [R3.1, R4.3]
+- [x] 3.6 Test de integración en `backend/tests/platform/test_use_cases.py`: sembrar `tenant_a` (status ACTIVE) y un `super_admin` sin tenant; ejecutar `CreateUserInTenantUseCase(...).execute(tenant_id=tenant_a.id, ..., command=CreateUserCommand(name="...", email="...", role=UserRole.PROPERTY_MANAGER))`; verificar (a) hay una fila nueva en `users` con `tenant_id=tenant_a.id`, `role=PROPERTY_MANAGER`, `must_change_password=True`, `status=ACTIVE`; (b) hay una fila en `audit_logs` con `action=USER_CREATED`, `entity_type=USER`, `entity_id=<new_user.id>`, `tenant_id=tenant_a.id` (del path, no del actor — el actor es SUPER_ADMIN sin tenant), `actor_user_id=super_admin.id`, `actor_ip`, y `changes` con `email`, `role`, `password` (redactado a `{"changed": true}` por la regla 11 que ya aplica `CreateUserUseCase`). [R4.1, R4.3, D5]
+- [x] 3.7 Test de integración con un tenant `SUSPENDED`: ejecutar el mismo flujo debe terminar en `TenantNotActiveError` y NO crear fila de `users` ni fila de `audit_logs` con `USER_CREATED`. [R3.3, R4.2]
 
 ## 4. Platform API — schemas, router, dependencies, errors, mounting
 
@@ -146,3 +146,37 @@
   `tenant_id=None`) because `tests/auth/conftest.py` does not yet have a `super_admin`
   fixture; section 5 will add one and the 2.5 test can stop carrying that helper. Until
   then the row satisfies `audit_logs.actor_user_id`'s FK.
+- `TenantNotActiveError` accepts an optional `tenant_id` for log diagnostics only; the
+  response never carries it (R3.3 wants the missing-vs-suspended case indistinguishable).
+  It inherits from `PlatformDomainError` so a future handler can match the family with one
+  clause; section 4's explicit mapping still wins today.
+- `CreateUserInTenantUseCase.__init__` takes the wrapped use case directly as
+  `create_user: CreateUserUseCase` (positional-or-keyword, no `*`), per the task's signature.
+  It does NOT take a `UnitOfWork`: the wrapped use case owns its own `commit()`, and
+  section 4's `get_create_user_in_tenant_use_case` injects the same `SqlAlchemyUnitOfWork`
+  the inner `CreateUserUseCase` receives so the per-request transaction is one commit, not
+  a nested `SAVEPOINT`. The wrapper's docstring records this so a future reader does not
+  "fix" the signature by adding a `uow` parameter.
+- The wrapper returns whatever `CreateUserUseCase.execute` returns, untouched — including
+  the `temporary_password`. The 3.5 unit test asserts identity (`result is create_user.return_value`)
+  to catch any future copy that would silently drop the one-time secret.
+- The section-3 fakes reuse the section-2 `_FakeTenantRepository`, extended with a
+  `get_return` / `get_calls` pair. `get_calls` lets the unit tests assert "yes, the wrapper
+  did look up the tenant before raising" without coupling to internal call counts. The
+  same fake is reused because the wrapper's view of the port is the same as section 2's:
+  `add` is unused (the wrapper never persists a tenant) and only the new `get` method
+  carries assertions.
+- `_FakeCreateUserUseCase` records the EXACT kwargs the wrapper forwarded — including
+  the `command` by identity, so the test catches a future "let me rebuild the command"
+  drift that would silently lose the `phone` or `preferred_language` fields.
+- The 3.6 and 3.7 integration tests reuse the inline `SUPER_ADMIN` pattern from the 2.5
+  test; section 5's `super_admin` fixture will let them drop the helper. The seeded
+  tenant in 3.6 is `TenantModel(...)` + `TenantConfigModel(...)` rather than the
+  `tests/auth/conftest.py::insert_tenant` helper, because the helper's `with_notification_config=True`
+  default already pins the two channel flags — the assertion only needs the `ACTIVE` row
+  to exist, and the helper would carry the same data either way. Using the raw models
+  keeps the test self-contained and readable.
+- The 3.6 integration test verifies `audit_row.changes["password"] == {"changed": True}`:
+  this is the redaction rule 11 of `steering/security.md`, applied by `CreateUserUseCase`,
+  reused verbatim. Section 4 does not need to redo this; the wrapper's only contract
+  is "delegate, do not edit".
