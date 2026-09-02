@@ -1,4 +1,4 @@
-"""The notifications a review produces (R6.2, design D9).
+"""The notifications a review produces (R6.2, design D9 of revenue-reviews).
 
 Pure builder, calqued on `app/maintenance/domain/notifications.py` and
 `app/messaging/domain/notifications.py`, so the **content** of what gets written is
@@ -8,10 +8,17 @@ fixed by `celery-jobs`: the body carries **ids and a type**, never the content o
 row. Nothing here reads the reviewer's `content`, the `ai_summary`, or the draft text.
 
 **No `sla_deadline_at` on purpose** (D9): R6.2 says "notificación", not "notificación con
-plazo". `escalation_for` has no rule for `REVIEW_RESPONSE_APPROVED` (this change adds the
-entry), so a deadline here would produce a breach that escalates to nobody — the same
-reasoning `owner_approval_notification` records for `OWNER_APPROVAL_REQUIRED` and
-`incident_critical_notification` records for `INCIDENT_CREATED_CRITICAL`.
+plazo". `escalation_for` has a rule for `REVIEW_RESPONSE_APPROVED` (added in this change),
+but R6.2 leaves SLA optional — and the resolver does not set one here — so the deadline
+column stays NULL.
+
+**Channel + contact (notification-channel-routing D2/D3).** The builder accepts
+`channel: NotificationChannel = IN_APP` and `contact: str | None = None` as **optional**
+kwargs, the same shape as `cleaning/domain/notifications.py` and the other builders
+listed in `tests/notifications/test_channel_literals.py::CHANNEL_LITERAL_WHITELIST`.
+The default is the reason this file is on that allowlist: a legacy single-row test (or a
+call site that has not been rewired through `dispatch_channels` yet) can still construct
+the row without going through the fan-out.
 """
 
 import uuid
@@ -41,8 +48,10 @@ def build_review_response_approved_log(
     review_id: uuid.UUID,
     property_id: uuid.UUID,
     recipient_user_id: uuid.UUID,
-    recipient_contact: str,
+    recipient_contact: str = "",
     now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
 ) -> NotificationLog:
     """The `REVIEW_RESPONSE_APPROVED` row a manager/owner receives (R6.2).
 
@@ -52,13 +61,17 @@ def build_review_response_approved_log(
 
     `status = PENDING`: queued work for the sender `access-notifications` left running,
     which is what moves it to `SENT`.
+
+    `channel` and `contact` are the optional kwargs that `dispatch_channels` populates
+    per channel; `recipient_contact` is kept as the legacy parameter so existing tests
+    that build a single row continue to work without going through the fan-out.
     """
     return NotificationLog(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         recipient_user_id=recipient_user_id,
-        recipient_contact=recipient_contact,
-        channel=NotificationChannel.IN_APP,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
         notification_type=NotificationType.REVIEW_RESPONSE_APPROVED.value,
         created_at=now,
         updated_at=now,
