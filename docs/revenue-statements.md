@@ -20,12 +20,17 @@ vivienda y período: un statement existente se conserva intacto. El informe del 
 Para adelantar una liquidación, usa `POST /api/v1/owner-statements/generate` con:
 
 ```json
-{"property_id": "<uuid opcional>", "period_start": "2026-07-01", "period_end": "2026-07-31"}
+{"property_id": "<uuid opcional>", "period_end": "2026-07-31"}
 ```
 
-El período debe ser un único mes natural ya cerrado. Sin `property_id` se procesan todas las
-viviendas activas del tenant autenticado. Una repetición devuelve el statement existente y
-lo cuenta como `skipped`; no recalcula ni muta importes.
+`period_end` es el último día del mes a liquidar; el sistema reconstruye el mes natural
+completo a partir de él, y un día que no sea el último del mes devuelve `422`. El cuerpo
+no admite `period_start` ni ningún otro campo (`extra="forbid"`). Sin `property_id` se
+procesan todas las viviendas activas del tenant autenticado. La respuesta son los
+contadores del barrido (`created`, `skipped`, `failed`, `consolidated_count`,
+`currency_mismatch`), no el statement: una repetición conserva el existente intacto y lo
+cuenta como `skipped`; el detalle se consulta con `GET /api/v1/owner-statements` o
+`GET /api/v1/owner-statements/{id}`.
 
 Si el informe contiene `currency_mismatch`, corrige o retira la fila que no esté en EUR y
 vuelve a ejecutar la generación. No se hace conversión de divisas ni se crea un statement
@@ -45,8 +50,10 @@ operativa sin alterar el snapshot.
 ## Revisión y estados
 
 Consulta `GET /api/v1/owner-statements` con filtros de vivienda, período y estado. El detalle
-incluye gastos y el desglose por reserva. El flujo legal es `DRAFT → READY → SENT`; `SENT` es
-terminal. El manager puede editar notas, pero los importes y períodos solo proceden de la
+JSON devuelve los once importes, `status` y `notes`; el desglose por reserva y la lista de
+gastos consolidados se obtienen con las exportaciones (PDF y CSV) o filtrando
+`GET /api/v1/expenses` por vivienda y período. El flujo legal es `DRAFT → READY → SENT`;
+`SENT` es terminal. El manager puede editar notas, pero los importes y períodos solo proceden de la
 generación.
 
 ## Exportaciones
