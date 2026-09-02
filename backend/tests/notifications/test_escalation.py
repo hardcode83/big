@@ -140,9 +140,14 @@ def test_every_type_without_a_defined_escalation_returns_none() -> None:
     # Unchanged by R3: the change moved what the technician branch *produces*, not which
     # types have an escalation. `SLA_BREACH` and `TECHNICIAN_NO_RESPONSE` are both produced
     # by this map and neither appears in it, which is what keeps R3.4 true for both.
+    #
+    # `REVIEW_RESPONSE_APPROVED` joined the catalog in `revenue-reviews` (design D9).
+    # Its entry has `sla_minutes=None` so the breach job never produces a candidate for
+    # it — the row exists to keep the catalog closed against the enum, not to be triggered.
     with_escalation = {
         NotificationType.CLEANING_TASK_ASSIGNED,
         NotificationType.TECHNICIAN_ASSIGNED,
+        NotificationType.REVIEW_RESPONSE_APPROVED,
     }
 
     for member in NotificationType:
