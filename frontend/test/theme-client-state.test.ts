@@ -73,6 +73,28 @@ const MAY_NAME_THEME = new Set([
   "lib/config/constants.ts",
   "app/layout.tsx",
   /*
+   * `useThemePreference` and its test, added by `shell-topbar-overflow-360` (D9,
+   * R4.4). It IS the theme mechanism, not client state holding the theme, and
+   * the distinction is the same one that exempts the switcher below.
+   *
+   * What it does: reads the chosen preference from the `data-theme` attribute of
+   * `<html>` through `useSyncExternalStore` over a `MutationObserver`, seeded by
+   * `getServerSnapshot` with the value the server sent. R3.3 forbids the theme
+   * being client state — read on the client, hydrated after the first paint,
+   * flashing. This hook reads the attribute the SERVER wrote, in the same paint,
+   * so there is nothing to flash; and `:22` of `design-system-tokens.md` already
+   * designates that attribute as the authority. It holds no state of its own: no
+   * `useState`, no `localStorage`, no `matchMedia`, no `document.cookie` read,
+   * and no store — the checks below would trip on any of them if this exemption
+   * were removed, which is how it was verified before being written.
+   *
+   * Its reason for existing is that the narrow topbar mounts `ThemeSwitcher`
+   * twice, and per-instance state made the two disagree about which button was
+   * pressed.
+   */
+  "lib/theme/use-theme-preference.ts",
+  "lib/theme/use-theme-preference.test.tsx",
+  /*
    * The switcher, and the one entry that needs justifying rather than listing.
    *
    * It holds the chosen PREFERENCE in `useState` and mutates the document in an
@@ -115,11 +137,53 @@ const MAY_NAME_THEME = new Set([
   "features/shell/components/workspace-shell.tsx",
   "features/shell/components/cleaner-shell.tsx",
   "features/shell/components/technician-shell.tsx",
+  /*
+   * The narrow-layout container for the theme + locale controls, added by
+   * `shell-topbar-overflow-360` (D2/D3). It names the theme only because it
+   * MOUNTS `ThemeSwitcher` and forwards the server's `initial` prop through to
+   * it — the same reason `Topbar` and the three shells above are exempt, one
+   * step further down the tree.
+   *
+   * It is `"use client"`, so unlike those it cannot lean on «a Server Component
+   * cannot hold client state by construction». What stands in for that: it holds
+   * no theme state at all. `initial` arrives as a prop and leaves as a prop; the
+   * file contains no `useState`/`useReducer`/`createContext`, no
+   * `localStorage`/`sessionStorage`, no `matchMedia` and no `document.cookie` —
+   * verified before this exemption was written, by watching the client-state
+   * gate below stay silent on it while only the broad `/theme/i` sweep tripped.
+   * Its only state is the sheet's open/closed, which Radix owns and which is not
+   * a preference.
+   */
+  "features/shell/components/topbar-overflow-sheet.tsx",
+  "features/shell/components/topbar-overflow-sheet.test.tsx",
+  /*
+   * `TopbarPreferences` and `AuthenticatedTopbarActions`, the two Server
+   * Components `shell-topbar-overflow-360` (D3) inserted between `Topbar` and the
+   * controls. They name the theme because the server value is threaded through
+   * them as a prop — the same reason `Topbar` and the three shells are exempt,
+   * and with the same protection: neither carries `"use client"`, so neither can
+   * hold client state by construction, and the gate below still runs over both.
+   *
+   * `topbar-preferences.tsx` has the extra assertions at the bottom of this file
+   * pinning what its exemption gives up: that it does not source the theme
+   * itself, only forwards it.
+   */
+  "features/shell/components/topbar-preferences.tsx",
+  "features/shell/components/authenticated-topbar-actions.tsx",
   // Its tests.
   "lib/theme/theme.test.ts",
   "lib/theme/server.test.ts",
   "app/layout.test.tsx",
   "test/theme-client-state.test.ts",
+  /*
+   * The D6 structural guard from `shell-topbar-overflow-360`. It names the theme
+   * only as the literal path `features/shell/components/theme-switcher.tsx` and
+   * as the `<ThemeSwitcher` tag it looks for in the source of others — it reads
+   * files, holds nothing, and never runs against a resolved theme. Whitelisted
+   * when it was written rather than by loosening `NAMES_THEME`, which would have
+   * widened the net for every future file too.
+   */
+  "test/topbar-overflow.test.ts",
   // The token layer and its guards.
   "app/globals.tokens.test.ts",
   "app/globals.contrast.test.ts",
@@ -239,11 +303,24 @@ describe("R3.3 — the theme is never client state", () => {
      * colours would already be right from the server-rendered attribute while the
      * control corrected itself a tick later.
      */
-    // `Topbar` is what hands it over, and it must stay on the server to do so.
+    /*
+     * `Topbar` is what fetches the server value, and it must stay on the server
+     * to do so. It no longer hands it straight to the switcher: since
+     * `shell-topbar-overflow-360` (D3) it passes it to `TopbarPreferences`, which
+     * renders the two responsive branches. So the chain is asserted in two hops
+     * instead of one — what matters is unchanged, that the value comes from the
+     * server and that neither file is a client component.
+     */
     const topbar = code("features/shell/components/topbar.tsx");
     expect(topbar).not.toMatch(/^\s*["']use client["']/m);
     expect(topbar).toMatch(/await\s+getServerTheme\(\)/);
-    expect(topbar).toMatch(/<ThemeSwitcher\s+initial=\{theme\}/);
+    expect(topbar).toMatch(/<TopbarPreferences\s+initial=\{theme\}/);
+
+    const preferences = code("features/shell/components/topbar-preferences.tsx");
+    expect(preferences).not.toMatch(/^\s*["']use client["']/m);
+    expect(preferences).toMatch(/<ThemeSwitcher\s+initial=\{initial\}/);
+    // And it must not source the theme itself — it only forwards the prop.
+    expect(preferences).not.toMatch(/getServerTheme|document\.cookie|matchMedia/);
 
     const source = code("features/shell/components/theme-switcher.tsx");
 

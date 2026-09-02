@@ -75,6 +75,7 @@
 | blocked-transition-response-ids | new, tasks, run, review, ship, archive | 6367916 | 567328 | 131512414 | 111.7790 | 2026-08-26 | 2026-08-27 |
 | photo-cache-control-assertion-bound | new, design, tasks, run, review, ship, archive | 3375198 | 257671 | 35441337 | 43.6621 | 2026-08-24 | 2026-08-26 |
 | public-zone-hardening | new, design, tasks, run, review, ship, archive | 1351799 | 241955 | 54634461 | 40.1250 | 2026-08-26 | 2026-08-26 |
+| backend-pyright-tooling | run, review, ship, archive | 158509 | 357969 | 32089709 | 29.7672 | 2026-09-01 | 2026-09-01 |
 | blocked-transitions-web | new, design, tasks, run, review, ship, archive | 5840872 | 1000619 | 216249227 | 170.9211 | 2026-08-24 | 2026-08-29 |
 | frontend-auth-role-routing | new, design, tasks, run, review, ship, archive | 2901957 | 533239 | 111194635 | 83.4381 | 2026-08-27 | 2026-08-27 |
 | guest-portal-messaging | new, design, tasks, run, review, ship | 570697 | 1558467 | 368118623 | 231.8098 | 2026-08-29 | — |
@@ -82,3 +83,9 @@
 | notification-writers-gap | new, design, tasks, run, review, ship, archive | 347258 | 1298780 | 286206103 | 183.4083 | 2026-08-29 | 2026-08-30 |
 | notifications-inbox-web | new, design, tasks, run, review, ship, archive | 462522 | 1377686 | 284998420 | 181.8444 | 2026-08-28 | 2026-08-29 |
 | reservation-property-identity | new, design, tasks, run, review, ship, archive | 2597769 | 332557 | 72084496 | 61.6039 | 2026-08-24 | 2026-08-30 |
+| dashboard-operational-kpis | new, tasks, run, review | 261108 | 307075 | 89945937 | 32.9396 | 2026-08-31 | — |
+| notification-channel-routing | new, design, tasks, run, review | 1081724 | 473145 | 249211412 | 92.2307 | 2026-08-31 | — |
+| rule11-guard-trigger-and-scope | new, design, tasks, run, review | 1661381 | 2756674 | 459941800 | 340.0561 | 2026-08-31 | — |
+| rule11-guard-trigger-and-scope | new, design, tasks, run, review, ship, archive | 2605754 | 3120937 | 598433744 | 423.8289 | 2026-08-31 | 2026-09-02 |
+| shell-topbar-overflow-360 | new, design, tasks, run, review, ship, archive | 622710 | 1301477 | 280668088 | 189.6256 | 2026-08-30 | 2026-09-01 |
+| cleaner-app | new, tasks, run, review, ship, archive | 1913125 | 420916 | 113055583 | 70.1061 | 2026-08-18 | 2026-08-31 |

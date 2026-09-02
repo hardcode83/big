@@ -20,6 +20,7 @@ from app.cleaning.infrastructure.repositories import SqlAlchemyCleaningTaskRepos
 from app.core.db import get_db_session
 from app.dashboard.application.use_cases import (
     GetDashboardCardsUseCase,
+    GetOperationalKpisUseCase,
     GetPropertyDashboardUseCase,
 )
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
@@ -55,4 +56,12 @@ def get_property_dashboard_use_case(session: SessionDep) -> GetPropertyDashboard
         incidents=SqlAlchemyIncidentReader(session),
         approvals=SqlAlchemyOwnerApprovalReader(session),
         expenses=SqlAlchemyExpenseReader(session),
+    )
+
+
+def get_operational_kpis_use_case(session: SessionDep) -> GetOperationalKpisUseCase:
+    return GetOperationalKpisUseCase(
+        cleaning=SqlAlchemyCleaningTaskRepository(session),
+        reservations=SqlAlchemyReservationRepository(session),
+        incidents=SqlAlchemyIncidentReader(session),
     )

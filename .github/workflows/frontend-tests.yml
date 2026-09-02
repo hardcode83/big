@@ -111,6 +111,36 @@ jobs:
           : > .next/dev/types/routes.d.ts
           npm test
 
+      - name: Guarda de desbordamiento a 360px (Vitest browser)
+        id: layout
+        if: ${{ steps.install.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        working-directory: frontend
+        # `npm run test:layout` es el proyecto `browser` de Vitest: mide
+        # `scrollWidth` de las siete composiciones del `Topbar` en un Chromium
+        # real (change `shell-topbar-overflow-360`, R5.1). jsdom no hace layout,
+        # así que esto no puede vivir en el paso de arriba.
+        #
+        # Coste: el binario de Chromium son ~180 MiB de descarga más las
+        # dependencias de sistema; la suite en sí tarda ~13 s (medido en local:
+        # 8 s de Vitest y 0,3 s de compilar el CSS). En un job que hoy tarda
+        # ~1m30-2m15, la instalación del navegador es lo que domina y puede
+        # llegar a duplicarlo. Si duele, hay dos salidas escritas: cachear
+        # `~/.cache/ms-playwright` por versión de playwright, o partir el job
+        # como hizo `ci-backend-tests-conditional-gate` en `backend-tests.yml`.
+        #
+        # `npm exec --no --` y no `npx`: cuando el paquete no está en
+        # `node_modules`, `npx` lo descarga del registro y lo ejecuta. Y
+        # `package.json` es contenido que controla el Pull Request, sobre un
+        # disparador `pull_request:` sin filtros de rutas — así que un PR que
+        # quite `playwright` del manifiesto convertiría esta línea en «baja del
+        # registro la versión del día y ejecútala con `--with-deps`», es decir
+        # bajo el sudo sin contraseña del runner. `--no` se niega a instalar
+        # nada: usa el binario que `npm ci` dejó desde el lockfile, o falla.
+        run: |
+          npm exec --no -- playwright install --with-deps chromium
+          npm run test:layout
+
       - name: Lint (ESLint)
         id: lint
         if: ${{ steps.install.outcome == 'success' && !cancelled() }}
@@ -130,6 +160,7 @@ jobs:
         env:
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
           TESTS_OUTCOME: ${{ steps.tests.outcome }}
+          LAYOUT_OUTCOME: ${{ steps.layout.outcome }}
           LINT_OUTCOME: ${{ steps.lint.outcome }}
           TYPECHECK_OUTCOME: ${{ steps.typecheck.outcome }}
         run: |
@@ -141,12 +172,14 @@ jobs:
             echo "|---|---|"
             echo "| npm ci | ${INSTALL_OUTCOME:-not-run} |"
             echo "| Tests (Vitest) | ${TESTS_OUTCOME:-not-run} |"
+            echo "| Guarda de layout 360px (Vitest browser) | ${LAYOUT_OUTCOME:-not-run} |"
             echo "| Lint (ESLint) | ${LINT_OUTCOME:-not-run} |"
             echo "| Typecheck (TypeScript) | ${TYPECHECK_OUTCOME:-not-run} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$INSTALL_OUTCOME" != "success" ] || \
              [ "$TESTS_OUTCOME" != "success" ] || \
+             [ "$LAYOUT_OUTCOME" != "success" ] || \
              [ "$LINT_OUTCOME" != "success" ] || \
              [ "$TYPECHECK_OUTCOME" != "success" ]; then
             echo "::error::Una o más verificaciones del frontend fallaron, se cancelaron o no llegaron a ejecutarse."

@@ -164,8 +164,10 @@ en un listado.
   cuatro. **La disparó [`tech-incident-context`](tech-incident-context.md) el 2026-08-21**, que sí
   lee `access_notes`: le dio la excepción 6 del censo de la regla 11 y sacó las tres notas de
   `properties` del listado paginado. Lo que sigue pendiente de aquella decisión es el cifrado en
-  reposo de las cuatro columnas —entrada `plaintext-sink-encryption-at-rest`— y `access_records.notes`,
-  que sigue siendo de `cleaner-app`.
+  reposo de las cuatro columnas —entrada `plaintext-sink-encryption-at-rest`—. `access_records.notes`
+  queda aparcada sin disparador ni change asignado: [`cleaner-app`](cleaner-app.md) (archivado
+  2026-08-31) verificó que la app de la limpiadora no amplía su público — PRD §11 y §6 no le dan
+  accesos y `policy.py` le niega `READ_ACCESS_RECORDS` por escrito.
 - **Instrucciones de limpieza.** PRD §11 enumera nueve cosas y no pide `cleaning_notes`. Excluirlo
   no es quedarse corto.
 - **Los requisitos de foto de la tarea.** El `SHALL` de *once campos y solo once* es lo que los

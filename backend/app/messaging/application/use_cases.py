@@ -66,6 +66,8 @@ from app.messaging.domain.value_objects import (
     MessageMetadata,
     contact_kind_for,
 )
+from app.notifications.application.channel_dispatch import dispatch_and_persist
+from app.notifications.domain.enums import NotificationType
 from app.notifications.domain.repositories import NotificationLogRepository
 from app.properties.domain.clock_triggers import effective_bounds
 from app.properties.domain.repositories import PropertyRepository
@@ -462,17 +464,20 @@ class ProcessInboundGuestMessageUseCase:
             )
             return
 
+        config = await self._configs.get_or_create(tenant_id, now)
         for manager in managers.items:
-            await self._notifications.add(
-                tenant_id,
-                guest_escalation_notification(
-                    tenant_id=tenant_id,
-                    conversation_id=conversation.id,
-                    property_id=conversation.property_id,
-                    recipient_user_id=manager.id,
-                    recipient_contact=manager.email,
-                    now=now,
-                ),
+            await dispatch_and_persist(
+                notifications=self._notifications,
+                tenant_id=tenant_id,
+                recipient=manager,
+                config=config,
+                notification_type=NotificationType.GUEST_ESCALATION.value,
+                recipient_role=manager.role.value,
+                log_builder=guest_escalation_notification,
+                conversation_id=conversation.id,
+                property_id=conversation.property_id,
+                recipient_user_id=manager.id,
+                now=now,
             )
 
     # --- Step 7b: the automatic reply (R4.4, R6.5) ---------------------------------------

@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --project node",
+    "test:layout": "npm run build:layout-css && vitest run --project browser",
+    "build:layout-css": "tailwindcss --input app/globals.css --output test/artifacts/globals.css",
     "test:public-artifacts": "node scripts/test-public-artifacts.mjs",
     "test:entrypoint": "sh devops/test-entrypoint.sh",
     "api:generate": "node scripts/generate-api-types.mjs",
@@ -35,6 +37,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
     "@tailwindcss/postcss": "^4.3.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -42,11 +45,14 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "@vitest/browser": "^4.1.11",
+    "@vitest/browser-playwright": "^4.1.11",
     "axe-core": "^4.12.1",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.2.10",
     "jsdom": "^29.1.1",
     "openapi-typescript": "6.7.6",
+    "playwright": "^1.62.1",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

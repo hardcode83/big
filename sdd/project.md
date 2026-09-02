@@ -19,6 +19,8 @@ Fuente de verdad funcional: `docs/AutoHostAI_PRD_v5_Claude.md` (PRD técnico v5,
 
 - Arranque completo local: `make up` (copiar `.env.example` a `.env` antes). Por componente: `make up SERVICE=backend|frontend`.
 - Backend tests: `docker compose exec backend uv run pytest` (el backend corre en Docker; `uv` no está instalado en el host). Con el stack parado: `docker compose run --rm backend uv run pytest`.
+- Backend static tooling: desde `backend`, `uv sync --frozen`, `command -v pyright`, `uv run pyright --version` y `uv run pyright .`; los findings se reportan aparte de los fallos de arranque. `uvx pyright` no es el camino soportado (descarga fuera del lockfile, no reproducible): usa siempre `uv run pyright .` con el entorno preparado por `uv sync --frozen`.
+- Guardia de la propiedad de la regla 11: `make check-rule11-ownership` — **host, `python3`, sin Docker y sin stack levantado** (`specs/rule11-ownership-guard.md`). Correlo cuando toques prosa de `sdd/` o `docs/`, o un docstring del backend. **Coste declarado**: desde `rule11-guard-trigger-and-scope` el `pytest` del backend **ya no** ejecuta esta guardia, así que una atribución en un docstring de `backend/app/**` se ve aquí y en CI (check `rule11-ownership`), no en la suite local. A cambio, esta vía es más barata que la de antes: no necesita contenedor.
 - Frontend: `cd frontend && npm run dev` / `npm test`
 - E2E: `npx playwright test` (previsto — llega con `hardening-release`)
 

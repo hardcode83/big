@@ -121,6 +121,7 @@ class Harness:
         users: FakeUserRepository | None = None,
         guests: FakeGuestRepository | None = None,
         channels: dict | None = None,
+        configs: FakeTenantConfigRepository | None = None,
     ) -> None:
         self.conversation = conversation
         self.conversations = FakeConversationRepository(conversation)
@@ -147,7 +148,7 @@ class Harness:
             notifications=self.notifications,
             users=self.users,
             guests=self.guests,
-            configs=FakeTenantConfigRepository(threshold=threshold),
+            configs=configs or FakeTenantConfigRepository(threshold=threshold),
             properties=FakePropertyRepository(),
             reservations=FakeReservationRepository(),
             uow=self.uow,
@@ -492,6 +493,39 @@ async def test_escalating_notifies_every_active_property_manager() -> None:
     await harness.run()
 
     assert len(harness.notifications.rows) == 2
+    assert all(
+        row.notification_type == NotificationType.GUEST_ESCALATION.value
+        for row in harness.notifications.rows
+    )
+
+
+@pytest.mark.asyncio
+async def test_escalation_fans_out_across_the_tenants_enabled_channels() -> None:
+    """notification-channel-routing R1, R2 — the guest-escalation writer, exercised
+    through the real use case → resolver → `dispatch_and_persist` path, not just the
+    pure `channel_dispatch.py` unit tests."""
+    from app.notifications.domain.enums import NotificationChannel
+
+    manager = make_user(TENANT, email="manager@example.com", phone="+34600000002")
+    harness = Harness(
+        make_conversation(),
+        ai=StubAIAdapter(intent=MessageIntent.EMERGENCY),
+        users=FakeUserRepository(manager),
+        configs=FakeTenantConfigRepository(
+            notification_email_enabled=True, notification_whatsapp_enabled=True
+        ),
+    )
+
+    await harness.run()
+
+    by_channel = {row.channel: row for row in harness.notifications.rows}
+    assert set(by_channel) == {
+        NotificationChannel.IN_APP,
+        NotificationChannel.EMAIL,
+        NotificationChannel.WHATSAPP,
+    }
+    assert by_channel[NotificationChannel.EMAIL].recipient_contact == manager.email
+    assert by_channel[NotificationChannel.WHATSAPP].recipient_contact == manager.phone
     assert all(
         row.notification_type == NotificationType.GUEST_ESCALATION.value
         for row in harness.notifications.rows

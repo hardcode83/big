@@ -32,8 +32,23 @@ def hasher() -> BcryptPasswordHasher:
 
 
 async def insert_tenant(
-    session: AsyncSession, *, name: str | None = None, status: TenantStatus = TenantStatus.ACTIVE
+    session: AsyncSession,
+    *,
+    name: str | None = None,
+    status: TenantStatus = TenantStatus.ACTIVE,
+    with_notification_config: bool = True,
 ) -> TenantModel:
+    """A tenant, with a `TenantConfigModel` row already seeded by default.
+
+    `with_notification_config=False` skips that row — the shape `tests/tenants/` needs to
+    exercise `TenantConfigRepository.get_or_create`'s lazy-creation contract (R5.7): a tenant
+    that arrived through this helper without a config, exactly like one that never went
+    through bootstrap. Every other caller wants the row present, pinned with the two channel
+    flags off, so the resolver returns `{IN_APP}` only and the suite's single-row assertions
+    stay valid — a test that wants both flags on seeds its own `TenantConfigModel`.
+    """
+    from app.tenants.infrastructure.models import TenantConfigModel
+
     tenant = TenantModel(
         id=uuid.uuid4(),
         name=name or f"tenant-{uuid.uuid4().hex[:8]}",
@@ -42,6 +57,15 @@ async def insert_tenant(
     )
     session.add(tenant)
     await session.flush()
+    if with_notification_config:
+        session.add(
+            TenantConfigModel(
+                tenant_id=tenant.id,
+                notification_email_enabled=False,
+                notification_whatsapp_enabled=False,
+            )
+        )
+        await session.flush()
     return tenant
 
 

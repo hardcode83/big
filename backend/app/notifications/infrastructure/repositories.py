@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tenancy import CrossTenantWriteError
 from app.notifications.domain.entities import NotificationLog
+from app.notifications.domain.enums import NotificationChannel
 from app.notifications.domain.enums import NotificationStatus
 from app.notifications.domain.exceptions import NotificationLogNotFoundError
 from app.notifications.domain.repositories import NotificationLogPage
@@ -91,10 +92,16 @@ class SqlAlchemyNotificationLogRepository:
         page: int,
         per_page: int,
         unread: bool | None = None,
+        channel: NotificationChannel = NotificationChannel.IN_APP,
     ) -> NotificationLogPage:
+        # R5 — the inbox is the in-app channel of `notification_logs`. The default is set
+        # here, in the repository, because the router has no business knowing which channel
+        # an inbox is (D4). Passing another channel is opt-in for diagnostic calls; nothing
+        # in the production code path does.
         conditions = (
             NotificationLogModel.tenant_id == tenant_id,
             NotificationLogModel.recipient_user_id == recipient_user_id,
+            NotificationLogModel.channel == channel,
             # D5: the filter is an extra condition on the query that already exists, so the
             # envelope, the ordering and the page ceilings are the same ones with or without
             # it. `unread is None` (the default) and `unread is False` both mean "all".
@@ -153,32 +160,56 @@ class SqlAlchemyNotificationLogRepository:
         )
         return result.rowcount > 0
 
-    async def count_unread(self, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
-        """The counter of D4: a `count(*)` over the partial index, never a page of rows."""
+    async def count_unread(
+        self,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        channel: NotificationChannel = NotificationChannel.IN_APP,
+    ) -> int:
+        """The counter of D4: a `count(*)` over the partial index, never a page of rows.
+
+        `notification-channel-routing` R5.2 — the bell's counter is consistent with the
+        inbox, which means it is also scoped to `IN_APP` by default. Same lazy default as
+        `list_for_recipient`, kept here so a future diagnostic call can ask for another
+        channel without changing the signature.
+        """
         total = await self._session.scalar(
             select(func.count())
             .select_from(NotificationLogModel)
             .where(
                 NotificationLogModel.tenant_id == tenant_id,
                 NotificationLogModel.recipient_user_id == user_id,
+                NotificationLogModel.channel == channel,
                 NotificationLogModel.read_at.is_(None),
             )
         )
         return total or 0
 
-    async def mark_all_read(self, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
+    async def mark_all_read(
+        self,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        channel: NotificationChannel = NotificationChannel.IN_APP,
+    ) -> int:
         """Every unread row of this user, and how many there were (D6).
 
         No `NotificationLogNotFoundError`, unlike `mark_breached`: an inbox already up to
         date has nothing to move, which is the normal case and not a failure. The
         `read_at IS NULL` term is what makes it idempotent — a second call finds nothing and
         cannot overwrite the timestamps the first one wrote.
+
+        `notification-channel-routing` R5 — "mark all as read" only moves the in-app rows;
+        the EMAIL/WHATSAPP rows live outside the inbox and have no `read_at` column to
+        update.
         """
         result = await self._session.execute(
             update(NotificationLogModel)
             .where(
                 NotificationLogModel.tenant_id == tenant_id,
                 NotificationLogModel.recipient_user_id == user_id,
+                NotificationLogModel.channel == channel,
                 NotificationLogModel.read_at.is_(None),
             )
             .values(read_at=datetime.now(UTC))

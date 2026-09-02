@@ -110,7 +110,7 @@ def _writers() -> dict[str, list[str]]:
     """Every type with a writer, mapped to the sites that write it.
 
     Sites are carried so a failure can name a file and a line instead of only a set
-    difference — the same courtesy `test_layering.py` and `test_rule11_ownership.py` extend.
+    difference — the same courtesy `test_layering.py` and `scripts/rule11-ownership.py` extend.
     """
     found: dict[str, list[str]] = {}
     for path in sorted(APP_ROOT.rglob("*.py")):
@@ -286,6 +286,11 @@ CONSTRUCTION_SITES = {
     # The escalation policy (its `Escalation` entries) and the row its use case composes.
     "notifications/domain/escalation.py",
     "notifications/application/use_cases.py",
+    # The fan-out — the new construction site added by `notification-channel-routing`
+    # (R2). It iterates the resolved channel set and calls a builder once per channel,
+    # so it is a construction site of N rows, not of one. Added here for the same
+    # reason as every other entry: the census counts writers, and the fan-out is one.
+    "notifications/application/channel_dispatch.py",
     # Not a writer: the adapter's INSERT and its rehydration of a row back into an entity.
     "notifications/infrastructure/repositories.py",
     # Not a writer either, and not application code: the `celery-jobs` benchmark harness

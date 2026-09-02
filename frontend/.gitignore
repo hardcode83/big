@@ -2,3 +2,9 @@ node_modules/
 .next/
 next-env.d.ts
 *.tsbuildinfo
+
+# Compiled Tailwind sheet for the 360px layout guard (`npm run build:layout-css`).
+# Built from `app/globals.css` on every `test:layout` run, so it is derived, never
+# edited, and never reviewed. It lives under `test/` rather than the frontend root
+# because `test/color-tokens.test.ts` pins the exact list of loose root files.
+test/artifacts/

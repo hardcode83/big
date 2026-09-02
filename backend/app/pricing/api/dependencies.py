@@ -28,6 +28,7 @@ from app.notifications.infrastructure.repositories import (
 )
 from app.core.db import get_db_session
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
+from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
 from app.pricing.application.use_cases import (
     CreatePricingRuleUseCase,
     DecidePriceRecommendationUseCase,
@@ -101,6 +102,7 @@ def get_generate_price_recommendations_use_case(
         # asked, not what happens.
         users=SqlAlchemyUserRepository(session),
         notifications=SqlAlchemyNotificationLogRepository(session),
+        tenant_configs=SqlAlchemyTenantConfigRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
 

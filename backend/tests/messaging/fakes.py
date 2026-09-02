@@ -323,6 +323,11 @@ class FakeGuestRepository:
 @dataclass
 class FakeTenantConfigRepository:
     threshold: Decimal = Decimal("0.75")
+    # `notification-channel-routing` — pinned off so the resolver returns `{IN_APP}` only
+    # and this suite's single-row assertions stay valid. A test that wants both flags on
+    # passes them explicitly.
+    notification_email_enabled: bool = False
+    notification_whatsapp_enabled: bool = False
 
     async def get_or_create(self, tenant_id: uuid.UUID, now: datetime) -> TenantConfig:
         return TenantConfig(
@@ -331,6 +336,8 @@ class FakeTenantConfigRepository:
             created_at=now,
             updated_at=now,
             ai_confidence_threshold=self.threshold,
+            notification_email_enabled=self.notification_email_enabled,
+            notification_whatsapp_enabled=self.notification_whatsapp_enabled,
         )
 
 
@@ -364,6 +371,7 @@ def make_user(
     tenant_id: uuid.UUID,
     *,
     email: str = "manager@example.com",
+    phone: str | None = None,
     role: UserRole = UserRole.PROPERTY_MANAGER,
     status: UserStatus = UserStatus.ACTIVE,
 ) -> User:
@@ -372,6 +380,7 @@ def make_user(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         email=email,
+        phone=phone,
         password_hash="x" * 60,
         name="Manager",
         role=role,

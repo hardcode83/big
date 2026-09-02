@@ -134,5 +134,9 @@
     "triggerLabel": "Menú de usuario",
     "logout": "Cerrar sesión",
     "anonymous": "Usuario"
+  },
+  "topbarPreferences": {
+    "trigger": "Preferencias",
+    "title": "Preferencias"
   }
 }
