@@ -42,6 +42,8 @@ BEYOND_PRD_8_3 = {
     "provision_access_records": timedelta(minutes=5),
     "process_webhook_events": timedelta(seconds=60),
     "classify_incidents": timedelta(minutes=5),
+    # `revenue-reviews` D2 — every-five-minutes classification of pending reviews.
+    "classify_reviews": timedelta(minutes=5),
 }
 
 ALL_CADENCES = PRD_8_3 | BEYOND_PRD_8_3

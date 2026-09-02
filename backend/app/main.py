@@ -51,6 +51,9 @@ from app.tenants.api.router import router as tenants_router
 from app.timeline.api.errors import register_timeline_error_handlers
 from app.timeline.api.router import router as timeline_router
 from app.provenance.api.router import router as provenance_router
+from app.reviews.api.errors import register_reviews_error_handlers
+from app.reviews.api.router import router as reviews_router
+from app.reviews.api.router import summary_router as reviews_summary_router
 
 API_V1_PREFIX = "/api/v1"
 
@@ -93,6 +96,7 @@ def create_app() -> FastAPI:
     register_timeline_error_handlers(app)
     register_pricing_error_handlers(app)
     register_notification_error_handlers(app)
+    register_reviews_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -187,6 +191,14 @@ def create_app() -> FastAPI:
     app.include_router(pricing_rules_router, prefix=API_V1_PREFIX)
     app.include_router(price_recommendations_router, prefix=API_V1_PREFIX)
     app.include_router(provenance_router, prefix=API_V1_PREFIX)
+    # `revenue-reviews`: PRD §18's seven endpoints. Two routers because the summary
+    # lives under `/properties/{id}/reviews/summary` and a literal segment there would
+    # collide with `/properties/{id}` — same registration-order lesson as
+    # `blocked_transitions_router`. Mounted after `maintenance` because a review may
+    # open an incident; reading the two in this order is how that dependency reads
+    # in the code.
+    app.include_router(reviews_router, prefix=API_V1_PREFIX)
+    app.include_router(reviews_summary_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late.

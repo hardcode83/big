@@ -515,32 +515,38 @@ class TestRecipientRoleIsNotCachedAcrossRoles:
 
 class TestRecipientTruncation:
     @pytest.mark.asyncio
-    async def test_more_recipients_than_one_page_is_reported_not_only_logged(self) -> None:
-        """A partial notification that only a log-scraper can detect is a silent drop."""
+    async def test_more_recipients_than_one_page_writes_every_row(self) -> None:
+        """A tenant with more managers than one page used to get a silent partial
+        notification: the page capped, the counter recorded the gap, and the escalation
+        rows went out to the truncated subset. R6.2 closes the gap end-to-end, so this
+        test now pins the post-fix contract: every active manager is notified and
+        `recipients_truncated` stays at zero."""
         from app.auth.domain.recipients import RoleRecipients
 
         harness = Harness()
-        for index in range(RoleRecipients.MAX_RECIPIENTS + 3):
+        for index in range(RoleRecipients.PAGE_SIZE + 3):
             harness.users.add_user(role=UserRole.PROPERTY_MANAGER, name=f"Mgr{index:03d}")
         harness.notifications.seed(_breached())
 
         report = await harness.run()
 
-        assert report.rows_written == RoleRecipients.MAX_RECIPIENTS
-        assert report.recipients_truncated == 3
+        assert report.rows_written == RoleRecipients.PAGE_SIZE + 3
+        assert report.recipients_truncated == 0
 
     @pytest.mark.asyncio
-    async def test_the_owner_fallback_counts_its_truncation_too(self) -> None:
-        """The fallback used to skip the check, so it reintroduced the silent partial
-        notification the counter exists to prevent. Found by the section-4 QA re-review."""
+    async def test_the_owner_fallback_writes_every_row_too(self) -> None:
+        """The fallback used to skip the page boundary, so a tenant with more owners than
+        one page and no manager reintroduced the silent partial notification the counter
+        exists to prevent. The end-to-end loop closes it; this test pins the fallback
+        path at a roster larger than one page (R6.2). Found by the section-4 QA re-review."""
         from app.auth.domain.recipients import RoleRecipients
 
         harness = Harness()
-        for index in range(RoleRecipients.MAX_RECIPIENTS + 2):
+        for index in range(RoleRecipients.PAGE_SIZE + 2):
             harness.users.add_user(role=UserRole.TENANT_OWNER, name=f"Own{index:03d}")
         harness.notifications.seed(_breached())
 
         report = await harness.run()
 
-        assert report.rows_written == RoleRecipients.MAX_RECIPIENTS
-        assert report.recipients_truncated == 2
+        assert report.rows_written == RoleRecipients.PAGE_SIZE + 2
+        assert report.recipients_truncated == 0

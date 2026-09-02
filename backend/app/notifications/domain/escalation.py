@@ -27,11 +27,20 @@ class Escalation:
     roster, which is `EscalateBreachedSlasUseCase`'s to answer (design D17 — one row per
     active holder, falling back to `TENANT_OWNER`). Keeping the id out of here is what
     lets this stay pure.
+
+    `sla_minutes` is `None` for notifications that are not SLA-tracked (the catalog has
+    them so a future SLA on the same type is intentional, not accidental). The breach
+    job never reads a `None` entry because the candidate's own SLA deadline is what
+    puts a row on the candidates list in the first place — so a `None` here is a
+    documentation entry, not a path the job will ever exercise. Added when
+    `REVIEW_RESPONSE_APPROVED` joined the catalog (design D9 of
+    `sdd/changes/revenue-reviews/`).
     """
 
     notification_type: NotificationType
     recipient_role: UserRole
     reason: str
+    sla_minutes: int | None = None
 
 
 # PRD §14: "CLEANING_TASK_ASSIGNED → crear nueva notificación al manager, marcar
@@ -80,6 +89,20 @@ _POLICY: dict[NotificationType, Escalation] = {
         notification_type=NotificationType.TECHNICIAN_NO_RESPONSE,
         recipient_role=UserRole.PROPERTY_MANAGER,
         reason="technician_assignment_unanswered_no_phone_adapter",
+    ),
+    # `REVIEW_RESPONSE_APPROVED` joins the catalog with `sla_minutes=None`: it is
+    # not SLA-tracked (R6.2 says "notificación", not "notificación con plazo"), so
+    # the breach job never produces a candidate for it. The entry exists so the
+    # `_POLICY` catalog is closed against the `NotificationType` enum — a future
+    # adding an SLA on this type is then an explicit decision, not a silently
+    # missing row. The recipients are resolved by the writer (`reviews`'s
+    # `ApproveReviewUseCase`) via `RoleRecipients.managers_or_owners`, exactly as
+    # `maintenance` and `cleaning` already do.
+    NotificationType.REVIEW_RESPONSE_APPROVED: Escalation(
+        notification_type=NotificationType.REVIEW_RESPONSE_APPROVED,
+        recipient_role=UserRole.PROPERTY_MANAGER,
+        reason="review_response_approved_no_sla",
+        sla_minutes=None,
     ),
 }
 

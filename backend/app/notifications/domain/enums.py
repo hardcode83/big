@@ -31,6 +31,13 @@ class NotificationType(str, enum.Enum):
     CHECKOUT_REMINDER = "CHECKOUT_REMINDER"
     PRICE_RECOMMENDATION = "PRICE_RECOMMENDATION"
     SLA_BREACH = "SLA_BREACH"
+    # `revenue-reviews` (design D9). One new member, named for the verb R6.2 declares.
+    # Same precedent `PASSWORD_RESET_REQUESTED` set for `auth-account-recovery`: PRD §14
+    # has no slot for it, so it sits outside the catalogue's sixteen. The row carries
+    # no SLA deadline (R6.2 says "notificación", not "con plazo") and no escalation —
+    # the manager's notification arrives, the manager acts on it, and that is the end
+    # of the row's lifecycle.
+    REVIEW_RESPONSE_APPROVED = "REVIEW_RESPONSE_APPROVED"
     # The SEVENTEENTH, declared as a divergence from the sixteen of PRD §14
     # (`auth-account-recovery` R6.1). Same kind of divergence `access-notifications` declared
     # for its two jobs against PRD §8.3's four: the PRD's list is the operational catalogue —

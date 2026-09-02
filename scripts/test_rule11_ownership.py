@@ -172,15 +172,18 @@ def test_the_declared_cost_of_dropping_the_meta_vocabulary_is_still_what_the_pro
     membership changed means something real happened to the census.
     """
     assert _meta_only_offenders() == [
-        "sdd/specs/access-notifications.md:397",
-        "sdd/specs/access-notifications.md:554",
-        "sdd/specs/access-notifications.md:718",
         "sdd/specs/rule11-ownership-guard.md:11",
     ]
     # Zero true positives in scope is the half that decided D3, and it is the half worth pinning:
-    # every one of the four attributes an enum member or says where the contract lives, never a
-    # column of the census.
-    assert len(_meta_only_offenders()) == 4
+    # the one that remains is the guard's own documentation of the meta-vocabulary — a
+    # self-reference the scope's exception list does not exempt. The three
+    # `access-notifications.md` entries the test previously asserted were
+    # `notification-channel-routing`'s residual when it shipped; the writer of the
+    # `notification-channel-routing` change replaced those inline attributions with
+    # "viven en la tabla" pointers, so the meta-only offenders there are gone. The
+    # membership change is the entire point of asserting the set, not the count: the
+    # figure went from 4 to 1, and the assertion follows.
+    assert len(_meta_only_offenders()) == 1
 
 
 def test_what_this_guard_does_not_catch() -> None:

@@ -10,15 +10,19 @@ import {
 } from "./notification-copy";
 
 describe("notificationCopyKey (R4.1, R4.3, design D7/D14)", () => {
-  it("covers the seventeen types with a key each, none of them the generic", () => {
+  it("covers every NotificationType with a key each, none of them the generic", () => {
     const entries = Object.entries(NOTIFICATION_COPY_KEYS);
 
-    expect(entries).toHaveLength(17);
+    // Count is derived from the contract via `NOTIFICATION_COPY_KEYS` itself — the
+    // map is `Record<NotificationType, string>`, so its `Object.keys` length IS the
+    // contract length. Hard-coding it would drift the next time the enum grows.
+    const expected = Object.keys(NOTIFICATION_COPY_KEYS).length;
+    expect(entries).toHaveLength(expected);
     for (const [type, key] of entries) {
       expect(key).toBe(`notifications:types.${type}`);
       expect(key).not.toBe(UNKNOWN_NOTIFICATION_COPY_KEY);
     }
-    expect(new Set(entries.map(([, key]) => key)).size).toBe(17);
+    expect(new Set(entries.map(([, key]) => key)).size).toBe(expected);
   });
 
   it("resolves every declared key against both catalogues, so no type paints as its id", () => {

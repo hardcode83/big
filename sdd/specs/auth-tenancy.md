@@ -186,9 +186,11 @@ tocar la base de datos a mano.
   todo rol que puede autenticarse, el catálogo contiene hoy los que añadió `reservations`
   (`READ_RESERVATIONS`, `MANAGE_RESERVATIONS`), los cuatro de `user-management`
   (`READ_USERS`, `MANAGE_USERS`, `READ_TENANT_SETTINGS`, `MANAGE_TENANT_SETTINGS`), los dos de
-  `properties-crud` (`READ_PROPERTIES`, `MANAGE_PROPERTIES`), los cinco de `cleaning` y los
+  `properties-crud` (`READ_PROPERTIES`, `MANAGE_PROPERTIES`), los cinco de `cleaning`, los
   cuatro de `maintenance` (`READ_INCIDENTS`, `MANAGE_INCIDENTS`, `EXECUTE_INCIDENTS`,
-  `RESPOND_OWNER_APPROVALS`), todos diferenciados por rol.
+  `RESPOND_OWNER_APPROVALS`) y los cinco de `revenue-reviews` (`READ_REVIEWS`,
+  `CREATE_REVIEW`, `APPROVE_REVIEW`, `IGNORE_REVIEW`, `MARK_REVIEW_POSTED`), todos
+  diferenciados por rol.
 - **`TECHNICIAN` dejó de ser un rol sin capacidades el 2026-08-15.** Hasta `maintenance` tenía
   autoservicio y nada más: existía y no podía hacer nada. Ahora suma `READ_INCIDENTS` y
   `EXECUTE_INCIDENTS` —exactamente lo que necesita el ciclo del técnico— y NEVER SHALL poder

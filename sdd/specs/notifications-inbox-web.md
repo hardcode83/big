@@ -110,12 +110,10 @@ componente de esta capa necesita cambiar para que R1 y R2 sigan siendo ciertos.
   traducido (`notifications:types.<MIEMBRO>`), y SHALL NOT usar `subject` ni `body`: están
   escritos en inglés, para un operador, y llevan UUID en crudo. El DTO del frontend **ni siquiera
   los transporta**, de modo que pintarlos no es una opción disponible.
-- THE SYSTEM SHALL cubrir los **diecisiete** miembros de `NotificationType` en `locales/es` y
-  `locales/en`, incluidos los nueve que hoy no escribe nadie y que traerá
-  `notification-writers-gap`. La exhaustividad la garantiza el tipo:
-  `NOTIFICATION_COPY_KEYS: Record<NotificationType, string>` sobre el `NotificationType` derivado
-  del contrato generado, así que un miembro sin entrada falla `npm run typecheck` — no un test de
-  paridad que alguien tenga que acordarse de escribir.
+- THE SYSTEM SHALL cubrir los **dieciocho** miembros de `NotificationType` en `locales/es` y
+  `locales/en` (los diecisiete originales más `REVIEW_RESPONSE_APPROVED`, que `revenue-reviews`
+  introduce para avisar al propietario del tenant cuando una respuesta a reseña pasa a
+  `APPROVED`). La exhaustividad la garantiza el tipo:
 - IF llega un `notification_type` que la interfaz no conoce —la columna es `String(100)` libre y
   admite valores anteriores al enum—, THEN THE SYSTEM SHALL pintar `types.unknown` traducido y
   SHALL NOT romper el renderizado. La búsqueda en la tabla usa `Object.hasOwn`, de modo que un

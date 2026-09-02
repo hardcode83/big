@@ -454,6 +454,18 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     # entry on `REDACT_ONLY_FIELDS` — `deleted_count` is an `int` and `cutoff` is the
     # `cutoff.isoformat()` string the command writes.
     "AUDIT_LOG": frozenset({"deleted_count", "cutoff"}),
+    # `revenue-reviews` R1.7 / R3.5. Two entity types so the audit row's `entity_id`
+    # points at a real primary key. `REVIEW`'s auditable surface is what R1.7's
+    # transitions can name in `changes` — a diff over `status` is the only thing the
+    # transitions move, and a diff over the closed enum `channel` is the row's
+    # provenance. Nothing else from the review row (the prose `content`, the free-text
+    # `ai_summary`, the enum JSONB `recurring_issues`) is auditable: rule 11 already
+    # governs them, and rule 9 says not to extend the row's diff into a rule-3 sink.
+    "REVIEW": frozenset({"status", "channel"}),
+    # `REVIEW_RESPONSE_DRAFT` — the edit row's only diff is `edits_count`. `draft_content`
+    # is a rule-11 closed vocabulary and never carries a value in `changes`; `language`
+    # is immutable after creation (R3.1) so it cannot change.
+    "REVIEW_RESPONSE_DRAFT": frozenset({"edits_count"}),
 }
 
 #: Fields that may appear in an entity's audit row **only** as `{"changed": true}`, keyed by

@@ -72,6 +72,13 @@ CHANNEL_LITERAL_WHITELIST = frozenset(
         "app/maintenance/domain/notifications.py",
         "app/messaging/domain/notifications.py",
         "app/pricing/domain/notifications.py",
+        # Revenue-reviews builder — same shape as the other five, added so its
+        # `REVIEW_RESPONSE_APPROVED` row can be built in isolation by the legacy
+        # single-row tests without going through the fan-out. R6.2 lands the
+        # writer before `notification-channel-routing` retires the per-module
+        # literal pattern; this entry is the same ongoing carry-over the five
+        # other modules document.
+        "app/reviews/domain/notifications.py",
         # Inbox use cases & repository — same story: `channel=IN_APP` is the
         # default of the new keyword-only param, not a writer literal.
         "app/notifications/application/use_cases.py",
@@ -166,6 +173,7 @@ class TestChannelLiterals:
                 "app/maintenance/domain/notifications.py",
                 "app/messaging/domain/notifications.py",
                 "app/pricing/domain/notifications.py",
+                "app/reviews/domain/notifications.py",
                 "app/notifications/application/use_cases.py",
                 "app/notifications/infrastructure/repositories.py",
                 "app/notifications/domain/repositories.py",

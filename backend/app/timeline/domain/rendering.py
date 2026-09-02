@@ -249,6 +249,32 @@ TIMELINE_TITLE_TEMPLATES: dict[TimelineEventType, dict[Locale, str]] = {
         Locale.ES: "Respuesta a la reseña aprobada",
         Locale.EN: "Review response approved",
     },
+    # `revenue-reviews` (design D8). Five new members, each carrying identifiers only
+    # in `metadata` (no reviewer's body — the column is append-only and rule 11 of
+    # `steering/security.md` would never recover from a leak). Static titles, on
+    # purpose, mirroring the `REVIEW_IMPORTED` / `REVIEW_RESPONSE_DRAFTED` pair
+    # above. A `REVIEW_CLASSIFIED_LOW_CONFIDENCE` carries the sentiment in metadata,
+    # which the timeline does not interpolate today.
+    TimelineEventType.REVIEW_CREATED: {
+        Locale.ES: "Reseña creada",
+        Locale.EN: "Review created",
+    },
+    TimelineEventType.REVIEW_DRAFT_EDITED: {
+        Locale.ES: "Borrador de respuesta a la reseña editado",
+        Locale.EN: "Review response draft edited",
+    },
+    TimelineEventType.REVIEW_CLASSIFIED_LOW_CONFIDENCE: {
+        Locale.ES: "Reseña clasificada con baja confianza",
+        Locale.EN: "Review classified with low confidence",
+    },
+    TimelineEventType.REVIEW_IGNORED: {
+        Locale.ES: "Reseña ignorada",
+        Locale.EN: "Review ignored",
+    },
+    TimelineEventType.REVIEW_POSTED_MANUALLY: {
+        Locale.ES: "Reseña publicada manualmente",
+        Locale.EN: "Review posted manually",
+    },
     TimelineEventType.SLA_BREACH_WARNING: {
         Locale.ES: "Aviso de incumplimiento de SLA",
         Locale.EN: "SLA breach warning",

@@ -84,6 +84,9 @@ class TenantConfigPatch(BaseModel):
     cleaning_photo_required: bool | None = None
     notification_email_enabled: bool | None = None
     notification_whatsapp_enabled: bool | None = None
+    # `revenue-reviews` R5.5: top-N bound for the recurring-issues summary. `1..50`,
+    # matching the migration's CHECK constraint and the domain guard.
+    review_recurring_issues_top_n: int | None = Field(default=None, ge=1, le=50)
 
     _no_bools = field_validator(
         "owner_approval_threshold_eur",
@@ -163,6 +166,7 @@ class TenantConfigResponse(BaseModel):
     storage_type: StorageType
     notification_email_enabled: bool
     notification_whatsapp_enabled: bool
+    review_recurring_issues_top_n: int
 
 
 class TenantResponse(BaseModel):
@@ -206,5 +210,6 @@ class TenantResponse(BaseModel):
                 storage_type=config.storage_type,
                 notification_email_enabled=config.notification_email_enabled,
                 notification_whatsapp_enabled=config.notification_whatsapp_enabled,
+                review_recurring_issues_top_n=config.review_recurring_issues_top_n,
             ),
         )
