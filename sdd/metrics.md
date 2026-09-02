@@ -82,6 +82,7 @@
 | notification-writers-gap | new, design, tasks, run, review, ship, archive | 347258 | 1298780 | 286206103 | 183.4083 | 2026-08-29 | 2026-08-30 |
 | notifications-inbox-web | new, design, tasks, run, review, ship, archive | 462522 | 1377686 | 284998420 | 181.8444 | 2026-08-28 | 2026-08-29 |
 | reservation-property-identity | new, design, tasks, run, review, ship, archive | 2597769 | 332557 | 72084496 | 61.6039 | 2026-08-24 | 2026-08-30 |
+| super-admin-identity | new, design, tasks, run, review | 589661 | 719289 | 359240487 | 102.5144 | 2026-08-31 | — |
 | dashboard-operational-kpis | new, tasks, run, review | 261108 | 307075 | 89945937 | 32.9396 | 2026-08-31 | — |
 | notification-channel-routing | new, design, tasks, run, review, ship, archive | 1107558 | 563328 | 313576317 | 108.5665 | 2026-08-31 | 2026-09-02 |
 | rule11-guard-trigger-and-scope | new, design, tasks, run, review | 1661381 | 2756674 | 459941800 | 340.0561 | 2026-08-31 | — |

@@ -13,6 +13,7 @@ import uuid
 import pytest
 
 from app.auth.domain.enums import UserRole
+from app.core.db import TENANT_ID_SESSION_KEY
 from tests.reservations.conftest import auth_header
 
 # A literal, not `uuid.uuid4()`. Inside `@pytest.mark.parametrize` a random value becomes
@@ -27,13 +28,19 @@ MANAGERS = {UserRole.PROPERTY_MANAGER}
 ALL_ROLES = list(UserRole)
 
 
-async def _seed_reservation(api, users_by_role_a, create_payload) -> str:
+async def _seed_reservation(api, users_by_role_a, create_payload, db_session) -> str:
     response = await api.post(
         "/api/v1/reservations",
         json=create_payload(),
         headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER]),
     )
     assert response.status_code == 201
+    # `super-admin-identity` R1.1: seeding marks `db_session` (shared across this test's
+    # simulated requests) to tenant A. A real request never sees that — `get_db_session`
+    # hands out a fresh session per request — so unmark here to match, or a `SUPER_ADMIN`
+    # check right after (`tenant_id IS NULL`) gets silently hidden by the stale tenant A
+    # filter instead of correctly resolving to its own tenantless row.
+    db_session.info.pop(TENANT_ID_SESSION_KEY, None)
     return response.json()["id"]
 
 
@@ -52,9 +59,9 @@ async def test_listing_is_allowed_for_readers_only(
 @pytest.mark.parametrize("role", ALL_ROLES)
 @pytest.mark.asyncio
 async def test_reading_the_detail_is_allowed_for_readers_only(
-    api, users_by_role_a, create_payload, role: UserRole
+    api, db_session, users_by_role_a, create_payload, role: UserRole
 ) -> None:
-    reservation_id = await _seed_reservation(api, users_by_role_a, create_payload)
+    reservation_id = await _seed_reservation(api, users_by_role_a, create_payload, db_session)
 
     response = await api.get(
         f"/api/v1/reservations/{reservation_id}", headers=auth_header(api, users_by_role_a[role])
@@ -80,9 +87,9 @@ async def test_creating_is_allowed_for_managers_only(
 @pytest.mark.parametrize("role", ALL_ROLES)
 @pytest.mark.asyncio
 async def test_patching_is_allowed_for_managers_only(
-    api, users_by_role_a, create_payload, role: UserRole
+    api, db_session, users_by_role_a, create_payload, role: UserRole
 ) -> None:
-    reservation_id = await _seed_reservation(api, users_by_role_a, create_payload)
+    reservation_id = await _seed_reservation(api, users_by_role_a, create_payload, db_session)
 
     response = await api.patch(
         f"/api/v1/reservations/{reservation_id}",
@@ -96,9 +103,9 @@ async def test_patching_is_allowed_for_managers_only(
 @pytest.mark.parametrize("role", ALL_ROLES)
 @pytest.mark.asyncio
 async def test_cancelling_is_allowed_for_managers_only(
-    api, users_by_role_a, create_payload, role: UserRole
+    api, db_session, users_by_role_a, create_payload, role: UserRole
 ) -> None:
-    reservation_id = await _seed_reservation(api, users_by_role_a, create_payload)
+    reservation_id = await _seed_reservation(api, users_by_role_a, create_payload, db_session)
 
     response = await api.delete(
         f"/api/v1/reservations/{reservation_id}",
@@ -128,14 +135,14 @@ async def test_no_endpoint_is_reachable_without_a_token(api, method, path, body)
 
 @pytest.mark.asyncio
 async def test_a_forbidden_answer_never_reveals_whether_the_resource_exists(
-    api, users_by_role_a, create_payload
+    api, db_session, users_by_role_a, create_payload
 ) -> None:
     """A `CLEANER` gets the same `403` for a real reservation and for a made-up id.
 
     If the authorisation check ran after the lookup, the two answers would differ and the
     endpoint would enumerate reservation ids for a role that cannot read them.
     """
-    real_id = await _seed_reservation(api, users_by_role_a, create_payload)
+    real_id = await _seed_reservation(api, users_by_role_a, create_payload, db_session)
     cleaner = auth_header(api, users_by_role_a[UserRole.CLEANER])
 
     real = await api.get(f"/api/v1/reservations/{real_id}", headers=cleaner)
@@ -147,7 +154,7 @@ async def test_a_forbidden_answer_never_reveals_whether_the_resource_exists(
 
 @pytest.mark.asyncio
 async def test_the_new_derived_fields_do_not_relax_the_role_gate(
-    api, users_by_role_a, create_payload
+    api, db_session, users_by_role_a, create_payload
 ) -> None:
     """R6.3 / tasks 3.3: a `CLEANER` and a missing token get the same `403` / `401`
     on the listing and detail endpoints even though the response schema now carries
@@ -157,7 +164,7 @@ async def test_the_new_derived_fields_do_not_relax_the_role_gate(
     either pass this test (gate still works) or fail it (gate leaked); the test that
     *promised* to assert the body shape with the new fields is this one.
     """
-    reservation_id = await _seed_reservation(api, users_by_role_a, create_payload)
+    reservation_id = await _seed_reservation(api, users_by_role_a, create_payload, db_session)
 
     # 1. CLEANER (no READ_RESERVATIONS) — still 403 on listing and detail.
     cleaner = auth_header(api, users_by_role_a[UserRole.CLEANER])

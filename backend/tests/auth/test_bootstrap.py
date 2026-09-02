@@ -31,6 +31,9 @@ COMPLETE_ENV = {
     "BOOTSTRAP_MANAGER_NAME": "Manager Person",
     "BOOTSTRAP_MANAGER_EMAIL": "manager@example.com",
     "BOOTSTRAP_MANAGER_PASSWORD": "manager-password-for-tests",
+    "BOOTSTRAP_SUPER_ADMIN_NAME": "Root Person",
+    "BOOTSTRAP_SUPER_ADMIN_EMAIL": "root@example.com",
+    "BOOTSTRAP_SUPER_ADMIN_PASSWORD": "super-admin-password-for-tests",
 }
 
 
@@ -93,12 +96,13 @@ def test_the_error_never_echoes_a_password(monkeypatch: pytest.MonkeyPatch, comp
     assert COMPLETE_ENV["BOOTSTRAP_MANAGER_PASSWORD"] not in str(excinfo.value)
 
 
-def test_the_plan_carries_the_two_expected_roles(complete_env) -> None:
+def test_the_plan_carries_the_three_expected_roles(complete_env) -> None:
     plan = build_plan()
 
     assert [user.role for user in plan.users] == [
         UserRole.TENANT_OWNER,
         UserRole.PROPERTY_MANAGER,
+        UserRole.SUPER_ADMIN,
     ]
 
 
@@ -111,7 +115,7 @@ def test_the_plan_normalises_the_addresses(monkeypatch: pytest.MonkeyPatch, comp
 
 
 @pytest.mark.asyncio
-async def test_it_creates_the_tenant_its_config_and_both_users(
+async def test_it_creates_the_tenant_its_config_and_all_three_users(
     db_session, complete_env, hasher
 ) -> None:
     created = await apply_plan(db_session, build_plan(), hasher)
@@ -120,7 +124,7 @@ async def test_it_creates_the_tenant_its_config_and_both_users(
         "tenants": 1,
         "tenant_configs": 1,
         "tenant_configs_converged": 0,
-        "users": 2,
+        "users": 3,
     }
     tenant = (
         await db_session.execute(
@@ -140,6 +144,17 @@ async def test_it_creates_the_tenant_its_config_and_both_users(
     )
     assert {user.role for user in users} == {UserRole.TENANT_OWNER, UserRole.PROPERTY_MANAGER}
 
+    # `super-admin-identity` R1.1: SUPER_ADMIN belongs to no tenant, so it is outside the
+    # `tenant.id`-filtered query above by construction — checked separately.
+    admin = (
+        await db_session.execute(
+            select(UserModel).where(
+                UserModel.tenant_id.is_(None), UserModel.role == UserRole.SUPER_ADMIN
+            )
+        )
+    ).scalar_one()
+    assert admin.email == COMPLETE_ENV["BOOTSTRAP_SUPER_ADMIN_EMAIL"]
+
 
 @pytest.mark.asyncio
 async def test_running_it_twice_changes_nothing(db_session, complete_env, hasher) -> None:
@@ -156,7 +171,7 @@ async def test_running_it_twice_changes_nothing(db_session, complete_env, hasher
         "users": 0,
     }
     assert await db_session.scalar(select(func.count()).select_from(TenantModel)) == 1
-    assert await db_session.scalar(select(func.count()).select_from(UserModel)) == 2
+    assert await db_session.scalar(select(func.count()).select_from(UserModel)) == 3
 
 
 @pytest.mark.asyncio
@@ -219,6 +234,66 @@ async def test_the_bootstrapped_owner_can_actually_log_in(
     assert (
         await hasher.verify(COMPLETE_ENV["BOOTSTRAP_OWNER_PASSWORD"], found.password_hash) is True
     )
+
+
+@pytest.mark.asyncio
+async def test_the_bootstrapped_super_admin_can_log_in_with_no_tenant(
+    db_session, complete_env, hasher
+) -> None:
+    """`super-admin-identity` R5.1: the identity model is verifiable end to end, not just
+    declarable in the schema — mirrors `test_the_bootstrapped_owner_can_actually_log_in`."""
+    from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
+
+    await apply_plan(db_session, build_plan(), hasher)
+
+    found = await SqlAlchemyUserRepository(db_session).find_by_email_globally(
+        COMPLETE_ENV["BOOTSTRAP_SUPER_ADMIN_EMAIL"]
+    )
+
+    assert found is not None
+    assert found.tenant_id is None
+    assert found.role is UserRole.SUPER_ADMIN
+    assert (
+        await hasher.verify(
+            COMPLETE_ENV["BOOTSTRAP_SUPER_ADMIN_PASSWORD"], found.password_hash
+        )
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_second_run_does_not_raise_on_the_existing_super_admin(
+    db_session, complete_env, hasher
+) -> None:
+    """Regression test for the D6 bug: comparing `existing.tenant_id != tenant.id`
+    unconditionally would be `None != tenant.id` — always True — and raise
+    `BootstrapConflictError` on every re-run once the SUPER_ADMIN seed exists,
+    violating R5.2's convergence requirement."""
+    await apply_plan(db_session, build_plan(), hasher)
+
+    created = await apply_plan(db_session, build_plan(), hasher)
+
+    assert created["users"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_super_admin_address_under_a_real_tenant_is_refused(
+    db_session, monkeypatch: pytest.MonkeyPatch, complete_env, hasher
+) -> None:
+    """R5.3: the conflict case D6's fix must still catch — a `SUPER_ADMIN` address that
+    already exists, but under a tenant rather than with `tenant_id IS NULL`."""
+    from tests.auth.conftest import insert_tenant, insert_user
+
+    other_tenant = await insert_tenant(db_session, name="some-other-tenant")
+    await insert_user(
+        db_session,
+        tenant=other_tenant,
+        email=COMPLETE_ENV["BOOTSTRAP_SUPER_ADMIN_EMAIL"],
+        role=UserRole.PROPERTY_MANAGER,
+    )
+
+    with pytest.raises(BootstrapConflictError):
+        await apply_plan(db_session, build_plan(), hasher)
 
 
 @pytest.mark.asyncio

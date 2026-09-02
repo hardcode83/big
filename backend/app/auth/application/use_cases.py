@@ -92,7 +92,10 @@ class LoginUseCase:
             await self._record_failure(user.id, f"user status {user.status.value}", client_ip)
             raise InvalidCredentialsError("Invalid email or password")
 
-        if not await self.tenants.is_active(user.tenant_id):
+        # `SUPER_ADMIN` has no tenant to check (`super-admin-identity` R2.1, design D2):
+        # `self.tenants.is_active(None)` would find no `tenants` row and always return
+        # False, locking every SUPER_ADMIN out. Every other check above still runs.
+        if user.tenant_id is not None and not await self.tenants.is_active(user.tenant_id):
             await self._record_failure(user.id, "tenant not active", client_ip)
             raise InvalidCredentialsError("Invalid email or password")
 
@@ -238,7 +241,9 @@ class LogoutUseCase:
     sessions: SessionRepository
     uow: UnitOfWork
 
-    async def execute(self, *, tenant_id: uuid.UUID, family_id: uuid.UUID, now: datetime) -> None:
+    async def execute(
+        self, *, tenant_id: uuid.UUID | None, family_id: uuid.UUID, now: datetime
+    ) -> None:
         """Ends the session the caller is authenticated with (R2.3).
 
         The family comes from the access token's `fam` claim (design D18). Access
@@ -253,7 +258,7 @@ class LogoutUseCase:
 class GetCurrentUserUseCase:
     users: UserRepository
 
-    async def execute(self, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> User:
+    async def execute(self, *, tenant_id: uuid.UUID | None, user_id: uuid.UUID) -> User:
         user = await self.users.get_active_by_id(tenant_id, user_id)
         if user is None:
             raise InvalidTokenError("Token is not valid")

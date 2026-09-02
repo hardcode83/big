@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -19,7 +20,29 @@ from app.auth.domain.enums import SessionRevokedReason, UserRole, UserStatus
 from app.core.db import Base, TenantScopedMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 
-class UserModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
+class UserModel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """`tenant_id` is nullable (`super-admin-identity` R1.1, design D1).
+
+    Does NOT use `TenantScopedMixin`, which hard-codes `nullable=False` — the column is
+    declared by hand instead, mirroring `WebhookEventModel`
+    (`app/integrations/infrastructure/models.py`), the one other table with a nullable
+    `tenant_id`. `tenant_scoped_classes()` (`app/core/db.py`) selects by column presence,
+    not by mixin, so `users` stays inside the global tenant filter: a session marked with
+    a tenant still only sees that tenant's users, exactly as before. Only a `SUPER_ADMIN`
+    row — the one with `tenant_id IS NULL` — is reachable from an unmarked session, the
+    same mechanism that already protects `webhook_events`.
+
+    `ck_users_super_admin_tenant_id_null` holds the OTHER half of R1 (R1.2): relaxing the
+    column relaxes it for every role, not only `SUPER_ADMIN`'s, and nothing else in this
+    entity or its repository enforces that only `SUPER_ADMIN` may have a null tenant —
+    found by the review panel of `super-admin-identity`. Without it, a
+    `TENANT_OWNER`/`PROPERTY_MANAGER`/`CLEANER`/`TECHNICIAN` row that ever acquired
+    `tenant_id IS NULL` would authenticate with its session left unmarked by
+    `get_authenticated_request` (which keys that decision on `tenant_id` nullity, not on
+    `role`) while still holding that role's full operational permissions — the same
+    unmarked state R3 scopes to `SUPER_ADMIN` alone.
+    """
+
     __tablename__ = "users"
     __table_args__ = (
         # A normalised email identifies ONE user in the whole installation, not one
@@ -38,8 +61,15 @@ class UserModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
         Index("uq_users_lower_email", func.lower(column("email")), unique=True),
         Index("ix_users_tenant_id_role", "tenant_id", "role"),
         Index("ix_users_tenant_id_status", "tenant_id", "status"),
+        CheckConstraint(
+            "(role = 'SUPER_ADMIN') = (tenant_id IS NULL)",
+            name="ck_users_super_admin_tenant_id_null",
+        ),
     )
 
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("tenants.id"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(200))
     email: Mapped[str] = mapped_column(String(255))
     password_hash: Mapped[str] = mapped_column(String(255))
@@ -59,13 +89,18 @@ class UserModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
     )
 
 
-class UserSessionModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
+class UserSessionModel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """Server-side state of one refresh token (design D5).
 
     The primary key is the refresh token's `jti`, so the token is never stored.
     Not part of the PRD §7 entity list: PRD §22 requires refresh token rotation
     without saying where the state lives, and rotation, reuse detection and logout
     are all impossible without durable server-side state.
+
+    `tenant_id` is nullable (`super-admin-identity` R1.1, R2, design D1), the same shape
+    as `UserModel` above and for the same reason: a `SUPER_ADMIN` login persists a
+    session row with no tenant to attribute it to. Not `TenantScopedMixin` — declared by
+    hand, mirroring `WebhookEventModel`.
     """
 
     __tablename__ = "user_sessions"
@@ -75,6 +110,9 @@ class UserSessionModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMi
         Index("ix_user_sessions_expires_at", "expires_at"),
     )
 
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("tenants.id"), nullable=True, index=True
+    )
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
     family_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     parent_id: Mapped[uuid.UUID | None] = mapped_column(

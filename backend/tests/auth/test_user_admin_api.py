@@ -166,8 +166,10 @@ async def test_the_listing_uses_the_prd_envelope(api, users_by_role_a) -> None:
     assert response.status_code == 200
     body = response.json()
     assert set(body) == {"data", "total", "page", "per_page", "total_pages"}
-    # The five seeded users of tenant A.
-    assert body["total"] == len(UserRole)
+    # The four tenant-bound seeded users of tenant A. `SUPER_ADMIN` is one of the five
+    # `users_by_role_a` seeds but belongs to no tenant (`super-admin-identity` R1.1), so
+    # it is correctly outside this tenant's own listing.
+    assert body["total"] == len(UserRole) - 1
     assert body["total_pages"] == 1
 
 

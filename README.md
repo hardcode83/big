@@ -168,7 +168,7 @@ comando. Rellena los `BOOTSTRAP_*` de tu `.env` (van sin valor a propósito: son
 contraseñas de personas) y ejecuta:
 
 ```bash
-make bootstrap   # crea el tenant, su config y dos usuarios: TENANT_OWNER y PROPERTY_MANAGER
+make bootstrap   # crea el tenant, su config y tres usuarios: TENANT_OWNER, PROPERTY_MANAGER y SUPER_ADMIN
 ```
 
 Es idempotente y falla antes de escribir nada si falta alguna variable. No está

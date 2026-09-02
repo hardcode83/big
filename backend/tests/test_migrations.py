@@ -249,6 +249,170 @@ async def _column_shape(url: str, table: str, column: str) -> tuple[str, int | N
         await conn.close()
 
 
+async def _column_nullable(url: str, table: str, column: str) -> bool:
+    """Whether `column` on `table` currently accepts `NULL`, read from the real DDL."""
+    parsed = make_url(url)
+    conn = await asyncpg.connect(
+        user=parsed.username,
+        password=parsed.password,
+        host=parsed.host,
+        port=parsed.port,
+        database=parsed.database,
+    )
+    try:
+        value = await conn.fetchval(
+            "SELECT is_nullable FROM information_schema.columns "
+            "WHERE table_name = $1 AND column_name = $2",
+            table,
+            column,
+        )
+        return value == "YES"
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_the_super_admin_identity_revision_unwinds_and_reapplies_over_a_null_row(
+    migrations_database,
+) -> None:
+    """`c22b8ae01096` down and up again, with a `tenant_id IS NULL` row in both tables.
+
+    Three things an empty-table run cannot prove, mirroring the `assignment_note`/`eta_at`
+    pattern above: the `ALTER COLUMN ... DROP NOT NULL` does not fail on existing rows;
+    `downgrade()` really refuses to reinstate `NOT NULL` while a `NULL` row exists in either
+    table (R1.4); and once those rows are gone, the same `downgrade()` succeeds and the
+    column is `NOT NULL` again.
+    """
+    url = migrations_database
+    assert _alembic("upgrade", "head", database_url=url).returncode == 0
+
+    assert await _column_nullable(url, "users", "tenant_id") is True
+    assert await _column_nullable(url, "user_sessions", "tenant_id") is True
+
+    parsed = make_url(url)
+    conn = await asyncpg.connect(
+        user=parsed.username,
+        password=parsed.password,
+        host=parsed.host,
+        port=parsed.port,
+        database=parsed.database,
+    )
+    try:
+        admin_id = await conn.fetchval(
+            "INSERT INTO users (id, tenant_id, name, email, password_hash, role) "
+            "VALUES (gen_random_uuid(), NULL, 'Root', 'root@example.com', 'x', "
+            "'SUPER_ADMIN') RETURNING id"
+        )
+        session_id = await conn.fetchval(
+            "INSERT INTO user_sessions "
+            "(id, tenant_id, user_id, family_id, expires_at) "
+            "VALUES (gen_random_uuid(), NULL, $1, gen_random_uuid(), "
+            "now() + interval '7 days') RETURNING id",
+            admin_id,
+        )
+    finally:
+        await conn.close()
+
+    # (c) downgrade refuses while the NULL rows exist, over BOTH tables — neither column
+    # is altered, so a partial downgrade cannot leave one table ahead of the other.
+    blocked = _alembic("downgrade", "e5c9b1f47a28", database_url=url)
+    assert blocked.returncode != 0
+    assert "c22b8ae01096" in blocked.stderr
+    assert await _column_nullable(url, "users", "tenant_id") is True
+    assert await _column_nullable(url, "user_sessions", "tenant_id") is True
+
+    conn = await asyncpg.connect(
+        user=parsed.username,
+        password=parsed.password,
+        host=parsed.host,
+        port=parsed.port,
+        database=parsed.database,
+    )
+    try:
+        # `user_sessions` first: it has the foreign key onto `users`.
+        await conn.execute("DELETE FROM user_sessions WHERE id = $1", session_id)
+        await conn.execute("DELETE FROM users WHERE id = $1", admin_id)
+    finally:
+        await conn.close()
+
+    # (b) downgrade succeeds once no row violates the constraint it is about to reinstate.
+    unwound = _alembic("downgrade", "e5c9b1f47a28", database_url=url)
+    assert unwound.returncode == 0, unwound.stderr
+    assert await _column_nullable(url, "users", "tenant_id") is False
+    assert await _column_nullable(url, "user_sessions", "tenant_id") is False
+
+    # (a) and reapplies cleanly.
+    reapplied = _alembic("upgrade", "head", database_url=url)
+    assert reapplied.returncode == 0, reapplied.stderr
+    assert await _column_nullable(url, "users", "tenant_id") is True
+    assert await _column_nullable(url, "user_sessions", "tenant_id") is True
+
+
+@pytest.mark.asyncio
+async def test_the_super_admin_check_constraint_actually_fires(
+    migrations_database,
+) -> None:
+    """`ck_users_super_admin_tenant_id_null` rejects both violating shapes (R1.2).
+
+    Review panel finding (round 2, 2026-09-02): the constraint added alongside the
+    `super-admin-identity` revision had no test that attempts the violation it exists to
+    reject — every fixture elsewhere in the suite works AROUND it (`tenant_for_role` in
+    `tests/auth/conftest.py`) rather than proving it fires. Run against the real migrated
+    schema, in both directions, so the model's declaration and the migration's `CHECK` are
+    pinned together rather than either one alone.
+    """
+    url = migrations_database
+    assert _alembic("upgrade", "head", database_url=url).returncode == 0
+    parsed = make_url(url)
+
+    # (a) a tenanted role acquiring a NULL tenant_id — the escalation path this constraint
+    # exists to close: such a row would authenticate with its session left unmarked
+    # (`get_authenticated_request` keys that decision on nullity, not role) while holding
+    # that role's full operational permissions.
+    conn = await asyncpg.connect(
+        user=parsed.username,
+        password=parsed.password,
+        host=parsed.host,
+        port=parsed.port,
+        database=parsed.database,
+    )
+    try:
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute(
+                "INSERT INTO users (id, tenant_id, name, email, password_hash, role) "
+                "VALUES (gen_random_uuid(), NULL, 'Manager', 'ck-manager@example.com', "
+                "'x', 'PROPERTY_MANAGER')"
+            )
+    finally:
+        # A failed statement leaves asyncpg's connection unusable for further commands —
+        # a fresh one keeps the two probes independent.
+        await conn.close()
+
+    # (b) the mirror case: a SUPER_ADMIN with a real tenant_id.
+    conn = await asyncpg.connect(
+        user=parsed.username,
+        password=parsed.password,
+        host=parsed.host,
+        port=parsed.port,
+        database=parsed.database,
+    )
+    try:
+        tenant_id = await conn.fetchval(
+            "INSERT INTO tenants (id, name, billing_email) "
+            "VALUES (gen_random_uuid(), 'Constraint Test', 'ck-tenant@example.com') "
+            "RETURNING id"
+        )
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute(
+                "INSERT INTO users (id, tenant_id, name, email, password_hash, role) "
+                "VALUES (gen_random_uuid(), $1, 'Root', 'ck-root@example.com', 'x', "
+                "'SUPER_ADMIN')",
+                tenant_id,
+            )
+    finally:
+        await conn.close()
+
+
 @pytest.mark.asyncio
 async def test_the_declared_column_widths_reach_the_real_ddl(migrations_database) -> None:
     """A bound that lives in the model and not in the database is half a bound — and a width

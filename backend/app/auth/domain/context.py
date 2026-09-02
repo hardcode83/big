@@ -21,14 +21,18 @@ class RequestContext:
     """
 
     user_id: uuid.UUID
-    tenant_id: uuid.UUID
+    # `None` for a `SUPER_ADMIN` request only (`super-admin-identity` R2.2, design D2): the
+    # role has no tenant to act on. `user_id` stays strictly a `uuid.UUID` — a `SUPER_ADMIN`
+    # always has an identity, just not a tenant.
+    tenant_id: uuid.UUID | None
     role: UserRole
     preferred_language: Locale
 
     def __post_init__(self) -> None:
-        for field_name in ("user_id", "tenant_id"):
-            if not isinstance(getattr(self, field_name), uuid.UUID):
-                raise ValueError(f"{field_name} must be a UUID")
+        if not isinstance(self.user_id, uuid.UUID):
+            raise ValueError("user_id must be a UUID")
+        if self.tenant_id is not None and not isinstance(self.tenant_id, uuid.UUID):
+            raise ValueError("tenant_id must be a UUID or None")
         if not isinstance(self.role, UserRole):
             raise ValueError("role must be a UserRole")
         if not isinstance(self.preferred_language, Locale):

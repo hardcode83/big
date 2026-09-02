@@ -75,6 +75,9 @@ def build_plan() -> BootstrapPlan:
         "BOOTSTRAP_MANAGER_NAME": settings.bootstrap_manager_name,
         "BOOTSTRAP_MANAGER_EMAIL": settings.bootstrap_manager_email,
         "BOOTSTRAP_MANAGER_PASSWORD": settings.bootstrap_manager_password,
+        "BOOTSTRAP_SUPER_ADMIN_NAME": settings.bootstrap_super_admin_name,
+        "BOOTSTRAP_SUPER_ADMIN_EMAIL": settings.bootstrap_super_admin_email,
+        "BOOTSTRAP_SUPER_ADMIN_PASSWORD": settings.bootstrap_super_admin_password,
     }
     missing = sorted(name for name, value in required.items() if not value.strip())
     if missing:
@@ -104,6 +107,14 @@ def build_plan() -> BootstrapPlan:
                 email=normalize_email(settings.bootstrap_manager_email),
                 password=settings.bootstrap_manager_password,
                 role=UserRole.PROPERTY_MANAGER,
+            ),
+            # `super-admin-identity` R5.1: a platform identity, not this (or any) tenant's —
+            # `apply_plan` gives it `tenant_id=None` rather than `tenant.id` (design D6).
+            SeedUser(
+                name=settings.bootstrap_super_admin_name.strip(),
+                email=normalize_email(settings.bootstrap_super_admin_email),
+                password=settings.bootstrap_super_admin_password,
+                role=UserRole.SUPER_ADMIN,
             ),
         ),
     )
@@ -178,8 +189,15 @@ async def apply_plan(session: AsyncSession, plan: BootstrapPlan, hasher: BcryptP
         # `guest-portal-api` added a third unscoped query that carries neither name, so the
         # grep stopped being exhaustive; it then named one docstring as the home of the
         # enumeration, and that went stale too. A test cannot.
+        # `super-admin-identity` D6: the address is expected under THIS run's tenant for
+        # every seed except SUPER_ADMIN, which is expected under no tenant at all. Without
+        # this, `existing.tenant_id != tenant.id` compares `None != tenant.id` — always
+        # True — and a re-run raises BootstrapConflictError on an account this same
+        # command already created, violating R5.2's convergence requirement before R5.3's
+        # real conflict case (a different tenant) ever gets to matter.
+        expected_tenant_id = None if seed.role is UserRole.SUPER_ADMIN else tenant.id
         existing = await users.find_by_email_globally(seed.email)
-        if existing is not None and existing.tenant_id != tenant.id:
+        if existing is not None and existing.tenant_id != expected_tenant_id:
             raise BootstrapConflictError(
                 f"The address of {seed.role.value} already exists under another tenant. "
                 "Emails are unique across the whole installation, so this address cannot "
@@ -190,7 +208,7 @@ async def apply_plan(session: AsyncSession, plan: BootstrapPlan, hasher: BcryptP
         session.add(
             UserModel(
                 id=uuid.uuid4(),
-                tenant_id=tenant.id,
+                tenant_id=expected_tenant_id,
                 name=seed.name,
                 email=seed.email,
                 password_hash=await hasher.hash(seed.password),

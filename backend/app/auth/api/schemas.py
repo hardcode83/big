@@ -125,7 +125,10 @@ class CurrentUserResponse(BaseModel):
     """
 
     id: uuid.UUID
-    tenant_id: uuid.UUID
+    # `None` for `SUPER_ADMIN` (`super-admin-identity` R2.4, design D5): the role has no
+    # tenant, and this field is what makes `GET /auth/me` say so instead of 500ing on a
+    # non-optional `uuid.UUID` at the API boundary.
+    tenant_id: uuid.UUID | None
     name: str
     email: str
     role: UserRole

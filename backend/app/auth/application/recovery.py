@@ -20,6 +20,7 @@ from app.auth.domain.enums import SessionRevokedReason, UserStatus
 from app.auth.domain.exceptions import (
     InvalidCredentialsError,
     InvalidRecoveryTokenError,
+    SuperAdminSelfServiceUnsupportedError,
     TooManyAttemptsError,
 )
 from app.auth.domain.password_policy import (
@@ -212,7 +213,16 @@ class RequestPasswordResetUseCase:
             raise TooManyAttemptsError("Too many password reset requests")
 
         user = await self._users.find_by_email_globally(email)
-        if user is None or user.status is not UserStatus.ACTIVE:
+        # `super-admin-identity` D7 amendment: a `SUPER_ADMIN` has no tenant to attribute a
+        # `PasswordResetToken` to (`password_reset_tokens.tenant_id` stays `NOT NULL`,
+        # untouched by that change), so it is treated exactly like an unresolved address —
+        # same silent return, same log line — rather than reaching `add()` and failing at
+        # `commit()` with an unmapped `IntegrityError`.
+        if (
+            user is None
+            or user.status is not UserStatus.ACTIVE
+            or user.tenant_id is None
+        ):
             # R2.6: the log records the OUTCOME, never the address — not even hashed, which
             # would still correlate two requests for the same person.
             logger.info("auth.password_reset_requested", extra={"resolved": False})
@@ -490,7 +500,7 @@ class ChangeOwnPasswordUseCase:
     async def execute(
         self,
         *,
-        tenant_id: uuid.UUID,
+        tenant_id: uuid.UUID | None,
         user_id: uuid.UUID,
         actor_ip: str | None,
         current_password: str,
@@ -522,6 +532,17 @@ class ChangeOwnPasswordUseCase:
         user = await self._users.get_active_by_id(tenant_id, user_id)
         if user is None:
             raise InvalidCredentialsError("Invalid email or password")
+
+        # `super-admin-identity` D7: a `SUPER_ADMIN` reaches this endpoint through the same
+        # `MANAGE_OWN_SESSION` permission every role holds (R4 keeps that unchanged), but it
+        # cannot complete it — `_AuditWriter.record` below writes an `AuditLog` row whose
+        # `tenant_id` would be `None`, and `audit_logs.tenant_id` stays `NOT NULL`. Refused
+        # here, before any password verification or audit write, with a clean `403` instead
+        # of an unmapped `IntegrityError` at commit.
+        if user.tenant_id is None:
+            raise SuperAdminSelfServiceUnsupportedError(
+                "SUPER_ADMIN cannot change its password through this endpoint"
+            )
 
         # The same RESPONSE a wrong password gets — code, body and headers — on purpose: a
         # distinguishable "you are locked" would tell the holder of a stolen token that they
