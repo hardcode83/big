@@ -193,7 +193,9 @@ QA focalizado, y si PASS seguir con `mark-local-verified` → `mark-ready --base
 - **Qué y por qué**: §11.4 verifica que los workflows `compose-ports`, `backend-tests`
   y `api-contract` siguen verdes vía `gh pr checks`. No es ejecutable durante `/sdd:run`:
   `gh pr checks` no tiene PR hasta que `/sdd:ship` lo abra (`no pull requests found for
-  branch`). Permanece `[ ]` en `tasks.md`, explícitamente **deferred-to-PR_OPEN**.
+  branch`). **Reubicada de casilla `[ ]` a nota post-ship en `tasks.md`** (review 2026-09-01,
+  decisión del usuario opción (b)) porque `mark-ready` exige toda tarea completa y esta es
+  inherentemente post-PR; sigue siendo un ítem **deferred-to-PR_OPEN** rastreado aquí.
 - **Comando de reanudación**: tras `/sdd:ship`, `gh pr checks` sobre el PR abierto.
 
 ## Resuelto
