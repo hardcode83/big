@@ -5,7 +5,7 @@ local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: hardcode83/super-admin-identity
-implementation_sha: 7abeefb01dc5dc237680c3d721aaffe973cf8eaf
+implementation_sha: 8d315ef766d11647d79e36e736f25b67847cc92c
 pr_number: 146
 pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/146
 pr_state: OPEN
