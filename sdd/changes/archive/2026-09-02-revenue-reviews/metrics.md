@@ -7,4 +7,5 @@
 | 2026-09-01 | tasks | MiniMax-M3[1m] claude-opus-5 | 297261 | 19389 | 1947803 | 2.9550 |  |
 | 2026-09-01 | run | MiniMax-M3[1m] claude-opus-5 claude-sonnet-5 | 7026167 | 364655 | 174839741 | 131.8382 | incl. subagents |
 | 2026-09-01 | review | MiniMax-M3[1m] claude-opus-5 | 1460923 | 97127 | 17806219 | 18.6428 | incl. subagents |
-| 2026-09-02 | ship | MiniMax-M3[1m] | 27731 | 3917 | 2405888 | 1.4395 |  |
+| 2026-09-02 | ship | MiniMax-M3[1m] claude-sonnet-5 | 3569468 | 109129 | 52233245 | 46.7588 | incl. subagents |
+| 2026-09-02 | archive | MiniMax-M3[1m] | 1018924 | 16778 | 12766538 | 11.8973 |  |
