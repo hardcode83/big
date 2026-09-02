@@ -22,7 +22,7 @@ from app.messaging.domain.enums import (
 )
 from app.messaging.infrastructure.models import ConversationModel, MessageModel
 from app.properties.infrastructure.models import PropertyModel
-from app.tenants.infrastructure.models import TenantModel
+from app.tenants.infrastructure.models import TenantConfigModel, TenantModel
 
 NOW = datetime(2026, 8, 16, 10, 0, tzinfo=UTC)
 
@@ -30,6 +30,17 @@ NOW = datetime(2026, 8, 16, 10, 0, tzinfo=UTC)
 async def seed_tenant(db_session, name: str) -> TenantModel:
     tenant = TenantModel(name=name, billing_email=f"{name.lower()}@example.com")
     db_session.add(tenant)
+    await db_session.flush()
+    # `notification-channel-routing` — pin the channel flags off so the resolver returns
+    # `{IN_APP}` only and this suite's single-row assertions stay valid. A test that wants
+    # both flags on seeds its own `TenantConfigModel` with the flags it needs.
+    db_session.add(
+        TenantConfigModel(
+            tenant_id=tenant.id,
+            notification_email_enabled=False,
+            notification_whatsapp_enabled=False,
+        )
+    )
     await db_session.flush()
     return tenant
 

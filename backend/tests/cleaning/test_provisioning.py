@@ -246,9 +246,15 @@ async def test_config_off_transitions_without_creating(
     db_session, tenant_a, template_a, due_checkout
 ):
     """R2.2 — `TenantConfig.auto_create_cleaning_task` is honoured, and counted apart."""
-    db_session.add(
-        TenantConfigModel(tenant_id=tenant_a.id, auto_create_cleaning_task=False)
-    )
+    # `insert_tenant` (tests/auth/conftest.py) already seeds a `TenantConfigModel` row —
+    # update it rather than inserting a second one, which would collide with the unique
+    # constraint on `tenant_id`.
+    config = (
+        await db_session.execute(
+            select(TenantConfigModel).where(TenantConfigModel.tenant_id == tenant_a.id)
+        )
+    ).scalar_one()
+    config.auto_create_cleaning_task = False
     await db_session.flush()
 
     report = await _advance(db_session).execute(

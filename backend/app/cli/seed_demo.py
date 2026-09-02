@@ -1506,6 +1506,7 @@ async def _run_the_cleaning(
             photos=SqlAlchemyCleaningPhotoRepository(session),
             incidents=SqlAlchemyBlockingIncidentQuery(session),
         ),
+        configs=SqlAlchemyTenantConfigRepository(session),
         **lifecycle,
     ).execute(tenant_id=tenant_id, task_id=task.id, actor=actor, now=now)
 

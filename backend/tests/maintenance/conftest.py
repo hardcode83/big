@@ -123,7 +123,7 @@ class Flow:
         )
         self.accept = AcceptIncidentUseCase(notifications=self.notifications, **common)
         self.reject = RejectIncidentUseCase(
-            users=users, notifications=self.notifications, **common
+            users=users, notifications=self.notifications, configs=configs, **common
         )
         self.en_route = EnRouteIncidentUseCase(**common)
         self.wait_for_parts = WaitForPartsUseCase(**common)
@@ -178,9 +178,21 @@ async def _user(db_session, tenant: TenantModel, role: str) -> UserModel:
 @pytest_asyncio.fixture
 async def world(db_session) -> World:
     from app.properties.domain.enums import PropertyOperationalState
+    from app.tenants.infrastructure.models import TenantConfigModel
 
     tenant = TenantModel(name="TenantA", billing_email="a@example.com")
     db_session.add(tenant)
+    await db_session.flush()
+    # `notification-channel-routing` — pin the channel flags off so the resolver returns
+    # `{IN_APP}` only and this suite's single-row assertions stay valid. A test that wants
+    # both flags on seeds its own `TenantConfigModel` with the flags it needs.
+    db_session.add(
+        TenantConfigModel(
+            tenant_id=tenant.id,
+            notification_email_enabled=False,
+            notification_whatsapp_enabled=False,
+        )
+    )
     await db_session.flush()
     prop = PropertyModel(
         tenant_id=tenant.id,

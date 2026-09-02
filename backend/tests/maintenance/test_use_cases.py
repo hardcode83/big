@@ -43,7 +43,7 @@ from app.maintenance.domain.exceptions import (
 )
 from app.maintenance.domain.repositories import IncidentFilters
 from app.maintenance.infrastructure.models import IncidentModel, OwnerApprovalModel
-from app.notifications.domain.enums import NotificationStatus, NotificationType
+from app.notifications.domain.enums import NotificationChannel, NotificationStatus, NotificationType
 from app.notifications.infrastructure.models import NotificationLogModel
 from app.tenants.infrastructure.models import TenantModel
 from app.properties.domain.enums import PropertyOperationalState
@@ -2225,6 +2225,48 @@ async def test_a_critical_classification_tells_the_manager(flow, world, db_sessi
     # R5.5 — no deadline, so `dispatch_notifications` cannot manufacture a breach candidate
     # against a type `escalation_for` has no rule for.
     assert rows[0].sla_deadline_at is None
+
+
+async def test_a_critical_classification_fans_out_across_the_tenants_enabled_channels(
+    flow, world, db_session
+) -> None:
+    """notification-channel-routing R1, R2 — the severity-alert fan-out, exercised end to
+    end (real use case → resolver → `dispatch_and_persist`), not just the pure
+    `channel_dispatch.py` unit tests."""
+    from sqlalchemy import select
+
+    from app.tenants.infrastructure.models import TenantConfigModel
+
+    config = (
+        await db_session.execute(
+            select(TenantConfigModel).where(TenantConfigModel.tenant_id == world.tenant.id)
+        )
+    ).scalar_one()
+    config.notification_email_enabled = True
+    config.notification_whatsapp_enabled = True
+    world.manager.phone = "+34600000001"
+    db_session.add(world.manager)
+    await db_session.flush()
+
+    incident = await make_incident(db_session, world, description=SAFETY_FAULT)
+    result = await flow.classify.execute(
+        tenant_id=world.tenant.id, incident_id=incident.id, actor=None, now=LATER
+    )
+
+    assert result.severity is IncidentSeverity.CRITICAL
+    rows = await _severity_alerts(
+        db_session, world.tenant.id, NotificationType.INCIDENT_CREATED_CRITICAL.value
+    )
+    by_channel = {row.channel: row for row in rows}
+    assert set(by_channel) == {
+        NotificationChannel.IN_APP,
+        NotificationChannel.EMAIL,
+        NotificationChannel.WHATSAPP,
+    }
+    assert all(row.recipient_user_id == world.manager.id for row in rows)
+    assert by_channel[NotificationChannel.WHATSAPP].recipient_contact == world.manager.phone
+    # R5.5 — no channel of a severity alert carries an SLA deadline.
+    assert all(row.sla_deadline_at is None for row in rows)
 
 
 async def test_a_high_classification_writes_the_high_alert(flow, world, db_session) -> None:

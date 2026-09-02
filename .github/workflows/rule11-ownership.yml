@@ -1,0 +1,81 @@
+name: rule11-ownership
+
+# La propiedad de un sumidero de la regla 11 se declara en la tabla de `sdd/steering/security.md`
+# y en ningún otro sitio, y eso lo hace cumplir un test y no la buena voluntad. Este workflow
+# existe porque el test estaba, y **no se ejecutaba donde tenía que hablar**.
+#
+# El defecto, medido y no inferido: la guardia vivía en `backend/tests/`, y `backend-tests.yml`
+# decide el área del diff con `case "$f" in backend/* | .github/workflows/backend-tests.yml)`, así
+# que un commit de **sola prosa** —que es exactamente la forma de todo commit de `/sdd:archive`—
+# no ejecutaba la suite que la contiene. Su entrada (`sdd/**`, `docs/**`, los `.py` del backend) y
+# su gatillo eran conjuntos disjuntos. En el run 33409418091 de `main`, sobre el commit `f86a83f`
+# que introdujo tres bloques infractores: `backend-tests-detect` success, `backend-tests` success,
+# `backend-tests-suite` **skipped**. `main` verde en CI y rojo en local, y el rojo le habría caído
+# a la siguiente PR que tocara `backend/**` sin haberlo escrito.
+#
+# **SIN `paths:` en `on:`** (R1.2), prohibido por `sdd/specs/backend-ci.md`: un filtro de rutas a
+# nivel de disparador no produce check alguno en los PR que no tocan esas rutas, y un required
+# check con filtro deja esos PR esperando para siempre uno que no llegará.
+#
+# **Y sin puerta de área dentro** (D2), que es la parte que no se lee sola. Podría filtrarse aquí
+# dentro, como hace `backend-tests.yml`, y sería barato — pero un gate de área es **un segundo
+# sitio donde equivocarse sobre el alcance**, que es literalmente el defecto que este workflow
+# arregla. El escaneo tarda ~1 s sobre ~900 ficheros: no hay nada que ahorrar. Correr siempre
+# satisface R1.1 por construcción y no por acierto.
+#
+# `push: branches: [main]` no es decorativo: es lo que habría puesto en rojo aquel run.
+#
+# **Sin Postgres, sin Redis, sin `.env` y sin secrets** (R1.3), y eso es verificable leyendo este
+# fichero, que es el punto. La guardia es stdlib (`ast`, `re`, `pathlib`) y sólo lee ficheros del
+# árbol, así que va con el `python3` del runner. `uv` entra únicamente para el paso de la suite.
+#
+# Un solo job, copiando la forma de `api-contract.yml` y `compose-ports.yml`. Se llama igual que el
+# workflow **a propósito**: el check run toma el nombre del *job*, no el del workflow, y R1.1 pide
+# que sea un check propio, distinto del de `backend-tests`.
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: rule11-ownership-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rule11-ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # Checkout por defecto, es decir `fetch-depth: 1`: **el árbol de trabajo llega completo** y
+      # la profundidad del historial es irrelevante para esta guardia, que lee ficheros y no
+      # commits. No se pone `fetch-depth: 0` a propósito: no compraría nada y clonaría el
+      # historial entero en cada PR. Lo que un checkout truncado provocaría —menos ficheros de los
+      # que hay— lo caza el centinela de suelo mínimo (`MINIMUM_MARKDOWN_FILES`,
+      # `MINIMUM_PYTHON_FILES`), que es su motivo de existir.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Sólo para el paso de la suite. Misma acción y mismo SHA que `compose-ports.yml`,
+      # `api-contract.yml` y `backend-tests.yml`.
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: La propiedad de un sumidero se declara en un solo sitio
+        # El mismo target que se ejecuta en local y el mismo script: un workflow con su propia
+        # invocación fallaría por un motivo que nadie puede reproducir en su máquina.
+        run: make check-rule11-ownership
+
+      - name: La suite de la guardia
+        # Si la guardia deja de detectar lo que dice detectar, esto rompe el check. Va aquí además
+        # de en `compose-ports.yml` —cuyo paso `pytest scripts/ -q` también las recoge— porque
+        # depender de que otro workflow ejecute tus pruebas es la misma clase de acoplamiento que
+        # este change existe para deshacer.
+        #
+        # `--no-project` porque no hay `pyproject.toml` en la raíz y no queremos sincronizar el
+        # árbol de dependencias del backend para probar un script de la stdlib; el `pytest` va
+        # **pinneado** y alineado con el `pytest>=9.1.1` de `backend/pyproject.toml`.
+        run: uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/test_rule11_ownership.py -q
