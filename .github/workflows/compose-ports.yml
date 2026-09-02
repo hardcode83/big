@@ -67,9 +67,4 @@ jobs:
         # `--no-project` porque no hay `pyproject.toml` en la raíz y no queremos sincronizar el
         # árbol de dependencias del backend para probar scripts de la stdlib; el `pytest` va
         # **pinneado** y alineado con el `pytest>=9.1.1` de `backend/pyproject.toml`.
-        # **Ojo antes de acotar este glob.** `scripts/ -q` recoge también
-        # `scripts/test_rule11_ownership.py`, y eso es portante: si alguien estrechara el
-        # disparador de `rule11-ownership.yml`, este paso sigue siendo el único camino por el
-        # que su guardián del gatillo se ejecuta en la PR que lo estrecha. El `pyyaml` es de
-        # ese test, que lee su workflow como YAML en vez de modelarlo.
-        run: uv run --no-project --with 'pytest==9.1.1' --with 'pyyaml==6.0.2' python -m pytest scripts/ -q
+        run: uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/ -q

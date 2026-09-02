@@ -473,7 +473,7 @@ fichero con marcador de fin: los pipes truncan y el filtro de `rtk` colapsa pyte
 | | resultado |
 |---|---|
 | 7.1 `make check-rule11-ownership` | salida **0**, 95 markdown + 800 python, cero infractores |
-| 7.2 `pytest scripts/ -q` | **248 passed** (2026-09-01) — eran 246 en la pasada de run; la review añadió dos pruebas: la que ancla el coste declarado de D3 y la que fija la forma del gatillo del workflow. Esta cifra se mueve con cada prueba nueva, así que va fechada |
+| 7.2 `pytest scripts/ -q` | **247 passed** (2026-09-02) — eran 246 en la pasada de run; la review añadió una prueba, la que ancla el coste declarado de D3. Llegó a 248 con el guardián del gatillo, retirado el 2026-09-02 (ver D2). Esta cifra se mueve con cada prueba nueva, así que va fechada |
 | 7.3 suite del backend | **9213 passed, 41 skipped** — contra la partida de **9218/41**, exactamente los 5 tests del fichero borrado |
 | 7.4 `check-compose-ports` · `check-version-parity` | **0** y **0** |
 | 7.5 `make down && make up` | los seis servicios arriba sin los dos bind mounts, y la suite **verde dentro del contenedor recreado**: los mismos 9213/41 en 21:47 |

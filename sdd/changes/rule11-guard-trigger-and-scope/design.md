@@ -121,33 +121,32 @@ y en `sdd/project.md`.
 `workflow_dispatch: {}`, **sin `paths:`** (R1.2), un solo job llamado `rule11-ownership` — el
 nombre del check run sale del *job*, no del workflow — y **ninguna detección de área dentro**.
 
-> **D2 dejó de ser prosa: lo impone una prueba** (añadida en review el 2026-09-01,
-> `test_the_workflow_trigger_has_no_path_filter_and_no_area_gate`). Fija los **tres** niveles
-> en los que un workflow de Actions puede alojar una puerta —raíz, job y paso— como conjuntos
-> **cerrados** de claves, más los valores de `permissions`, `runs-on`, `timeout-minutes` y la
-> lista de pasos en orden. Hizo falta llegar a eso: las dos versiones anteriores fijaban un
-> nivel cada una y el panel las sorteó por el de debajo, veinticuatro veces entre ambas.
+> **Se intentó anclar D2 con una prueba y se retiró en review el 2026-09-02, tras cuatro
+> versiones y siete rondas de panel.** Queda escrito porque el intento enseñó algo y porque el
+> hueco sigue abierto: D2 es una norma que hoy sostiene un revisor humano, no un test.
 >
-> Consecuencia práctica para quien edite el workflow: **cualquier cambio de lo que la prueba
-> fija la pone en rojo** —el disparador entero, las claves de los tres niveles, y por valor
-> `permissions`, `concurrency`, `runs-on`, `timeout-minutes` y los cuatro pasos, incluidos los
-> dos SHA de acción—. Es el coste buscado, no un falso positivo: las constantes son el contrato
-> y se leen contra esta decisión.
+> Las cuatro versiones y cómo cayó cada una: prohibir grafías de puerta (`case "$f"`,
+> `paths-filter`, …) — sorteada de trece formas; fijar el bloque `on:` y las claves del job —
+> sorteada por el nivel de debajo; fijar los tres niveles por indentación — sorteada por un
+> espacio de más detrás de un guion, que mueve la columna del mapa de un paso mientras el guion
+> se queda donde está, y por un guion desnudo en su propia línea; y leer el documento con
+> `yaml.load_all` — que retiró toda esa clase, pero abrió tres vías nuevas: `on:` y `"on":` son
+> claves distintas que la normalización fundía, PyYAML acepta anclas que Actions rechaza, y un
+> paso con `uses` y `run` a la vez perdía el `run`.
 >
-> **Lo que la prueba no cubre**, dicho sin el atajo de «vive fuera del fichero», que era falso:
-> fuera del fichero quedan la protección de rama, si el check es obligatorio, si el workflow
-> está deshabilitado en la interfaz, y que exista un runner que responda a `runs-on`. Dentro
-> del fichero queda sin fijar el **valor** de los `name:` de cada paso, que no puede desviar lo
-> que se ejecuta.
+> **La lección, que es lo que vale conservar:** cada versión fijaba un *sustituto* del mecanismo
+> —una grafía, un nivel, una indentación, una normalización— y el panel entró por debajo cada
+> vez. Y la cuarta arrastró además una dependencia (`pyyaml`) a dos workflows, rompiendo el
+> comando documentado en una spec viva y el razonamiento de un test hermano. Lo que se retira no
+> es sólo el test: es su radio de explosión.
 >
-> **Y cómo lo comprueba, que es lo que costó llegar:** lee el workflow con `yaml.load_all` y un
-> loader que rechaza claves duplicadas, y afirma sobre la estructura cargada. Las tres versiones
-> anteriores modelaban YAML a mano —por nombres prohibidos, por niveles, por indentación— y el
-> panel las derrotó las tres; la última con un espacio de más detrás de un guion, que mueve la
-> columna del mapa de un paso mientras el guion se queda donde está. Leer el documento en vez de
-> modelarlo retira la clase entera en lugar de enumerarla: estilo de flujo, escalares en bloque,
-> claves entrecomilladas o en mayúsculas, anclas, duplicados y un segundo documento dejan de ser
-> casos y pasan a ser, simplemente, otra estructura.
+> Por qué se retira en vez de arreglarse: ningún requisito de este change lo pedía. R4.1 pide
+> demostrar la ejecución del guardián, no fijar la forma del workflow; el test nació en review
+> para anclar esa mitad y acabó costando más rondas que el change entero. El hueco real —que un
+> `paths:` añadido después del merge reintroduzca el defecto sin que nada se ponga rojo— queda
+> como candidato de roadmap con las tres vías medidas y con el enfoque que el panel propuso:
+> recorrer el flujo de eventos de `yaml.parse`, que ve las anclas y las claves crudas que
+> `safe_load` normaliza.
 
 R1.1 pide que el guardián corra cuando el diff toque cualquier ruta que escanea; correr siempre
 lo satisface trivialmente y por construcción. Y es lo correcto aquí por un motivo que no es
@@ -429,10 +428,10 @@ Rejected:
 | Area | Files | Change |
 |---|---|---|
 | Guardia | `scripts/rule11-ownership.py` | **Nuevo.** La lógica de `backend/tests/test_rule11_ownership.py` con `SCOPE` (D4), `SINK_TERMS` sin meta-vocabulario (D3), `GuardError` + `main() -> int` (D7) y `_prose_roots()` con un único origen (D1) |
-| Guardia | `scripts/test_rule11_ownership.py` | **Nuevo.** Las cuatro pruebas de hoy más las de `SCOPE` (R2.4), la de alcance vacío (R4.3), el ancla prosa↔`SCOPE` (D11) y las cifras re-medidas de `test_what_this_guard_does_not_catch`. **Añadidas en review (2026-09-01)**: el ancla del coste declarado de D3 —que fija el conjunto exacto de `file:line`, no el total— y el guardián del gatillo, que es quien impone D2 |
+| Guardia | `scripts/test_rule11_ownership.py` | **Nuevo.** Las cuatro pruebas de hoy más las de `SCOPE` (R2.4), la de alcance vacío (R4.3), el ancla prosa↔`SCOPE` (D11) y las cifras re-medidas de `test_what_this_guard_does_not_catch`. **Añadida en review (2026-09-01)**: el ancla del coste declarado de D3, que fija el conjunto exacto de `file:line` y no el total. El guardián del gatillo se añadió y se retiró en la misma fase; el motivo está en D2 |
 | Guardia | `backend/tests/test_rule11_ownership.py` | **Se borra** (D1) |
 | CI | `.github/workflows/rule11-ownership.yml` | **Nuevo.** Un job `rule11-ownership`, sin `paths:`, `contents: read`, `concurrency` con `cancel-in-progress`, `timeout-minutes: 10`; pasos: checkout, `setup-uv`, `make check-rule11-ownership`, `uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/test_rule11_ownership.py -q` |
-| CI | `.github/workflows/compose-ports.yml` | **Una línea**, decidida en review (2026-09-01): su paso `pytest scripts/ -q` recoge las meta-pruebas de esta guardia, así que necesita el mismo `--with 'pyyaml==6.0.2'` desde que el test lee YAML de verdad. Sin esa línea, ese workflow se pondría en rojo por un `ImportError` ajeno a lo suyo. Es el único fichero que este change toca fuera de su alcance declarado, y se toca porque la alternativa —que un workflow hermano falle por nuestra dependencia— es peor. Lo demás sigue igual: Se deja así porque ya es el statu quo para los otros cuatro `scripts/test_*.py`, y estrechar el glob crearía una lista que el próximo script hay que acordarse de ampliar |
+| CI | `.github/workflows/compose-ports.yml` | **Sin cambios.** Se tocó en review para añadir `pyyaml` a su paso `pytest scripts/ -q` y se revirtió al retirar la prueba que lo necesitaba; consta porque su glob ancho recoge las meta-pruebas de esta guardia, y estrecharlo las dejaría sin ese segundo camino. Se deja así porque ya es el statu quo para los otros cuatro `scripts/test_*.py` |
 | Local | `Makefile` | Target `check-rule11-ownership: python3 scripts/rule11-ownership.py`, junto a `check-compose-ports` y `check-version-parity`. **Fuera de `$(COMPOSE)`**, como sus dos hermanos |
 | Local | `docker-compose.yml` | Se retiran `./sdd:/workspace/sdd:ro` y `./docs:/workspace/docs:ro` con su comentario (D9) |
 | Spec | `sdd/specs/rule11-ownership-guard.md` | **Nueva** (D8): gatillo, check run, fallo cerrado, vía local, estado del check, y la decisión de D6 sobre miembro de enum vs columna |
@@ -509,6 +508,24 @@ en alcance de este change. Se registran aquí para que `/sdd:archive` los promue
   `rule11-ownership.yml`. Esa dependencia sólo está escrita en un sentido, así que quien acote esa
   invocación por velocidad —una limpieza local perfectamente razonable— no vería que retira el
   único camino redundante.
+
+- **Anclar D2 con una prueba, por el flujo de eventos de `yaml.parse`.** Es el hueco que las
+  cuatro versiones retiradas no cerraron, y sigue abierto: un `paths:` o una puerta de área añadidos
+  después del merge reintroducen el defecto original sin que nada se ponga en rojo. Las tres vías que
+  quedaron vivas en la última versión están medidas y son el punto de partida: `on:` frente a `"on":`
+  como claves distintas, anclas que PyYAML acepta y Actions rechaza, y un paso con `uses` y `run` a
+  la vez. El enfoque que el panel propuso —y que ninguna de las cuatro usó— es leer el flujo de
+  eventos de `yaml.parse` en vez del documento cargado, porque ve las anclas y las claves crudas que
+  `safe_load` normaliza. **Y una advertencia de secuencia**: no generalizar el ancla a
+  `compose-ports.yml` ni a `api-contract.yml` hasta que esté cerrada, o propaga el hueco a tres
+  ficheros en vez de uno.
+- **Declarar el idioma de registro de cada superficie en `sdd/project.md` § Conventions.** Coste: una
+  línea. § Conventions cubre hoy los mensajes del backend y las strings de UI, y no dice nada de
+  `scripts/` ni de `.github/workflows/`, así que cada script nuevo elige idioma imitando al fichero
+  del que se copió — que es cómo esta capacidad acabó con tres idiomas de registro sin que nadie lo
+  decidiera. La forma propuesta: salida de runtime en el idioma del artefacto sobre el que informa;
+  comentarios de código y mensajes de aserción en inglés. Es seguimiento de **documentación**, no de
+  mecanismo: su disparador es el próximo change que toque `sdd/project.md`, no una feature propia.
 
 ## Risks & mitigations
 

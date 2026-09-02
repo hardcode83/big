@@ -39,10 +39,11 @@ en CI y rojo en local, y el rojo le habría caído a la siguiente Pull Request q
   [`specs/backend-ci.md`](backend-ci.md) fija para todo el repositorio: un filtro de rutas a nivel
   de disparador no produce check alguno en los PR que no tocan esas rutas.
 - THE SYSTEM SHALL ejecutarlo **sin puerta de área de ninguna clase**, ni en el disparador ni
-  dentro del workflow. Lo impone una prueba y no la buena voluntad —igual que el alcance, más
-  abajo—: `test_the_workflow_trigger_has_no_path_filter_and_no_area_gate` fija los tres niveles
-  del workflow (raíz, job y paso) como conjuntos cerrados de claves, de modo que una puerta
-  nueva se pone en rojo por no estar en el conjunto permitido, sin depender de cómo se escriba. No es comodidad: una puerta de área sería **un segundo sitio donde
+  dentro del workflow. **Y hoy esto no lo impone ninguna prueba**, a diferencia del alcance más
+  abajo: es una norma escrita que un revisor humano tiene que sostener. Anclarla
+  mecánicamente se intentó y no convergió —el detalle y las tres vías medidas están en el
+  candidato de roadmap del change `rule11-guard-trigger-and-scope`—, así que el hueco se
+  declara aquí en vez de darse por cerrado. No es comodidad: una puerta de área sería **un segundo sitio donde
   equivocarse sobre el alcance**, que es exactamente el defecto que esta capacidad corrige.
   Ejecutar siempre satisface el requisito por construcción y no por acierto, y el escaneo cuesta
   alrededor de un segundo sobre el árbol entero.
@@ -70,13 +71,7 @@ en CI y rojo en local, y el rojo le habría caído a la siguiente Pull Request q
   ningún secret, y SHALL hacerlo **verificable leyendo el workflow**: sin `services:`, sin `env:` y
   sin ninguna referencia a `secrets`.
 - THE SYSTEM SHALL implementarlo con biblioteca estándar exclusivamente, de forma que se ejecute
-  con el `python3` del runner sin sincronizar el árbol de dependencias del backend. **El
-  guardián**, se entiende: sus meta-pruebas sí traen una dependencia, `pyyaml`, y sólo para una
-  cosa —leer el propio workflow como YAML en vez de modelarlo por indentación—. La distinción
-  importa porque lo que este punto protege es que la guardia corra en cualquier sitio con un
-  `python3`; las pruebas corren donde hay `uv`, que es CI y el host de quien las ejecuta a
-  propósito. Y el motivo de la dependencia está medido: tres versiones del test modelaron YAML a
-  mano y el panel las derrotó las tres, la última con un espacio de más detrás de un guion.
+  con el `python3` del runner sin sincronizar el árbol de dependencias del backend.
 - WHEN alguien lo ejecute en local, THE SYSTEM SHALL ofrecer `make check-rule11-ownership`, que
   corre con el `python3` del host **sin Docker y sin el stack levantado**, y SHALL dar el mismo
   veredicto que en CI sobre el mismo árbol.
@@ -164,7 +159,7 @@ antes**, porque ya no exige contenedor ni stack.
 ## Verification
 
 - `make check-rule11-ownership` — cero infractores y salida 0, sin Docker y sin stack.
-- `uv run --no-project --with 'pytest==9.1.1' --with 'pyyaml==6.0.2' python -m pytest scripts/test_rule11_ownership.py -q`
+- `uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/test_rule11_ownership.py -q`
   — las meta-pruebas del guardián, que incluyen un caso en rojo por cada forma de fallo cerrado y
   el ancla entre la frase de alcance de la regla 11 y `SCOPE`.
 - Que el check `rule11-ownership` se ejecuta y reporta por las dos vías de diff —una de sola prosa y
