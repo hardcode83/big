@@ -35,10 +35,15 @@
 
 - [x] 6.1 `.github/workflows/deploy-dev.yml`'s "Render .env" step: add six `read_secret_by_name` calls (`autohostai-${ENV}-smtp-host`, `-smtp-port`, `-smtp-username`, `-smtp-password`, `-smtp-from-email`, `-smtp-use-tls`) and six new lines in the rendered `.env` (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS`) — same fail-fast contract as the existing calls. [R6.1, R6.2]
 
-## 7. Verification
+## 7. Verification <!-- panel: PASS 2026-09-02 -->
 
 - [x] 7.1 Full backend test suite: `docker compose exec backend uv run pytest` — 9716 passed, 41 skipped, 0 failed.
 - [x] 7.2 Static tooling: `uv sync --frozen && uv run pyright .` (from `backend`) — 838 pre-existing errors across the repo, none in any file this change touches (confirmed by grep against the pyright output).
-- [ ] 7.3 Apply Terraform to dev (`terraform apply` in `infra/environments/dev/`) once 5.1's IAM grant is live; confirm the SPF/DKIM records appear in Cloudflare and the Vault holds all six `autohostai-dev-smtp-*` secrets.
-- [ ] 7.4 After DNS propagation, trigger `app-deploy-dev` and confirm "Render .env" succeeds with the six SMTP values present in the deployed `.env`.
-- [ ] 7.5 Manual end-to-end in dev: request a password reset with SMTP configured and confirm the mail is delivered through the real relay — the first real `EMAIL`→real-recipient path this change measures (R7.1).
+
+## Post-merge operational steps (not gated by `mark-local-verified`)
+
+Same shape as the original environment bootstrap (`infra/environments/dev/README.md`: "El apply real... queda como paso explícito, confirmado por el usuario — no se ejecutan solos como parte de este change"): `.github/workflows/infra-dev.yml`'s plan/apply jobs are both gated `if: ... && github.ref == 'refs/heads/main'`, so these cannot run before this change is merged. Local review certifies the code/Terraform is correct and ready to ship; these three are what confirms it live, after merge.
+
+1. **Pending.** Apply Terraform to dev (`infra-dev` workflow, `action=plan` then `action=apply`, from `main`) — 5.1's IAM grant is already live (applied by the tenancy admin, 2026-09-02); confirm the SPF/DKIM records appear in Cloudflare and the Vault holds all six `autohostai-dev-smtp-*` secrets.
+2. **Pending.** After DNS propagation, trigger `app-deploy-dev` and confirm "Render .env" succeeds with the six SMTP values present in the deployed `.env`.
+3. **Pending.** Manual end-to-end in dev: request a password reset with SMTP configured and confirm the mail is delivered through the real relay — the first real `EMAIL`→real-recipient path this change measures (R7.1).
