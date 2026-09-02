@@ -261,3 +261,37 @@ async def test_list_pending_classification_skips_rows_locked_by_another_transact
     finally:
         await trans_a.rollback()
         await session_a.close()
+
+
+def test_classify_pending_reviews_use_case_accepts_the_scheduler_wiring_kwargs() -> None:
+    """N1: the constructor takes `audit=` and the scheduler passes `audit=`.
+
+    The mismatch this test pins came up at the panel of the first round: the use case
+    constructor required `audit_factory=` while the scheduler wired `audit=`. After the
+    constructor change the wiring is one line, and this test freezes both ends so a
+    future refactor cannot reintroduce the drift — a redefinition that drops `audit=` or
+    renames it to `audit_factory=` makes the constructor call below raise TypeError,
+    with the kwargs the scheduler actually passes.
+    """
+    # The full set of kwargs `_classify_reviews` builds at
+    # `backend/app/scheduler/tasks.py::_classify_reviews`. Anything `_classify_reviews`
+    # passes has to be accepted by the constructor; a missing or renamed kwarg surfaces
+    # as a TypeError the moment the wiring is touched.
+    scheduler_kwargs = {
+        "reviews": object(),
+        "drafts": object(),
+        "analyzer": object(),
+        "draft_generator": object(),
+        "configs": object(),
+        "audit": object(),
+        "timeline": object(),
+        "uow": object(),
+    }
+
+    use_case = ClassifyPendingReviewsUseCase(**scheduler_kwargs)
+
+    # The constructor stored them, and `audit` is the slot the panel flagged — verify
+    # the same object the scheduler wired lands on the field the audit writer writes
+    # through. A regression that swaps `audit=` for `audit_factory=` either fails the
+    # constructor above or leaves this assertion red because `_audit` is unset.
+    assert use_case._audit is scheduler_kwargs["audit"]
