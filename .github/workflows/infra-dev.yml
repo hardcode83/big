@@ -1,3 +1,6 @@
+# Runner self-hosted en la VM dev (label `[self-hosted, dev]`). Rollback: ver
+# docs/ci-runner-rollback.md (procedimiento + SHA del commit de migración).
+# Cambio: ci-runner-oci (PR <migration-pr>).
 name: infra-dev
 
 on:
@@ -27,7 +30,7 @@ jobs:
   # PR que toca infra/environments/dev/**: sin credenciales de OCI (init -backend=false). [R3.3]
   check:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -52,7 +55,7 @@ jobs:
     # Consecuencia operativa aceptada: no se puede planificar desde una rama de feature; el plan de
     # un change se ejecuta tras mergear a `main` (ver BLOCKED.md #2).
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -140,7 +143,7 @@ jobs:
   apply:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply' && github.ref == 'refs/heads/main'
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 15
     concurrency:
       group: infra-dev-apply
