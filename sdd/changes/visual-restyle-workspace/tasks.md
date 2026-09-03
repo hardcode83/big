@@ -285,13 +285,17 @@
   `features/*` behavioural test needed editing anywhere across sections 2-7 —
   if `git diff` shows an edited test file under `features/*/**/*.test.tsx`,
   treat that as a stop condition that was already raised in its section, not
-  something to silently resolve here. [R7] — confirmed: the only two test
-  files touched in the whole change are `components/ui/button.test.tsx`
-  (Tier-1 primitive, not `features/*`, task 1.2's own explicit ask) and
-  `features/shell/components/workspace-shell.test.tsx` (section 2's fix
-  round — purely additive coverage for this change's own new sidebar
-  elements, already raised and PASSed by the qa reviewer in section 2, not a
-  silent workaround for a regression).
+  something to silently resolve here. [R7] — confirmed: three test files are
+  touched in the whole change, none an edit to an existing `features/*`
+  behavioural assertion: `components/ui/button.test.tsx` (Tier-1 primitive,
+  not `features/*`, task 1.2's own explicit ask), `features/shell/components/workspace-shell.test.tsx`
+  (section 2's fix round — purely additive coverage for this change's own
+  new sidebar elements, already raised and PASSed by the qa reviewer in
+  section 2, not a silent workaround for a regression), and
+  `features/reservations/lib/reservation-status-tone.test.ts` (new file,
+  new coverage for the new tone map introduced alongside it — not an edit
+  to a pre-existing test, flagged by the qa reviewer's re-check as missing
+  from this note and added here for an accurate audit trail).
 
 ## Implementation Notes
 
