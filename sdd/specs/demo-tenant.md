@@ -26,8 +26,9 @@ credencial no alcanza nada fuera de su tenant, y que `saas-cross-tenant` sigue c
   `technician@demo.autohostai.test` (`TECHNICIAN`)—, más `billing@demo.autohostai.test` como
   `tenants.billing_email`, que es columna del tenant y no un login, y por eso no toma prestada la
   dirección del owner.
-- El dominio es `.test` (RFC 2606) a propósito: no resuelve, así que el día que llegue SMTP con
-  `hardening-release` ningún correo de la demo saldrá a ninguna parte.
+- El dominio es `.test` (RFC 2606) a propósito: no resuelve, así que con el SMTP real ya conectado
+  (`smtp-delivery-adapter`) ningún correo de la demo puede llegar a un buzón de nadie — que era el
+  riesgo que esta elección cubría desde antes de que el relay existiera.
 - THE SYSTEM SHALL resolver el tenant por igualdad **exacta** de `tenants.name`, no
   case-insensitive, porque así lo resuelven `bootstrap` y `seed_demo`: un nombre con otra caja es
   otra fila, y refusar sobre ella refusaría una ejecución que nunca estuvo en peligro.

@@ -18,9 +18,11 @@ from app.cleaning.api.errors import register_cleaning_error_handlers
 from app.maintenance.api.approvals_router import router as owner_approvals_router
 from app.maintenance.api.errors import register_maintenance_error_handlers
 from app.maintenance.api.incidents_router import router as incidents_router
+from app.maintenance.api.messages_router import router as incident_messages_router
 from app.messaging.api.errors import register_messaging_error_handlers
 from app.notifications.api.errors import register_notification_error_handlers
 from app.messaging.api.router import router as conversations_router
+from app.cleaning.api.messages_router import router as cleaning_task_messages_router
 from app.cleaning.api.photos_router import router as cleaning_photos_router
 from app.maintenance.api.photos_router import router as incident_photos_router
 from app.cleaning.api.tasks_router import router as cleaning_tasks_router
@@ -48,6 +50,8 @@ from app.properties.api.router import blocked_transitions_router
 from app.properties.api.router import router as properties_router
 from app.reservations.api.errors import register_reservation_error_handlers
 from app.reservations.api.router import router as reservations_router
+from app.statements.api.errors import register_statements_error_handlers
+from app.statements.api.router import router as statements_router
 from app.tenants.api.errors import register_tenant_error_handlers
 from app.tenants.api.router import router as tenants_router
 from app.timeline.api.errors import register_timeline_error_handlers
@@ -97,6 +101,7 @@ def create_app() -> FastAPI:
     register_guest_error_handlers(app)
     register_timeline_error_handlers(app)
     register_pricing_error_handlers(app)
+    register_statements_error_handlers(app)
     register_notification_error_handlers(app)
     register_reviews_error_handlers(app)
     register_platform_error_handlers(app)
@@ -129,6 +134,10 @@ def create_app() -> FastAPI:
     # its own than buried among the task routes (proposal R1, `ASSUMPTION`).
     app.include_router(cleaning_templates_router, prefix=API_V1_PREFIX)
     app.include_router(cleaning_tasks_router, prefix=API_V1_PREFIX)
+    # `staff-messaging`: the cleaning task's staff-to-manager thread, its own router the
+    # `cleaning_photos_router` precedent (a sub-resource of the task, split out rather than
+    # grown onto `cleaning_tasks_router`'s twelve routes).
+    app.include_router(cleaning_task_messages_router, prefix=API_V1_PREFIX)
     # `cleaning-photos-storage`: the **first of the two anonymous routes that serve tenant
     # data** (design D7); `incident-photos` mounted the second below, and its D5 moved the
     # machinery both share into `app/integrations/`. Its own router because sharing
@@ -145,6 +154,10 @@ def create_app() -> FastAPI:
     # its R4.6; nothing here opens one, and the one surface that creates an incident
     # anonymously is the guest portal's, mounted further down.
     app.include_router(incidents_router, prefix=API_V1_PREFIX)
+    # `staff-messaging`: the incident's staff-to-manager thread, its own router the
+    # `incident_photos_router`/`cleaning_task_messages_router` precedent (a sub-resource of
+    # the incident, split out rather than grown onto `incidents_router`'s existing routes).
+    app.include_router(incident_messages_router, prefix=API_V1_PREFIX)
     # Its own router and NOT part of `incidents_router` (R4.6): that one's every path carries
     # a `require(...)`, and this is the module's only anonymous door. The second route in the
     # application that serves object bytes against an HMAC signature, after
@@ -172,8 +185,10 @@ def create_app() -> FastAPI:
     # its routes carry no `Authorization` header and declare no permission, because the token
     # in the path is the credential. Keeping them off `guests_router` — which declares
     # `AUTHENTICATED_RESPONSES` — is what stops an unauthenticated route from hiding inside a
-    # shape that says otherwise, and forces an entry per route in `ANONYMOUS_ENDPOINTS`:
-    # four, one per route of PRD §23.
+    # shape that says otherwise, and forces **an entry per route** in `ANONYMOUS_ENDPOINTS` —
+    # which is the property that matters, and the reason no number is given here: this comment
+    # said "four, one per route of PRD §23" until `guest-portal-messaging` mounted two more.
+    # The census is the authority on how many there are, and it is enforced by a test.
     app.include_router(guest_portal_router, prefix=API_V1_PREFIX)
     # `dashboard-api`: the read side of PRD §10. `timeline` had `domain/` and
     # `infrastructure/` since `timeline-state-machine` and no way to read an event back —
@@ -193,6 +208,12 @@ def create_app() -> FastAPI:
     # no anonymous door into this module.
     app.include_router(pricing_rules_router, prefix=API_V1_PREFIX)
     app.include_router(price_recommendations_router, prefix=API_V1_PREFIX)
+    # `revenue-statements`: the `api/` layer `statements` never had — the module was
+    # entities and two tables with no writer at all (`dashboard-api` R2 already read
+    # them). One router because the two aggregates share the same permissions and the
+    # export endpoints live on the same URL tree (design D9). Both fully authenticated;
+    # there is no anonymous door into this module.
+    app.include_router(statements_router, prefix=API_V1_PREFIX)
     app.include_router(provenance_router, prefix=API_V1_PREFIX)
     # `revenue-reviews`: PRD §18's seven endpoints. Two routers because the summary
     # lives under `/properties/{id}/reviews/summary` and a literal segment there would

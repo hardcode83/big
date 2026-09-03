@@ -337,6 +337,58 @@ def test_the_owner_manages_pricing_and_not_only_reads_it() -> None:
     assert is_allowed(UserRole.TENANT_OWNER, Permission.MANAGE_PRICE_RECOMMENDATIONS)
 
 
+# --- `revenue-statements` (design D8) ----------------------------------------------
+
+STATEMENTS_PERMISSIONS = (
+    Permission.READ_OWNER_STATEMENTS,
+    Permission.MANAGE_OWNER_STATEMENTS,
+)
+
+
+def test_reading_and_managing_statements_are_distinct_permissions() -> None:
+    """The two are siblings, not stacked — `MANAGE` does not imply `READ` here as it does
+    elsewhere. D8 cites `_ACCESS_*` as the precedent; `_ACCESS_MANAGE` does include
+    `READ_ACCESS_RECORDS` (`_ACCESS_MANAGE = {READ_ACCESS_RECORDS, MANAGE_ACCESS_RECORDS}`),
+    but for statements the design says the owner reads the document and the manager
+    operates it, so the owner does not get `MANAGE`. Pinned here so the bundles don't
+    drift into the universal `_MANAGE ⊇ _READ` pattern."""
+    assert Permission.READ_OWNER_STATEMENTS != Permission.MANAGE_OWNER_STATEMENTS
+    granted = ROLE_PERMISSIONS[UserRole.TENANT_OWNER]
+    assert Permission.READ_OWNER_STATEMENTS in granted
+    assert Permission.MANAGE_OWNER_STATEMENTS not in granted
+    granted = ROLE_PERMISSIONS[UserRole.PROPERTY_MANAGER]
+    assert Permission.READ_OWNER_STATEMENTS in granted
+    assert Permission.MANAGE_OWNER_STATEMENTS in granted
+
+
+EXPECTED_STATEMENTS_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
+    UserRole.SUPER_ADMIN: frozenset(),
+    UserRole.TENANT_OWNER: frozenset({Permission.READ_OWNER_STATEMENTS}),
+    UserRole.PROPERTY_MANAGER: frozenset(STATEMENTS_PERMISSIONS),
+    UserRole.TECHNICIAN: frozenset(),
+    UserRole.CLEANER: frozenset(),
+}
+
+
+@pytest.mark.parametrize("role", list(UserRole))
+def test_the_statements_matrix_is_the_one_design_d8_decided(role: UserRole) -> None:
+    granted = ROLE_PERMISSIONS[role] & frozenset(STATEMENTS_PERMISSIONS)
+
+    assert granted == EXPECTED_STATEMENTS_PERMISSIONS[role]
+
+
+@pytest.mark.parametrize("role", [UserRole.CLEANER, UserRole.TECHNICIAN, UserRole.SUPER_ADMIN])
+def test_field_and_admin_roles_get_nothing_from_statements(role: UserRole) -> None:
+    """R7.1: the eleven routes sit behind one of these two, so holding none is what makes
+    the 403 structural instead of a check each router must remember. `SUPER_ADMIN` gets
+    nothing for the same reason it holds no operational permission today
+    (`steering/security.md` regla 1, cross-tenant stance)."""
+    for permission in STATEMENTS_PERMISSIONS:
+        assert not is_allowed(role, permission), (
+            f"{role.value} unexpectedly holds {permission.value}"
+        )
+
+
 @pytest.mark.parametrize("role", [UserRole.CLEANER, UserRole.TECHNICIAN])
 def test_the_operational_roles_get_nothing_from_pricing(role: UserRole) -> None:
     """R1.1/R5.2: the seven routes all sit behind one of these four, so holding none is

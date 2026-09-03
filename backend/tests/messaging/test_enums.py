@@ -6,7 +6,7 @@ the enum member's *name* is what every persisted row carries — change it in Py
 rows written yesterday stop mapping, silently.
 """
 
-from app.messaging.domain.enums import EscalationReason, MessageIntent
+from app.messaging.domain.enums import ConversationChannel, EscalationReason, MessageIntent
 
 #: PRD §13, in the order it lists them.
 PRD_INTENTS = (
@@ -61,3 +61,14 @@ def test_delivery_failed_is_the_only_reason_outside_the_prd() -> None:
 
     assert len(prd_reasons) == 6
     assert EscalationReason.DELIVERY_FAILED.name not in prd_reasons
+
+
+def test_conversation_channel_declares_portal() -> None:
+    """`guest-portal-messaging` R3.1. Pinned by name and value for the same reason as
+    `MessageIntent`: `conversations.channel` persists the member's name."""
+    assert ConversationChannel.PORTAL in ConversationChannel
+    assert ConversationChannel.PORTAL.value == "PORTAL"
+
+
+def test_conversation_channel_values_equal_their_names() -> None:
+    assert all(member.value == member.name for member in ConversationChannel)

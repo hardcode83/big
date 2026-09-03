@@ -63,8 +63,10 @@ class GuestPortalUnauthorised(GuestDomainError):
 
     It carries **no detail and no cause**: no `__cause__` chained, no reservation id, no
     reason. `str(exc)` is a constant, and every portal route answers it through the single
-    helper that emits one constant `404` body — the four routes of PRD §23 go through it, none
-    of them able to drift from the others.
+    helper that emits one constant `404` body — **every** portal route goes through it, none of
+    them able to drift from the others. Stated as "every" and not as a tally: the surface has
+    grown twice since this sentence was written, and what has to stay true is that no route
+    bypasses the helper, which is a property a number cannot express.
 
     The same reasoning as `GuestNotFoundError` one class up, applied where it matters more:
     that one protects an identity document from an authenticated operator of another tenant;

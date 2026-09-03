@@ -34,6 +34,7 @@ from app.cleaning.infrastructure.models import (
     CleaningChecklistCompletionModel,
     CleaningChecklistTemplateModel,
     CleaningPhotoModel,
+    CleaningTaskMessageModel,
     CleaningTaskModel,
 )
 from app.cli import demo_reset, seed_demo
@@ -54,6 +55,7 @@ from app.maintenance.domain.enums import (
     OwnerApprovalRelatedType,
 )
 from app.maintenance.infrastructure.models import (
+    IncidentMessageModel,
     IncidentModel,
     IncidentPhotoModel,
     OwnerApprovalModel,
@@ -975,6 +977,15 @@ async def populate_tenant(session: AsyncSession, tenant: TenantModel) -> dict[st
     session.add_all(
         [
             AccessRecordModel(id=uuid.uuid4(), tenant_id=tenant.id, property_id=prop.id),
+            CleaningTaskMessageModel(
+                id=uuid.uuid4(),
+                tenant_id=tenant.id,
+                task_id=task.id,
+                author_id=user.id,
+                author_role=UserRole.CLEANER,
+                content="Ventilado y listo",
+                created_at=datetime(2026, 8, 2, tzinfo=UTC),
+            ),
             ExpenseModel(
                 id=uuid.uuid4(),
                 tenant_id=tenant.id,
@@ -989,6 +1000,15 @@ async def populate_tenant(session: AsyncSession, tenant: TenantModel) -> dict[st
                 tenant_id=tenant.id,
                 reservation_id=reservation.id,
                 token_hash=uuid.uuid4().hex,
+            ),
+            IncidentMessageModel(
+                id=uuid.uuid4(),
+                tenant_id=tenant.id,
+                incident_id=incident.id,
+                author_id=user.id,
+                author_role=UserRole.CLEANER,
+                content="Aviso enviado al propietario",
+                created_at=datetime(2026, 8, 2, tzinfo=UTC),
             ),
             IncidentPhotoModel(
                 id=uuid.uuid4(),
@@ -1121,11 +1141,13 @@ def test_the_delete_phase_covers_every_scoped_table_minus_the_four_it_preserves(
         "cleaning_checklist_completions",
         "cleaning_checklist_templates",
         "cleaning_photos",
+        "cleaning_task_messages",
         "cleaning_tasks",
         "conversations",
         "expenses",
         "guest_access_tokens",
         "guests",
+        "incident_messages",
         "incident_photos",
         "incidents",
         "messages",

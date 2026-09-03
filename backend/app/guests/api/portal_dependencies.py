@@ -39,6 +39,16 @@ from app.guests.infrastructure.portal_throttle import RedisGuestPortalThrottle
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.maintenance.application.use_cases import ReportGuestIncidentUseCase
 from app.maintenance.infrastructure.repositories import SqlAlchemyIncidentRepository
+from app.messaging.api.dependencies import get_process_inbound_message_use_case
+from app.messaging.application.portal import (
+    PostPortalGuestMessageUseCase,
+    ReadPortalThreadUseCase,
+)
+from app.messaging.application.use_cases import ProcessInboundGuestMessageUseCase
+from app.messaging.infrastructure.repositories import (
+    SqlAlchemyConversationRepository,
+    SqlAlchemyMessageRepository,
+)
 from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
 
 SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
@@ -123,4 +133,42 @@ def get_report_guest_incident_use_case(session: SessionDep) -> ReportGuestIncide
         audit=SqlAlchemyAuditLogRepository(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
+    )
+
+
+def get_post_portal_guest_message_use_case(
+    session: SessionDep,
+    pipeline: Annotated[
+        ProcessInboundGuestMessageUseCase, Depends(get_process_inbound_message_use_case)
+    ],
+) -> PostPortalGuestMessageUseCase:
+    """`messaging`'s submitter, wired from the portal (D2, D5).
+
+    **The pipeline comes from `get_process_inbound_message_use_case`, not from a second graph
+    assembled here.** That factory wires eleven collaborators — the AI adapter, the outbound
+    channel registry, the incident reporting port, timeline, notifications and five
+    repositories — and R1.4 asks for the pipeline "entero y sin duplicarlo". A copy of that
+    graph would be a second place to forget a collaborator, and the forgetting would show up as
+    a step of the pipeline silently not running for portal messages only.
+
+    It resolves against the same request-scoped `AsyncSession` this function takes, because
+    FastAPI caches `Depends(get_db_session)` per request — which is what puts the conversation
+    created here and the message the pipeline writes in one transaction, and what keeps both
+    under the tenant the authoriser bound.
+    """
+    return PostPortalGuestMessageUseCase(
+        conversations=SqlAlchemyConversationRepository(session),
+        pipeline=pipeline,
+    )
+
+
+def get_read_portal_thread_use_case(session: SessionDep) -> ReadPortalThreadUseCase:
+    """`messaging`'s reader, wired from the portal (D2, D9).
+
+    Two repositories and no pipeline: reading never creates, so there is nothing transactional
+    to own here (R2.5).
+    """
+    return ReadPortalThreadUseCase(
+        conversations=SqlAlchemyConversationRepository(session),
+        messages=SqlAlchemyMessageRepository(session),
     )

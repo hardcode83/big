@@ -5,7 +5,8 @@ authorisation dependency. A new endpoint that forgets makes this fail; getting p
 it requires adding the path to the list below, which is a visible diff.
 """
 
-from fastapi import FastAPI
+import pytest
+from fastapi import Depends, FastAPI
 from fastapi.routing import APIRoute
 
 from app.auth.api.dependencies import REQUIRED_PERMISSION_ATTR
@@ -78,17 +79,31 @@ ANONYMOUS_ENDPOINTS = {
     # asserts that a token which does not exist, is malformed, has been revoked, is past its
     # window, or belongs to a cancelled stay are all indistinguishable.
     #
-    # Four entries, over three paths: `/checkin/{token}` answers both `GET` (what is still
-    # missing) and `POST` (the submission). That is the whole of PRD §23's guest surface, and
-    # the count is the point of the census — a fifth route under `/api/v1/guest/` would have to
-    # be added here, in a diff a reviewer sees.
+    # **Six entries, over four paths** — recounted against the list below rather than bumped:
+    # `/checkin/{token}` answers both `GET` (what is still missing) and `POST` (the submission),
+    # and `/messages/{token}` answers both `GET` (the guest's thread) and `POST` (writing to it).
+    # This comment said "four entries, over three paths … the whole of PRD §23's guest surface"
+    # and spoke of "a fifth route under `/api/v1/guest/`"; `guest-portal-messaging` added the
+    # fifth and the sixth at once, so the sentence was wrong in the count and in the singular.
+    #
+    # The census is not a tally for its own sake: adding a route here is the diff a reviewer
+    # sees, which is the whole mechanism. Anything new under `/api/v1/guest/` has to appear in
+    # this list or the check below goes red.
     ("GET", "/api/v1/guest/info/{token}"),
     ("GET", "/api/v1/guest/checkin/{token}"),
     ("POST", "/api/v1/guest/checkin/{token}"),
-    # The only one of the four that creates a row from a stranger's free text. It authorises
-    # through the same `GuestPortalAuthenticator`, and R5.3 is structural: no route here reads
-    # an incident back, so there is nothing to restrict.
+    # This one creates a row from a stranger's free text. It authorises through the same
+    # `GuestPortalAuthenticator`, and R5.3 is structural: no route here reads an incident back,
+    # so there is nothing to restrict.
     ("POST", "/api/v1/guest/incident/{token}"),
+    # `guest-portal-messaging`: the guest writes to their stay's thread and reads it back. The
+    # `POST` is the second route on this surface that lands a stranger's free text in a column
+    # — `messages.content`, whose contract is rule 11's — and it runs the whole `messaging-ai`
+    # pipeline over it rather than storing it, which is why no new use case appears alongside
+    # it. The `GET` publishes a frozen projection: the fields it does not declare cannot be
+    # serialised, so there is nothing here to restrict either.
+    ("POST", "/api/v1/guest/messages/{token}"),
+    ("GET", "/api/v1/guest/messages/{token}"),
     ("GET", "/openapi.json"),
     ("GET", "/docs"),
     ("GET", "/docs/oauth2-redirect"),
@@ -149,7 +164,11 @@ def _declared_permissions(route: APIRoute) -> set[Permission]:
 
     def walk(dependant) -> None:
         permission = getattr(dependant.call, REQUIRED_PERMISSION_ATTR, None)
-        if permission is not None:
+        if isinstance(permission, frozenset):
+            # `require_any(...)` tags with a frozenset so the walk sees every permission it
+            # declares, not one arbitrary member (`staff-messaging` design D3).
+            found.update(permission)
+        elif permission is not None:
             found.add(permission)
         for sub in dependant.dependencies:
             walk(sub)
@@ -225,6 +244,66 @@ def test_the_check_catches_an_endpoint_that_forgets() -> None:
     ]
 
     assert undeclared == ["/forgot-its-authorisation"]
+
+
+def test_require_any_authorises_either_permission_and_refuses_neither() -> None:
+    """`require_any` gets its own test, the same shape as `test_the_check_catches_an_endpoint_that_forgets`
+    (`staff-messaging` design D3).
+
+    A route gated by `require_any(A, B)` must both (a) show up as declaring authorisation for
+    the route walk above — proving the frozenset tag is seen, not skipped — and (b) actually
+    authorise a caller holding either permission and refuse one holding neither, which is the
+    behavioural half a static tag alone cannot prove.
+    """
+    import asyncio
+
+    from app.auth.api.dependencies import AuthenticatedRequest, require_any
+    from app.auth.domain.context import RequestContext
+    from app.auth.domain.enums import UserRole
+    from app.core.errors import ForbiddenError
+    from app.core.i18n import Locale
+
+    app = create_app()
+
+    @app.get("/gated-by-either")
+    async def gated(
+        authenticated: AuthenticatedRequest = Depends(
+            require_any(Permission.EXECUTE_CLEANING_TASKS, Permission.MANAGE_CLEANING_TASKS)
+        ),
+    ) -> dict[str, bool]:
+        return {"ok": True}
+
+    routes, _ = _api_routes(app)
+    matching = [route for path, route in routes if path == "/gated-by-either"]
+    assert len(matching) == 1
+    assert _declared_permissions(matching[0]) == {
+        Permission.EXECUTE_CLEANING_TASKS,
+        Permission.MANAGE_CLEANING_TASKS,
+    }
+
+    dependency = require_any(Permission.EXECUTE_CLEANING_TASKS, Permission.MANAGE_CLEANING_TASKS)
+
+    def _authenticated(role: UserRole) -> AuthenticatedRequest:
+        import uuid
+
+        return AuthenticatedRequest(
+            context=RequestContext(
+                user_id=uuid.uuid4(),
+                tenant_id=uuid.uuid4(),
+                role=role,
+                preferred_language=Locale.ES,
+            ),
+            family_id=uuid.uuid4(),
+        )
+
+    # Either permission alone authorises.
+    for role in (UserRole.CLEANER, UserRole.PROPERTY_MANAGER):
+        result = asyncio.run(dependency(_authenticated(role)))
+        assert result is not None
+
+    # Neither permission refuses.
+    with pytest.raises(ForbiddenError):
+        asyncio.run(dependency(_authenticated(UserRole.TECHNICIAN)))
 
 
 def test_the_check_catches_an_endpoint_that_authenticates_but_declares_no_permission() -> None:
@@ -371,10 +450,11 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
     `ANONYMOUS_ENDPOINTS` above, which is the visible diff this module exists to force.
 
     And by `guest-portal-api` with the guest-access-token path (`POST` and `DELETE`, both
-    `MANAGE_GUEST_ACCESS_TOKENS`), asserted per role in `tests/guests/test_api.py`. Its four
+    `MANAGE_GUEST_ACCESS_TOKENS`), asserted per role in `tests/guests/test_api.py`. Its
     **anonymous** portal routes are the same case as the webhook receiver and join
     `ANONYMOUS_ENDPOINTS` instead — the token in the path is the credential, so there is no
-    permission to declare.
+    permission to declare. Not counted here: the allowlist above is the authority on how many
+    there are, and this sentence said "four" until `guest-portal-messaging` made it six.
 
     And by `cleaner-task-context` with the task context path (`GET`, `READ_CLEANING_TASKS`),
     asserted per role in `tests/cleaning/test_task_context_api.py`. It declares no new permission
@@ -427,6 +507,14 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         # and it lives here rather than under `/api/v1/incidents` precisely so that module's
         # "no creation route" invariant survives (R1.2).
         "/api/v1/cleaning-tasks/{task_id}/incidents",
+        # `staff-messaging` R3.1: the staff-to-manager thread. Gated by `READ_CLEANING_TASKS`
+        # for the read and by `require_any(EXECUTE_CLEANING_TASKS, MANAGE_CLEANING_TASKS)` for
+        # the write, design D3 — **no new permission**, the two that already exist cover the
+        # cleaner and the manager respectively. Row-level scoping (a `CLEANER` reaches only her
+        # own task) is derived inside the use case from `CleaningActor`, the kind of
+        # restriction this snapshot cannot see. Asserted per role in
+        # `tests/cleaning/test_messages_api.py`.
+        "/api/v1/cleaning-tasks/{task_id}/messages",
         # `cleaner-photo-requirements` R4.1: `READ_CLEANING_TASKS`, **no new permission**, on the
         # same reasoning as the context path above. It is the read half of the photo path right
         # below it — the cleaner is told which categories exist instead of discovering them by
@@ -440,8 +528,9 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/cleaning-tasks/{task_id}/reject",
         "/api/v1/cleaning-tasks/{task_id}/start",
         "/api/v1/cleaning-tasks/{task_id}/validate",
-        # `maintenance`: sixteen authenticated routes now, fifteen here plus the owner approval
-        # below — fourteen until `incident-photos` added `POST` and `GET` on `.../photos`, and
+        # `maintenance`: seventeen authenticated routes now, sixteen here plus the owner approval
+        # below — fifteen until `staff-messaging` added `POST` and `GET` on `.../messages`,
+        # fourteen until `incident-photos` added `POST` and `GET` on `.../photos`, and
         # thirteen before `tech-cycle-completion` added `reject`. Every one of *these* is
         # authenticated. The module does have an anonymous door, exactly one, and it is not on
         # this router: `GET /api/v1/incident-photos/{photo_id}` is in `ANONYMOUS_ENDPOINTS`
@@ -459,6 +548,13 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         # this table can see. Its own authorisation cases — `CLEANER` refused, guest token
         # refused — are in `tests/maintenance/test_incident_context_api.py`.
         "/api/v1/incidents/{incident_id}/context",
+        # `staff-messaging` R2, R3.1: the incident's staff-to-manager thread. `GET` takes
+        # `READ_INCIDENTS` alone and `POST` takes `EXECUTE_INCIDENTS` alone — **no
+        # `require_any`**, unlike `cleaning`'s equivalent route: `EXECUTE_INCIDENTS` already
+        # covers both `TECHNICIAN` and `PROPERTY_MANAGER` (design D3). One path, two methods,
+        # the same convention `.../photos` below uses; asserted per role in
+        # `tests/maintenance/test_messages_api.py`.
+        "/api/v1/incidents/{incident_id}/messages",
         # `tech-cycle-completion` R2.3: renamed from `/start`, same `EXECUTE_INCIDENTS`. The
         # old path is gone rather than aliased — there was no consumer to protect.
         "/api/v1/incidents/{incident_id}/en-route",
@@ -541,6 +637,15 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/conversations/{conversation_id}/messages",
         "/api/v1/conversations/{conversation_id}/escalate",
         "/api/v1/conversations/{conversation_id}/resolve",
+        # `revenue-statements`: the seven authenticated paths for owner statements and
+        # tenant expenses (PRD §23), asserted per role in `tests/statements/test_api.py`.
+        "/api/v1/owner-statements",
+        "/api/v1/owner-statements/generate",
+        "/api/v1/owner-statements/{statement_id}",
+        "/api/v1/owner-statements/{statement_id}/export.csv",
+        "/api/v1/owner-statements/{statement_id}/export.pdf",
+        "/api/v1/expenses",
+        "/api/v1/expenses/{expense_id}",
         # `platform-admin-api` R6.1: the cross-tenant surface, two routes under one router,
         # both gated on `MANAGE_PLATFORM` (held by `SUPER_ADMIN` and nobody else,
         # `app.auth.domain.policy`). Asserted per role in

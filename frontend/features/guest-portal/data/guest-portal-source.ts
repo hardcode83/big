@@ -5,4 +5,6 @@ export interface GuestPortalDataSource {
   getCheckinStatus(token: string): Promise<GuestPortalDTOs.CheckinStatus>;
   submitCheckin(token: string, data: GuestPortalDTOs.SubmitCheckin): Promise<GuestPortalDTOs.CheckinSubmitted>;
   reportIncident(token: string, data: GuestPortalDTOs.ReportIncident): Promise<GuestPortalDTOs.IncidentReported>;
+  getConversation(token: string, params?: { page?: number; perPage?: number }): Promise<GuestPortalDTOs.Conversation>;
+  postMessage(token: string, data: GuestPortalDTOs.PostMessage): Promise<GuestPortalDTOs.ConversationMessage>;
 }

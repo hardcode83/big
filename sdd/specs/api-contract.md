@@ -218,6 +218,11 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
   un `StrEnum`, son iguales al literal equivalente — un `"NOT_FOUND"` a pelo pasaría, que es
   exactamente el fallo que el panel de `properties-crud` demostró inyectando una cadena. Cerrarlo
   es añadir los cinco `import` a la tupla de la guarda; lo que le falta es dueño.
+- **`revenue-statements` repite el mismo hueco con una duodécima tabla.**
+  `app/statements/api/errors.py` declara su propio `_MAPPING` (siguiendo el mismo patrón
+  que `pricing`) pero `tests/test_openapi_contract.py` no lo importa, así que `statements`
+  se suma al conjunto de arriba sin que este change haya intentado recontar ni cerrar el
+  hueco preexistente de `access`/`guests`/`maintenance`/`messaging`/`timeline`.
 - **Deuda con dueño**: la guarda de integridad del registro recorre los `_MAPPING`, las
   subclases de `AppError` y `_HTTP_STATUS_CODES`, pero **no las llamadas sueltas a
   `error_envelope(...)`**. Los **catorce** sitios de hoy pasan todos un miembro de `ErrorCode`
@@ -234,22 +239,24 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
   Inerte mientras nada instale uvloop y la generación sea síncrona.
 - **Sin protección de rama**: como el resto de checks del repositorio, `api-contract` se
   ejecuta y reporta pero no puede marcarse obligatorio (`specs/backend-ci.md` §Estado).
-- El contrato declara `HTTPBearer` como esquema de seguridad, y 92 de las 104 operaciones lo
-  referencian. Las doce restantes son `GET /health`, `POST /api/v1/auth/login`,
+- El contrato declara `HTTPBearer` como esquema de seguridad, y 100 de las 114 operaciones lo
+  referencian. Las catorce restantes son `GET /health`, `POST /api/v1/auth/login`,
   `POST /api/v1/auth/refresh`, `POST /api/v1/auth/forgot-password`,
   `POST /api/v1/auth/reset-password`, `GET /api/v1/cleaning-photos/{photo_id}`,
   `GET /api/v1/incident-photos/{photo_id}`,
-  `POST /api/v1/webhooks/{provider}/{webhook_token}` y las cuatro del portal del huésped
+  `POST /api/v1/webhooks/{provider}/{webhook_token}` y las seis del portal del huésped
   (`GET /api/v1/guest/info/{token}`, `GET` y `POST /api/v1/guest/checkin/{token}`,
-  `POST /api/v1/guest/incident/{token}`). Las siete últimas son las anónimas que **tocan datos de
-  un tenant**, y cada una lo resuelve por su lado porque el llamante no puede mandar cabecera
-  `Authorization`: las **dos** de fotos —la de limpieza y la de incidencia—, con la firma HMAC de
-  su query string, porque un navegador que resuelve un `<img src>` no la manda; la de webhooks, con
-  el token opaco de la ruta más el
-  secreto de cabecera del tenant (`specs/reservations-webhooks.md`), porque el llamante es el PMS
-  y no tiene sesión; las cuatro del portal, con `GuestPortalAuthenticator` sobre el token de la
-  ruta (`specs/guest-portal-api.md`). Las doce están nombradas **con su verbo** en el allowlist de
-  `tests/test_route_authorization.py`, que es el diff visible que ese allowlist existe para forzar.
+  `POST /api/v1/guest/incident/{token}`, `GET` y `POST /api/v1/guest/messages/{token}`). Las
+  nueve últimas son las anónimas que **tocan datos de un tenant**, y cada una lo resuelve por su
+  lado porque el
+  llamante no puede mandar cabecera `Authorization`: las **dos** de fotos —la de limpieza y la de
+  incidencia—, con la firma HMAC de su query string, porque un navegador que resuelve un
+  `<img src>` no la manda; la de webhooks, con el token opaco de la ruta más el secreto de
+  cabecera del tenant (`specs/reservations-webhooks.md`), porque el llamante es el PMS y no tiene
+  sesión; las seis del portal, con `GuestPortalAuthenticator` sobre el token de la ruta
+  (`specs/guest-portal-api.md`). Las catorce están nombradas **con su verbo** en el allowlist de
+  `tests/test_route_authorization.py`, que es el diff visible que ese allowlist existe para
+  forzar.
 - **Las dieciséis rutas de `maintenance` entraron todas autenticadas y con permiso declarado**:
   quince bajo `/api/v1/incidents` —las dos últimas,
   `POST` y `GET /api/v1/incidents/{incident_id}/photos`, entraron el 2026-08-23 con
@@ -298,6 +305,12 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
   ([`revenue-reviews.md`](../sdd/changes/revenue-reviews/proposal.md)). Tampoco tocan el
   allowlist anónimo: una reseña la da de alta un manager, la lee un manager o la propietaria,
   y la publica una persona — el flujo no tiene superficie sin token.
+- **Las dos rutas de `guest-portal-messaging` entraron anónimas** (2026-09-02):
+  `GET` y `POST /api/v1/guest/messages/{token}`, quinta y sexta del portal del huésped
+  ([`guest-portal-api.md`](guest-portal-api.md)), autorizadas por `GuestPortalAuthenticator`
+  sobre el token de la ruta como las cuatro anteriores. Amplían el allowlist anónimo de doce a
+  catorce entradas y `92 de 104` a `100 de 114` operaciones con `HTTPBearer` — la cifra sube en
+  las dos columnas porque ninguna de las dos rutas nuevas lleva el esquema.
 
 ## Key files
 

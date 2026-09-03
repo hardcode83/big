@@ -32,6 +32,7 @@ dependencies = [
     # operator's address is exactly the place where the stricter check earns its dependency.
     "email-validator>=2.0",
     "fastapi>=0.139.0",
+    "fpdf2>=2.8.2",
     # Runtime dependency since `channex-staging-adapter` (design D4): `ChannexAdapter`
     # talks HTTP in production code, so a dev-group httpx would be absent from the
     # deployed image — `devops/Dockerfile`'s prod stage installs with

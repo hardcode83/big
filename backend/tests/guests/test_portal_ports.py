@@ -9,6 +9,7 @@ Pure unit tests: `portal_ports.py` is stdlib plus dataclasses, so nothing needs 
 """
 
 import dataclasses
+import inspect
 import uuid
 from datetime import date, time
 
@@ -16,11 +17,33 @@ import pytest
 
 from app.guests.domain.portal_ports import (
     GuestAccessToken,
+    GuestPortalMessageSubmitter,
     GuestPortalStayReader,
+    GuestPortalThreadReader,
     GuestAccessTokenRepository,
     GuestSession,
+    PortalMessage,
+    PortalMessageSender,
+    PortalThread,
+    PortalThreadState,
     StayInfo,
 )
+
+
+def _declared_methods(protocol: type) -> set[str]:
+    """Every method reachable on a `Protocol`, ignoring what `Protocol` itself brings along.
+
+    **`dir()` and not `vars()`**, which is the difference between guarding R2.6 and appearing
+    to: `vars(protocol)` sees only that class body, so a method inherited from another
+    `Protocol` base would be invisible here while being perfectly callable. The reasoning is
+    `tests/messaging/test_ports.py`'s, which paid for it; the two older assertions in this file
+    use `vars()` and are safe only because those protocols have no base of their own.
+    """
+    return {
+        name
+        for name in dir(protocol)
+        if not name.startswith("_") and callable(getattr(protocol, name, None))
+    }
 
 
 def _fields(cls) -> set[str]:
@@ -203,3 +226,113 @@ def test_the_stay_reader_offers_exactly_one_read() -> None:
     methods = {name for name in vars(GuestPortalStayReader) if not name.startswith("_")}
 
     assert methods == {"stay_info"}
+
+
+# --- The portal thread's projection (`guest-portal-messaging` R2.2, R2.3, R2.4, D4) -------
+# Same discipline as `StayInfo` above, and for a sharper reason: this is the surface an
+# anonymous caller reads, and R2.4 asks that the exclusion be **structural** — the forbidden
+# fields must not exist, rather than being omitted by a serialiser that could stop omitting
+# them.
+
+#: What R2.2 and R2.3 forbid the guest ever seeing. Each would leak something different:
+#: whether a person or the AI answered, how sure the classifier was, what we think the message
+#: is about, and which internal conversation it belongs to.
+FORBIDDEN_ON_THE_THREAD = [
+    "sender_user_id",
+    "ai_generated",
+    "confidence_score",
+    "intent",
+    "metadata",
+    "conversation_id",
+    "escalation_reason",
+    "escalated_reason",
+    "reason",
+]
+
+
+def test_portal_message_declares_exactly_the_four_fields_d4_lists() -> None:
+    """An exact set, so a fifth field is a conscious decision rather than a slip."""
+    assert _fields(PortalMessage) == {"id", "sender", "content", "created_at"}
+
+
+def test_portal_thread_declares_exactly_the_five_fields_d4_lists() -> None:
+    assert _fields(PortalThread) == {"items", "total", "page", "per_page", "state"}
+
+
+@pytest.mark.parametrize("forbidden", FORBIDDEN_ON_THE_THREAD)
+def test_neither_projection_can_carry_what_r2_forbids(forbidden: str) -> None:
+    """R2.4's "la exclusión sea estructural". Parametrized by name so the failure says which
+    field came back, rather than just that a set comparison broke."""
+    assert forbidden not in _fields(PortalMessage)
+    assert forbidden not in _fields(PortalThread)
+
+
+@pytest.mark.parametrize("projection", [PortalMessage, PortalThread])
+def test_the_projections_are_frozen(projection) -> None:
+    assert projection.__dataclass_params__.frozen
+
+
+def test_the_sender_vocabulary_has_exactly_two_members() -> None:
+    """R2.2 groups five `MessageSenderType` members into two. A third member here would be a
+    distinction the guest can act on, which is the thing the requirement forbids."""
+    assert {m.name for m in PortalMessageSender} == {"GUEST", "PROPERTY"}
+
+
+def test_the_thread_state_vocabulary_has_exactly_two_members() -> None:
+    """R2.3's "estado cerrado de espera". Two members and not a boolean — D4's reasoning is
+    that a boolean invites the escalation reason to be hung beside it."""
+    assert {m.name for m in PortalThreadState} == {"AUTOMATIC", "AWAITING_HUMAN"}
+
+
+@pytest.mark.parametrize(
+    "vocabulary", [PortalMessageSender, PortalThreadState]
+)
+def test_the_portal_vocabularies_persist_nothing_but_their_names(vocabulary) -> None:
+    """These cross the wire to a client that switches on them (R5.5, R5.6), so a value that
+    drifted from its name would change the contract silently."""
+    assert all(member.value == member.name for member in vocabulary)
+
+
+# --- The two ports (R1.3, R2.6, D3) ------------------------------------------------------
+
+
+def test_the_two_portal_ports_declare_one_method_each() -> None:
+    """R2.6 is satisfied **by absence**: no method to escalate, resolve, close, reopen or list.
+
+    Asserted as an exact set rather than by checking the forbidden names are missing — a
+    denylist of verbs is exactly the guard that gets walked around by picking a different verb.
+    """
+    assert _declared_methods(GuestPortalThreadReader) == {"read"}
+    assert _declared_methods(GuestPortalMessageSubmitter) == {"submit"}
+
+
+@pytest.mark.parametrize(
+    ("port", "method"),
+    [(GuestPortalThreadReader, "read"), (GuestPortalMessageSubmitter, "submit")],
+)
+def test_neither_port_accepts_an_identifier_beside_the_session(port, method) -> None:
+    """R1.3: tenant, stay, property and token hash come from the token's row and from nowhere
+    else. The port's signature is where that becomes unwritable rather than merely undone —
+    there is no parameter into which a route could pass an id it read from the path or body.
+    """
+    parameters = set(inspect.signature(getattr(port, method)).parameters)
+
+    assert "session" in parameters
+    for identifier in (
+        "tenant_id",
+        "reservation_id",
+        "property_id",
+        "guest_id",
+        "conversation_id",
+        "token",
+        "token_hash",
+    ):
+        assert identifier not in parameters, identifier
+
+
+def test_the_reader_can_be_asked_for_no_particular_page() -> None:
+    """D9 makes the unasked-for window the **last** page, so "no preference" has to be
+    expressible — a defaulted `1` would quietly make it the first."""
+    page = inspect.signature(GuestPortalThreadReader.read).parameters["page"]
+
+    assert page.annotation == int | None

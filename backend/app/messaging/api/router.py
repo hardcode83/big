@@ -66,6 +66,7 @@ from app.messaging.application.use_cases import (
 from app.messaging.domain.enums import ConversationEscalationStatus, ConversationStatus
 from app.messaging.domain.exceptions import MessagingValidationError
 from app.messaging.domain.repositories import ConversationFilters
+from app.messaging.domain.value_objects import InboundMessageActor
 
 router = APIRouter(
     prefix="/conversations", tags=["messaging"], responses=AUTHENTICATED_RESPONSES
@@ -226,8 +227,12 @@ async def create_message(
             tenant_id=authenticated.context.tenant_id,
             conversation_id=conversation_id,
             content=payload.content,
-            actor_user_id=authenticated.context.user_id,
-            ip=client_ip or None,
+            # The authenticated door into the pipeline, so the actor is a user
+            # (`guest-portal-messaging` D8). The anonymous one builds its actor from the
+            # `GuestSession`'s digest instead, in `messaging/application/portal.py`.
+            actor=InboundMessageActor(
+                user_id=authenticated.context.user_id, ip=client_ip or None
+            ),
             now=now_utc(),
         )
     else:

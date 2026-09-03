@@ -108,6 +108,8 @@ top-N recurring-issue counts of the property's reviews in the last 90 days
   record of work a person did, not a call our system made.
 - It does not render a UI. The manager-facing screen of PRD §18 is the
   next change.
-- It does not write the audit row for the four actions. The R1.7 audit is
-  deferred to a follow-up; today the use cases wire `audit_factory=None` and
-  the timeline event carries the operator's identity.
+- The `Approve` and `Ignore` use cases each write one row in `audit_logs`
+  with the `REVIEW_APPROVED` / `REVIEW_IGNORED` action and a `status` diff
+  carrying the pre-mutation state (the row's own diff is the only way to
+  reconstruct what state the row had at the moment of the action without
+  replaying the timeline).

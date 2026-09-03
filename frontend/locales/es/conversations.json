@@ -17,7 +17,8 @@
     "BOOKING_MSG": "Mensaje de Booking",
     "EMAIL": "Email",
     "PHONE_TRANSCRIPT": "Transcripción telefónica",
-    "MANUAL": "Manual"
+    "MANUAL": "Manual",
+    "PORTAL": "Portal del huésped"
   },
   "senderType": {
     "GUEST": "Huésped",

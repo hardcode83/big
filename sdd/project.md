@@ -120,10 +120,11 @@ docker compose run --rm --no-deps -p 3042:3000 frontend sh -c 'npx next start -p
 
 El arreglo de fondo sigue siendo declarar `allowedDevOrigins` en `next.config`, y sigue sin hacerse.
 
-Qué hacer con esto, entonces: **prueba `next dev` con `PORT_OFFSET` primero** —el 2026-08-29 funcionó— y si la página se sirve pero no responde, no des la pasada visual por imposible: cae al `next start` de arriba **con su `build` delante**. Lo que no vale es citar el aviso de 2026-08-23 para no mirar, que es lo que pasó dos veces. Dos cosas más que cuestan tiempo:
+Qué hacer con esto, entonces: **prueba `next dev` con `PORT_OFFSET` primero** —el 2026-08-29 funcionó, y el 2026-08-30 también: `guest-portal-messaging` corrió con `PORT_OFFSET=41` la pasada manual entera de su tarea 12.6 (portal del huésped, envío, respuesta automática, escalación, bandeja del manager y respuesta humana leída de vuelta), con `next dev` y sin `allowedDevOrigins`— y si la página se sirve pero no responde, no des la pasada visual por imposible: cae al `next start` de arriba **con su `build` delante**. Lo que no vale es citar el aviso de 2026-08-23 para no mirar, que es lo que pasó dos veces. Dos cosas más que cuestan tiempo:
 
 - **La sesión vive en memoria.** Un `page.goto` a una ruta protegida cae a `/login`: el token de acceso no sobrevive a una recarga dura. Hay que entrar y navegar **por clic**, como un usuario, no recargando cada pantalla.
 - **El overlay de desarrollo de Next intercepta los clics de Playwright.** `page.click` falla con «`<nextjs-portal>` intercepts pointer events»; hacer el clic en el DOM (`el.click()`) lo esquiva.
+
 
 **Nada que copiar a mano**: `make up` crea `.env` desde `.env.example`, genera `JWT_SECRET_KEY` y ajusta permisos; las dependencias viven en volúmenes de Docker (`backend_venv`, `frontend_node_modules`), no en el árbol de ficheros. Requiere Docker Compose ≥ 2.35.0 y git ≥ 2.31 (por `--path-format`). El suelo de Compose lo fijan tres cosas y manda la mayor: 2.24 por el tag `!reset` de `docker-compose.worktree.yml`, 2.24.4 por el tag `!override` del overlay que genera `make up PORT_OFFSET=<n>`, y 2.35.0 por la bandera `--no-env-resolution` que usa `make check-compose-ports` (`specs/local-environment.md`).
 

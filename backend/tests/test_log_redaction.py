@@ -51,14 +51,18 @@ def test_other_paths_are_untouched() -> None:
         assert redact_path_tokens(path) == path
 
 
-# --- The guest portal's four routes (`guest-portal-api` R1.2, D8) ---------------------
+# --- The guest portal's routes (`guest-portal-api` R1.2, D8) --------------------------
 
 GUEST_TOKEN = "Kp3_vB8nQ1sTz6yW-live-guest-token"
 
 
-@pytest.mark.parametrize("action", ["info", "checkin", "incident"])
+@pytest.mark.parametrize("action", ["info", "checkin", "incident", "messages"])
 def test_a_guest_portal_token_is_replaced_and_the_action_kept(action: str) -> None:
-    """All four routes of PRD §23 share one shape, so one pattern covers them.
+    """Every portal route shares one shape, so one pattern covers them all.
+
+    Parametrized over the actions rather than counted: this docstring said "all four routes"
+    while the parametrize listed three, and `guest-portal-messaging` then added `messages` —
+    so the number described neither the surface nor the list below it.
 
     The action is kept for the same reason the provider is kept above: it is not a secret,
     and without it the log says only that *somebody* used the portal.
@@ -69,14 +73,20 @@ def test_a_guest_portal_token_is_replaced_and_the_action_kept(action: str) -> No
     assert redacted == f"/api/v1/guest/{action}/{REDACTED}"
 
 
-def test_a_fifth_guest_action_is_covered_without_touching_the_pattern() -> None:
+def test_an_unwritten_guest_action_is_covered_without_touching_the_pattern() -> None:
     """The residual risk the design's own Risks section names, closed by anchoring.
 
     "El riesgo real es que alguien añada una quinta ruta de huésped con otra forma de path y
     el patrón no la cubra." The pattern anchors on `/api/v1/guest/` plus one segment rather
-    than on the three actions that exist, so a route nobody has written yet is already
-    redacted. A pattern enumerating `info|checkin|incident` would have passed every other
-    test in this file and leaked the day the fourth action landed.
+    than on the actions that happen to exist, so a route nobody has written yet is already
+    redacted. A pattern enumerating `info|checkin|incident` would have passed every other test
+    in this file and leaked the day a new action landed.
+
+    **That day came**: `guest-portal-messaging` added `/api/v1/guest/messages/{token}`, and
+    this file needed no change to the pattern — only the parametrize above gained the action,
+    and it gained it to be covered explicitly rather than because it had been leaking. The test
+    was named `..._a_fifth_guest_action_...` when a fifth was hypothetical; it is renamed
+    because the hypothetical is now history and the point is the anchoring, not the ordinal.
     """
     redacted = redact_path_tokens(f"/api/v1/guest/receipt/{GUEST_TOKEN}")
 

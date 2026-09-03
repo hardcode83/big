@@ -18,6 +18,7 @@ See `MessageRepository` below.
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from app.messaging.domain.entities import Conversation, Message
@@ -83,6 +84,70 @@ class ConversationRepository(Protocol):
         Escalating, taking over, resolving and reopening all come through here, so this is
         the write path that has to stay atomic with the message, the timeline event and the
         notification of R4.7.
+        """
+        ...
+
+    async def ensure_portal(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        reservation_id: uuid.UUID,
+        property_id: uuid.UUID,
+        guest_id: uuid.UUID | None,
+        language: str,
+        now: datetime,
+    ) -> Conversation:
+        """The stay's one `PORTAL` conversation, creating it if this is the first message.
+
+        `guest-portal-messaging` R3.3, R3.4, design D6. **Never commits** — the portal's write
+        path runs inside the pipeline's single transaction (R1.4), so this shares its session
+        and leaves the commit to it.
+
+        **Idempotent under concurrency, and not by a read-then-write.** Two messages from the
+        same guest can arrive at once; an implementation that looked first and inserted second
+        would open two threads for one stay under exactly the load a double tap produces. The
+        contract is therefore stronger than "returns the conversation": the loser of the race
+        must **not** abort its transaction — it blocks until the winner commits, inserts
+        nothing, and reads the winner's row back. Both messages then land in the same thread,
+        which is what R3.4 asks for.
+
+        `reservation_id` is **mandatory, not `uuid.UUID | None`**, and that is the requirement
+        rather than a convenience. The partial unique index behind this method is
+        `(tenant_id, reservation_id) WHERE channel = 'PORTAL'`, and PostgreSQL treats NULLs as
+        distinct in a unique index — so rows with a null reservation do not collide with each
+        other and R3.4 would hold only for stays that happen to carry one. Typing it here is
+        what makes the guarantee independent of which caller shows up. Measured on 2026-08-29
+        (two such rows both insert); recorded in D6 by the security panel of section 1.
+
+        `language` applies **only when the row is created**. On the `DO NOTHING` branch the
+        existing conversation keeps its own, which is what R3.3 asks for: the language was
+        decided by the first message and a later one in another language does not restate it.
+
+        **Precondition the caller must honour**, the same one `add` states and for the same
+        schema reason: `property_id`, `reservation_id` and `guest_id` must already have been
+        resolved *within* `tenant_id`. The foreign keys of `conversations` are global rather
+        than composite with the tenant. On the portal path they come from the `GuestSession`,
+        which the authoriser resolved from the token's own row, so the precondition is met by
+        construction rather than by a check here.
+        """
+        ...
+
+    async def find_portal(
+        self, tenant_id: uuid.UUID, reservation_id: uuid.UUID
+    ) -> Conversation | None:
+        """The stay's `PORTAL` conversation, or `None`. **Creates nothing.**
+
+        R2.5: "leer no abre conversación" — a guest opening the page before they have ever
+        written must not leave a row behind, so the read path cannot go through
+        `ensure_portal`. That is the whole reason these are two methods and not one with a
+        flag.
+
+        `None` rather than an exception, like `get` above: the portal turns every failure into
+        one constant `404` and an empty thread is a `200`, so the decision belongs to the use
+        case.
+
+        Filters on `channel = PORTAL` as well as the tenant, so a stay's `WHATSAPP` or
+        `MANUAL` threads are neither returned here nor reachable from the portal (R3.5).
         """
         ...
 

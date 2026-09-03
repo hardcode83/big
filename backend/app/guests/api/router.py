@@ -23,7 +23,7 @@ a guest's identity — directly or by handing out a link to it — in one file i
 the file a security reviewer opens.
 
 PRD §23 declares no paths for the document or submission routes; those are
-`access-notifications`'. It *does* declare the four anonymous `{token}` ones, which are
+`access-notifications`'. It *does* declare the anonymous `{token}` ones, which are
 deliberately **not** here — they carry no `Authorization` header and live in
 `portal_router.py` (D1), because hiding an unauthenticated route inside a router that
 declares `AUTHENTICATED_RESPONSES` is what `app/main.py` describes as "esconder un endpoint

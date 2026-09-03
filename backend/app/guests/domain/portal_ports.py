@@ -13,6 +13,7 @@ context is unauthenticated — so R3.2 is satisfied *structurally*: the fields s
 exist on the type, and no future serialiser can leak what it cannot name.
 """
 
+import enum
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time
@@ -69,11 +70,20 @@ class PortalStay:
 class GuestSession:
     """Who the bearer of a token turns out to be (D4).
 
-    The return of `GuestPortalAuthenticator.authorize`, and the only thing the four portal
-    use cases are given. R2.1 is satisfied by construction: every identifier here came out
-    of the token's own row and its reservation, so a use case *cannot* read a tenant, a
-    reservation or a property from the path, the body, the query or a header — there is
-    nowhere else for them to come from.
+    The return of `GuestPortalAuthenticator.authorize`, and the only thing a portal use case
+    is given.
+
+    **Deliberately without a count.** This sentence said "the four portal use cases" until
+    `guest-portal-messaging` added two, and the number was then describing a tree that no
+    longer existed — the same way it had already drifted from the set that actually takes a
+    `GuestSession`, which never included `ReportGuestIncidentUseCase`. A tally in prose beside
+    a set that grows is what this project recounts rather than increments, so what is stated
+    here is the property instead: it does not go stale, and it is the part that matters.
+
+    R2.1 is satisfied by construction: every identifier here came out of the token's own row
+    and its reservation, so a use case *cannot* read a tenant, a reservation or a property
+    from the path, the body, the query or a header — there is nowhere else for them to come
+    from.
 
     `guest_id` is nullable because `reservations.guest_id` is: a booking may exist with no
     guest attached, and OQ3 decided the check-in creates one rather than refusing.
@@ -134,6 +144,156 @@ class StayInfo:
     arrival_notes: str | None
     access_code_masked: str | None
     support_channel: str | None
+
+
+class PortalMessageSender(str, enum.Enum):
+    """Who wrote a message, **grouped into two** (`guest-portal-messaging` R2.2, D4).
+
+    Derived in the backend from `MessageSenderType`, whose five members collapse to these two.
+    The collapse is the requirement, not an implementation detail: R2.2 forbids **publishing**
+    whether a reply was written by the AI or by a person, and a vocabulary of two is what makes
+    the distinction absent from the response rather than merely omitted by a serialiser.
+
+    **It does not make the distinction unguessable, and this docstring used to claim it did.**
+    A guest can still infer it from outside the payload — the automatic reply carries the same
+    `created_at` as the message that triggered it, it arrives in the same poll, and its text
+    comes from a closed catalogue. The residual is written down in `design.md` under R2.2
+    rather than left as an overstatement next to the type. Raised by the security panel of
+    sections 5-6.
+
+    `PROPERTY` and not `HOST`/`MANAGER`: the guest is told *the accommodation* answered, which
+    is true of an automatic reply and of a manager's, and names no role.
+    """
+
+    GUEST = "GUEST"
+    PROPERTY = "PROPERTY"
+
+
+class PortalThreadState(str, enum.Enum):
+    """Whether a person has the conversation (R2.3, D4).
+
+    An enum of two members and **not a boolean**, for two reasons D4 records: the front end
+    switches on a name to pick its localised copy (R5.6), and a boolean called
+    `awaiting_human` invites somebody to hang the *why* beside it — which is the escalation
+    reason, and R2.3 says that is internal.
+
+    `AWAITING_HUMAN` covers `PENDING_HUMAN` and `HUMAN_HANDLING` alike. The guest is told a
+    person will reply; that a manager has already taken it over is our business, not theirs.
+    """
+
+    AUTOMATIC = "AUTOMATIC"
+    AWAITING_HUMAN = "AWAITING_HUMAN"
+
+
+@dataclass(frozen=True)
+class PortalMessage:
+    """One message as the guest may see it (R2.2, R2.4, D4).
+
+    **The field list is the security control**, exactly as `StayInfo` above says of itself.
+    There is no `sender_user_id`, no `ai_generated`, no `confidence_score`, no `intent`, no
+    `metadata` and no `conversation_id`: they do not exist on the type, so no serialiser —
+    present or future — can leak one by forgetting to exclude it. R2.4 asks for precisely that,
+    "de modo que la exclusión sea estructural".
+
+    `sender` is already grouped: the mapping from `MessageSenderType` happens in the
+    implementer, so nothing downstream ever holds the ungrouped value.
+    """
+
+    id: uuid.UUID
+    sender: PortalMessageSender
+    content: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class PortalThread:
+    """One page of the guest's own thread (R2.1, R2.3, R2.4, D4, D9).
+
+    Same rule as `PortalMessage`: what is not declared cannot be published. In particular there
+    is **no escalation reason** — R2.3 calls it internal information — and no conversation id.
+
+    `total`, `page` and `per_page` travel because D9 makes the default window the **last** page
+    rather than the first, and a client that does not know which window it holds cannot page
+    backwards from it.
+    """
+
+    items: tuple[PortalMessage, ...]
+    total: int
+    page: int
+    per_page: int
+    state: PortalThreadState
+
+
+class GuestPortalThreadReader(Protocol):
+    """Reading the guest's own thread (D3).
+
+    Its own port rather than a method beside the submitter, on interface segregation and for
+    the reason D3 gives: these are different questions with different implementers — one
+    projects rows, the other runs a transactional pipeline. Same criterion by which this module
+    already separates `GuestPortalStayReader` from `PortalStayLocator`.
+
+    **It takes the `GuestSession` and no loose identifier** (R1.3). There is no `tenant_id`, no
+    `reservation_id` and no `conversation_id` parameter, so a caller cannot read one out of the
+    path, the body, the query or a header even by mistake — the only identifiers that exist are
+    the ones the authoriser resolved from the token's own row.
+
+    **And there is no second method** (R2.6): nothing to escalate, resolve, close or reopen a
+    conversation, and nothing to list conversations other than the stay's own. That absence is
+    the mechanism, not an omission — a port that offered one would be the open door for the
+    change that comes next, which is what `GuestAccessTokenRepository` above says of its own
+    missing `list`.
+    """
+
+    async def read(
+        self, session: GuestSession, *, page: int | None, per_page: int
+    ) -> PortalThread:
+        """The stay's portal thread, oldest first within the window (R2.1).
+
+        `page` is `None` when the caller did not ask for one, and that is a real value rather
+        than a defaulted `1`: D9 makes the unasked-for window the **last** page, so the
+        implementer needs to tell "no preference" from "page 1" in order to honour it.
+
+        **Never creates the conversation** (R2.5). A stay whose guest has not written yet
+        answers with an empty thread, not a `404` and not a new row.
+        """
+        ...
+
+
+class GuestPortalMessageSubmitter(Protocol):
+    """Writing one message from the guest (D3).
+
+    The same two constraints as its sibling above: the `GuestSession` and nothing else (R1.3),
+    and no method beyond this one (R2.6).
+    """
+
+    async def submit(
+        self,
+        session: GuestSession,
+        *,
+        content: str,
+        client_ip: str | None,
+        now: datetime,
+    ) -> PortalMessage:
+        """Run the whole `messaging-ai` pipeline for this message and return what was recorded.
+
+        `content` is the one free-form value that crosses this port, and it is the guest's own
+        words — bounded and validated by the schema before the route function runs (R1.6).
+
+        **`client_ip` is not an identifier and does not weaken R1.3.** Every identifier still
+        comes from the token's row; this is the address the request arrived from, a property of
+        the connection that the caller cannot claim. It travels because rule 9 of
+        `steering/security.md` names `actor_ip` as one of the two things `audit_logs` records
+        that no other table does, and none of its five exceptions covers this path — all of
+        them are grounded in there being no request to take an address from, and here there is
+        one. The sibling anonymous route, `POST /guest/incident/{token}`, has always passed it;
+        omitting it here gave the same anonymous actor two different audit trails for the same
+        entity. Raised by the security panel of sections 5-6.
+
+        The returned `PortalMessage` is the guest's message as they may see it, which is the
+        same projection the reader publishes: one published type, so the `201` of the write and
+        the items of the read cannot drift apart.
+        """
+        ...
 
 
 class TenantBinder(Protocol):
