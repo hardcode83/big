@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { PropertyStateBadge } from "@/components/property-state-badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 
 import type { PropertyFilters, PropertySummaryDto } from "../../data";
 import { useProperties } from "../../hooks/use-properties";
@@ -137,7 +138,7 @@ function PropertyCardRow({ property }: { property: PropertySummaryDto }) {
   ];
 
   return (
-    <article className="flex flex-col gap-2 rounded-lg border bg-surface p-3 shadow-sm">
+    <Card role="article" className="flex flex-col gap-2 p-3">
       <h3 className="text-base font-semibold">
         <NameLink property={property} />
       </h3>
@@ -154,7 +155,7 @@ function PropertyCardRow({ property }: { property: PropertySummaryDto }) {
           </div>
         ))}
       </dl>
-    </article>
+    </Card>
   );
 }
 
