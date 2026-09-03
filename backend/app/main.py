@@ -48,6 +48,8 @@ from app.properties.api.router import blocked_transitions_router
 from app.properties.api.router import router as properties_router
 from app.reservations.api.errors import register_reservation_error_handlers
 from app.reservations.api.router import router as reservations_router
+from app.statements.api.errors import register_statements_error_handlers
+from app.statements.api.router import router as statements_router
 from app.tenants.api.errors import register_tenant_error_handlers
 from app.tenants.api.router import router as tenants_router
 from app.timeline.api.errors import register_timeline_error_handlers
@@ -97,6 +99,7 @@ def create_app() -> FastAPI:
     register_guest_error_handlers(app)
     register_timeline_error_handlers(app)
     register_pricing_error_handlers(app)
+    register_statements_error_handlers(app)
     register_notification_error_handlers(app)
     register_reviews_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
@@ -202,6 +205,12 @@ def create_app() -> FastAPI:
     # no anonymous door into this module.
     app.include_router(pricing_rules_router, prefix=API_V1_PREFIX)
     app.include_router(price_recommendations_router, prefix=API_V1_PREFIX)
+    # `revenue-statements`: the `api/` layer `statements` never had — the module was
+    # entities and two tables with no writer at all (`dashboard-api` R2 already read
+    # them). One router because the two aggregates share the same permissions and the
+    # export endpoints live on the same URL tree (design D9). Both fully authenticated;
+    # there is no anonymous door into this module.
+    app.include_router(statements_router, prefix=API_V1_PREFIX)
     app.include_router(provenance_router, prefix=API_V1_PREFIX)
     # `revenue-reviews`: PRD §18's seven endpoints. Two routers because the summary
     # lives under `/properties/{id}/reviews/summary` and a literal segment there would

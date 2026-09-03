@@ -46,10 +46,11 @@ class NotificationType(str, enum.Enum):
     # because rule 9 of `steering/security.md` only makes an operation findable by filtering
     # on its own name.
     #
-    # EXTERNAL_DEPENDENCY: rows of this type reach nobody until a real SMTP adapter arrives
-    # with `hardening-release`. `EMAIL` resolves to `ConsoleEmailAdapter`, which
-    # `specs/access-notifications.md` forbids from logging content or recipient — so not even
-    # a developer can read the link from the log. See `docs/auth-account-recovery.md`.
+    # EXTERNAL_DEPENDENCY: rows of this type reach nobody unless a real SMTP relay is
+    # configured (`smtp-delivery-adapter`) — without one, `EMAIL` resolves to
+    # `ConsoleEmailAdapter`, which `specs/access-notifications.md` forbids from logging
+    # content or recipient — so not even a developer can read the link from the log. See
+    # `docs/auth-account-recovery.md`.
     PASSWORD_RESET_REQUESTED = "PASSWORD_RESET_REQUESTED"
     # `staff-messaging` design D8. Two more, the same kind of divergence
     # `REVIEW_RESPONSE_APPROVED` and `PASSWORD_RESET_REQUESTED` already declared: PRD §14 has

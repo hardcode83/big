@@ -46,7 +46,7 @@ escriben con `NULL` a propósito, para que `check_sla_breaches` no duplique el e
 
 | Canal | Adapter | Qué hace hoy |
 |---|---|---|
-| `EMAIL` / `CONSOLE` | `ConsoleEmailAdapter` | Registra la entrega en el log. SMTP real llega con `smtp-delivery-adapter` |
+| `EMAIL` / `CONSOLE` | `SMTPEmailAdapter` con `SMTP_HOST` puesto (dev lo tiene: OCI Email Delivery); `ConsoleEmailAdapter` si no | Entrega por el relay real — `SENT` significa «el relay lo aceptó», no «llegó a un buzón». Sin relay, registra la entrega en el log (canal y longitudes, nunca contenido ni destinatario) |
 | `WHATSAPP` | `MockWhatsAppAdapter` | Mock (PRD §14). WhatsApp real llega con `whatsapp-cloud-adapter` |
 | `IN_APP` | `InAppNotificationAdapter` | No envía nada: **la fila es la entrega**, y la bandeja web es lo que la hace legible — y desde `notifications-inbox-web`, acusable |
 | `PUSH` | — | Sin adapter a propósito: una fila `PUSH` pasa a `SKIPPED` |
@@ -251,7 +251,11 @@ entrante sin firma sobre datos de registro policial. Nada de eso está hecho.
 
 - `guest-portal-api` — la captura de los datos por el propio huésped (token web, check-in).
 - `cleaner-app` / `dashboard-web` — las pantallas que consumen todo esto.
-- `hardening-release` — SMTP y WhatsApp reales, settings de integraciones.
+- `smtp-delivery-adapter` — **ya aterrizó** (2026-09-03): el adapter SMTP real y su relay (OCI
+  Email Delivery, SPF/DKIM por Terraform, secretos por el Vault).
+- `whatsapp-cloud-adapter` — WhatsApp real.
+- `hardening-release` — settings de integraciones (la pantalla; las credenciales y el adapter ya
+  no son suyos).
 - `maintenance` — **ya aterrizó** (2026-08-15) y usó esta maquinaria en lugar de construir una
   segunda: `TECHNICIAN_ASSIGNED` abre su plazo de SLA según la severidad de la incidencia y escala
   al `PROPERTY_MANAGER` si nadie lo atiende. `OWNER_APPROVAL_REQUIRED` viaja **sin plazo y sin

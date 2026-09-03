@@ -105,6 +105,12 @@ ENTITY_PRICE_RECOMMENDATION = "PRICE_RECOMMENDATION"
 # entity type and its own allowlist entry, exactly like the other writer-less resources the
 # vocabulary already enumerates.
 ENTITY_AUDIT_LOG = "AUDIT_LOG"
+# `revenue-statements` (design D7). Two new entities, both already in the schema since
+# `domain-foundation-financial` but with no writers until this change. Audit by event rather
+# than by row: a `statement_id` mutation on `Expense` is audited against the `EXPENSE` row
+# that carries it, not against the `OWNER_STATEMENT` it points at.
+ENTITY_OWNER_STATEMENT = "OWNER_STATEMENT"
+ENTITY_EXPENSE = "EXPENSE"
 
 # action — the operation that produced the row.
 USER_CREATED = "USER_CREATED"
@@ -348,6 +354,28 @@ PRICE_RECOMMENDATIONS_GENERATED = "PRICE_RECOMMENDATIONS_GENERATED"
 # `purge-audit` phase is the only operation that mints it, and an action for an operation
 # nothing else performs is the speculative vocabulary this module's docstring argues against.
 AUDIT_LOG_PURGED = "AUDIT_LOG_PURGED"
+# `revenue-statements` (design D7, R7.3).
+#
+# `OWNER_STATEMENT_GENERATED`: written only by the **manual** `POST /api/v1/owner-statements/generate`.
+# The monthly job omits it by design — design D5/D12 of `revenue-statements/design.md` opens
+# the new exception to regla 9 of `steering/security.md` (the one added by this change), and
+# the `TimelineEvent OWNER_STATEMENT_GENERATED` is the audit trail for the clock path.
+# Mirror of `PRICE_RECOMMENDATIONS_GENERATED`'s split.
+OWNER_STATEMENT_GENERATED = "OWNER_STATEMENT_GENERATED"
+# `OWNER_STATEMENT_STATUS_CHANGED` covers every status move (DRAFT → READY, READY → SENT). `SENT`
+# is terminal, so a third action for "sent" would be a verb for one transition and not pay for
+# itself — same pattern as `OWNER_APPROVAL_ANSWERED` for incident approvals.
+OWNER_STATEMENT_STATUS_CHANGED = "OWNER_STATEMENT_STATUS_CHANGED"
+# `OWNER_STATEMENT_NOTES_UPDATED` writes `{"changed": true}` only — `notes` is regla 11 sumidero
+# under exception 3, and `REDACT_ONLY_FIELDS["OWNER_STATEMENT"] = {"notes"}` enforces it
+# structurally: `diff("notes", …)` raises `AuditContractError`, leaving `redacted("notes")`
+# as the only legal form. This mirrors `pricing_rules.event_rules`'s structural guarantee,
+# not `auth-account-recovery`'s or `tech-incident-context`'s model (those fields are
+# *outside* `AUDITABLE_FIELDS`; this one is inside and gated by the per-entity denylist).
+OWNER_STATEMENT_NOTES_UPDATED = "OWNER_STATEMENT_NOTES_UPDATED"
+EXPENSE_CREATED = "EXPENSE_CREATED"
+EXPENSE_UPDATED = "EXPENSE_UPDATED"
+EXPENSE_DELETED = "EXPENSE_DELETED"
 
 # `revenue-reviews` R1.7 / R3.5 — four actions for the four transitions of `Review.status`
 # the proposal enumerates, plus one for the draft-edit of `R3.5`. Each is written by the
@@ -391,6 +419,9 @@ ENTITY_TYPES = frozenset(
         ENTITY_PRICING_RULE,
         ENTITY_PRICE_RECOMMENDATION,
         ENTITY_AUDIT_LOG,
+        # `revenue-statements` — entities that earn their writers in §4.
+        ENTITY_OWNER_STATEMENT,
+        ENTITY_EXPENSE,
         ENTITY_REVIEW,
         ENTITY_REVIEW_RESPONSE_DRAFT,
     }
@@ -456,6 +487,13 @@ ACTIONS = frozenset(
         PRICE_RECOMMENDATION_APPLIED_EXTERNAL,
         PRICE_RECOMMENDATIONS_GENERATED,
         AUDIT_LOG_PURGED,
+        # `revenue-statements` — actions exercised by §4.1's `_AuditWriter`.
+        OWNER_STATEMENT_GENERATED,
+        OWNER_STATEMENT_STATUS_CHANGED,
+        OWNER_STATEMENT_NOTES_UPDATED,
+        EXPENSE_CREATED,
+        EXPENSE_UPDATED,
+        EXPENSE_DELETED,
         REVIEW_CREATED,
         REVIEW_APPROVED,
         REVIEW_IGNORED,

@@ -110,6 +110,27 @@ variable "media_user_email" {
   }
 }
 
+variable "smtp_user_email" {
+  description = <<-EOT
+    Email primario del usuario de servicio del relay SMTP (change `smtp-delivery-adapter`).
+    Mismo motivo que `media_user_email`: esta tenancy usa Identity Domains (IDCS), que rechaza
+    crear un usuario sin email primario aunque sea de servicio y no vaya a iniciar sesión nunca.
+
+    No es un secreto y por eso lleva default versionado. Mismo patrón de plus-addressing sobre
+    un buzón que ya existe, con una dirección propia y distinta de `media_user_email`: son dos
+    usuarios de servicio separados a propósito (tasks.md 5.3 de `smtp-delivery-adapter` — que un
+    Customer Secret Key de medios filtrado no conceda también envío de correo, y viceversa), así
+    que sus emails primarios tampoco coinciden.
+  EOT
+  type        = string
+  default     = "josegascon+autohostai-smtp@gmail.com"
+
+  validation {
+    condition     = can(regex("^[^@[:space:]]+@[^@[:space:]]+$", var.smtp_user_email))
+    error_message = "smtp_user_email debe ser una dirección de correo válida."
+  }
+}
+
 variable "ssh_authorized_keys" {
   description = "Lista de claves públicas SSH autorizadas (una por operador), inyectadas vía cloud-init al usuario por defecto de la imagen (ubuntu). Cada par dedicado a esta VM — distinto de la API key de OCI del provider/backend, nunca reutilizar. Por ahora solo la de Jose; añadir más no requiere recrear."
   type        = list(string)
