@@ -4,6 +4,8 @@ Procedimiento para revertir los workflows migrados al runner self-hosted de la V
 
 Referencias rápidas: PR de migración `<n>` · SHA del commit `<migration_sha>` · runner label `dev` · usuario de la VM `ubuntu` · clave local `~/.ssh/autohostai_dev_vm` · el runner corre en `/opt/actions-runner` sobre la VM `dev` (AD-3).
 
+> **`<n>`, `<migration_sha>` y `<merge_sha>` (§3) son placeholders literales mientras este change no tiene PR.** `/sdd:ship` los rellena con valores reales al abrir el PR (`<n>`, `<migration_sha>`) y, si el merge es por merge-commit, al mergear (`<merge_sha>` en §3 solo se conoce entonces — el comando de squash de §3 usa `<migration_sha>`, que sí queda fijado al abrir el PR). No copies los comandos de §3 verbatim hasta que estos placeholders tengan valores reales.
+
 ## 1. Resumen
 
 El change `ci-runner-oci` migra los 10 workflows bajo `.github/workflows/` al runner self-hosted de la VM `dev` con label `[self-hosted, dev]`. Antes del merge del PR, cada workflow ha corrido al menos una vez verde en el runner (R7). Tras el merge:

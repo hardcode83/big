@@ -65,7 +65,12 @@ jobs:
       - name: Escribir la private key a fichero
         env:
           OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
-        run: printf '%s\n' "$OCI_PRIVATE_KEY" > "$RUNNER_TEMP/oci_private_key.pem"
+        # umask 077 antes del printf: en el runner self-hosted persistente el fichero convive con
+        # otros procesos/usuarios locales, a diferencia del runner GH-hosted efímero de antes de
+        # ci-runner-oci (hallazgo del panel de seguridad — riesgo aceptado documentado en design.md).
+        run: |
+          umask 077
+          printf '%s\n' "$OCI_PRIVATE_KEY" > "$RUNNER_TEMP/oci_private_key.pem"
       - name: Escribir configuración del backend
         env:
           TFSTATE_BUCKET: ${{ secrets.TFSTATE_BUCKET }}
@@ -156,7 +161,12 @@ jobs:
       - name: Escribir la private key a fichero
         env:
           OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
-        run: printf '%s\n' "$OCI_PRIVATE_KEY" > "$RUNNER_TEMP/oci_private_key.pem"
+        # umask 077 antes del printf: en el runner self-hosted persistente el fichero convive con
+        # otros procesos/usuarios locales, a diferencia del runner GH-hosted efímero de antes de
+        # ci-runner-oci (hallazgo del panel de seguridad — riesgo aceptado documentado en design.md).
+        run: |
+          umask 077
+          printf '%s\n' "$OCI_PRIVATE_KEY" > "$RUNNER_TEMP/oci_private_key.pem"
       - name: Escribir configuración del backend
         env:
           TFSTATE_BUCKET: ${{ secrets.TFSTATE_BUCKET }}
