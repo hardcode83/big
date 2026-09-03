@@ -24,7 +24,7 @@ las pantallas —; aquí va el *cómo se trabaja con ello*.
 
 ## La API (`dashboard-api`)
 
-Cuatro rutas, todas autenticadas con `require(Permission.READ_PROPERTIES)`, todas
+Cinco rutas, todas autenticadas con `require(Permission.READ_PROPERTIES)`, todas
 tenant-scoped y todas de solo lectura:
 
 | Ruta | Qué devuelve |
@@ -33,6 +33,7 @@ tenant-scoped y todas de solo lectura:
 | `GET /api/v1/properties/{id}/dashboard` | el agregado de PRD §9.2 para una vivienda |
 | `GET /api/v1/properties/{id}/state` | estado operacional canónico + instante de la última transición |
 | `GET /api/v1/timeline/{property_id}` | la cronología de la vivienda, filtrable y paginada (PRD §10) |
+| `GET /api/v1/dashboard/occupancy-series` | serie de ocupación de la semana ISO en curso del tenant: un punto por día (lunes a domingo, UTC) con el % de viviendas activas con «noche ocupada» ese día |
 
 Lo que conviene saber al operarlas:
 
@@ -66,6 +67,24 @@ Lo que conviene saber al operarlas:
   donde un operador puede haber pegado un código de puerta.
 - **Los importes viajan como cadena decimal**, no como número: un `float` pierde
   céntimos.
+- **`occupancy-series` cuenta «noche ocupada», no reservas.** Una vivienda cuenta
+  como ocupada un día si, para esa noche, tiene una reserva que no está
+  `CANCELLED`/`NO_SHOW`, o estaba `BLOCKED_BY_OWNER` u `OUT_OF_SERVICE` al final de
+  ese día UTC (una foto de su historial de transiciones tomada en el último
+  instante del día). Las tres condiciones se unen sin contar dos veces. Un bloqueo
+  que entra y sale el mismo día calendario **no** cuenta como ocupación por sí
+  solo — consecuencia aceptada y confirmada en el diseño, no un defecto a
+  corregir.
+- **La semana es la ISO del tenant: lunes a domingo, UTC**, siempre siete puntos en
+  ese orden. `occupancy_pct` es un número de 0 a 100 con un decimal, salvo que el
+  tenant no tenga ninguna vivienda activa — entonces sale `null` en los siete
+  puntos, nunca una división por cero.
+- **Redacción total, no parcial.** Un rol sin `READ_RESERVATIONS` recibe
+  `data: null` para toda la serie, no una serie construida solo con bloqueos y
+  fuera de servicio: como las reservas son la fuente mayoritaria de una noche
+  ocupada, esa serie sería un número distinto con la misma forma, no una lectura
+  más estrecha del mismo. Un rol sin `READ_PROPERTIES` no llega ni aquí: la ruta
+  responde `403` antes de entrar al handler.
 
 ## Rutas de la pantalla
 
@@ -158,3 +177,8 @@ make up SERVICE=frontend   # o: cd frontend && npm run dev
 - **Hora de entrada y salida**: `check_in`/`check_out` viajan como fecha, no como
   instante — combinar la fecha con la hora exige resolver la zona horaria de la
   vivienda, y equivocarse ahí son horas de diferencia en la pantalla de un operador.
+- **Panel de ocupación semanal en la pantalla**: `GET
+  /api/v1/dashboard/occupancy-series` ya existe y responde (arriba), pero hoy es
+  solo backend — no hay ninguna pantalla que lo grafique. El panel "Ocupación
+  Semanal" que lo consuma es trabajo de un change futuro, cuando el rediseño
+  visual del dashboard lo necesite.

@@ -236,3 +236,28 @@ class PropertyDetail:
     # gives operator notes a column of their own — not by draining a sink into a screen.
     notes: str | None
     pending_approvals: tuple[ApprovalBlock, ...]
+
+
+@dataclass(frozen=True)
+class OccupancyPoint:
+    """One day of the weekly occupancy series (`dashboard-occupancy-series` R1.2, R1.3).
+
+    `date` is the calendar day **in UTC** — the same day the three occupancy sources of R2.1
+    are counted over (R2.4), so the reservation criterion (by date) and the transition
+    criterion (by instant) cannot drift into different timezones.
+
+    `occupancy_pct` is a `Decimal` quantized to one decimal place, mirroring
+    `occupancy_pct_for`'s return type (design D4): a 0–100 percentage rendered to one decimal
+    has no float-precision failure mode the way money does, and a plain number is what a
+    charting library consumes directly. It is `None` — on **all seven** points, never on some
+    of them — when `total_properties` is zero, because R1.3 forbids answering a division by
+    zero with anything at all.
+
+    No colour and no weekday label: PRD §9.1 leaves both to the frontend, the same line
+    `PropertyDashboardCard` already holds for `operational_state`.
+    """
+
+    date: date
+    occupied_properties: int
+    total_properties: int
+    occupancy_pct: Decimal | None
