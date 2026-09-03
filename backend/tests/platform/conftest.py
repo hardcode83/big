@@ -12,6 +12,7 @@ from tests.auth.conftest import (  # noqa: F401
     TEST_BCRYPT_ROUNDS,
     api,
     auth_header,
+    hasher,
     insert_tenant,
     insert_user,
     tenant_a,

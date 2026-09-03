@@ -59,16 +59,16 @@
 - [x] 4.13 Test de API: `POST /api/v1/platform/tenants/{tenant_a.id}/users` con un email ya usado por `tenant_b` devuelve `409` con `code=CONFLICT` sin nombrar a qué tenant pertenece (mismo trato que `user-management`). [R3.4]
 - [x] 4.14 Test de API: `POST /api/v1/platform/tenants` con cuerpo inválido (`name=""`) Y un token no `SUPER_ADMIN` (p. ej. `tenant_a`'s `TENANT_OWNER`): el `require(Permission.MANAGE_PLATFORM)` corta ANTES de validar el cuerpo y devuelve `403` con un único motivo. Confirmar este orden: `require(...)` está declarado antes que `body: CreateTenantRequest` en la firma del endpoint. [R1.4, R5.3]
 
-## 5. Authorization matrix, isolation, structural guards, and docs
+## 5. Authorization matrix, isolation, structural guards, and docs <!-- panel: PASS 2026-09-03 -->
 
-- [ ] 5.1 Añadir las dos rutas al snapshot protegido de `backend/tests/test_route_authorization.py::test_the_protected_endpoints_are_the_ones_expected`: `"/api/v1/platform/tenants"` y `"/api/v1/platform/tenants/{tenant_id}/users"`. Actualizar el comentario del snapshot citando `platform-admin-api` como el cambio que las añadió (mismo formato que los snapshots previos). [R6.1, R6.2]
-- [ ] 5.2 Nuevo test estructural en `backend/tests/test_route_authorization.py::test_manage_platform_only_lives_under_platform_prefix`: walkear las rutas registradas, recoger las que llevan `require(Permission.MANAGE_PLATFORM)` (vía `getattr(dependant.call, REQUIRED_PERMISSION_ATTR, None)` igual que en el resto del módulo), y fallar si alguna cuelga de un path que NO empieza por `/api/v1/platform/`. Esto cierra R-6 del design. [R-6]
-- [ ] 5.3 Nuevo fichero `backend/tests/platform/test_authorization.py` con un test por rol, para cada una de las dos rutas: `TENANT_OWNER`, `PROPERTY_MANAGER`, `CLEANER`, `TECHNICIAN` y un `SUPER_ADMIN` con `must_change_password=True` (que es fenced, R5.4 — el `require(...)` corta antes de la autorización, pero el test declara el caso para cerrar una regresión futura). Cada rol no autorizado debe obtener `403` con un único motivo. Usar la fixture `users_by_role_a` y la fixture `super_admin` (añadir a `tests/auth/conftest.py` si no existe — `tenant_a` no sirve para SUPER_ADMIN por `ck_users_super_admin_tenant_id_null`, sigue el patrón de `tenant_for_role`). [R5.3]
-- [ ] 5.4 Test de aislamiento: nuevo fichero `backend/tests/platform/test_isolation.py` con `test_creating_a_user_in_tenant_a_does_not_leak_to_tenant_b`: sembrar `tenant_a`, `tenant_b`, y un `super_admin`; ejecutar `POST /api/v1/platform/tenants/{tenant_a.id}/users` y verificar que el usuario creado tiene `tenant_id=tenant_a.id`, no `tenant_b.id` y no `None` (que sería el tenant del actor — la regla 1 dice que `SUPER_ADMIN` puede saltarse esa restricción **en el actor**, no en la entidad). [R3.2, R3.7]
-- [ ] 5.5 Test de bootstrap (R7.2/R7.3): nuevo test en `backend/tests/cli/test_bootstrap.py` o en `backend/tests/platform/test_isolation.py` que ejecute `apply_plan(session, plan, hasher)` con un `BootstrapPlan` que contiene los dos seeds (`tenant_name=MAGNO_REDES11`, `users=(OWNER, MANAGER, SUPER_ADMIN)`) y luego invoque `POST /api/v1/platform/tenants` con `name="MAGNO_REDES11"`: debe responder `409` con `code=CONFLICT`. Repetir el bootstrap (`apply_plan` segunda vez) sobre la misma BD: ninguna fila nueva; `tenants=0`, `users=0`, `tenant_configs_converged` solo si `storage_type` cambia — la unicidad del nombre por la API no afecta a la convergencia del bootstrap. [R7.1, R7.2, R7.3]
-- [ ] 5.6 Modificar `sdd/specs/auth-tenancy.md`: añadir `MANAGE_PLATFORM` a la enumeración de permisos y al mapeo `ROLE_PERMISSIONS` para `SUPER_ADMIN` (mismo formato que las entradas existentes); añadir las dos rutas al censo de excepciones a la regla 1 (mismo formato que las entradas de `super-admin-identity`). [R5.1, R5.2, R6.1]
-- [ ] 5.7 Modificar `sdd/specs/user-management.md`: añadir una nota sobre el caso de uso compartido con `POST /api/v1/platform/tenants/{tenant_id}/users` (R4.3) y otra nota declarando que `GRANTABLE_ROLES` no se abre por API en esta entrada (R3.5/D2). [R4.3, R3.5]
-- [ ] 5.8 Regenerar el contrato: `python3 backend/scripts/export_openapi.py` (o el comando que `sdd/project.md` §Verification declare hoy) → `backend/openapi.json` regenerado; `backend/tests/test_openapi_contract.py` verde. Confirmar que `tags=["platform"]` aparece en las dos rutas y que `summary`/`description` dicen literalmente `Requires SUPER_ADMIN`. [R6.3]
+- [x] 5.1 Añadir las dos rutas al snapshot protegido de `backend/tests/test_route_authorization.py::test_the_protected_endpoints_are_the_ones_expected`: `"/api/v1/platform/tenants"` y `"/api/v1/platform/tenants/{tenant_id}/users"`. Actualizar el comentario del snapshot citando `platform-admin-api` como el cambio que las añadió (mismo formato que los snapshots previos). [R6.1, R6.2]
+- [x] 5.2 Nuevo test estructural en `backend/tests/test_route_authorization.py::test_manage_platform_only_lives_under_platform_prefix`: walkear las rutas registradas, recoger las que llevan `require(Permission.MANAGE_PLATFORM)` (vía `getattr(dependant.call, REQUIRED_PERMISSION_ATTR, None)` igual que en el resto del módulo), y fallar si alguna cuelga de un path que NO empieza por `/api/v1/platform/`. Esto cierra R-6 del design. [R-6]
+- [x] 5.3 Nuevo fichero `backend/tests/platform/test_authorization.py` con un test por rol, para cada una de las dos rutas: `TENANT_OWNER`, `PROPERTY_MANAGER`, `CLEANER`, `TECHNICIAN` y un `SUPER_ADMIN` con `must_change_password=True` (que es fenced, R5.4 — el `require(...)` corta antes de la autorización, pero el test declara el caso para cerrar una regresión futura). Cada rol no autorizado debe obtener `403` con un único motivo. Usar la fixture `users_by_role_a` y la fixture `super_admin` (añadir a `tests/auth/conftest.py` si no existe — `tenant_a` no sirve para SUPER_ADMIN por `ck_users_super_admin_tenant_id_null`, sigue el patrón de `tenant_for_role`). [R5.3]
+- [x] 5.4 Test de aislamiento: nuevo fichero `backend/tests/platform/test_isolation.py` con `test_creating_a_user_in_tenant_a_does_not_leak_to_tenant_b`: sembrar `tenant_a`, `tenant_b`, y un `super_admin`; ejecutar `POST /api/v1/platform/tenants/{tenant_a.id}/users` y verificar que el usuario creado tiene `tenant_id=tenant_a.id`, no `tenant_b.id` y no `None` (que sería el tenant del actor — la regla 1 dice que `SUPER_ADMIN` puede saltarse esa restricción **en el actor**, no en la entidad). [R3.2, R3.7]
+- [x] 5.5 Test de bootstrap (R7.2/R7.3): nuevo test en `backend/tests/cli/test_bootstrap.py` o en `backend/tests/platform/test_isolation.py` que ejecute `apply_plan(session, plan, hasher)` con un `BootstrapPlan` que contiene los dos seeds (`tenant_name=MAGNO_REDES11`, `users=(OWNER, MANAGER, SUPER_ADMIN)`) y luego invoque `POST /api/v1/platform/tenants` con `name="MAGNO_REDES11"`: debe responder `409` con `code=CONFLICT`. Repetir el bootstrap (`apply_plan` segunda vez) sobre la misma BD: ninguna fila nueva; `tenants=0`, `users=0`, `tenant_configs_converged` solo si `storage_type` cambia — la unicidad del nombre por la API no afecta a la convergencia del bootstrap. [R7.1, R7.2, R7.3]
+- [x] 5.6 Modificar `sdd/specs/auth-tenancy.md`: añadir `MANAGE_PLATFORM` a la enumeración de permisos y al mapeo `ROLE_PERMISSIONS` para `SUPER_ADMIN` (mismo formato que las entradas existentes); añadir las dos rutas al censo de excepciones a la regla 1 (mismo formato que las entradas de `super-admin-identity`). [R5.1, R5.2, R6.1]
+- [x] 5.7 Modificar `sdd/specs/user-management.md`: añadir una nota sobre el caso de uso compartido con `POST /api/v1/platform/tenants/{tenant_id}/users` (R4.3) y otra nota declarando que `GRANTABLE_ROLES` no se abre por API en esta entrada (R3.5/D2). [R4.3, R3.5]
+- [x] 5.8 Regenerar el contrato: `python3 backend/scripts/export_openapi.py` (o el comando que `sdd/project.md` §Verification declare hoy) → `backend/openapi.json` regenerado; `backend/tests/test_openapi_contract.py` verde. Confirmar que `tags=["platform"]` aparece en las dos rutas y que `summary`/`description` dicen literalmente `Requires SUPER_ADMIN`. [R6.3]
 
 ## N. Verification
 
@@ -215,3 +215,51 @@
   "Create a tenant (SUPER_ADMIN only)" and "Create a user in a named tenant (SUPER_ADMIN only)",
   and the descriptions literally include "Requires SUPER_ADMIN — issues MANAGE_PLATFORM",
   per task 4.5's wording. Section 5.8 regenerates `backend/openapi.json` from this contract.
+- Section 5's snapshot entry (5.1) was already added by section 4 — the
+  `test_the_protected_endpoints_are_the_ones_expected` set includes the two
+  `/api/v1/platform/...` paths with the `platform-admin-api` comment block. Marking 5.1
+  `[x]` retroactively; no code change.
+- The structural test (5.2) lives next to the snapshot, not next to the platform tests:
+  it walks every registered route and pins the property the snapshot cannot — that
+  `MANAGE_PLATFORM` is bound to the `/api/v1/platform/` prefix, not just to a single
+  route. A future cross-tenant surface either lives under the same prefix (and the test
+  stays green) or it fails here, which is the visible diff R-6 asks for.
+- The per-role authorization test (5.3) reuses `users_by_role_a` for the four tenant
+  roles and the platform's `super_admin` for the authorized case; the fenced case gets
+  a `fenced_super_admin` fixture seeded inline because `users_by_role_a` cannot hold a
+  `SUPER_ADMIN` (`ck_users_super_admin_tenant_id_null`) and the platform's
+  `super_admin` fixture would defeat the test's point. The fence fires before the
+  permission check, so the 403 reason is `PASSWORD_CHANGE_REQUIRED` (or `FORBIDDEN`
+  depending on the gate wiring); the test pins both because either is acceptable as
+  long as the request is refused.
+- `hasher` is now re-exported from `tests/platform/conftest.py` so the fenced fixture
+  can hash a temporary password; it was already used internally by `auth/conftest.py`
+  but not re-exported here. Same pattern as the existing `insert_user`/`tenant_a`
+  re-exports — the platform test package pulls the auth package's fixtures by name.
+- The isolation test (5.4) does the cross-tenant check in three states — right
+  tenant, wrong tenant, NULL — and asserts the first by ground truth against the
+  database, not just against the response envelope. The envelope already pins the
+  happy path (`body["user"]["tenant_id"] == str(tenant_a.id)`); the SQL query is what
+  closes the case where the response lies. A symmetric test (named `tenant_b` instead
+  of `tenant_a`) catches a regression where the `tenant_id` came from a cached lookup
+  rather than the path.
+- The bootstrap test (5.5) is in `test_isolation.py` rather than `test_bootstrap.py`
+  because no such file exists yet — the project's CLI tests are split between
+  `test_demo_reset.py` and `test_seed_demo.py`. The bootstrap test pairs a real
+  `apply_plan` run with a real API call against the same database, then re-runs the
+  bootstrap to assert convergence: `tenants=0`, `users=0`, `tenant_configs_converged=0`
+  because the plan's `storage_type` matches the one already persisted. The convergence
+  property survives the platform's `uq_tenants_name` migration — the bootstrap is
+  create-only on the tenant identity, the API is what enforces uniqueness, and the
+  two writers cooperate rather than collide.
+- The fenced-super-admin test uses `pytest.skip` for the `SUPER_ADMIN` role rather
+  than forking the matrix into "authorized" and "unauthorized" tests; one test pins
+  the 201 vs 403 split (parametrised), the next pins the 403 envelope, and the fenced
+  case stands on its own. The skip keeps the parametrised test's assertion coherent —
+  "200 vs 403" reads better than "this row is special-cased below".
+- Spec changes (5.6, 5.7) are prose-only; they fold the change into the catalogue of
+  permissions and the rule-1 exception census the spec already maintained. The
+  `MANAGE_PLATFORM` entry uses the same `_SOMETHING` bundle shape the rest of the
+  catalogue does (`_PLATFORM`), and the cross-tenant exception is its own paragraph
+  rather than an extension of the `_SELF_SERVICE` enumeration — the platform route
+  is NOT self-service, so listing it there would lie about what the actor does.

@@ -188,9 +188,18 @@ tocar la base de datos a mano.
   (`READ_USERS`, `MANAGE_USERS`, `READ_TENANT_SETTINGS`, `MANAGE_TENANT_SETTINGS`), los dos de
   `properties-crud` (`READ_PROPERTIES`, `MANAGE_PROPERTIES`), los cinco de `cleaning`, los
   cuatro de `maintenance` (`READ_INCIDENTS`, `MANAGE_INCIDENTS`, `EXECUTE_INCIDENTS`,
-  `RESPOND_OWNER_APPROVALS`) y los cinco de `revenue-reviews` (`READ_REVIEWS`,
-  `CREATE_REVIEW`, `APPROVE_REVIEW`, `IGNORE_REVIEW`, `MARK_REVIEW_POSTED`), todos
-  diferenciados por rol.
+  `RESPOND_OWNER_APPROVALS`), los cinco de `revenue-reviews` (`READ_REVIEWS`,
+  `CREATE_REVIEW`, `APPROVE_REVIEW`, `IGNORE_REVIEW`, `MARK_REVIEW_POSTED`) y el que añadió
+  `platform-admin-api` (`MANAGE_PLATFORM`), todos diferenciados por rol.
+- `MANAGE_PLATFORM` lo sostiene `SUPER_ADMIN` y solo `SUPER_ADMIN` (cambio
+  `platform-admin-api`, R5.1/R5.2/D6). Vive en una entrada `_PLATFORM` del módulo
+  `app/auth/domain/policy.py`, sumada a `_SELF_SERVICE` para componer
+  `ROLE_PERMISSIONS[UserRole.SUPER_ADMIN]`; ningún `_SOMETHING_*` por rol de tenant
+  (`_OWNER_*`, `_MANAGER_*`, `_TECH_*`, `_CLEANING_*`) lo arrastra, y `is_allowed` lo
+  niega para los cuatro roles tenant-scoped. Sin esta concentración el permiso se
+  diluiría por el camino de cualquier cambio futuro al catálogo, y la guarda
+  estructural de `tests/test_route_authorization.py::test_manage_platform_only_lives_under_platform_prefix`
+  deja de ser el ancla que R-6 del diseño pide.
 - **`TECHNICIAN` dejó de ser un rol sin capacidades el 2026-08-15.** Hasta `maintenance` tenía
   autoservicio y nada más: existía y no podía hacer nada. Ahora suma `READ_INCIDENTS` y
   `EXECUTE_INCIDENTS` —exactamente lo que necesita el ciclo del técnico— y NEVER SHALL poder
@@ -267,6 +276,19 @@ tocar la base de datos a mano.
   el listener añade la cláusula de tenant también a `find_by_email_globally`); no protege INSERTs; no cubre el mapa de identidad; y no alcanza
   las tablas hijas sin `tenant_id` propio (`messages`, `cleaning_checklist_completions`,
   `cleaning_photos`), que deben unirse a su padre scopado y traer su propio test.
+- **Excepción adicional a la regla 1 introducida por `platform-admin-api` (R6.1/R6.2):** las
+  dos rutas del router de plataforma — `POST /api/v1/platform/tenants` y
+  `POST /api/v1/platform/tenants/{tenant_id}/users` — corren sobre sesiones
+  `SUPER_ADMIN` no marcadas (la enumeración anterior aplica, no se duplica), y la regla 1
+  se sostiene **en la entidad** aunque se haya saltado **en el actor**. Lo afirma
+  `CreateUserInTenantUseCase`, que toma el `tenant_id` del path y no del actor, y
+  `tests/platform/test_isolation.py::test_creating_a_user_in_tenant_a_does_not_leak_to_tenant_b`
+  lo pinea: el nuevo usuario aterriza bajo el tenant del path, no bajo el tenant del actor
+  ni bajo `NULL`. La guarda estructural
+  `tests/test_route_authorization.py::test_manage_platform_only_lives_under_platform_prefix`
+  cierra la otra mitad (R-6 del diseño): el permiso `MANAGE_PLATFORM` solo vive bajo
+  `/api/v1/platform/`, así que la excepción a la regla 1 que abre esta superficie
+  sigue siendo solo esta superficie.
 - WHEN un comando o job resuelve credenciales de PMS propiedad a propiedad, THE SYSTEM SHALL
   marcar la sesión con el tenant **antes** de la resolución y mantener una sesión por tenant.
   Es el mismo patrón que `celery-jobs` (sesión marcada por tenant, enumeración de tenants desde

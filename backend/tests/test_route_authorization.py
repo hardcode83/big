@@ -316,6 +316,34 @@ def test_the_allowlist_only_names_endpoints_that_exist() -> None:
     assert ANONYMOUS_ENDPOINTS <= real
 
 
+def test_manage_platform_only_lives_under_platform_prefix() -> None:
+    """Design risk R-6: `MANAGE_PLATFORM` is the platform's permission; only platform routes
+    carry it.
+
+    `platform-admin-api` introduces the permission as `SUPER_ADMIN`'s alone and ships it under
+    `/api/v1/platform/`. A route hung off a sibling prefix (a stray `require(MANAGE_PLATFORM)`
+    added to a tenants-scoped endpoint, for example) would still pass the snapshot test above
+    — it would just add a new entry to `protected` — so this guard pins the property the
+    snapshot cannot: the permission is bound to its prefix, not to a role check the body can
+    work around. A future cross-tenant surface would either live under the same prefix (and
+    keep the property) or fail this test, which is the visible diff a reviewer sees.
+    """
+    routes, _ = _api_routes(create_app())
+    offending = sorted(
+        path
+        for path, route in routes
+        if Permission.MANAGE_PLATFORM in _declared_permissions(route)
+        and not path.startswith("/api/v1/platform/")
+    )
+
+    assert not offending, (
+        f"routes declaring `MANAGE_PLATFORM` outside `/api/v1/platform/`: {offending}. "
+        "The platform permission lives under the platform prefix; a route elsewhere that "
+        "needs cross-tenant reach either moves under `/api/v1/platform/` or declares a "
+        "permission of its own."
+    )
+
+
 def test_the_protected_endpoints_are_the_ones_expected() -> None:
     """A snapshot, on purpose: every new protected path has to show up in this diff.
 
