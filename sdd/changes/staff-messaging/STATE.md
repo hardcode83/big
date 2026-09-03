@@ -5,7 +5,7 @@ local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: hardcode83/staff-messaging
-implementation_sha: 8cb79222b265a579ef1eb34a6b3302f033c867e8
+implementation_sha: 85d490a8d756b688b83c603b90e4b52526b337ee
 pr_number: 155
 pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/155
 pr_state: OPEN
