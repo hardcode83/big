@@ -1,3 +1,6 @@
+# Runner self-hosted en la VM dev (label `[self-hosted, dev]`). Rollback: ver
+# docs/ci-runner-rollback.md (procedimiento + SHA del commit de migración).
+# Cambio: ci-runner-oci (PR <migration-pr>).
 name: backend-tests
 
 # Merge gate reproducible para el backend, pedido en la revisión del PR #25: hasta
@@ -104,7 +107,7 @@ jobs:
   # Sin `services:` ni dependencias: solo git. Es el job que hace que el camino corto
   # cueste segundos en vez de siete minutos.
   backend-tests-detect:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 5
     permissions:
       contents: read
@@ -264,7 +267,7 @@ jobs:
   backend-tests-suite:
     needs: backend-tests-detect
     if: needs.backend-tests-detect.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 20
     permissions:
       contents: read
@@ -427,7 +430,7 @@ jobs:
   backend-tests:
     needs: [backend-tests-detect, backend-tests-suite]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 5
     permissions:
       contents: read

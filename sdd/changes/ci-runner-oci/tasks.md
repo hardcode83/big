@@ -17,7 +17,7 @@
 
 ## 3. Migrate backend-tests.yml
 
-- [ ] 3.1 `.github/workflows/backend-tests.yml` (3 jobs: `backend-tests-detect`, `backend-tests-suite`, `backend-tests`): `runs-on` de los 3 jobs a `[self-hosted, dev]`. Mantener el `concurrency` por ref con `cancel-in-progress: true`. Cabecera de comentario. El cambio se queda byte a byte fuera del `runs-on` y la cabecera. [R1] [R2] [R7]
+- [x] 3.1 `.github/workflows/backend-tests.yml` (3 jobs: `backend-tests-detect`, `backend-tests-suite`, `backend-tests`): `runs-on` de los 3 jobs a `[self-hosted, dev]`. Mantener el `concurrency` por ref con `cancel-in-progress: true`. Cabecera de comentario. El cambio se queda byte a byte fuera del `runs-on` y la cabecera. [R1] [R2] [R7]
 
 ## 4. Migrate frontend-tests.yml + infra-dev.yml
 
@@ -53,3 +53,4 @@
 - **§2 (2026-09-03) — `compose-ports.yml`**: cabecera D7 pegada (3 líneas, `<migration-pr>` literal), `runs-on: ubuntu-latest` → `runs-on: [self-hosted, dev]` en el único job `compose-ports`. Diff scope: header + runs-on, byte a byte en lo demás. SHA del commit lo añadirá el orchestrator al cerrar §2.
 - **§2 (2026-09-03) — `frontend-api-contract.yml`**: cabecera D7 pegada (3 líneas, `<migration-pr>` literal), `runs-on: ubuntu-latest` → `runs-on: [self-hosted, dev]` en el único job `frontend-api-contract`. Diff scope: header + runs-on, byte a byte en lo demás. SHA del commit lo añadirá el orchestrator al cerrar §2.
 - **§2 (2026-09-03) — `rule11-ownership.yml`**: cabecera D7 pegada (3 líneas, `<migration-pr>` literal) **encima** de la prosa existente que ya vivía antes de `name:`; `runs-on: ubuntu-latest` → `runs-on: [self-hosted, dev]` en el único job `rule11-ownership`. Diff scope: header + runs-on, la prosa larga original entre `name:` y `on:` queda intacta, todo lo demás byte a byte. SHA del commit lo añadirá el orchestrator al cerrar §2.
+- **§3 (2026-09-03) — `backend-tests.yml`**: cabecera D7 pegada (3 líneas, `<migration-pr>` literal) **encima** de la prosa existente que ya vivía antes de `name:`; `runs-on: ubuntu-latest` → `runs-on: [self-hosted, dev]` en los 3 jobs (`backend-tests-detect` @107, `backend-tests-suite` @267, `backend-tests` @430). `concurrency` por ref con `cancel-in-progress: true` preservado (workflow-level, aplica a los 3). Diff scope: header + 3 runs-on (+6 / -3 line diff), todo lo demás (`on:`, `concurrency`, `permissions`, `timeout-minutes`, actions pineadas por SHA, `env`, steps, `services:`, `needs:`, `if:`, `outputs:`) byte a byte. Sin `secrets.*` / `vars.*` (R5.2). SHA del commit lo añadirá el orchestrator al cerrar §3.
