@@ -1,3 +1,6 @@
+# Runner self-hosted en la VM dev (label `[self-hosted, dev]`). Rollback: ver
+# docs/ci-runner-rollback.md (procedimiento + SHA del commit de migración).
+# Cambio: ci-runner-oci (PR <n>).
 name: deploy-dev
 
 # CD del entorno dev: construye las imágenes `prod` arm64 de backend/frontend, las publica
@@ -21,7 +24,7 @@ jobs:
   # Un job propio, no un step en cada build: R1.5 exige que las dos imágenes lleven
   # idéntica cadena, y calcularlo dos veces es exactamente cómo se desincronizan (D2).
   provenance:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     permissions:
       contents: read
     outputs:
@@ -34,6 +37,11 @@ jobs:
       actions_run_id: ${{ steps.compose.outputs.actions_run_id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # D11: el runner self-hosted no trae node preinstalado, a diferencia de ubuntu-latest.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
 
       - name: Componer la identidad de build
         id: compose
@@ -62,7 +70,7 @@ jobs:
   build-backend:
     needs: provenance
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 20
     concurrency:
       group: build-backend-${{ github.ref }}
@@ -98,10 +106,17 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/autohostai-backend:sha-${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/autohostai-backend:dev
 
+      - name: Logout GHCR
+        # Mismo cierre que el job `deploy` ya hacía (deploy-dev.yml, paso "Logout GHCR"): sin esto
+        # la credencial de `docker/login-action` queda en `~/.docker/config.json` del runner
+        # persistente hasta el próximo login (hallazgo del panel de seguridad, cuarta pasada).
+        if: always()
+        run: docker logout ghcr.io || true
+
   build-frontend:
     needs: provenance
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 20
     concurrency:
       group: build-frontend-${{ github.ref }}
@@ -142,6 +157,10 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/autohostai-frontend:sha-${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/autohostai-frontend:dev
 
+      - name: Logout GHCR
+        if: always()
+        run: docker logout ghcr.io || true
+
   # --- Deploy LOCAL en la VM (runner self-hosted); sin SSH ni puertos entrantes [R3, R4, R5] ---
   deploy:
     needs: [provenance, build-backend, build-frontend]
@@ -158,6 +177,15 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Render .env leyendo los secrets del OCI Vault (validación previa) [R4]
+        # Fuera del workspace del checkout a propósito, en `$HOME` (no en `_work/`, ni siquiera en
+        # `$RUNNER_TEMP`): desde ci-runner-oci el workspace es compartido con 7 workflows más
+        # `pull_request`-triggered, y el `git clean -ffdx` del checkout POR DEFECTO de cualquiera de
+        # ellos borraría un `.env` que viviera ahí — de hecho lo borra, sin necesidad de que nadie lo
+        # intente: el primer PR normal que corra tras un deploy real ya lo hace (hallazgo del panel
+        # de seguridad, sexta pasada). `$RUNNER_TEMP` tampoco vale: se limpia al inicializar el
+        # SIGUIENTE job, así que para cuando `demo-reset` lo necesitara ya habría desaparecido.
+        # `demo-reset.yml` lee este mismo fichero (ver su paso de precondición) — cualquier cambio
+        # de ruta aquí tiene que reflejarse allí.
         env:
           # OCID del Vault: lo necesita la resolución POR NOMBRE del token del túnel. No puede salir
           # de /etc/autohostai-deploy.env porque ese fichero lo escribe cloud-init y `metadata` es
@@ -244,8 +272,8 @@ jobs:
             echo "APP_PROVENANCE_PULL_REQUEST_NUMBER=${{ needs.provenance.outputs.pull_request_number }}"
             echo "APP_PROVENANCE_COMMIT_SHA=${{ needs.provenance.outputs.commit_sha }}"
             echo "APP_PROVENANCE_ACTIONS_RUN_ID=${{ needs.provenance.outputs.actions_run_id }}"
-          } > .env
-          chmod 600 .env
+          } > "$HOME/.autohostai-dev-runtime.env"
+          chmod 600 "$HOME/.autohostai-dev-runtime.env"
 
       - name: Login GHCR (GITHUB_TOKEN del job, read-only) [R3]
         # El job corre en un workflow del repo → su GITHUB_TOKEN (packages: read) está cubierto por
@@ -259,7 +287,7 @@ jobs:
       - name: Deploy — pull + preflight + up --wait [R3, R5]
         run: |
           set -euo pipefail
-          docker compose -f docker-compose.deploy.yml pull
+          docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml pull
           # Preflight: una sola cabeza en el grafo de Alembic ANTES de tocar contenedores.
           # `up -d --wait` recrea backend/worker/beat/frontend y solo después espera a que
           # `migrate` termine; si `migrate` sale 255 con "Multiple head revisions" (2026-09-02,
@@ -269,16 +297,16 @@ jobs:
           # va a desplegar, no sobre el checkout, porque es esa imagen la que corre `migrate`.
           # `alembic heads` solo lee el directorio de scripts —no toca la base de datos—,
           # `--no-deps` evita arrancar `postgres` desde aquí y `--rm` no deja contenedor.
-          heads="$(docker compose -f docker-compose.deploy.yml run --rm --no-deps -T migrate alembic heads)"
+          heads="$(docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml run --rm --no-deps -T migrate alembic heads)"
           count="$(printf '%s\n' "$heads" | grep -c '(head)' || true)"
           if [ "$count" -ne 1 ]; then
             echo "::error::el grafo de Alembic de la imagen tiene ${count} cabezas; no se ha tocado ningún contenedor y la versión anterior sigue sirviendo"
             printf '%s\n' "$heads"
             exit 1
           fi
-          if ! docker compose -f docker-compose.deploy.yml up -d --wait --wait-timeout 180; then
+          if ! docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml up -d --wait --wait-timeout 180; then
             echo "::error::deploy falló — servicios no healthy dentro del timeout"
-            docker compose -f docker-compose.deploy.yml logs --tail=200
+            docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml logs --tail=200
             exit 1
           fi
 
@@ -307,7 +335,7 @@ jobs:
         timeout-minutes: 2
         run: |
           set -euo pipefail
-          CID="$(docker compose -f docker-compose.deploy.yml ps -q cloudflared)"
+          CID="$(docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml ps -q cloudflared)"
           if [ -z "${CID:-}" ]; then
             echo "::error::no hay contenedor de cloudflared en marcha: no se puede comprobar el origen"
             exit 1
@@ -384,7 +412,7 @@ jobs:
           docker rm -f "$PROBE" >/dev/null 2>&1 || true
           if [ "$CODE" != "0" ]; then
             echo "::error::el origen no es alcanzable desde la red de ingress ($NET) — el túnel serviría 502. ¿Está 'frontend' en esa red?"
-            docker compose -f docker-compose.deploy.yml logs --tail=100 frontend cloudflared
+            docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml logs --tail=100 frontend cloudflared
             exit 1
           fi
 
