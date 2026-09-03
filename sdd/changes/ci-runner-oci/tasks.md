@@ -38,7 +38,7 @@
 - [x] 7.2 Rellenar la tabla de `docs/ci-runner-rollback.md` §2 con los valores reales: workflow / `runs-on` previo / `runs-on` actual / excepción (multiarch-build-check si QEMU falló). Confirmar que la tabla cubre los 10 workflows y coincide con los `.yml` migrados (R6.1, R6.3). Verificar que `pr-review-cicd` (cuando se añada el chequeo de `runs-on:`) lo dé por bueno.
 - [ ] 7.3 Verificación end-to-end (R7): ejecutar `gh run list --workflow=<name> --json name,conclusion,runner --limit 1` por los 10 workflows contra el commit del PR. Para los que no se disparen en push/PR (típicamente `demo-reset.yml` por schedule), correr `workflow_dispatch` ad-hoc. Adjuntar la salida al PR como evidencia. Si algún workflow queda rojo, NO abrir el PR — escribir el bloqueo en `STATE.md` y `BLOCKED.md`, y reabrir §5 o §6 según corresponda. [R7] **Primera pasada 2026-09-03 (branch `sdd/ci-runner-oci` @ `f82a035`)**: 5 verdes, 4 rojos por tooling implícito de `ubuntu-latest` → design D11 y §8. Se cierra tras §8.5.
 
-## 8. Tooling pins — enmienda D11 tras la verificación R7
+## 8. Tooling pins — enmienda D11 tras la verificación R7 <!-- panel: PASS 2026-09-03 -->
 
 <!-- Añadida el 2026-09-03 por deviación (skill run, paso 4): D3 «solo runs-on» dejó 4 jobs en rojo en el runner. Detalle medido en design.md D11. -->
 
