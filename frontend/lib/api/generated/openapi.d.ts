@@ -710,6 +710,20 @@ export interface paths {
      */
     post: operations["generate_owner_statement_api_v1_owner_statements_generate_post"];
   };
+  "/api/v1/platform/tenants": {
+    /**
+     * Create a tenant (SUPER_ADMIN only)
+     * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
+     */
+    post: operations["create_tenant_api_v1_platform_tenants_post"];
+  };
+  "/api/v1/platform/tenants/{tenant_id}/users": {
+    /**
+     * Create a user in a named tenant (SUPER_ADMIN only)
+     * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
+     */
+    post: operations["create_user_in_tenant_api_v1_platform_tenants__tenant_id__users_post"];
+  };
   "/api/v1/price-recommendations": {
     /**
      * List the tenant's price recommendations
@@ -1750,6 +1764,19 @@ export interface components {
       reservation_id?: string | null;
     };
     /**
+     * CreatedPlatformUserResponse
+     * @description The user plus the one-time secret (`platform-admin-api` R3.1, design D10).
+     *
+     * Two-shape separation, the same rule `CreatedUserResponse` follows: the temporary password
+     * lives on this type and not on `PlatformUserResponse`, so it cannot leak into a listing or
+     * a detail by somebody adding an optional attribute "just in case".
+     */
+    CreatedPlatformUserResponse: {
+      /** Temporary Password */
+      temporary_password: string;
+      user: components["schemas"]["PlatformUserResponse"];
+    };
+    /**
      * CreatedUserResponse
      * @description A separate type, and the only shape that carries the one-time secret (design D10).
      *
@@ -1779,6 +1806,28 @@ export interface components {
       content: string;
       /** Sender Type */
       sender_type?: "GUEST" | null;
+    };
+    /**
+     * CreatePlatformUserRequest
+     * @description What `POST /api/v1/platform/tenants/{tenant_id}/users` accepts (R3.1, R3.5, R3.6).
+     *
+     * The body is the same shape the tenants-scoped `CreateUserRequest` uses, minus the fields
+     * the platform operator never sees: no `tenant_id` (it comes from the path), no
+     * `preferred_language` (the tenant's `default_language` decides — `CreateUserInTenantUseCase`
+     * threads it through). `phone` is kept optional so the optional-`null` semantics the user
+     * module enforces are reused verbatim.
+     */
+    CreatePlatformUserRequest: {
+      /**
+       * Email
+       * Format: email
+       */
+      email: string;
+      /** Full Name */
+      full_name: string;
+      /** Phone */
+      phone?: string | null;
+      role: components["schemas"]["UserRole"];
     };
     /**
      * CreatePricingRuleRequest
@@ -1980,6 +2029,36 @@ export interface components {
       reservation_id?: string | null;
       /** Reviewer Name */
       reviewer_name?: string | null;
+    };
+    /**
+     * CreateTenantRequest
+     * @description What `POST /api/v1/platform/tenants` accepts (R1.1, R1.3).
+     *
+     * The five fields are the same ones `Tenant.update` accepts on a PATCH — reusing them keeps
+     * the boundary `Tenant` enforces ("every guard is the same function `update` uses", design
+     * D2). No `status`: a tenant is born ACTIVE.
+     *
+     * `name` requires `min_length=1` so an empty string is a `422` naming the field, not a
+     * row created from a blank value (R1.3).
+     */
+    CreateTenantRequest: {
+      /**
+       * Billing Email
+       * Format: email
+       */
+      billing_email: string;
+      /** Country */
+      country: string;
+      /**
+       * Default Language
+       * @default es
+       * @enum {string}
+       */
+      default_language?: "es" | "en";
+      /** Name */
+      name: string;
+      /** Timezone */
+      timezone: string;
     };
     /** CreateUserRequest */
     CreateUserRequest: {
@@ -3226,6 +3305,47 @@ export interface components {
       required: boolean;
       /** Uploaded */
       uploaded: boolean;
+    };
+    /**
+     * PlatformUserResponse
+     * @description The user shape the platform endpoint returns (R3.1).
+     *
+     * A separate type from `auth.UserResponse` for one reason: this one carries `tenant_id`.
+     * The tenants-scoped endpoints derive `tenant_id` from the token, so it would always equal
+     * the caller's own — printing it would be a no-op — and `UserResponse` deliberately omits
+     * it. The platform operator names the tenant in the path, so the response has to echo it
+     * back; this type is the visible diff that declares that.
+     */
+    PlatformUserResponse: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Email */
+      email: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Last Login At */
+      last_login_at: string | null;
+      /** Name */
+      name: string;
+      /** Phone */
+      phone: string | null;
+      /** Preferred Language */
+      preferred_language: string;
+      role: components["schemas"]["UserRole"];
+      status: components["schemas"]["UserStatus"];
+      /** Tenant Id */
+      tenant_id: string | null;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /**
      * PMSProvider
@@ -8553,6 +8673,85 @@ export interface operations {
       201: {
         content: {
           "application/json": components["schemas"]["OwnerStatementGenerationReportResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a tenant (SUPER_ADMIN only)
+   * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
+   */
+  create_tenant_api_v1_platform_tenants_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateTenantRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["TenantResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a user in a named tenant (SUPER_ADMIN only)
+   * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
+   */
+  create_user_in_tenant_api_v1_platform_tenants__tenant_id__users_post: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreatePlatformUserRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["CreatedPlatformUserResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

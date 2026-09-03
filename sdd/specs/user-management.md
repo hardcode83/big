@@ -55,7 +55,18 @@ tenants, ni salida de la API a internet (`api-ingress-routing`).
   el cliente no puede accionar.
 - IF el rol solicitado es `SUPER_ADMIN`, THEN THE SYSTEM SHALL responder `422`: sus capacidades
   en PRD §6 son globales, no operativas de un tenant, y lo cross-tenant está diferido a
-  `saas-cross-tenant`.
+  `saas-cross-tenant`. Esta restricción no se relaja por API: `GRANTABLE_ROLES` la cierra y
+  `platform-admin-api` la mantiene en su propio `POST /api/v1/platform/tenants/{tenant_id}/users`
+  (D2) — un campo `role=SUPER_ADMIN` en esa ruta cae por el `field_validator` del esquema
+  (`backend/app/platform/api/schemas.py`), no por la entidad. La duplicación es deliberada:
+  la entrada de la API de plataforma es la primera línea de defensa, no un permiso nuevo.
+- **Caso de uso compartido con `platform-admin-api` (R4.3):** `POST /api/v1/platform/tenants/{tenant_id}/users`
+  reutiliza `CreateUserUseCase` con `tenant_id` tomado del path, no del token; la auditoría
+  resultante lleva `tenant_id=<path>` (regla D5, el actor `SUPER_ADMIN` no tiene tenant y la
+  sesión no se marca). El redaction de la contraseña temporal en `audit_logs.changes` (`password: {"changed": true}`)
+  es el mismo que aplica esta capacidad. No hay aquí un cambio de comportamiento: la API
+  de plataforma delega, y el único contrato que expone es el de los tres campos del cuerpo
+  (`email`, `full_name`, `role`) y la cabecera `Cache-Control: no-store`.
 
 ### Listado y consulta
 

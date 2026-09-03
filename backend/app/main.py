@@ -12,6 +12,8 @@ from app.access.api.router import router as access_router
 from app.auth.api.errors import register_auth_error_handlers
 from app.auth.api.router import router as auth_router
 from app.auth.api.users_router import router as users_router
+from app.platform.api.errors import register_platform_error_handlers
+from app.platform.api.router import router as platform_router
 from app.cleaning.api.errors import register_cleaning_error_handlers
 from app.maintenance.api.approvals_router import router as owner_approvals_router
 from app.maintenance.api.errors import register_maintenance_error_handlers
@@ -102,6 +104,7 @@ def create_app() -> FastAPI:
     register_statements_error_handlers(app)
     register_notification_error_handlers(app)
     register_reviews_error_handlers(app)
+    register_platform_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -220,6 +223,12 @@ def create_app() -> FastAPI:
     # in the code.
     app.include_router(reviews_router, prefix=API_V1_PREFIX)
     app.include_router(reviews_summary_router, prefix=API_V1_PREFIX)
+    # `platform-admin-api` (R6.1, D5): the cross-tenant surface, mounted LAST so a load
+    # failure here does not break the routers that already registered. The order of the
+    # error-handler registrations above follows the same rule: auth first, then platform,
+    # so a `TenantAlreadyExistsError` raised inside the platform router reaches the
+    # platform-specific handler rather than any generic 500.
+    app.include_router(platform_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late.

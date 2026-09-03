@@ -1683,6 +1683,45 @@
         "title": "CreateMessageRequest",
         "type": "object"
       },
+      "CreatePlatformUserRequest": {
+        "additionalProperties": false,
+        "description": "What `POST /api/v1/platform/tenants/{tenant_id}/users` accepts (R3.1, R3.5, R3.6).\n\nThe body is the same shape the tenants-scoped `CreateUserRequest` uses, minus the fields\nthe platform operator never sees: no `tenant_id` (it comes from the path), no\n`preferred_language` (the tenant's `default_language` decides — `CreateUserInTenantUseCase`\nthreads it through). `phone` is kept optional so the optional-`null` semantics the user\nmodule enforces are reused verbatim.",
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "full_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Full Name",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 30,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
+          }
+        },
+        "required": [
+          "email",
+          "full_name",
+          "role"
+        ],
+        "title": "CreatePlatformUserRequest",
+        "type": "object"
+      },
       "CreatePricingRuleRequest": {
         "additionalProperties": false,
         "description": "`POST /api/v1/pricing-rules` (R1.1, R1.3, R1.4).\n\n`property_id` omitted means a tenant-wide rule (R1.5), which is why it is nullable\nrather than required. The five JSONB columns default to empty: a rule with no\nmodifiers is a flat `base_price`, which is a legitimate starting point.",
@@ -2324,6 +2363,51 @@
         "title": "CreateReviewRequest",
         "type": "object"
       },
+      "CreateTenantRequest": {
+        "additionalProperties": false,
+        "description": "What `POST /api/v1/platform/tenants` accepts (R1.1, R1.3).\n\nThe five fields are the same ones `Tenant.update` accepts on a PATCH — reusing them keeps\nthe boundary `Tenant` enforces (\"every guard is the same function `update` uses\", design\nD2). No `status`: a tenant is born ACTIVE.\n\n`name` requires `min_length=1` so an empty string is a `422` naming the field, not a\nrow created from a blank value (R1.3).",
+        "properties": {
+          "billing_email": {
+            "format": "email",
+            "title": "Billing Email",
+            "type": "string"
+          },
+          "country": {
+            "maxLength": 2,
+            "minLength": 2,
+            "title": "Country",
+            "type": "string"
+          },
+          "default_language": {
+            "default": "es",
+            "enum": [
+              "es",
+              "en"
+            ],
+            "title": "Default Language",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "timezone": {
+            "maxLength": 50,
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "billing_email",
+          "country",
+          "timezone"
+        ],
+        "title": "CreateTenantRequest",
+        "type": "object"
+      },
       "CreateUserRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2387,6 +2471,25 @@
           "header_name"
         ],
         "title": "CreateWebhookEndpointRequest",
+        "type": "object"
+      },
+      "CreatedPlatformUserResponse": {
+        "additionalProperties": false,
+        "description": "The user plus the one-time secret (`platform-admin-api` R3.1, design D10).\n\nTwo-shape separation, the same rule `CreatedUserResponse` follows: the temporary password\nlives on this type and not on `PlatformUserResponse`, so it cannot leak into a listing or\na detail by somebody adding an optional attribute \"just in case\".",
+        "properties": {
+          "temporary_password": {
+            "title": "Temporary Password",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/PlatformUserResponse"
+          }
+        },
+        "required": [
+          "user",
+          "temporary_password"
+        ],
+        "title": "CreatedPlatformUserResponse",
         "type": "object"
       },
       "CreatedUserResponse": {
@@ -4827,6 +4930,95 @@
           "data"
         ],
         "title": "PhotoRequirementsResponse",
+        "type": "object"
+      },
+      "PlatformUserResponse": {
+        "additionalProperties": false,
+        "description": "The user shape the platform endpoint returns (R3.1).\n\nA separate type from `auth.UserResponse` for one reason: this one carries `tenant_id`.\nThe tenants-scoped endpoints derive `tenant_id` from the token, so it would always equal\nthe caller's own — printing it would be a no-op — and `UserResponse` deliberately omits\nit. The platform operator names the tenant in the path, so the response has to echo it\nback; this type is the visible diff that declares that.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "preferred_language": {
+            "title": "Preferred Language",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UserStatus"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "name",
+          "email",
+          "role",
+          "status",
+          "phone",
+          "preferred_language",
+          "last_login_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PlatformUserResponse",
         "type": "object"
       },
       "PortalMessageSender": {
@@ -16081,6 +16273,152 @@
         "summary": "Download the statement as a PDF",
         "tags": [
           "statements"
+        ]
+      }
+    },
+    "/api/v1/platform/tenants": {
+      "post": {
+        "description": "Requires SUPER_ADMIN — issues MANAGE_PLATFORM.",
+        "operationId": "create_tenant_api_v1_platform_tenants_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTenantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a tenant (SUPER_ADMIN only)",
+        "tags": [
+          "platform"
+        ]
+      }
+    },
+    "/api/v1/platform/tenants/{tenant_id}/users": {
+      "post": {
+        "description": "Requires SUPER_ADMIN — issues MANAGE_PLATFORM.",
+        "operationId": "create_user_in_tenant_api_v1_platform_tenants__tenant_id__users_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlatformUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedPlatformUserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a user in a named tenant (SUPER_ADMIN only)",
+        "tags": [
+          "platform"
         ]
       }
     },
