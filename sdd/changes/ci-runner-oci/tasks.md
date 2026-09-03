@@ -24,7 +24,7 @@
 - [x] 4.1 `.github/workflows/frontend-tests.yml` (2 jobs): `runs-on` a `[self-hosted, dev]`. Concurrency por ref con `cancel-in-progress: true`. Cabecera de comentario. [R1] [R2] [R7]
 - [x] 4.2 `.github/workflows/infra-dev.yml` (3 jobs: `check`, `plan`, `apply`): `runs-on` a `[self-hosted, dev]` en los 3 jobs. Mantener el actor IAM `svc-terraform-dev` — no se mueve a `instance_principal` (D6). `secrets.OCI_PRIVATE_KEY` se sigue escribiendo a `$RUNNER_TEMP/oci_private_key.pem` (`infra-dev.yml:62-66`, `infra-dev.yml:152-156`), el cleanup por job del runner ya cubre la persistencia. Concurrency de `apply` (`group: infra-dev-apply`, `cancel-in-progress: false`) intacto. Cabecera de comentario. [R1] [R2] [R5] [R7]
 
-## 5. Migrate deploy-dev.yml build jobs
+## 5. Migrate deploy-dev.yml build jobs <!-- panel: PASS 2026-09-03 -->
 
 - [x] 5.1 `.github/workflows/deploy-dev.yml` (3 jobs a migrar: `provenance`, `build-backend`, `build-frontend`): `runs-on` de los 3 a `[self-hosted, dev]`. El job `deploy` ya está en `[self-hosted, dev]`, sin cambios. Mantener `concurrency` exacto: `build-backend-${{ github.ref }}` y `build-frontend-${{ github.ref }}` con `cancel-in-progress: true` en los builds, `group: deploy-dev` con `cancel-in-progress: false` en el deploy (compartido con `demo-reset.yml`, ver D4). `docker/login-action` sigue usando `GITHUB_TOKEN` (`packages: write`) — sin nuevo secret (R5). Cabecera de comentario. [R1] [R2] [R3] [R5] [R7]
 
