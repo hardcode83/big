@@ -17,20 +17,20 @@ El rollback es **un `git revert`**: deja el repo exactamente en la línea base d
 
 ## 2. Tabla de workflows
 
-La tabla cubre los 10 workflows bajo `.github/workflows/`. Las columnas `runs-on previo` y `runs-on actual` se rellenan en §7 (al cerrar el runbook tras migrar todos los workflows); hasta entonces esta tabla es un placeholder.
+La tabla refleja los ficheros `.yml` migrados bajo `.github/workflows/` a fecha del change `ci-runner-oci`.
 
 | Workflow | runs-on previo | runs-on actual | Excepción |
 |---|---|---|---|
-| `api-contract.yml` | (se completa en §7) | (se completa en §7) | |
-| `backend-tests.yml` | (se completa en §7) | (se completa en §7) | |
-| `compose-ports.yml` | (se completa en §7) | (se completa en §7) | |
-| `demo-reset.yml` | (se completa en §7) | (se completa en §7) | ya estaba en `[self-hosted, dev]` |
-| `deploy-dev.yml` | (se completa en §7) | (se completa en §7) | |
-| `frontend-api-contract.yml` | (se completa en §7) | (se completa en §7) | |
-| `frontend-tests.yml` | (se completa en §7) | (se completa en §7) | |
-| `infra-dev.yml` | (se completa en §7) | (se completa en §7) | |
+| `api-contract.yml` | `ubuntu-latest` (1 job) | `[self-hosted, dev]` (1 job) | — |
+| `backend-tests.yml` | `ubuntu-latest` (3 jobs) | `[self-hosted, dev]` (3 jobs) | — |
+| `compose-ports.yml` | `ubuntu-latest` (1 job) | `[self-hosted, dev]` (1 job) | — |
+| `demo-reset.yml` | `[self-hosted, dev]` (1 job) | `[self-hosted, dev]` (1 job) | ya estaba en `[self-hosted, dev]` |
+| `deploy-dev.yml` | `ubuntu-latest` (3 jobs: provenance/build-backend/build-frontend) + `[self-hosted, dev]` (1 job: deploy) | `[self-hosted, dev]` (4 jobs) | — (el job `deploy` ya estaba en `[self-hosted, dev]`) |
+| `frontend-api-contract.yml` | `ubuntu-latest` (1 job) | `[self-hosted, dev]` (1 job) | — |
+| `frontend-tests.yml` | `ubuntu-latest` (2 jobs) | `[self-hosted, dev]` (2 jobs) | — |
+| `infra-dev.yml` | `ubuntu-latest` (3 jobs) | `[self-hosted, dev]` (3 jobs) | — |
 | `multiarch-build-check.yml` | `ubuntu-latest` | `ubuntu-latest` | **Sí — QEMU no verificado; fallback R4.2/D5** (sin probe ejecutado en §1, VM IP no reachable) |
-| `rule11-ownership.yml` | (se completa en §7) | (se completa en §7) | |
+| `rule11-ownership.yml` | `ubuntu-latest` (1 job) | `[self-hosted, dev]` (1 job) | — |
 
 > **Multiarch y QEMU — resolución adoptada en §1.** El probe de §1.2 no llegó a ejecutarse (VM IP no reachable desde este worktree: sin tfstate, OCI CLI con sesión expirada, SSH key presente pero sin destino). Se adoptó el fallback explícito de R4.2 / D5: `multiarch-build-check.yml` queda en `ubuntu-latest` y la columna Excepción marca **«QEMU no verificado; fallback R4.2/D5»**. La tabla dice «9 de 10 migrados, 1 excepción deliberada — QEMU no verificado». El operador puede verificar QEMU en un follow-up change y migrar ese workflow si el probe pasa; ese cambio actualizará esta misma fila y la columna Excepción a `—`.
 
@@ -84,7 +84,7 @@ Notas importantes:
 
 ## 5. Validación post-rollback
 
-Tras ejecutar `git revert` (§3) o un rollback manual (§4), confirma que los workflows vuelven a correr en `ubuntu-latest`. La validación usa `gh run list` filtrando por nombre de workflow y por `runner` (el campo `runner` muestra el nombre del runner que ejecutó el job; `GitHub Actions` indica `ubuntu-latest`, `autohostai-dev-vm` indica `[self-hosted, dev]`).
+Tras ejecutar `git revert` (§3) o un rollback manual (§4), confirma que los workflows vuelven a correr en `ubuntu-latest`. La validación va en dos pasos: `gh run list` localiza el último run de cada workflow, y la API REST de jobs (`GET /repos/{owner}/{repo}/actions/runs/{id}/jobs`) dice en qué runner corrió cada job — su campo `runner_name` vale `autohostai-dev-vm` para `[self-hosted, dev]` y `GitHub Actions N` para `ubuntu-latest`. **Ojo**: `gh run view --json jobs` **no** expone ese campo (medido el 2026-09-03: sus jobs solo traen `name`, `status`, `conclusion`, `steps`, `url`, fechas), así que hay que ir por `gh api`.
 
 ```bash
 # Lista de los 10 workflows para iterar:
@@ -101,12 +101,15 @@ WORKFLOWS=(
   rule11-ownership
 )
 
-# Por cada workflow: el último run, ¿en qué runner?
+# Por cada workflow: el último run y, job a job, en qué runner corrió.
 for w in "${WORKFLOWS[@]}"; do
   echo "== $w =="
+  run_id="$(gh run list --workflow="$w" --limit 1 --json databaseId --jq '.[0].databaseId')"
   gh run list --workflow="$w" --limit 1 \
-    --json name,conclusion,headBranch,event,createdAt,databaseId \
+    --json conclusion,headBranch,event,createdAt,databaseId \
     --jq '.[] | "  run=\(.databaseId) event=\(.event) branch=\(.headBranch) conclusion=\(.conclusion) created=\(.createdAt)"'
+  gh api "repos/autohostai-labs/AutoHostAI/actions/runs/${run_id}/jobs" \
+    --jq '.jobs[] | "    job=\(.name) conclusion=\(.conclusion) runner=\(.runner_name)"'
 done
 ```
 
@@ -114,11 +117,12 @@ Comprobaciones esperadas:
 
 - `branch=main` (o el `head_branch` del commit de revert) — confirma que el run viene del revert, no de un push anterior.
 - `conclusion=success` (o `failure`/`cancelled` por motivos no relacionados con el runner).
-- Para los workflows migrados, el `runs-on:` efectivo es `ubuntu-latest` (la salida de `gh run list` no muestra el label directamente, pero el `runner` en `--json runner` lo delata: `GitHub Actions 4` o similar, no `autohostai-dev-vm`).
+- Para los workflows migrados, el `runs-on:` efectivo es `ubuntu-latest`: ni `gh run list` ni `gh run view` muestran el runner, lo dice `runner_name` en la API de jobs (`GitHub Actions 4` o similar, no `autohostai-dev-vm`).
 
 ```bash
-# Comprobación directa del runner usado por el último run:
-gh run view <run-id> --json jobs --jq '.jobs[] | "  job=\(.name) runner=\(.runner.name)"'
+# Comprobación directa del runner usado por cada job del último run:
+gh api "repos/autohostai-labs/AutoHostAI/actions/runs/<run-id>/jobs" \
+  --jq '.jobs[] | "  job=\(.name) conclusion=\(.conclusion) runner=\(.runner_name) labels=\((.labels // []) | join(","))"'
 ```
 
 Si algún workflow sigue apareciendo en `autohostai-dev-vm` tras el revert, abre un PR con el patch manual (§4) y no des el rollback por bueno hasta que la salida de arriba sea coherente.
