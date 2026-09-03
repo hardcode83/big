@@ -286,7 +286,9 @@ jobs:
     # pública real (solo el security list de la VM lo protege, no el aislamiento del runner), un
     # 0.0.0.0 innecesario amplía la superficie sin necesidad — nada fuera del propio job necesita
     # alcanzar Postgres/Redis (enmienda del 2026-09-03 tras el panel de seguridad de `/sdd:review`,
-    # ver `design.md` Risks & mitigations y `steering/security.md` regla 8).
+    # ver `design.md` D3 enmienda 5). Misma postura que `steering/security.md` regla 8 exige para el
+    # Postgres de dev local (`docker-compose.yml`) — no es la misma guardia (`compose-ports` no mira
+    # este fichero), pero es la misma razón: un dato sin sensibilidad real no justifica 0.0.0.0.
     services:
       postgres:
         image: postgres:16

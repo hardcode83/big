@@ -135,9 +135,10 @@ jobs:
       # El token del portal es la excepción única de R2.5 (D19), y su acotamiento se apoya en que
       # el resumen del job sea el ÚNICO canal por el que llega a alguien. El fichero intermedio no
       # puede sobrevivir al job: el workspace del runner self-hosted es compartido y persistente,
-      # así que un `tee` sin borrado deja un token vivo legible en la máquina hasta el reset
-      # siguiente. Va en `RUNNER_TEMP` (que GitHub limpia entre jobs) y además se borra aquí de
-      # forma explícita, con `if: always()` para que un reset en rojo tampoco lo deje atrás.
+      # así que un `tee` sin borrado deja un token vivo legible en la máquina hasta que otro job
+      # inicialice y limpie `RUNNER_TEMP` — que no es al terminar este, así que el borrado de abajo
+      # es lo único que realmente lo cierra, con `if: always()` para que un reset en rojo tampoco lo
+      # deje atrás.
       - name: Borrar la salida intermedia, que lleva el token del portal
         if: always()
         run: rm -f "$RUNNER_TEMP/demo-reset.out"

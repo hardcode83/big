@@ -22,7 +22,7 @@
 ## 4. Migrate frontend-tests.yml + infra-dev.yml <!-- panel: PASS 2026-09-03 -->
 
 - [x] 4.1 `.github/workflows/frontend-tests.yml` (2 jobs): `runs-on` a `[self-hosted, dev]`. Concurrency por ref con `cancel-in-progress: true`. Cabecera de comentario. [R1] [R2] [R7]
-- [x] 4.2 `.github/workflows/infra-dev.yml` (3 jobs: `check`, `plan`, `apply`): `runs-on` a `[self-hosted, dev]` en los 3 jobs. Mantener el actor IAM `svc-terraform-dev` — no se mueve a `instance_principal` (D6). `secrets.OCI_PRIVATE_KEY` se sigue escribiendo a `$RUNNER_TEMP/oci_private_key.pem` (`infra-dev.yml:62-66`, `infra-dev.yml:152-156`), el cleanup por job del runner ya cubre la persistencia. Concurrency de `apply` (`group: infra-dev-apply`, `cancel-in-progress: false`) intacto. Cabecera de comentario. [R1] [R2] [R5] [R7]
+- [x] 4.2 `.github/workflows/infra-dev.yml` (3 jobs: `check`, `plan`, `apply`): `runs-on` a `[self-hosted, dev]` en los 3 jobs. Mantener el actor IAM `svc-terraform-dev` — no se mueve a `instance_principal` (D6). `secrets.OCI_PRIVATE_KEY` se sigue escribiendo a `$RUNNER_TEMP/oci_private_key.pem` (`infra-dev.yml:62-66`, `infra-dev.yml:152-156`), el borrado explícito `if: always()` (añadido en la ronda de review) es lo que cubre la persistencia — el runner NO limpia `$RUNNER_TEMP` al terminar el job, solo al inicializar el siguiente. Concurrency de `apply` (`group: infra-dev-apply`, `cancel-in-progress: false`) intacto. Cabecera de comentario. [R1] [R2] [R5] [R7]
 
 ## 5. Migrate deploy-dev.yml build jobs <!-- panel: PASS 2026-09-03 -->
 
