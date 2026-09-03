@@ -41,12 +41,14 @@ from app.messaging.domain.value_objects import (
 )
 from app.messaging.infrastructure.models import ConversationModel, MessageModel
 from app.messaging.infrastructure.repositories import (
+    _MUTABLE_CONVERSATION_COLUMNS,
     SqlAlchemyConversationRepository,
     SqlAlchemyMessageRepository,
 )
 from tests.messaging.conftest import (
     NOW,
     seed_conversation,
+    seed_guest,
     seed_message,
     seed_property,
     seed_reservation,
@@ -518,6 +520,82 @@ async def test_an_escalated_conversation_still_counts(db_session) -> None:
     assert count == 1
 
 
+# --- last_guest_message_at (`whatsapp-cloud-adapter` R2.4, design D2) ---------------------
+
+
+@pytest.mark.asyncio
+async def test_the_guests_last_message_time_is_none_when_the_guest_never_wrote(
+    db_session,
+) -> None:
+    """D2's binding reading: no guest message ever means OUTSIDE the session window, not an
+    invitation to guess at one."""
+    tenant = await seed_tenant(db_session, "TenantA")
+    prop = await seed_property(db_session, tenant, "REDES11")
+    conversation = await seed_conversation(db_session, tenant, prop)
+    await seed_message(db_session, conversation, sender_type=MessageSenderType.AI)
+
+    result = await messages(db_session).last_guest_message_at(tenant.id, conversation.id)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_the_guests_last_message_time_with_a_single_guest_message(db_session) -> None:
+    tenant = await seed_tenant(db_session, "TenantA")
+    prop = await seed_property(db_session, tenant, "REDES11")
+    conversation = await seed_conversation(db_session, tenant, prop)
+    written = await seed_message(db_session, conversation, created_at=NOW)
+
+    result = await messages(db_session).last_guest_message_at(tenant.id, conversation.id)
+
+    assert result == written.created_at
+
+
+@pytest.mark.asyncio
+async def test_the_guests_last_message_time_is_the_most_recent_of_several(db_session) -> None:
+    tenant = await seed_tenant(db_session, "TenantA")
+    prop = await seed_property(db_session, tenant, "REDES11")
+    conversation = await seed_conversation(db_session, tenant, prop)
+    await seed_message(db_session, conversation, created_at=NOW)
+    latest = await seed_message(
+        db_session, conversation, created_at=NOW + timedelta(minutes=5)
+    )
+    await seed_message(db_session, conversation, created_at=NOW + timedelta(minutes=2))
+
+    result = await messages(db_session).last_guest_message_at(tenant.id, conversation.id)
+
+    assert result == latest.created_at
+
+
+@pytest.mark.asyncio
+async def test_a_later_ai_or_manager_message_does_not_change_the_guests_last_message_time(
+    db_session,
+) -> None:
+    """The exact gap `Conversation.last_message_at` cannot close (design D2, resolved with
+    the user 2026-09-02): that column would be touched by the AI's own reply or a manager's,
+    silently reopening a window the guest never reopened."""
+    tenant = await seed_tenant(db_session, "TenantA")
+    prop = await seed_property(db_session, tenant, "REDES11")
+    conversation = await seed_conversation(db_session, tenant, prop)
+    guest_message = await seed_message(db_session, conversation, created_at=NOW)
+    await seed_message(
+        db_session,
+        conversation,
+        sender_type=MessageSenderType.AI,
+        created_at=NOW + timedelta(hours=25),
+    )
+    await seed_message(
+        db_session,
+        conversation,
+        sender_type=MessageSenderType.MANAGER,
+        created_at=NOW + timedelta(hours=26),
+    )
+
+    result = await messages(db_session).last_guest_message_at(tenant.id, conversation.id)
+
+    assert result == guest_message.created_at
+
+
 # --- The portal thread: one per stay (`guest-portal-messaging` R2.5, R3.4, R3.5, D6) -------
 
 
@@ -813,3 +891,293 @@ async def test_the_already_committed_caller_also_gets_the_existing_thread(
         await second_session.commit()
 
     assert second.id == first.id
+
+
+# --- The WhatsApp thread: one per guest and property (`whatsapp-cloud-adapter` R4.5, D4) ---
+
+#: Meta's `phone_number_id` for the tenant's own number — an identifier, not a dialable
+#: number, and never `display_phone_number` (section 4's notes).
+BUSINESS_NUMBER = "109876543210987"
+OTHER_BUSINESS_NUMBER = "555000111222333"
+
+
+async def whatsapp_fixture(db_session):
+    """A tenant with a property, a stay and a guest — the anchors `ensure_whatsapp` takes."""
+    tenant = await seed_tenant(db_session, "TenantA")
+    prop = await seed_property(db_session, tenant, "REDES11")
+    reservation = await seed_reservation(db_session, tenant, prop)
+    guest = await seed_guest(db_session, tenant)
+    return tenant, prop, reservation, guest
+
+
+@pytest.mark.asyncio
+async def test_ensure_whatsapp_creates_the_thread_the_first_time(db_session) -> None:
+    tenant, prop, reservation, guest = await whatsapp_fixture(db_session)
+
+    conversation = await conversations(db_session).ensure_whatsapp(
+        tenant.id,
+        guest_id=guest.id,
+        property_id=prop.id,
+        reservation_id=reservation.id,
+        language="es",
+        business_phone_number=BUSINESS_NUMBER,
+        now=NOW,
+    )
+
+    assert conversation.channel is ConversationChannel.WHATSAPP
+    assert conversation.guest_id == guest.id
+    assert conversation.property_id == prop.id
+    assert conversation.reservation_id == reservation.id
+    assert conversation.language == "es"
+    assert conversation.status is ConversationStatus.OPEN
+    assert conversation.escalation_status is ConversationEscalationStatus.NONE
+    assert conversation.business_phone_number == BUSINESS_NUMBER
+
+
+@pytest.mark.asyncio
+async def test_a_second_message_from_the_same_guest_reuses_the_thread(db_session) -> None:
+    """R4.5: "una conversación existente… se reutiliza, no se duplica por mensaje". Both
+    halves — the same id back *and* one row in the table, since a method that inserted a
+    second row and returned the first would satisfy only the first assertion."""
+    tenant, prop, reservation, guest = await whatsapp_fixture(db_session)
+    repo = conversations(db_session)
+
+    first = await repo.ensure_whatsapp(
+        tenant.id, guest_id=guest.id, property_id=prop.id, reservation_id=reservation.id,
+        language="es", business_phone_number=BUSINESS_NUMBER, now=NOW,
+    )
+    second = await repo.ensure_whatsapp(
+        tenant.id, guest_id=guest.id, property_id=prop.id, reservation_id=reservation.id,
+        language="es", business_phone_number=BUSINESS_NUMBER, now=NOW + timedelta(hours=1),
+    )
+
+    assert second.id == first.id
+    total = await db_session.scalar(
+        select(func.count())
+        .select_from(ConversationModel)
+        .where(
+            ConversationModel.guest_id == guest.id,
+            ConversationModel.channel == ConversationChannel.WHATSAPP,
+        )
+    )
+    assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_the_second_call_rewrites_neither_the_language_nor_the_business_number(
+    db_session,
+) -> None:
+    """The D4 addendum: `business_phone_number` is "set once… and never changed after — a
+    reply always leaves from the number the thread was opened on". `DO NOTHING` and not
+    `DO UPDATE` is what makes that true, and the same holds for `language` (R3.3's rule,
+    inherited from `ensure_portal`), so both are asserted rather than assumed."""
+    tenant, prop, reservation, guest = await whatsapp_fixture(db_session)
+    repo = conversations(db_session)
+
+    await repo.ensure_whatsapp(
+        tenant.id, guest_id=guest.id, property_id=prop.id, reservation_id=reservation.id,
+        language="es", business_phone_number=BUSINESS_NUMBER, now=NOW,
+    )
+    second = await repo.ensure_whatsapp(
+        tenant.id, guest_id=guest.id, property_id=prop.id, reservation_id=reservation.id,
+        language="en", business_phone_number=OTHER_BUSINESS_NUMBER, now=NOW,
+    )
+
+    assert second.language == "es"
+    assert second.business_phone_number == BUSINESS_NUMBER
+
+
+@pytest.mark.asyncio
+async def test_the_same_guest_writing_about_a_second_property_opens_a_second_thread(
+    db_session,
+) -> None:
+    """D4, confirmed with the user: per guest **and** property, not one thread per guest for
+    life — "a message about property B shouldn't surface property A's unrelated history"."""
+    tenant, prop, reservation, guest = await whatsapp_fixture(db_session)
+    other_property = await seed_property(db_session, tenant, "PAJARITOS8")
+    repo = conversations(db_session)
+
+    first = await repo.ensure_whatsapp(
+        tenant.id, guest_id=guest.id, property_id=prop.id, reservation_id=reservation.id,
+        language="es", business_phone_number=BUSINESS_NUMBER, now=NOW,
+    )
+    second = await repo.ensure_whatsapp(
+        tenant.id, guest_id=guest.id, property_id=other_property.id, reservation_id=None,
+        language="es", business_phone_number=BUSINESS_NUMBER, now=NOW,
+    )
+
+    assert second.id != first.id
+    assert second.property_id == other_property.id
+    assert first.property_id == prop.id
+
+
+@pytest.mark.asyncio
+async def test_two_guests_at_the_same_property_get_one_thread_each(db_session) -> None:
+    """The other half of the key: it is not per property alone either."""
+    tenant, prop, reservation, guest = await whatsapp_fixture(db_session)
+    other_guest = await seed_guest(
+        db_session, tenant, full_name="Bruno Guest", phone="+34698765432"
+    )
+    repo = conversations(db_session)
+
+    first = await repo.ensure_whatsapp(
+        tenant.id, guest_id=guest.id, property_id=prop.id, reservation_id=reservation.id,
+        language="es", business_phone_number=BUSINESS_NUMBER, now=NOW,
+    )
+    second = await repo.ensure_whatsapp(
+        tenant.id, guest_id=other_guest.id, property_id=prop.id,
+        reservation_id=reservation.id, language="es",
+        business_phone_number=BUSINESS_NUMBER, now=NOW,
+    )
+
+    assert second.id != first.id
+
+
+@pytest.mark.asyncio
+async def test_ensure_whatsapp_never_reuses_a_thread_of_another_channel(db_session) -> None:
+    """The index predicate, and the mirror of R3.5's portal test: a `PORTAL` (or `MANUAL`)
+    thread for the very same guest and property is neither returned nor written into — the
+    partial index covers `channel = 'WHATSAPP'` rows only."""
+    tenant, prop, reservation, guest = await whatsapp_fixture(db_session)
+    portal = await conversations(db_session).ensure_portal(
+        tenant.id, reservation_id=reservation.id, property_id=prop.id,
+        guest_id=guest.id, language="es", now=NOW,
+    )
+
+    created = await conversations(db_session).ensure_whatsapp(
+        tenant.id, guest_id=guest.id, property_id=prop.id, reservation_id=reservation.id,
+        language="es", business_phone_number=BUSINESS_NUMBER, now=NOW,
+    )
+
+    assert created.id != portal.id
+    assert created.channel is ConversationChannel.WHATSAPP
+    reread = await conversations(db_session).find_portal(tenant.id, reservation.id)
+    assert reread is not None
+    assert reread.id == portal.id
+    assert reread.business_phone_number is None
+
+
+@pytest.mark.asyncio
+async def test_a_sender_with_no_guest_resolved_gets_a_new_row_per_message(db_session) -> None:
+    """D4 and the design's Risks, asserted rather than described: a `NULL` never equals another
+    `NULL` in a unique index, so rows whose `guest_id` (or `property_id`) is unresolved do not
+    dedupe against each other and an unresolved sender opens a thread per message. Accepted
+    for R4.3's rare, operator-visible case rather than given a second index shape.
+
+    It is also the case that makes `RETURNING` the read-back rather than a key lookup: after
+    the second call, `guest_id IS NULL AND property_id = :p AND channel = 'WHATSAPP'` matches
+    **two** rows, and a lookup by the key would raise `MultipleResultsFound` here — a failure
+    that would surface in production as a `500` on a guest's first message.
+    """
+    tenant, prop, _, _ = await whatsapp_fixture(db_session)
+    repo = conversations(db_session)
+
+    first = await repo.ensure_whatsapp(
+        tenant.id, guest_id=None, property_id=prop.id, reservation_id=None,
+        language="es", business_phone_number=BUSINESS_NUMBER, now=NOW,
+    )
+    second = await repo.ensure_whatsapp(
+        tenant.id, guest_id=None, property_id=prop.id, reservation_id=None,
+        language="es", business_phone_number=BUSINESS_NUMBER, now=NOW + timedelta(minutes=1),
+    )
+
+    assert second.id != first.id
+    assert second.guest_id is None
+    total = await db_session.scalar(
+        select(func.count()).select_from(ConversationModel).where(
+            ConversationModel.property_id == prop.id,
+            ConversationModel.channel == ConversationChannel.WHATSAPP,
+        )
+    )
+    assert total == 2
+
+
+@pytest.mark.asyncio
+async def test_two_simultaneous_whatsapp_messages_land_in_one_thread(
+    db_session, test_engine
+) -> None:
+    """The concurrency contract of D4, against real Postgres and with the same four steps as
+    its `ensure_portal` sibling above: the winner inserts without committing, the loser blocks
+    on the speculative-insertion lock, `assert not pending.done()` proves the contention
+    happened, and on waking the loser takes the `DO NOTHING` branch **without raising** and
+    reads the winner's row.
+
+    It discriminates the same two implementations, and one more of its own: this method reads
+    its row back through `RETURNING id` on the winning path, so the losing path is the *only*
+    one that goes through the key lookup. A `RETURNING` that leaked the loser's non-row as
+    `None` into the entity, or a key lookup that matched nothing, dies here rather than in
+    production.
+    """
+    tenant = await seed_tenant(db_session, "TenantA")
+    prop = await seed_property(db_session, tenant, "REDES11")
+    guest = await seed_guest(db_session, tenant)
+    tenant_id, property_id, guest_id = tenant.id, prop.id, guest.id
+    await db_session.commit()
+
+    def call(session, *, business_phone_number=BUSINESS_NUMBER):
+        return SqlAlchemyConversationRepository(session).ensure_whatsapp(
+            tenant_id,
+            guest_id=guest_id,
+            property_id=property_id,
+            reservation_id=None,
+            language="es",
+            business_phone_number=business_phone_number,
+            now=NOW,
+        )
+
+    async with AsyncSession(test_engine, expire_on_commit=False) as winner, AsyncSession(
+        test_engine, expire_on_commit=False
+    ) as loser:
+        # **Both connections are opened before the race starts.** With `NullPool` each
+        # `AsyncSession` opens a fresh asyncpg connection on its first statement, and inside
+        # the full suite that setup can take longer than the lock-observation window below —
+        # which fails the test for a reason that has nothing to do with the contract it
+        # checks (seen for real: green alone, red in `pytest tests/messaging/`). Warming both
+        # leaves the window measuring the lock and nothing else.
+        await winner.execute(text("SELECT 1"))
+        await loser.execute(text("SELECT 1"))
+
+        first = await call(winner)
+
+        pending = asyncio.create_task(call(loser, business_phone_number=OTHER_BUSINESS_NUMBER))
+        try:
+            # A longer deadline than the portal sibling's default for the same reason: this
+            # test runs late in a long file, on a host that may be carrying other suites.
+            assert await _wait_until_a_backend_blocks_on_a_lock(
+                test_engine, timeout=30.0
+            ), "the loser never blocked on the winner's row: the two did not race"
+            assert not pending.done()
+
+            await winner.commit()
+
+            second = await pending
+            assert second.id == first.id
+            # The loser read the winner's row rather than its own values: the thread keeps the
+            # number it was opened on, which is what a reply will leave from.
+            assert second.business_phone_number == BUSINESS_NUMBER
+            await loser.commit()
+        finally:
+            # Same reason as the portal sibling: a failure must not leave a blocked
+            # transaction behind, or the next test's truncation waits on it until
+            # `lock_timeout` and one red test becomes a cascade.
+            if not pending.done():
+                pending.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await pending
+
+    async with AsyncSession(test_engine) as observer:
+        total = await observer.scalar(
+            select(func.count()).select_from(ConversationModel).where(
+                ConversationModel.guest_id == guest_id,
+                ConversationModel.channel == ConversationChannel.WHATSAPP,
+            )
+        )
+    assert total == 1
+
+
+def test_saving_a_conversation_can_never_rewrite_the_business_number() -> None:
+    """"Set once… and never changed after" (D4 addendum) survives `save` too, and not by
+    discipline: `save` writes only `_MUTABLE_CONVERSATION_COLUMNS`, and this field is not one
+    of them. Adding it there is what this test exists to catch — a reply would then start
+    leaving from a number the guest never wrote to."""
+    assert "business_phone_number" not in _MUTABLE_CONVERSATION_COLUMNS

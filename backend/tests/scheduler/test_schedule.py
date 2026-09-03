@@ -10,7 +10,12 @@ from datetime import timedelta
 from celery.schedules import crontab
 
 from app.scheduler.locks import lock_ttl_for
-from app.scheduler.schedule import CADENCES, DAILY_JOBS, beat_schedule
+from app.scheduler.schedule import (
+    CADENCES,
+    DAILY_JOBS,
+    ON_DEMAND_TASKS,
+    beat_schedule,
+)
 
 #: PRD §8.3, "Jobs programados (Celery)", the rows that run on a period. The one row still
 #: unowned is listed with its owner so the omission reads as a decision instead of an
@@ -102,16 +107,29 @@ def test_a_daily_job_fires_at_its_hour_and_not_a_period_after_beat_starts() -> N
         assert entry["schedule"] == crontab(hour=daily.hour, minute=0)
 
 
-def test_the_two_tables_are_disjoint() -> None:
-    """A job in both would get two beat entries and two different lock TTLs."""
+def test_the_three_tables_are_disjoint() -> None:
+    """A job in two of them would get two beat entries and two different lock TTLs.
+
+    `ON_DEMAND_TASKS` joins the comparison with `whatsapp-cloud-adapter` (design D7): a task
+    that appears both there and in a cadence table would be claiming two contradictory things
+    about what starts it.
+    """
     assert not set(CADENCES) & set(DAILY_JOBS)
+    assert not set(CADENCES) & ON_DEMAND_TASKS
+    assert not set(DAILY_JOBS) & ON_DEMAND_TASKS
 
 
-def test_every_registered_task_is_in_exactly_one_of_the_two_tables() -> None:
+def test_every_registered_task_is_in_exactly_one_of_the_three_tables() -> None:
     """A scheduled task the calendar forgot never runs, and nothing else would say so.
 
     The complement of `test_every_scheduled_task_is_registered_with_celery`: that one catches
     a calendar entry with no task, this one a task with no calendar entry.
+
+    **`ON_DEMAND_TASKS` is a third table and not an exemption**, and the distinction is what
+    keeps this check worth having. `whatsapp-cloud-adapter`'s inbound task is dispatched with
+    `.delay(event_id)` the moment a webhook delivery commits (design D7), so a cadence would
+    be wrong rather than missing — but a task with no entry in *any* of the three is still
+    red, so a genuinely forgotten beat entry cannot hide behind "it must be on demand".
     """
     from app.worker import celery_app
 
@@ -119,9 +137,36 @@ def test_every_registered_task_is_in_exactly_one_of_the_two_tables() -> None:
         name for name in celery_app.tasks if not name.startswith("celery.")
     }
 
-    assert ours == set(CADENCES) | set(DAILY_JOBS)
+    assert ours == set(CADENCES) | set(DAILY_JOBS) | ON_DEMAND_TASKS
     for name in ours:
-        assert (name in CADENCES) != (name in DAILY_JOBS), name
+        assert [name in CADENCES, name in DAILY_JOBS, name in ON_DEMAND_TASKS].count(
+            True
+        ) == 1, name
+
+
+def test_no_on_demand_task_has_a_beat_entry() -> None:
+    """The absence design D7 asks for, checked rather than assumed.
+
+    `beat_schedule()` derives from the two cadence tables, so this cannot fail today — which
+    is exactly why it is written down: an entry added by hand to satisfy a future guard would
+    give every inbound guest message a cadence's worth of latency, and nothing else would say
+    so.
+    """
+    scheduled = {entry["task"] for entry in beat_schedule().values()}
+
+    assert not scheduled & ON_DEMAND_TASKS
+
+
+def test_the_on_demand_task_names_are_the_ones_the_tasks_register() -> None:
+    """The name is spelled in two places, so the two are compared here.
+
+    A rename that missed `ON_DEMAND_TASKS` would leave the set naming a task that does not
+    exist — and the exhaustiveness check above would go red for the *other* half of the same
+    typo, which is a confusing way to find out.
+    """
+    from app.scheduler.whatsapp_tasks import WHATSAPP_INBOUND_TASK
+
+    assert ON_DEMAND_TASKS == {WHATSAPP_INBOUND_TASK}
 
 
 def test_no_daily_job_derives_its_lock_ttl_from_the_cadence_rule() -> None:

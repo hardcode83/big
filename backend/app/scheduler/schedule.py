@@ -100,6 +100,23 @@ DAILY_JOBS: dict[str, DailySchedule] = {
 }
 
 
+#: Tasks that have no place on the calendar at all, because nothing fires them on a clock.
+#:
+#: The first one arrives with `whatsapp-cloud-adapter` (design D7): the anonymous WhatsApp
+#: receiver dispatches `process_inbound_whatsapp_message.delay(event_id)` the moment a
+#: delivery commits, one task per inbound guest message. A cadence would be wrong twice over
+#: — it would add up to a full tick of latency before the AI even sees a guest's question,
+#: and there is nothing for a tick to coalesce, since the payload already carries the message
+#: and no outbound re-read follows. Rule 12(d)'s "decouple the outbound traffic from webhook
+#: volume", which is exactly what `process_webhook_events`' 60 s buys, has no work to do here.
+#:
+#: **A declared list and not an exemption class.** `tests/scheduler/test_schedule.py` asserts
+#: that every task registered with Celery sits in exactly one of these three tables, so a job
+#: whose beat entry somebody forgot is still red — it just has a third place to be, and
+#: putting a task here is a visible diff that says "nothing schedules this".
+ON_DEMAND_TASKS: frozenset[str] = frozenset({"process_inbound_whatsapp_message"})
+
+
 def beat_schedule() -> dict[str, dict]:
     """The `beat_schedule` Celery expects, derived from `CADENCES` and `DAILY_JOBS`."""
     schedule: dict[str, dict] = {

@@ -21,9 +21,15 @@ async def _tenant(db_session, name: str) -> TenantModel:
 
 
 async def _guest(
-    db_session, tenant: TenantModel, *, full_name: str, email: str | None, created_at=None
+    db_session,
+    tenant: TenantModel,
+    *,
+    full_name: str,
+    email: str | None = None,
+    phone: str | None = None,
+    created_at=None,
 ) -> GuestModel:
-    model = GuestModel(tenant_id=tenant.id, full_name=full_name, email=email)
+    model = GuestModel(tenant_id=tenant.id, full_name=full_name, email=email, phone=phone)
     if created_at is not None:
         model.created_at = created_at
         model.updated_at = created_at
@@ -197,6 +203,67 @@ async def test_the_id_breaks_the_tie_when_created_at_is_identical(db_session) ->
 
     assert found is not None
     assert found.id == min(one.id, two.id, key=str)
+
+
+# --- `find_by_phone` (`whatsapp-cloud-adapter` R4.2, R4.4) --------------------------------
+#
+# Plural, unlike `find_by_email`: R4.4 needs to know *whether* more than one guest shares a
+# phone so the caller can escalate rather than guess, so this must never collapse to a
+# single deterministic pick.
+
+
+@pytest.mark.asyncio
+async def test_find_by_phone_with_no_match_returns_empty(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    await _guest(db_session, tenant, full_name="John", phone="+34600000000")
+
+    found = await _repository(db_session, tenant).find_by_phone(tenant.id, "+34611111111")
+
+    assert found == []
+
+
+@pytest.mark.asyncio
+async def test_find_by_phone_with_one_match_returns_it(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _guest(db_session, tenant, full_name="John", phone="+34612345678")
+
+    found = await _repository(db_session, tenant).find_by_phone(tenant.id, "+34612345678")
+
+    assert [g.id for g in found] == [model.id]
+
+
+@pytest.mark.asyncio
+async def test_find_by_phone_with_several_matches_returns_all_of_them(db_session) -> None:
+    """The escalation signal of R4.4: several guests sharing one number is not collapsed."""
+    tenant = await _tenant(db_session, "TenantA")
+    one = await _guest(db_session, tenant, full_name="John", phone="+34612345678")
+    two = await _guest(db_session, tenant, full_name="Jane", phone="+34612345678")
+
+    found = await _repository(db_session, tenant).find_by_phone(tenant.id, "+34612345678")
+
+    assert {g.id for g in found} == {one.id, two.id}
+
+
+@pytest.mark.asyncio
+async def test_find_by_phone_does_not_cross_tenants(db_session) -> None:
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    await _guest(db_session, tenant_b, full_name="Their John", phone="+34612345678")
+
+    found = await _repository(db_session, tenant_a).find_by_phone(tenant_a.id, "+34612345678")
+
+    assert found == []
+
+
+@pytest.mark.asyncio
+async def test_find_by_phone_with_a_blank_phone_matches_nothing(db_session) -> None:
+    """The same guard `find_by_email` applies to a blank address, and for the same reason."""
+    tenant = await _tenant(db_session, "TenantA")
+    await _guest(db_session, tenant, full_name="No phone")
+
+    found = await _repository(db_session, tenant).find_by_phone(tenant.id, "")
+
+    assert found == []
 
 
 @pytest.mark.asyncio

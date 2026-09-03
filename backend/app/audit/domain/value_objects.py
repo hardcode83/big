@@ -466,6 +466,12 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     # is a rule-11 closed vocabulary and never carries a value in `changes`; `language`
     # is immutable after creation (R3.1) so it cannot change.
     "REVIEW_RESPONSE_DRAFT": frozenset({"edits_count"}),
+    # `whatsapp-cloud-adapter` section 6. All three columns of `whatsapp_phone_numbers` are
+    # auditable as plain diffs — none is a rule-3 value (there is no secret in this table at
+    # all, D3/D8's whole point) — so none needs `REDACT_ONLY_FIELDS` either.
+    "WHATSAPP_PHONE_NUMBER": frozenset(
+        {"phone_number_id", "display_phone_number", "default_property_id"}
+    ),
 }
 
 #: Fields that may appear in an entity's audit row **only** as `{"changed": true}`, keyed by

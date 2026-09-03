@@ -19,6 +19,10 @@ from app.maintenance.api.incidents_router import router as incidents_router
 from app.messaging.api.errors import register_messaging_error_handlers
 from app.notifications.api.errors import register_notification_error_handlers
 from app.messaging.api.router import router as conversations_router
+from app.messaging.api.router import (
+    whatsapp_provisioning_router as messaging_whatsapp_provisioning_router,
+)
+from app.messaging.api.whatsapp_webhook_router import router as whatsapp_webhook_router
 from app.cleaning.api.photos_router import router as cleaning_photos_router
 from app.maintenance.api.photos_router import router as incident_photos_router
 from app.cleaning.api.tasks_router import router as cleaning_tasks_router
@@ -154,6 +158,20 @@ def create_app() -> FastAPI:
     # fixed. Registered after `maintenance` because a guest message can open an incident, and
     # reading the two in this order is how that dependency reads in the code.
     app.include_router(conversations_router, prefix=API_V1_PREFIX)
+    # `whatsapp-cloud-adapter` section 6: a second router of `messaging`, under `/messaging`
+    # rather than `/conversations` — provisioning a tenant's WhatsApp `phone_number_id` is
+    # tenant configuration, not a conversation endpoint, the same split `integrations` makes
+    # between `/pms/import-csv` and `/webhook-endpoints`.
+    app.include_router(messaging_whatsapp_provisioning_router, prefix=API_V1_PREFIX)
+    # `whatsapp-cloud-adapter` section 7: a THIRD router of `messaging`, and the only
+    # anonymous one — a sibling of `webhooks_router` above, under the same `/webhooks/`
+    # prefix and separate from the two routers just registered for the same reason that one
+    # is separate from `integrations_router`: those declare `AUTHENTICATED_RESPONSES` and a
+    # permission per route, and these two do not authenticate a person at all. Meta's
+    # `X-Hub-Signature-256` over the raw body is the credential (design D3a), and one fixed
+    # path serves the whole platform because Meta admits a single webhook subscription per
+    # App (R3.1 as amended, design D3).
+    app.include_router(whatsapp_webhook_router, prefix=API_V1_PREFIX)
     # `access-notifications`: the read side of the in-app channel. Without it the dispatcher
     # would mark `IN_APP` rows `SENT` with nothing able to show them to their recipient
     # (design D5/D6).

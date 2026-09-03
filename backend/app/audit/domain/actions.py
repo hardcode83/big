@@ -159,6 +159,21 @@ PMS_CREDENTIAL_ROTATED = "PMS_CREDENTIAL_ROTATED"
 WEBHOOK_ENDPOINT_CREATED = "WEBHOOK_ENDPOINT_CREATED"
 WEBHOOK_ENDPOINT_ROTATED = "WEBHOOK_ENDPOINT_ROTATED"
 
+# A row of `whatsapp_phone_numbers` (`whatsapp-cloud-adapter` section 6, design D3/D8). Its own
+# entity type rather than folded into `ENTITY_WEBHOOK_ENDPOINT`: the two hold opposite kinds of
+# fact — a webhook endpoint is material WE mint, this is an operator-supplied association with
+# no secret in it at all — and `ix_audit_logs_tenant_id_entity_type_entity_id` is what makes
+# "who associated this tenant's WhatsApp number" a lookup rather than a scan filtering `changes`.
+ENTITY_WHATSAPP_PHONE_NUMBER = "WHATSAPP_PHONE_NUMBER"
+
+# One action per operation, same reasoning `WEBHOOK_ENDPOINT_CREATED`/`_ROTATED` state: rule 9
+# is only auditable if the operation is findable by `action` rather than by a JSONB scan.
+# `AssociateWhatsAppPhoneNumberUseCase` writes the first for both a fresh association and a
+# replacement of the tenant's existing one — there is no separate "rotate" verb here the way
+# webhooks have one, because there is no secret whose lifetime that distinction protects (R6.3).
+WHATSAPP_PHONE_NUMBER_ASSOCIATED = "WHATSAPP_PHONE_NUMBER_ASSOCIATED"
+WHATSAPP_PHONE_NUMBER_RELEASED = "WHATSAPP_PHONE_NUMBER_RELEASED"
+
 # There is no `PROPERTY_DELETED`: retirement is `status = INACTIVE`, so it arrives as an update
 # (`properties-crud` R3.4, and `domain-foundation-core`: "el PRD modela el borrado vía `status`,
 # nunca `DELETE` real"). An action for an operation the API does not offer would be the
@@ -393,6 +408,7 @@ ENTITY_TYPES = frozenset(
         ENTITY_AUDIT_LOG,
         ENTITY_REVIEW,
         ENTITY_REVIEW_RESPONSE_DRAFT,
+        ENTITY_WHATSAPP_PHONE_NUMBER,
     }
 )
 
@@ -461,5 +477,7 @@ ACTIONS = frozenset(
         REVIEW_IGNORED,
         REVIEW_POSTED_MANUALLY,
         REVIEW_DRAFT_EDITED,
+        WHATSAPP_PHONE_NUMBER_ASSOCIATED,
+        WHATSAPP_PHONE_NUMBER_RELEASED,
     }
 )

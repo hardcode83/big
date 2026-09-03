@@ -20,6 +20,7 @@ from app.messaging.domain.enums import (
     ConversationStatus,
     MessageSenderType,
 )
+from app.guests.infrastructure.models import GuestModel
 from app.messaging.infrastructure.models import ConversationModel, MessageModel
 from app.properties.infrastructure.models import PropertyModel
 from app.reservations.infrastructure.models import ReservationModel
@@ -69,6 +70,31 @@ async def seed_user(
         name=email.split("@")[0],
         role=role,
         status=status,
+    )
+    db_session.add(model)
+    await db_session.flush()
+    return model
+
+
+async def seed_guest(
+    db_session,
+    tenant: TenantModel,
+    *,
+    full_name: str = "Ana Guest",
+    phone: str | None = "+34612345678",
+    email: str | None = None,
+) -> GuestModel:
+    """A guest for the WhatsApp thread to hang off (`whatsapp-cloud-adapter` R4.5, D4).
+
+    `conversations.guest_id` is a real foreign key, so `ensure_whatsapp` — which keys on
+    `(tenant_id, guest_id, property_id)` — cannot be tested without one. The phone is stored
+    already normalised to E.164, which is the shape `find_by_phone` compares against.
+    """
+    model = GuestModel(
+        tenant_id=tenant.id,
+        full_name=full_name,
+        email=email,
+        phone=phone,
     )
     db_session.add(model)
     await db_session.flush()

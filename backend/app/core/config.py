@@ -2,7 +2,7 @@ import base64
 import binascii
 from pathlib import Path
 
-from pydantic import Field, ValidationError, field_validator, model_validator
+from pydantic import Field, ValidationError, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.tenants.domain.enums import StorageType
@@ -248,9 +248,10 @@ class Settings(BaseSettings):
     # one, not a placeholder.
     guest_portal_support_channel: str | None = None
 
-    # Notification delivery (change `access-notifications`, design D4). No credential here:
-    # the MVP adapters are a console logger and two mocks (PRD §14's channel table), and the
-    # real WhatsApp/SMTP keys are already reserved by rule 8 of `steering/security.md`.
+    # Notification delivery (change `access-notifications`, design D4). No SMTP credential
+    # here: `ConsoleEmailAdapter` is the only `EMAIL` adapter and the real SMTP keys arrive
+    # with `hardening-release`. WhatsApp is no longer in that boat — `whatsapp_provider` and
+    # the Meta credentials just below are real, wired fields, not names merely reserved.
     #
     # `notification_max_attempts` is what bounds duplicates. The dispatcher records the attempt
     # BEFORE calling the adapter, so a process that dies mid-send re-sends at most until this
@@ -266,6 +267,48 @@ class Settings(BaseSettings):
     # in slices instead of in one transaction that holds row locks for as long as the slowest
     # provider takes.
     notification_batch_size: int = 100
+
+    # WhatsApp Cloud API (change `whatsapp-cloud-adapter`, design D1/D2). `whatsapp_provider`
+    # defaults to `mock`: a deployment that never configured WhatsApp gets today's boot
+    # behavior unchanged (design D1 — selecting `mock` "keeps constructing today's class so
+    # nothing changes for a deployment with no credentials") instead of a boot failure over a
+    # channel it never touched (proposal R1.5). The fail-fast guarantee rule 8 of
+    # `sdd/steering/security.md` cares about lives on the actual Meta credentials below
+    # (`whatsapp_access_token`, `whatsapp_phone_number_id`) via their own validators, not on
+    # this mode switch — the default (plus the `mode="before"` validator just below, which
+    # normalizes a blank `WHATSAPP_PROVIDER=` — what `.env.example` ships and what `make up`
+    # produces — onto the same default) only changes what applies when the var is absent or
+    # blank, not what `_reject_unknown_whatsapp_provider` below *validates*. `twilio` is a
+    # name an earlier design draft used and is NOT accepted here — this change wires Meta's
+    # Cloud API only; adding a second provider later is what would earn it a place in the
+    # allowed set.
+    whatsapp_provider: str = "mock"
+
+    # `None` here is not a rule-8 default in the sense the encryption/signing keys forbid —
+    # it means "unset", the same way `guest_portal_support_channel` uses `None` for "not
+    # configured". `mock` mode never reads these three, so a dev deployment with no WhatsApp
+    # Business account leaves them blank and still boots. `_require_access_token_for_meta` and
+    # `_require_phone_number_id_for_meta` below are what turn "unset AND
+    # whatsapp_provider=meta" into a boot failure instead of a `WhatsAppCloudAdapter` built
+    # with an empty Bearer token.
+    whatsapp_access_token: str | None = None
+    whatsapp_phone_number_id: str | None = None
+    # Consumed by inbound webhook signature verification (`whatsapp-cloud-adapter`
+    # section 7, `MetaInboundAdapter.verify_signature`) — declared here because rule 8 of
+    # `sdd/steering/security.md` wants every credential's name reserved in one place.
+    # Section 1 only declared it; **section 7 is what made it required for real**, via
+    # `_require_app_secret_for_meta` below, and the sentence that used to say "nothing in
+    # section 1 reads it yet" was corrected rather than left to age into a false claim.
+    whatsapp_app_secret: str | None = None
+    # Meta's one-time webhook verification handshake (`whatsapp-cloud-adapter` section 7,
+    # design D3a). The operator invents this value, pastes it into the Meta App dashboard
+    # next to the webhook URL, and Meta echoes it back on `GET /api/v1/webhooks/whatsapp`
+    # once, at subscription time. It is a **shared secret and not a mode switch**: without
+    # it Meta refuses to save the subscription at all, so no inbound message ever arrives.
+    #
+    # No default, for the same reason `whatsapp_app_secret` has none (rule 8) — a default
+    # here would be a value published in this repository that anybody could echo back.
+    whatsapp_webhook_verify_token: str | None = None
 
     # Channex staging (change `channex-staging-adapter`, design D3/D4). Only
     # `cli/pms_sync.py --provider channex` reads these; the application never does.
@@ -440,6 +483,124 @@ class Settings(BaseSettings):
                 f"bootstrap_storage_type must be one of {', '.join(allowed)}; got {candidate!r}"
             )
         return candidate
+
+    @field_validator("whatsapp_provider", mode="before")
+    @classmethod
+    def _blank_whatsapp_provider_falls_back_to_default(cls, value: object) -> object:
+        """A present-but-empty `WHATSAPP_PROVIDER=` must resolve exactly like an absent one.
+
+        Pydantic-settings only falls through to the field's Python default (`"mock"`) when the
+        key is genuinely ABSENT from the environment; a literal empty string is treated as the
+        field's *value* and handed straight to `_reject_unknown_whatsapp_provider` below, which
+        would reject it. But `.env.example` ships the line `WHATSAPP_PROVIDER=` — present, with
+        an empty value — and `make up` copies it verbatim into a fresh `.env`, so without this
+        `mode="before"` normalization every fresh checkout would fail to boot. Runs before
+        `_reject_unknown_whatsapp_provider`, so by the time that one runs, blank and absent are
+        indistinguishable.
+        """
+        if value is None or value == "":
+            return "mock"
+        return value
+
+    @field_validator("whatsapp_provider")
+    @classmethod
+    def _reject_unknown_whatsapp_provider(cls, value: str) -> str:
+        """Defaults to `mock`; a blank env value silently falls back to it too (design D1).
+
+        `whatsapp_provider` defaults to `"mock"` so a deployment with no WhatsApp
+        configuration at all keeps booting exactly as it did before this change (preserves
+        R1.5 / design D1's "nothing changes for a deployment with no credentials"). Both an
+        absent env var AND a blank one (`WHATSAPP_PROVIDER=`, exactly what `.env.example`
+        ships and what `make up` produces) resolve to that default, via
+        `_blank_whatsapp_provider_falls_back_to_default` above. Only an explicitly-set,
+        non-empty, invalid value reaches this validator and is rejected here — `mock`/`meta`
+        only. `twilio` is explicitly NOT in this set — it named an earlier design draft that
+        this change superseded before any code existed, and accepting it here would resurrect
+        a provider nothing implements.
+
+        The three real Meta credentials below (`whatsapp_access_token`,
+        `whatsapp_phone_number_id`, `whatsapp_app_secret`) are unaffected by any of this —
+        they still have no default and still fail fast via their own validators when
+        `whatsapp_provider=meta`.
+        """
+        allowed = {"mock", "meta"}
+        if value not in allowed:
+            raise ValueError(
+                f"whatsapp_provider must be one of {sorted(allowed)}; got {value!r} "
+                "('twilio' is a reserved name from an earlier draft, not accepted here)"
+            )
+        return value
+
+    # FIELD validators, not one model validator, for the same reason `jwt_secret_key` and
+    # `encryption_key` above are: a model validator that raises reports the whole settings
+    # object as the offending value, which would dump `whatsapp_access_token` into the error
+    # of a failure that was actually about `whatsapp_phone_number_id`, and vice versa. Each of
+    # these three scopes its own failure to its own field.
+    #
+    # Declaration order matters: `whatsapp_provider` is declared (and therefore validated)
+    # before these three, so `info.data["whatsapp_provider"]` is already the validated value
+    # by the time each of these runs.
+    @field_validator("whatsapp_access_token")
+    @classmethod
+    def _require_access_token_for_meta(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if info.data.get("whatsapp_provider") == "meta" and not (value or "").strip():
+            raise ValueError(
+                "whatsapp_access_token is required when whatsapp_provider=meta "
+                "(fail fast — rule 8 of sdd/steering/security.md)"
+            )
+        return value
+
+    @field_validator("whatsapp_phone_number_id")
+    @classmethod
+    def _require_phone_number_id_for_meta(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
+        if info.data.get("whatsapp_provider") == "meta" and not (value or "").strip():
+            raise ValueError(
+                "whatsapp_phone_number_id is required when whatsapp_provider=meta "
+                "(fail fast — rule 8 of sdd/steering/security.md)"
+            )
+        return value
+
+    # Section 7's two, added by the same reasoning and to the same shape as the two above.
+    # Section 1 declared `whatsapp_app_secret` without a validator on purpose ("this section
+    # only declares it"), because nothing read it yet; the inbound webhook is what reads both,
+    # so this is where they become required.
+    @field_validator("whatsapp_app_secret")
+    @classmethod
+    def _require_app_secret_for_meta(cls, value: str | None, info: ValidationInfo) -> str | None:
+        """Without it, `verify_signature` runs under a blank key — an HMAC anybody can compute.
+
+        `MetaInboundAdapter` fails closed on a blank secret and
+        `app/messaging/api/dependencies.py::whatsapp_signing_secret` normalises to `""`, so an
+        unset secret refuses every delivery rather than accepting a forged one. Both of those
+        are nets; refusing to boot is what makes the misconfiguration visible instead of
+        silently turning WhatsApp into a channel that receives nothing.
+        """
+        if info.data.get("whatsapp_provider") == "meta" and not (value or "").strip():
+            raise ValueError(
+                "whatsapp_app_secret is required when whatsapp_provider=meta "
+                "(fail fast — rule 8 of sdd/steering/security.md)"
+            )
+        return value
+
+    @field_validator("whatsapp_webhook_verify_token")
+    @classmethod
+    def _require_verify_token_for_meta(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
+        """Meta will not save a webhook subscription whose handshake we cannot answer (D3a).
+
+        So an unset token is not a degraded WhatsApp — it is no WhatsApp at all, discovered
+        weeks later by an operator staring at a dashboard that refuses to save. Failing at
+        boot names the variable instead.
+        """
+        if info.data.get("whatsapp_provider") == "meta" and not (value or "").strip():
+            raise ValueError(
+                "whatsapp_webhook_verify_token is required when whatsapp_provider=meta "
+                "(fail fast — rule 8 of sdd/steering/security.md)"
+            )
+        return value
 
     @model_validator(mode="after")
     def _default_database_url(self) -> "Settings":

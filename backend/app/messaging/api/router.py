@@ -33,6 +33,7 @@ from app.auth.api.dependencies import (
 from app.auth.domain.policy import Permission
 from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.messaging.api.dependencies import (
+    get_associate_whatsapp_phone_number_use_case,
     get_conversation_use_case,
     get_create_conversation_use_case,
     get_escalate_conversation_use_case,
@@ -40,17 +41,20 @@ from app.messaging.api.dependencies import (
     get_list_messages_use_case,
     get_process_inbound_message_use_case,
     get_record_human_reply_use_case,
+    get_release_whatsapp_phone_number_use_case,
     get_resolve_conversation_use_case,
 )
 from app.messaging.api.schemas import (
     MAX_PAGE,
     MAX_PER_PAGE,
+    AssociateWhatsAppPhoneNumberRequest,
     ConversationPageResponse,
     ConversationResponse,
     CreateConversationRequest,
     CreateMessageRequest,
     MessagePageResponse,
     MessageResponse,
+    WhatsAppPhoneNumberResponse,
     is_supported_language,
 )
 from app.messaging.application.use_cases import (
@@ -62,6 +66,10 @@ from app.messaging.application.use_cases import (
     ProcessInboundGuestMessageUseCase,
     RecordHumanReplyUseCase,
     ResolveConversationUseCase,
+)
+from app.messaging.application.whatsapp_provisioning import (
+    AssociateWhatsAppPhoneNumberUseCase,
+    ReleaseWhatsAppPhoneNumberUseCase,
 )
 from app.messaging.domain.enums import ConversationEscalationStatus, ConversationStatus
 from app.messaging.domain.exceptions import MessagingValidationError
@@ -296,3 +304,85 @@ async def resolve_conversation(
         now=now_utc(),
     )
     return ConversationResponse.from_domain(conversation)
+
+
+# --- WhatsApp number provisioning (section 6, R6.1-R6.3) ------------------------------------
+#
+# A second router of this module, under `/messaging` rather than `/conversations`: this is not
+# a conversation endpoint, it is tenant configuration, the same distinction that gives
+# `integrations` its own `/webhook-endpoints` routes next to `/pms/import-csv`. `MANAGE_TENANT_
+# SETTINGS` rather than `MANAGE_CONVERSATIONS`, for the same reason `integrations/api/router.py`
+# gives its webhook-endpoint routes that permission and not `MANAGE_RESERVATIONS`: deciding who
+# may write into the tenant from the internet — here, which number is treated as this tenant's
+# — is a configuration act PRD §6 gives to the `TENANT_OWNER` alone.
+
+whatsapp_provisioning_router = APIRouter(
+    prefix="/messaging", tags=["messaging"], responses=AUTHENTICATED_RESPONSES
+)
+
+TenantSettingsDep = Annotated[
+    AuthenticatedRequest, Depends(require(Permission.MANAGE_TENANT_SETTINGS))
+]
+
+
+@whatsapp_provisioning_router.post(
+    "/whatsapp-phone-number",
+    response_model=WhatsAppPhoneNumberResponse,
+    status_code=201,
+    summary="Associate a Meta Cloud API phone_number_id with this tenant",
+    description=(
+        "Create-or-replace (R6.1, R6.3): a tenant with no number yet gets one, a tenant that "
+        "already has one gets it replaced. `phone_number_id` is always supplied by the "
+        "operator, never generated here — it is Meta's own identifier for a number already "
+        "provisioned in the platform's single Meta App. `default_property_id` must be one of "
+        "this tenant's own properties, and it is what an inbound message anchors to when it "
+        "cannot be resolved to a specific stay (design D8). Refuses with `409` if that "
+        "`phone_number_id` is already associated with a different tenant — it is never "
+        "silently reassigned (R6.2)."
+    ),
+)
+async def associate_whatsapp_phone_number(
+    payload: AssociateWhatsAppPhoneNumberRequest,
+    authenticated: TenantSettingsDep,
+    use_case: Annotated[
+        AssociateWhatsAppPhoneNumberUseCase,
+        Depends(get_associate_whatsapp_phone_number_use_case),
+    ],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+) -> WhatsAppPhoneNumberResponse:
+    association = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        actor_user_id=authenticated.context.user_id,
+        actor_ip=client_ip or None,
+        phone_number_id=payload.phone_number_id,
+        display_phone_number=payload.display_phone_number,
+        default_property_id=payload.default_property_id,
+        now=now_utc(),
+    )
+    return WhatsAppPhoneNumberResponse.from_domain(association)
+
+
+@whatsapp_provisioning_router.post(
+    "/whatsapp-phone-number/release",
+    status_code=204,
+    summary="Retire this tenant's WhatsApp phone_number_id association",
+    description=(
+        "The equivalent of a webhook endpoint's rotation in this model (R6.3): after this, "
+        "the number resolves to no tenant until somebody — this one or another — associates "
+        "it again. Conversations already opened under it are untouched. `404` if this tenant "
+        "has no association to release."
+    ),
+)
+async def release_whatsapp_phone_number(
+    authenticated: TenantSettingsDep,
+    use_case: Annotated[
+        ReleaseWhatsAppPhoneNumberUseCase, Depends(get_release_whatsapp_phone_number_use_case)
+    ],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+) -> None:
+    await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        actor_user_id=authenticated.context.user_id,
+        actor_ip=client_ip or None,
+        now=now_utc(),
+    )
