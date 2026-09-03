@@ -145,6 +145,15 @@ jobs:
         # redacta los valores sensibles en consola). El apply re-planifica en el mismo job.
         run: terraform plan -input=false
 
+      - name: Limpiar ficheros con estado/credenciales del workspace
+        # `terraform apply`/`plan` puede volcar `errored.tfstate` (estado completo en claro, si el
+        # push del state falla) y `backend.hcl`/`.terraform/` quedan con la private key referenciada
+        # por ruta. El workspace es compartido y persistente entre workflows en el runner
+        # self-hosted (demo-reset.yml corre con `clean: false`), así que estos ficheros no deben
+        # sobrevivir al job (hallazgo del panel de seguridad, cuarta pasada).
+        if: always()
+        run: rm -rf errored.tfstate backend.hcl .terraform
+
   # apply: solo desde main y solo si action=apply. En repo privado + plan Free NO hay Environment
   # con required reviewers, así que el gate de aprobación es (opción A): el código llega a main
   # revisado vía PR + el dispatch de apply es manual y solo desde main → solo se aplica lo revisado.
@@ -226,3 +235,7 @@ jobs:
           TF_VAR_cloudflare_zone_name: ${{ vars.CLOUDFLARE_ZONE_NAME }}
           TF_VAR_public_hostname: ${{ vars.PUBLIC_HOSTNAME }}
         run: terraform apply -input=false -auto-approve
+
+      - name: Limpiar ficheros con estado/credenciales del workspace
+        if: always()
+        run: rm -rf errored.tfstate backend.hcl .terraform
