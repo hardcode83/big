@@ -41,6 +41,10 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      # D11: el runner self-hosted trae python3 3.10; el self-test siguiente exige >= 3.12.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
       - name: Version parity
         run: make check-version-parity
       - name: Pull request extractor self-test

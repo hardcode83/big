@@ -67,6 +67,12 @@ jobs:
       # `api-contract.yml` y `backend-tests.yml`.
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
+      # D11: el runner self-hosted trae python3 3.10; `make check-rule11-ownership` invoca
+      # python3 a pelo y exige >= 3.12.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
       - name: La propiedad de un sumidero se declara en un solo sitio
         # El mismo target que se ejecuta en local y el mismo script: un workflow con su propia
         # invocación fallaría por un motivo que nadie puede reproducir en su máquina.
