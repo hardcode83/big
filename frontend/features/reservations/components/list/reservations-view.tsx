@@ -1,13 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { Badge } from "@/components/ui/badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
+import { TONE_BADGE_CLASS } from "@/lib/ui/status-tone";
+import { cn } from "@/lib/utils";
 
 import { useReservations } from "../../hooks/use-reservations";
 import { mapReservationsError } from "../../lib/error-mapping";
+import { reservationStatusTone } from "../../lib/reservation-status-tone";
 import type {
   ReservationFilters,
   ReservationList,
@@ -95,31 +100,39 @@ export function ReservationsView() {
         />
       ) : (
         <>
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr>
-                <th className="border-b px-2 py-1 text-left">{t("fields.guest")}</th>
-                <th className="border-b px-2 py-1 text-left">
-                  {t("fields.property")}
-                </th>
-                <th className="border-b px-2 py-1 text-left">{t("fields.stay")}</th>
-                <th className="border-b px-2 py-1 text-left">
-                  {t("fields.status")}
-                </th>
-                <th className="border-b px-2 py-1 text-left">
-                  {t("fields.channel")}
-                </th>
-                <th className="border-b px-2 py-1 text-left">
-                  {t("fields.amount")}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {page.data.map((row) => (
-                <ReservationRow key={row.id} row={row} />
-              ))}
-            </tbody>
-          </table>
+          <div className="bg-surface border border-border rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
+                      {t("fields.guest")}
+                    </th>
+                    <th className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
+                      {t("fields.property")}
+                    </th>
+                    <th className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
+                      {t("fields.stay")}
+                    </th>
+                    <th className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
+                      {t("fields.status")}
+                    </th>
+                    <th className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
+                      {t("fields.channel")}
+                    </th>
+                    <th className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
+                      {t("fields.amount")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="font-mono text-data-mono">
+                  {page.data.map((row) => (
+                    <ReservationRow key={row.id} row={row} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
           <Pagination
             page={page.page}
             totalPages={page.totalPages}
@@ -146,8 +159,8 @@ function ReservationRow({ row }: { row: ReservationSummaryDto }) {
   const { t } = useTranslation("reservations");
   const href = `/reservations/${row.id}`;
   return (
-    <tr className="relative">
-      <td className="border-b px-2 py-1">
+    <tr className="relative border-b border-border last:border-b-0 hover:bg-accent/50 transition-colors group cursor-pointer">
+      <td className="py-3 px-4">
         <Link
           href={href}
           aria-label={t("fields.openReservation")}
@@ -156,16 +169,35 @@ function ReservationRow({ row }: { row: ReservationSummaryDto }) {
           {row.guestId ?? "—"}
         </Link>
       </td>
-      <td className="border-b px-2 py-1">{row.propertyId}</td>
-      <td className="border-b px-2 py-1">
+      <td className="py-3 px-4">{row.propertyId}</td>
+      <td className="py-3 px-4 whitespace-nowrap">
         {row.checkInDate} → {row.checkOutDate}
       </td>
-      <td className="border-b px-2 py-1">{t(`status.${row.status}`)}</td>
-      <td className="border-b px-2 py-1">{row.channel}</td>
-      <td className="border-b px-2 py-1">
-        {row.grossAmount !== null
-          ? `${row.grossAmount} ${row.currency}`
-          : "—"}
+      <td className="py-3 px-4 font-sans text-body-base">
+        <Badge
+          variant="outline"
+          className={cn(TONE_BADGE_CLASS[reservationStatusTone(row.status)])}
+        >
+          {t(`status.${row.status}`)}
+        </Badge>
+      </td>
+      <td className="py-3 px-4 font-sans text-body-base">{row.channel}</td>
+      <td className="py-3 px-4">
+        <div className="flex items-center justify-between gap-2">
+          <span>
+            {row.grossAmount !== null
+              ? `${row.grossAmount} ${row.currency}`
+              : "—"}
+          </span>
+          {/* Static, always-visible affordance cue (design D8, R5 AC2): the row
+              has no persistent visual affordance beyond the overlay `<Link>`
+              above, so a non-hover chevron lives in the last cell instead of a
+              new column. */}
+          <ChevronRight
+            className="size-4 shrink-0 text-muted-foreground"
+            aria-hidden="true"
+          />
+        </div>
       </td>
     </tr>
   );
@@ -187,7 +219,7 @@ function Pagination({
     <div className="flex items-center gap-2">
       <button
         type="button"
-        className="rounded-md border bg-background px-3 py-1 text-sm disabled:opacity-50"
+        className="tap-target rounded-md border bg-background px-3 py-1 text-body-base transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
         disabled={page <= 1}
         onClick={onPrev}
         aria-label={t("fields.prevPage")}
@@ -196,7 +228,7 @@ function Pagination({
       </button>
       <button
         type="button"
-        className="rounded-md border bg-background px-3 py-1 text-sm disabled:opacity-50"
+        className="tap-target rounded-md border bg-background px-3 py-1 text-body-base transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
         disabled={page >= totalPages}
         onClick={onNext}
         aria-label={t("fields.nextPage")}

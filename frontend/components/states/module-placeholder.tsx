@@ -37,7 +37,7 @@ export function ModulePlaceholder({
       description={description}
     >
       <Badge variant="secondary">{badgeLabel}</Badge>
-      <p className="max-w-prose text-sm text-muted-foreground">{explanation}</p>
+      <p className="max-w-prose text-body-base text-muted-foreground">{explanation}</p>
     </StatePanel>
   );
 }

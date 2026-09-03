@@ -32,13 +32,16 @@ export function TechEtaField({
 
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor="tech-eta" className="text-sm text-muted-foreground">
+      <label
+        htmlFor="tech-eta"
+        className="mb-1 block text-xs font-medium text-muted-foreground"
+      >
         {t("eta.label")}
       </label>
       <input
         id="tech-eta"
         type="datetime-local"
-        className="min-h-11 rounded-md border bg-background px-3 py-2 text-sm"
+        className="tap-target rounded-md border bg-background px-3 py-2 text-sm"
         value={value}
         disabled={disabled}
         aria-invalid={error ? true : undefined}
@@ -46,7 +49,7 @@ export function TechEtaField({
         onChange={(event) => onChange(event.target.value)}
       />
       {error ? (
-        <p id="tech-eta-error" role="alert" className="text-sm text-state-error-text">
+        <p id="tech-eta-error" role="alert" className="text-body-base text-state-error-text">
           {error}
         </p>
       ) : (

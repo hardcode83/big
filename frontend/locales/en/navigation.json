@@ -119,6 +119,8 @@
   "closeMenu": "Close menu",
   "expandSidebar": "Expand sidebar",
   "collapseSidebar": "Collapse sidebar",
+  "brandSubtitle": "Control Panel",
+  "help": "Help",
   "localeSwitcher": {
     "es": "Español",
     "en": "English",

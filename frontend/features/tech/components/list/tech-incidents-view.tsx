@@ -49,7 +49,7 @@ export function TechIncidentsView() {
 
   const heading = (
     <>
-      <h1 className="text-xl font-semibold text-foreground">
+      <h1 className="text-headline-md font-semibold text-foreground">
         {t("tech:list.title")}
       </h1>
       <TechStatusChips value={filters} onChange={onFiltersChange} />
@@ -88,7 +88,7 @@ export function TechIncidentsView() {
         closed incident — so it is rendered only where the requirement puts it.
       */}
       {filters.status === undefined ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-body-base text-muted-foreground">
           {t("tech:list.includesClosed")}
         </p>
       ) : null}

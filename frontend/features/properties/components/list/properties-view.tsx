@@ -66,20 +66,20 @@ function PropertyRow({ property }: { property: PropertySummaryDto }) {
   const capacityLabel = useCapacityLabel();
 
   return (
-    <tr className="border-b last:border-0">
-      <td className="px-3 py-2">
+    <tr className="border-b border-border last:border-b-0 hover:bg-accent/50 transition-colors">
+      <td className="py-3 px-4">
         <NameLink property={property} />
       </td>
-      <td className="px-3 py-2">{property.internalCode}</td>
-      <td className="px-3 py-2">{property.city ?? t("cityEmpty")}</td>
-      <td className="px-3 py-2">{capacityLabel(property)}</td>
-      <td className="px-3 py-2">
+      <td className="py-3 px-4">{property.internalCode}</td>
+      <td className="py-3 px-4">{property.city ?? t("cityEmpty")}</td>
+      <td className="py-3 px-4">{capacityLabel(property)}</td>
+      <td className="py-3 px-4 font-sans text-body-base">
         <PropertyStateBadge
           state={property.currentOperationalState}
           label={tDashboard(`state.${property.currentOperationalState}`)}
         />
       </td>
-      <td className="px-3 py-2">
+      <td className="py-3 px-4 font-sans text-body-base">
         <Badge variant="outline">{t(`status.${property.status}`)}</Badge>
       </td>
     </tr>
@@ -102,9 +102,24 @@ function PropertyCardRow({ property }: { property: PropertySummaryDto }) {
   const capacityLabel = useCapacityLabel();
 
   const fields: [string, React.ReactNode][] = [
-    [t("columns.internalCode"), property.internalCode],
-    [t("columns.city"), property.city ?? t("cityEmpty")],
-    [t("columns.capacity"), capacityLabel(property)],
+    [
+      t("columns.internalCode"),
+      <span key="internalCode" className="font-mono text-data-mono">
+        {property.internalCode}
+      </span>,
+    ],
+    [
+      t("columns.city"),
+      <span key="city" className="font-mono text-data-mono">
+        {property.city ?? t("cityEmpty")}
+      </span>,
+    ],
+    [
+      t("columns.capacity"),
+      <span key="capacity" className="font-mono text-data-mono">
+        {capacityLabel(property)}
+      </span>,
+    ],
     [
       t("columns.operationalState"),
       <PropertyStateBadge
@@ -132,10 +147,10 @@ function PropertyCardRow({ property }: { property: PropertySummaryDto }) {
             key={label}
             className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] items-baseline gap-x-3"
           >
-            <dt className="text-muted-foreground">{label}</dt>
-            <dd className="min-w-0 break-words text-right font-medium">
-              {value}
-            </dd>
+            <dt className="text-label-caps uppercase text-muted-foreground">
+              {label}
+            </dt>
+            <dd className="min-w-0 break-words text-right">{value}</dd>
           </div>
         ))}
       </dl>
@@ -163,6 +178,7 @@ function PropertyCardRow({ property }: { property: PropertySummaryDto }) {
  */
 export function PropertiesView() {
   const { t } = useTranslation("properties");
+  const { t: tNav } = useTranslation("navigation");
   const { t: tStates } = useTranslation("states");
   const [filters, setFilters] = useState<PropertyFilters>({ page: 1 });
   const query = useProperties(filters);
@@ -222,23 +238,29 @@ export function PropertiesView() {
         </div>
 
         {/* From `sm` up: the six-column table. */}
-        <div className="hidden sm:block">
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b text-left text-muted-foreground">
-                {COLUMNS.map((column) => (
-                  <th key={column} scope="col" className="px-3 py-2 font-medium">
-                    {t(`columns.${column}`)}
-                  </th>
+        <div className="hidden sm:block bg-surface border border-border rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-left text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  {COLUMNS.map((column) => (
+                    <th
+                      key={column}
+                      scope="col"
+                      className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap"
+                    >
+                      {t(`columns.${column}`)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="font-mono text-data-mono">
+                {pageData.data.map((property) => (
+                  <PropertyRow key={property.id} property={property} />
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {pageData.data.map((property) => (
-                <PropertyRow key={property.id} property={property} />
-              ))}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {/*
@@ -286,6 +308,9 @@ export function PropertiesView() {
 
   return (
     <div className="flex flex-col gap-4 p-4">
+      <h1 className="text-headline-md font-semibold text-foreground">
+        {tNav("routes.properties.title")}
+      </h1>
       <PropertiesFilters value={filters} onChange={setFilters} />
       {body()}
     </div>

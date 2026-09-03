@@ -2,6 +2,8 @@
 
 import { useTranslation } from "react-i18next";
 
+import { Card } from "@/components/ui/card";
+
 import type { MessageDto, MessageSenderType } from "../../data";
 import { ConversationThreadSenderMeta } from "./conversation-thread-sender-meta";
 
@@ -24,7 +26,7 @@ export function ConversationThreadMessages({ messages }: { messages: MessageDto[
   const { t } = useTranslation("conversations");
 
   if (messages.length === 0) {
-    return <p>{t("thread.noMessages")}</p>;
+    return <p className="text-body-base text-muted-foreground">{t("thread.noMessages")}</p>;
   }
 
   return (
@@ -32,21 +34,22 @@ export function ConversationThreadMessages({ messages }: { messages: MessageDto[
       {messages.map((message) => (
         <li
           key={message.id}
-          className="rounded-md border bg-background p-3"
+          className="list-none"
           aria-label={`${t(`senderType.${message.senderType}`)} — ${message.createdAt}`}
         >
-          <header className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-            <span className="rounded bg-muted px-2 py-0.5 font-medium">
+          <Card className="p-3">
+          <header className="mb-1 flex items-center justify-between text-body-base text-muted-foreground">
+            <span className="rounded bg-muted px-2 py-0.5 text-body-medium">
               {t(`senderType.${message.senderType}`)}
             </span>
-            <time dateTime={message.createdAt}>
+            <time dateTime={message.createdAt} className="font-mono text-data-mono">
               {message.createdAt.slice(0, 16).replace("T", " ")}
             </time>
           </header>
           {message.senderType === ("AI" satisfies MessageSenderType) &&
             message.intent && (
-              <p className="mb-1 text-xs text-muted-foreground">
-                {t("fields.intent")}: <code>{message.intent}</code>
+              <p className="mb-1 text-body-base text-muted-foreground">
+                {t("fields.intent")}: <code className="font-mono text-data-mono">{message.intent}</code>
               </p>
             )}
           {/*
@@ -55,7 +58,7 @@ export function ConversationThreadMessages({ messages }: { messages: MessageDto[
             one element with `whitespace-pre-wrap` to preserve line breaks
             and `max-w-prose` to bound the width on desktop.
           */}
-          <p className="whitespace-pre-wrap break-words max-w-prose">
+          <p className="max-w-prose whitespace-pre-wrap break-words text-body-base text-foreground">
             {message.content}
           </p>
           {/*
@@ -72,6 +75,7 @@ export function ConversationThreadMessages({ messages }: { messages: MessageDto[
               message.senderType === "MANAGER") && (
               <ConversationThreadSenderMeta senderUserId={message.senderUserId} />
             )}
+          </Card>
         </li>
       ))}
     </ol>

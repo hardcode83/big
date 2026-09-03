@@ -26,53 +26,71 @@ import { PropertyCard } from "./property-card";
  * the localized error inside its own stalls section. The cards query owns the
  * page-level error state; the stalls query never escalates to it, because a
  * blocked-transitions outage must not hide the properties themselves.
+ *
+ * The page title reuses the `navigation` namespace's existing
+ * `routes.dashboard.title` key (already rendered by the shell's breadcrumbs)
+ * — no new UI copy, matching the `properties-view.tsx` page-header precedent
+ * (visual-restyle-workspace section 4). It stays visible across every query
+ * state (loading/error/empty/success) instead of only the success branch.
  */
 export function DashboardView() {
   const { t } = useTranslation("dashboard");
   const { t: tStates } = useTranslation("states");
+  const { t: tNav } = useTranslation("navigation");
   const cardsQuery = useDashboardCards();
   const stallsQuery = useBlockedTransitions();
 
-  if (cardsQuery.isPending) {
-    return <LoadingState label={tStates("loading.label")} />;
-  }
+  function body() {
+    if (cardsQuery.isPending) {
+      return <LoadingState label={tStates("loading.label")} />;
+    }
 
-  if (cardsQuery.isError) {
+    if (cardsQuery.isError) {
+      return (
+        <ErrorState
+          title={t("cards.error.title")}
+          description={t("cards.error.description")}
+          onRetry={() => void cardsQuery.refetch()}
+          retryLabel={tStates("error.retry")}
+        />
+      );
+    }
+
+    const cards = cardsQuery.data.data;
+    if (cards.length === 0) {
+      return (
+        <EmptyState
+          title={t("cards.empty.title")}
+          description={t("cards.empty.description")}
+        />
+      );
+    }
+
+    const stallsByPropertyId = stallsQuery.isSuccess
+      ? stallsQuery.byPropertyId
+      : new Map();
+    const stallsHaveError = stallsQuery.isError;
+
     return (
-      <ErrorState
-        title={t("cards.error.title")}
-        description={t("cards.error.description")}
-        onRetry={() => void cardsQuery.refetch()}
-        retryLabel={tStates("error.retry")}
-      />
+      <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {cards.map((card) => (
+          <PropertyCard
+            key={card.propertyId}
+            card={card}
+            stalls={stallsByPropertyId.get(card.propertyId) ?? []}
+            stallsHaveError={stallsHaveError}
+          />
+        ))}
+      </div>
     );
   }
-
-  const cards = cardsQuery.data.data;
-  if (cards.length === 0) {
-    return (
-      <EmptyState
-        title={t("cards.empty.title")}
-        description={t("cards.empty.description")}
-      />
-    );
-  }
-
-  const stallsByPropertyId = stallsQuery.isSuccess
-    ? stallsQuery.byPropertyId
-    : new Map();
-  const stallsHaveError = stallsQuery.isError;
 
   return (
-    <div className="grid grid-cols-1 items-stretch gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
-      {cards.map((card) => (
-        <PropertyCard
-          key={card.propertyId}
-          card={card}
-          stalls={stallsByPropertyId.get(card.propertyId) ?? []}
-          stallsHaveError={stallsHaveError}
-        />
-      ))}
+    <div className="flex flex-col gap-4 p-4">
+      <h1 className="text-headline-md font-semibold text-foreground">
+        {tNav("routes.dashboard.title")}
+      </h1>
+      {body()}
     </div>
   );
 }

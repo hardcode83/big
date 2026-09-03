@@ -67,6 +67,7 @@ export function CleanerTaskChecklistItem({
       <Button
         type="button"
         variant="outline"
+        className="tap-target"
         onClick={onClick}
         disabled={mutation.isPending}
       >

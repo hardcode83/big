@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 import type { CleaningTaskContext, CleaningTaskListItem } from "../../data";
@@ -43,50 +44,49 @@ export function CleanerTaskListRow({ task, context }: CleanerTaskListRowProps) {
       : formatDateTime(context.nextCheckinDeadline, locale);
 
   return (
-    <li
-      aria-labelledby={headingId}
-      className="flex min-w-0 flex-col gap-3 rounded-lg border bg-surface p-4 shadow-sm"
-    >
-      <Link
-        href={`/cleaner/tasks/${task.id}`}
-        className="flex min-w-0 flex-col gap-3"
-      >
-        <div className="flex min-w-0 items-start justify-between gap-3">
-          <h3
-            id={headingId}
-            className="min-w-0 flex-1 break-words text-sm font-semibold text-foreground"
-          >
-            <span className="sr-only">{t("cleaner:list.label")}: </span>
-            {propertyName}
-          </h3>
-          <Badge
-            variant="outline"
-            className={cn(STATUS_BADGE_CLASS[statusColorGroup(task.status)])}
-          >
-            <span className="sr-only">{t("cleaning:columns.status")}: </span>
-            {t(`cleaning:status.${task.status}`)}
-          </Badge>
-        </div>
+    <li aria-labelledby={headingId} className="list-none">
+      <Card className="p-4">
+        <Link
+          href={`/cleaner/tasks/${task.id}`}
+          className="flex min-w-0 flex-col gap-3"
+        >
+          <div className="flex min-w-0 items-start justify-between gap-3">
+            <h3
+              id={headingId}
+              className="min-w-0 flex-1 break-words text-body-lg font-semibold text-foreground"
+            >
+              <span className="sr-only">{t("cleaner:list.label")}: </span>
+              {propertyName}
+            </h3>
+            <Badge
+              variant="outline"
+              className={cn(STATUS_BADGE_CLASS[statusColorGroup(task.status)])}
+            >
+              <span className="sr-only">{t("cleaning:columns.status")}: </span>
+              {t(`cleaning:status.${task.status}`)}
+            </Badge>
+          </div>
 
-        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="text-xs text-muted-foreground">
-              {t("cleaner:context.checkoutAt")}
-            </span>
-            <span className="min-w-0 break-words text-sm font-medium text-foreground">
-              {checkoutAt}
-            </span>
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-body-base text-muted-foreground">
+                {t("cleaner:context.checkoutAt")}
+              </span>
+              <span className="min-w-0 break-words text-body-medium text-foreground">
+                {checkoutAt}
+              </span>
+            </div>
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-body-base text-muted-foreground">
+                {t("cleaner:context.nextCheckinDeadline")}
+              </span>
+              <span className="min-w-0 break-words text-body-medium text-foreground">
+                {nextDeadline}
+              </span>
+            </div>
           </div>
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="text-xs text-muted-foreground">
-              {t("cleaner:context.nextCheckinDeadline")}
-            </span>
-            <span className="min-w-0 break-words text-sm font-medium text-foreground">
-              {nextDeadline}
-            </span>
-          </div>
-        </div>
-      </Link>
+        </Link>
+      </Card>
     </li>
   );
 }
