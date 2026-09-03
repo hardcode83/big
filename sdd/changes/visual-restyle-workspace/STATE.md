@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: hardcode83/visual-restyle-workspace
 implementation_sha: f5d13f81d8f1a80eb95cbed9a070421013460246
 pr_number:
 pr_url:
