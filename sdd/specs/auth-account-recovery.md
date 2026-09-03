@@ -19,12 +19,13 @@ El *cómo se opera* —invocaciones, tabla de configuración, procedimiento de r
 [`docs/auth-account-recovery.md`](../../docs/auth-account-recovery.md); esta spec cubre qué
 garantiza el sistema.
 
-> **EXTERNAL_DEPENDENCY — el aviso todavía no alcanza a ninguna persona.** El canal `EMAIL`
-> resuelve a `ConsoleEmailAdapter`, al que [`access-notifications.md`](access-notifications.md)
-> prohíbe registrar contenido y destinatario: solo canal y longitudes. El enlace no puede leerse
-> del log ni en desarrollo. El adapter SMTP real llega con `hardening-release`; hasta entonces el
-> flujo anónimo está **probado pero no entrega**, y la vía que de verdad recupera una cuenta es
-> el comando de rescate.
+> **El aviso ya alcanza a una persona cuando hay relay configurado.** Desde
+> `smtp-delivery-adapter` el canal `EMAIL` resuelve a `SMTPEmailAdapter` cuando `SMTP_HOST` está
+> puesto — dev lo está, y el primer reset real llegó a una bandeja real el 2026-09-03. En un
+> entorno **sin** relay sigue resolviendo a `ConsoleEmailAdapter`, al que
+> [`access-notifications.md`](access-notifications.md) prohíbe registrar contenido y destinatario:
+> ahí el enlace no puede leerse del log y la vía que de verdad recupera una cuenta sigue siendo el
+> comando de rescate.
 
 ## Requirements
 
@@ -301,7 +302,7 @@ garantiza el sistema.
 - **Consecuencia aceptada, y única de este tipo de notificación**: la fila registra *que se envió
   un aviso*, no su contenido.
 
-### Rescate operativo mientras no hay SMTP
+### Rescate operativo sin relay configurado
 
 - THE SYSTEM SHALL ofrecer `python -m app.cli.reset_password --email <dirección>` como vía de
   recuperación de un `TENANT_OWNER` bloqueado, y SHALL NOT exponerla como objetivo de `Makefile`:
@@ -350,26 +351,28 @@ garantiza el sistema.
 - IF `PASSWORD_RESET_GRACE_MINUTES >= PASSWORD_RESET_TOKEN_MINUTES`, THEN THE SYSTEM SHALL
   negarse a arrancar: un margen de gracia igual o mayor que la vida del token haría irrevocable
   todo enlace vivo. La vida coherente mínima del token es, por tanto, de 2 minutos.
-- THE SYSTEM SHALL reservar por nombre y sin valor en `.env.example` lo que un SMTP real
-  necesitará —`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`,
-  `SMTP_USE_TLS`— y SHALL NOT declararlos en `Settings` ni exigirlos en los composes: la regla 8
-  de `steering/security.md` manda que un secreto **en uso** falle rápido, y ninguno lo está
-  todavía.
+- Los seis nombres `SMTP_*` (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+  `SMTP_FROM_EMAIL`, `SMTP_USE_TLS`) siguen en `.env.example` sin valor, pero desde
+  `smtp-delivery-adapter` **sí** están declarados en `Settings` (defaults vacíos/permisivos) y su
+  fail-fast vive en `adapter_registry()` — el contrato completo del adapter y de la configuración
+  parcial se especifica en [`access-notifications.md`](access-notifications.md), no aquí.
 
 ## Deuda declarada
 
-- **El aviso no llega a nadie** (`EXTERNAL_DEPENDENCY`, marcado en
-  `app/notifications/domain/enums.py`, `app/auth/api/dependencies.py`, `app/cli/reset_password.py`
-  y `.env.example`). Hasta que `hardening-release` traiga un adapter SMTP real, el flujo anónimo
-  se ejercita en la suite —donde el `NotificationAdapter` es un doble que captura lo enviado— y
-  **no a mano en dev**. La promesa «el propietario bloqueado se recupera solo» no está cerrada;
-  la vía real sigue siendo el comando de rescate.
-- **Obligación explícita para `hardening-release`: el oráculo de latencia.** Con cuenta, la
-  solicitud hace un insert y una llamada al adapter; sin cuenta, nada. Hoy la diferencia es una
-  escritura; con SMTP real serían segundos, y el endpoint distinguiría **por tiempo** lo que la
-  respuesta iguala en código, cuerpo y cabeceras. El change que conecte SMTP tiene que sacar el
-  envío del camino de la petición. No se mitiga aquí: quemar trabajo equivalente en el camino
-  vacío no tiene análogo para un envío.
+- **El aviso llega — cerrado por `smtp-delivery-adapter` (2026-09-03).** El flujo anónimo se
+  verificó de punta a punta en dev: reset solicitado, correo entregado por el relay real, fila
+  `SENT`. La promesa «el propietario bloqueado se recupera solo» está cerrada en cualquier entorno
+  con `SMTP_HOST` configurado; el comando de rescate queda para el entorno sin relay y para el
+  bloqueo del propio owner.
+- **El oráculo de latencia está vivo, y la obligación que lo acompañaba sigue sin pagar.** Esta
+  deuda decía «el change que conecte SMTP tiene que sacar el envío del camino de la petición».
+  `smtp-delivery-adapter` conectó SMTP declarando fuera de alcance reescribir el mecanismo de
+  entrega, y `recovery.py` sigue llamando al adapter **dentro de la petición**: con cuenta, la
+  solicitud paga el round-trip al relay (hasta 10 s de timeout); sin cuenta, nada. El endpoint
+  distingue hoy **por tiempo** lo que la respuesta iguala en código, cuerpo y cabeceras. Sigue sin
+  mitigarse aquí —quemar trabajo equivalente en el camino vacío no tiene análogo para un envío— y
+  sin dueño asignado: sacar el envío del camino de la petición es trabajo pendiente que ningún
+  change ha reclamado.
 - **El enlace lleva el token en la query string** (`…/reset-password?token=…`). Ninguno de los
   cinco sumideros enumerados arriba lo recoge, pero cuando `dashboard-web` sirva esa página el
   token pasará por el log de acceso del frontend, el historial del navegador y la cabecera
@@ -395,7 +398,7 @@ garantiza el sistema.
   El código sí está en el enum de errores.
 - **Fuera de alcance, con dueño**: la página `/forgot-password` y la pantalla de cambio
   (`dashboard-web` / `hardening-release` — el enlace compuesto ya es válido, la página que abre
-  todavía no existe); el adapter SMTP real (`hardening-release`); segundo factor, magic links y
+  todavía no existe); segundo factor, magic links y
   expiración periódica de contraseñas (nada en el PRD los pide); el cambio del propio email, que
   es identidad de login y sigue administrado en `PATCH /api/v1/users/{id}`; y la recuperación de
   huéspedes, que es token opaco por estancia y pertenece a `guest-portal-api`.

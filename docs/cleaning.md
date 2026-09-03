@@ -124,6 +124,8 @@ plantilla.
 | Ver y crear plantillas | sí | sí | no |
 | Ver tareas | todas | todas | **solo las suyas** |
 | Ver las fotos de una tarea | todas | todas | **solo las de las suyas** |
+| Leer el hilo de mensajes de una tarea | todas | todas | **solo el de las suyas** |
+| Escribir en el hilo de mensajes de una tarea | no | sí | **solo en el de las suyas** |
 | Crear, asignar y validar | no | sí | no |
 | Aceptar, rechazar, iniciar, cerrar, marcar checklist, **subir fotos** | no | **no** | sí |
 
@@ -346,6 +348,37 @@ incidencias `CRITICAL` abiertas. Si falta alguna foto responde `409` **enumerand
 
 Cuenta como cubierto un `photo_type` con **al menos una** foto subida para esa tarea. Fotos de
 otra tarea no cuentan, aunque sean del mismo tipo.
+
+## El hilo de mensajes de la tarea
+
+Canal de respuesta entre la limpiadora y el manager, acotado a la tarea — no es el chat del
+huésped (`Conversation`), y no lo toca. El *qué hace*, con sus criterios EARS, está en
+`sdd/specs/staff-messaging.md`.
+
+```bash
+curl -X POST .../api/v1/cleaning-tasks/<task_id>/messages \
+  -H 'Authorization: Bearer <token de la limpiadora asignada, o del manager>' \
+  -d '{"content": "La cocina tiene una mancha que no sale, ¿aviso a mantenimiento?"}'
+
+curl .../api/v1/cleaning-tasks/<task_id>/messages \
+  -H 'Authorization: Bearer <token>'
+```
+
+- La limpiadora solo escribe y lee el hilo de **su propia** tarea asignada; el manager, el de
+  cualquier tarea del tenant. Una tarea ajena o inexistente responde el mismo `404` — nunca
+  `403` — para no delatar qué tareas existen.
+- No hace falta ningún permiso nuevo: escribir usa los mismos `EXECUTE_CLEANING_TASKS`/
+  `MANAGE_CLEANING_TASKS` que ya gatean el resto del ciclo de la tarea, y leer usa
+  `READ_CLEANING_TASKS`.
+- Cada mensaje nuevo avisa al otro lado por la campana de notificaciones (in-app): si escribe
+  la limpiadora, avisa a todos los managers activos del tenant; si escribe el manager, avisa a
+  la limpiadora asignada. El aviso lleva solo identificadores, nunca el texto del mensaje.
+- Se puede escribir y leer aunque la tarea ya esté cerrada o cancelada — el hilo no se congela
+  con el estado de la tarea.
+- El listado es paginado y cronológico (el más antiguo primero), con el mismo envelope
+  `data`/`total`/`page`/`per_page` del resto del API.
+- No genera entrada de timeline ni de auditoría: es una nota entre dos personas, no un evento
+  operacional de la propiedad.
 
 ## El límite que queda, y los dos que ya no lo son
 

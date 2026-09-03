@@ -1,3 +1,6 @@
+# Runner self-hosted en la VM dev (label `[self-hosted, dev]`). Rollback: ver
+# docs/ci-runner-rollback.md (procedimiento + SHA del commit de migración).
+# Cambio: ci-runner-oci (PR <n>).
 name: infra-dev
 
 on:
@@ -27,7 +30,7 @@ jobs:
   # PR que toca infra/environments/dev/**: sin credenciales de OCI (init -backend=false). [R3.3]
   check:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -52,7 +55,7 @@ jobs:
     # Consecuencia operativa aceptada: no se puede planificar desde una rama de feature; el plan de
     # un change se ejecuta tras mergear a `main` (ver BLOCKED.md #2).
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -62,7 +65,12 @@ jobs:
       - name: Escribir la private key a fichero
         env:
           OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
-        run: printf '%s\n' "$OCI_PRIVATE_KEY" > "$RUNNER_TEMP/oci_private_key.pem"
+        # umask 077 antes del printf: en el runner self-hosted persistente el fichero convive con
+        # otros procesos/usuarios locales, a diferencia del runner GH-hosted efímero de antes de
+        # ci-runner-oci (hallazgo del panel de seguridad — riesgo aceptado documentado en design.md).
+        run: |
+          umask 077
+          printf '%s\n' "$OCI_PRIVATE_KEY" > "$RUNNER_TEMP/oci_private_key.pem"
       - name: Escribir configuración del backend
         env:
           TFSTATE_BUCKET: ${{ secrets.TFSTATE_BUCKET }}
@@ -72,7 +80,11 @@ jobs:
           OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
           OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
           PRIVATE_KEY_PATH: ${{ runner.temp }}/oci_private_key.pem
+        # umask 077 por consistencia con el paso anterior (panel de seguridad, segunda pasada):
+        # bucket/namespace/región/OCIDs/fingerprint no autentican por sí solos, pero no hay razón
+        # para dejar el fichero en el modo por defecto del runner persistente.
         run: |
+          umask 077
           cat > backend.hcl <<EOF
           bucket           = "${TFSTATE_BUCKET}"
           namespace        = "${TFSTATE_NAMESPACE}"
@@ -133,6 +145,17 @@ jobs:
         # redacta los valores sensibles en consola). El apply re-planifica en el mismo job.
         run: terraform plan -input=false
 
+      - name: Limpiar ficheros con estado/credenciales del workspace
+        # `terraform apply`/`plan` puede volcar `errored.tfstate` (estado completo en claro, si el
+        # push del state falla) y `backend.hcl`/`.terraform/` quedan con la private key referenciada
+        # por ruta. El workspace es compartido y persistente entre los 9 workflows migrados a este
+        # runner self-hosted, así que estos ficheros no deben sobrevivir al job (hallazgo del panel
+        # de seguridad, cuarta y sexta pasada). `$RUNNER_TEMP`
+        # se limpia cuando el SIGUIENTE job inicializa, no al terminar este — no "al terminar el job
+        # por el propio runner" como decía la versión anterior de esta nota en design.md (corregido).
+        if: always()
+        run: rm -rf errored.tfstate backend.hcl .terraform "$RUNNER_TEMP/oci_private_key.pem"
+
   # apply: solo desde main y solo si action=apply. En repo privado + plan Free NO hay Environment
   # con required reviewers, así que el gate de aprobación es (opción A): el código llega a main
   # revisado vía PR + el dispatch de apply es manual y solo desde main → solo se aplica lo revisado.
@@ -140,7 +163,7 @@ jobs:
   apply:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply' && github.ref == 'refs/heads/main'
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 15
     concurrency:
       group: infra-dev-apply
@@ -153,7 +176,12 @@ jobs:
       - name: Escribir la private key a fichero
         env:
           OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
-        run: printf '%s\n' "$OCI_PRIVATE_KEY" > "$RUNNER_TEMP/oci_private_key.pem"
+        # umask 077 antes del printf: en el runner self-hosted persistente el fichero convive con
+        # otros procesos/usuarios locales, a diferencia del runner GH-hosted efímero de antes de
+        # ci-runner-oci (hallazgo del panel de seguridad — riesgo aceptado documentado en design.md).
+        run: |
+          umask 077
+          printf '%s\n' "$OCI_PRIVATE_KEY" > "$RUNNER_TEMP/oci_private_key.pem"
       - name: Escribir configuración del backend
         env:
           TFSTATE_BUCKET: ${{ secrets.TFSTATE_BUCKET }}
@@ -163,7 +191,11 @@ jobs:
           OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
           OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
           PRIVATE_KEY_PATH: ${{ runner.temp }}/oci_private_key.pem
+        # umask 077 por consistencia con el paso anterior (panel de seguridad, segunda pasada):
+        # bucket/namespace/región/OCIDs/fingerprint no autentican por sí solos, pero no hay razón
+        # para dejar el fichero en el modo por defecto del runner persistente.
         run: |
+          umask 077
           cat > backend.hcl <<EOF
           bucket           = "${TFSTATE_BUCKET}"
           namespace        = "${TFSTATE_NAMESPACE}"
@@ -205,3 +237,7 @@ jobs:
           TF_VAR_cloudflare_zone_name: ${{ vars.CLOUDFLARE_ZONE_NAME }}
           TF_VAR_public_hostname: ${{ vars.PUBLIC_HOSTNAME }}
         run: terraform apply -input=false -auto-approve
+
+      - name: Limpiar ficheros con estado/credenciales del workspace
+        if: always()
+        run: rm -rf errored.tfstate backend.hcl .terraform "$RUNNER_TEMP/oci_private_key.pem"

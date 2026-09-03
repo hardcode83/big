@@ -171,11 +171,16 @@ olvidar regenerar el contrato cortara la ejecución antes de la suite.
   (954s · 930s · 858s). Son **5,7×**, en dos mitades: dejar de construir y tirar el esquema de la
   base de datos en cada test —el 77,6 % del tiempo, medido— bajó a 4m03s, y paralelizar con
   `pytest-xdist` bajó de ahí a 2m44s.
-- **El runner tiene 2 vCPU, no 4**: es un repositorio privado y los runners estándar de repos
-  privados traen dos núcleos, compartidos además con PostgreSQL y Redis. Por eso el paralelismo se
-  declara como `-n 2`: medido, `-n 4` sobresuscribe y sale peor (227-233s frente a 205s). El paso
-  de la suite imprime el tamaño del runner en el log para que la próxima persona no tenga que
-  suponerlo.
+- **El paralelismo se declara como `-n 2`**: medido en el runner GH-hosted de 2 vCPU (estándar en
+  repos privados), `-n 4` sobresuscribía y salía peor (227-233s frente a 205s). El paso de la
+  suite imprime el tamaño del runner en el log para que la próxima persona no tenga que
+  suponerlo. **Pendiente de re-medición** (`ci-runner-oci`, 2026-09-04): la suite corre ahora en
+  el runner self-hosted (VM `dev`, 4 OCPU, compartidas con los otros 9 workflows y el stack
+  desplegado, no dedicadas), y la cifra de arriba —medida contra 2 vCPU sin contención— ya no
+  describe el entorno real. El único dato posterior disponible es un run mixto de verificación
+  (472,51s, `9903 passed`) que no aísla el efecto de `-n`: no sustituye a la medición. `-n 2`
+  queda sin tocar hasta que alguien la re-mida en el runner real; hasta entonces, tratar el número
+  de vCPU de este apartado como no verificado.
 - El procedimiento es repetible y está descrito en el archivo del change: tres
   `workflow_dispatch` **secuenciales** sobre la misma referencia, leyendo la duración del paso
   `Suite completa …` de `/repos/{owner}/{repo}/actions/runs/{id}/jobs`. Secuenciales por

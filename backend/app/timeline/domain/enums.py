@@ -86,3 +86,9 @@ class TimelineEventType(str, enum.Enum):
     # not. Written only when the legal status actually transitions (D13), so a resent form
     # does not add a second row to an immutable table.
     GUEST_CHECKIN_COMPLETED = "GUEST_CHECKIN_COMPLETED"
+    # `revenue-statements` (tasks 4.6, design D5/D12). The monthly job and the manual
+    # `POST /owner-statements/generate` both emit this — design D5 says the timeline is
+    # the audit trail for the clock path, mirroring `PRICE_RECOMMENDATION_CREATED`'s
+    # role. The title is the constant `_TIMELINE_TITLES[OWNER_STATEMENT_GENERATED]`
+    # in `app/statements/application/use_cases.py`.
+    OWNER_STATEMENT_GENERATED = "OWNER_STATEMENT_GENERATED"

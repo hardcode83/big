@@ -218,6 +218,11 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
   un `StrEnum`, son iguales al literal equivalente — un `"NOT_FOUND"` a pelo pasaría, que es
   exactamente el fallo que el panel de `properties-crud` demostró inyectando una cadena. Cerrarlo
   es añadir los cinco `import` a la tupla de la guarda; lo que le falta es dueño.
+- **`revenue-statements` repite el mismo hueco con una duodécima tabla.**
+  `app/statements/api/errors.py` declara su propio `_MAPPING` (siguiendo el mismo patrón
+  que `pricing`) pero `tests/test_openapi_contract.py` no lo importa, así que `statements`
+  se suma al conjunto de arriba sin que este change haya intentado recontar ni cerrar el
+  hueco preexistente de `access`/`guests`/`maintenance`/`messaging`/`timeline`.
 - **Deuda con dueño**: la guarda de integridad del registro recorre los `_MAPPING`, las
   subclases de `AppError` y `_HTTP_STATUS_CODES`, pero **no las llamadas sueltas a
   `error_envelope(...)`**. Los **catorce** sitios de hoy pasan todos un miembro de `ErrorCode`

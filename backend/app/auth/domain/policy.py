@@ -145,6 +145,17 @@ class Permission(str, enum.Enum):
     READ_PRICE_RECOMMENDATIONS = "READ_PRICE_RECOMMENDATIONS"
     MANAGE_PRICE_RECOMMENDATIONS = "MANAGE_PRICE_RECOMMENDATIONS"
 
+    # Added by `revenue-statements` (design D8). The split is the same as
+    # `READ_ACCESS_RECORDS`/`MANAGE_ACCESS_RECORDS` two entries above: PRD §6 gives
+    # `TENANT_OWNER` visibility ("ver sus propiedades y reservas") and `PROPERTY_MANAGER`
+    # the operation ("acceder a todos los datos operativos"). Both read the statement
+    # because the owner is the one who actually receives the document; the manager
+    # operates it (generation, status transitions, notes, exports). `CLEANER`,
+    # `TECHNICIAN`, `SUPER_ADMIN` get neither — `SUPER_ADMIN` for the same cross-tenant
+    # reason it holds no operational permission today, and the field roles because a
+    # cleaning or a ticket is not a financial review.
+    READ_OWNER_STATEMENTS = "READ_OWNER_STATEMENTS"
+    MANAGE_OWNER_STATEMENTS = "MANAGE_OWNER_STATEMENTS"
     # Added by `revenue-reviews` (design D3). Five, in the same one-per-action shape
     # `messaging-ai` and `cleaning` use: each verb the flow exposes gets its own
     # permission rather than a generic `MANAGE_REVIEWS`, because R4.2 has different
@@ -161,6 +172,22 @@ class Permission(str, enum.Enum):
     APPROVE_REVIEW = "APPROVE_REVIEW"
     IGNORE_REVIEW = "IGNORE_REVIEW"
     MARK_REVIEW_POSTED = "MARK_REVIEW_POSTED"
+
+    # Added by `platform-admin-api` (R5.1, R5.2, design D3, D6). The counterpart of
+    # `_GUEST_ACCESS_TOKEN_MANAGE` for the platform surface: `POST /api/v1/platform/tenants`
+    # and the operator console that follows. **One permission, not a read/manage pair**, and
+    # not a read at all: the cross-tenant listing of D6 is `SUPER_ADMIN`-only, and the only
+    # reason to read what the platform owns is to be the one who manages it. A read
+    # permission would be granted to nobody, which is what this catalogue calls "speculative
+    # vocabulary" in its own docstring.
+    #
+    # Held by `SUPER_ADMIN` alone for the reason every other operational permission inside
+    # a tenant is NOT: its powers in PRD §6 are global — tenants, global configuration,
+    # integrations — not the operation of one tenant, and cross-tenant visibility is
+    # explicitly deferred to the `saas-cross-tenant` roadmap entry. Granting it to anyone
+    # else would pre-empt that decision, which the design gate of 2026-08-16 already
+    # resolved the same way for the same surface in `_GUEST_ACCESS_TOKEN_MANAGE`.
+    MANAGE_PLATFORM = "MANAGE_PLATFORM"
 
 
 _SELF_SERVICE = frozenset(
@@ -250,6 +277,12 @@ _PRICING_RULE_MANAGE = frozenset(
 _PRICE_RECOMMENDATION_MANAGE = frozenset(
     {Permission.READ_PRICE_RECOMMENDATIONS, Permission.MANAGE_PRICE_RECOMMENDATIONS}
 )
+# `revenue-statements` D8. Owner reads, manager operates — same shape as
+# `_ACCESS_READ`/`_ACCESS_MANAGE` above.
+_STATEMENTS_READ = frozenset({Permission.READ_OWNER_STATEMENTS})
+_STATEMENTS_MANAGE = frozenset(
+    {Permission.READ_OWNER_STATEMENTS, Permission.MANAGE_OWNER_STATEMENTS}
+)
 # `revenue-reviews` D3. Approving, ignoring and marking-as-posted are shared with
 # the owner — she is the one who has the right to decide what goes out under her own
 # name, even when no manager is around. Only `CREATE_REVIEW` is the manager's alone,
@@ -272,6 +305,14 @@ _REVIEW_MANAGE = frozenset(
         Permission.MARK_REVIEW_POSTED,
     }
 )
+# `platform-admin-api` (R5.1, R5.2, D3, D6). The single permission that gates every route
+# under `/api/v1/platform/`; held by `SUPER_ADMIN` and by nobody else, exactly as every
+# other operational permission held by `SUPER_ADMIN` is the only one in its bundle. A
+# frozenset and not a one-element literal, so the bundle line below mirrors every other
+# bundle in this file — and so a future second permission (`VIEW_PLATFORM_BILLING`,
+# `ROTATE_PLATFORM_INTEGRATION_SECRET`, …) does not have to be threaded through the
+# declaration of `ROLE_PERMISSIONS[SUPER_ADMIN]` separately.
+_PLATFORM = frozenset({Permission.MANAGE_PLATFORM})
 
 # Every role that can authenticate may read its own profile and end its own
 # session (PRD §6). Role-differentiated permissions belong to the modules that
@@ -298,7 +339,7 @@ _REVIEW_MANAGE = frozenset(
 # product intuition ("she owns the homes") and PRD §6 ("ver sus propiedades") diverge, resolved
 # in favour of the PRD and of symmetry with reservations.
 ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
-    UserRole.SUPER_ADMIN: _SELF_SERVICE,
+    UserRole.SUPER_ADMIN: _SELF_SERVICE | _PLATFORM,
     UserRole.TENANT_OWNER: (
         _SELF_SERVICE
         | _RESERVATION_READ
@@ -331,6 +372,9 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         # Mode 1 and from whose money the guardrails bound.
         | _PRICING_RULE_MANAGE
         | _PRICE_RECOMMENDATION_MANAGE
+        # Reads the statement that closes her month (D8); does not operate it — same
+        # split as `_INCIDENT_READ`/`_ACCESS_READ` above.
+        | _STATEMENTS_READ
         # Sees what her guests write, and decides what goes out under her own name
         # (approve, ignore, mark posted). `CREATE_REVIEW` stays with the manager, the
         # same shape `_CONVERSATION_MANAGE` documents — operating the inbox is the
@@ -367,6 +411,10 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         # changing one. Same bundles as the owner, which is the divergence D11 records.
         | _PRICING_RULE_MANAGE
         | _PRICE_RECOMMENDATION_MANAGE
+        # Operates the statement end-to-end: generates, mutates, exports, deletes expenses
+        # pending consolidation. Owner approves the threshold-driven approvals via
+        # `RESPOND_OWNER_APPROVALS`, which is unchanged.
+        | _STATEMENTS_MANAGE
         # Operates the review band: creates rows, approves drafts, ignores noise, marks
         # posted manually. PRD §18 and R4.2 give every action of the flow to the manager.
         | _REVIEW_MANAGE

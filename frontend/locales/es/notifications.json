@@ -18,6 +18,8 @@
     "SLA_BREACH": "Un aviso ha superado su plazo",
     "PASSWORD_RESET_REQUESTED": "Se ha pedido restablecer tu contraseña",
     "REVIEW_RESPONSE_APPROVED": "Una respuesta a una reseña ha sido aprobada",
+    "CLEANING_TASK_MESSAGE": "Nuevo mensaje en una tarea de limpieza",
+    "INCIDENT_MESSAGE": "Nuevo mensaje en una incidencia",
     "unknown": "Aviso del sistema"
   },
   "bell": {

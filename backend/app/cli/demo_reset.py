@@ -78,8 +78,9 @@ from app.tenants.infrastructure.models import TenantConfigModel, TenantModel
 # out of the tree is the password, not who the accounts are.
 #
 # The domain is `.test`, which RFC 2606 reserves and no resolver answers. That is deliberate
-# and it is not decoration: when SMTP arrives with `hardening-release`, mail to these four
-# addresses will fail to resolve instead of reaching a stranger who happens to own the domain.
+# and it is not decoration: with a real SMTP relay configured (`smtp-delivery-adapter`), mail
+# to these four addresses fails to resolve instead of reaching a stranger who happens to own
+# the domain.
 
 DEMO_TENANT_NAME = "AutoHostAI Demo"
 

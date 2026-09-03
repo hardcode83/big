@@ -27,6 +27,7 @@ from app.dashboard.domain.read_models import (
     GuestBlock,
     IncidentBlock,
     NextActionBlock,
+    OccupancyPoint,
     OpenIncidentCountsBlock,
     OperationalKpis,
     PropertyDashboardCard,
@@ -43,6 +44,8 @@ from app.properties.api.schemas import MAX_PAGE, MAX_PER_PAGE
 __all__ = [
     "MAX_PAGE",
     "MAX_PER_PAGE",
+    "OccupancyPointResponse",
+    "OccupancySeriesResponse",
     "OpenIncidentCountsResponse",
     "OperationalKpisResponse",
     "PropertyDashboardCardResponse",
@@ -53,6 +56,16 @@ __all__ = [
 
 def _money(value: Decimal | None) -> str | None:
     return None if value is None else str(value)
+
+
+def _pct(value: Decimal | None) -> float | None:
+    """Unlike `_money`, this crosses the wire as a JSON number, not a string.
+
+    `OccupancyPoint`'s docstring records why: a 0-100 percentage quantized to one decimal
+    place has no float-precision failure mode the way money does, and a plain number is
+    what a charting library consumes directly (design D4).
+    """
+    return None if value is None else float(value)
 
 
 class ReservationSummaryResponse(BaseModel):
@@ -318,4 +331,51 @@ class PropertyDetailResponse(BaseModel):
                 PendingApprovalResponse.from_domain(approval)
                 for approval in detail.pending_approvals
             ],
+        )
+
+
+class OccupancyPointResponse(BaseModel):
+    """One day of the weekly occupancy series (`dashboard-occupancy-series` R1.2, R1.4).
+
+    Exactly the four fields `OccupancyPoint` carries — no colour, no weekday label: PRD
+    §9.1 leaves both to the frontend, which derives them from `date`, the same line
+    `PropertyDashboardCard` already holds for `operational_state`.
+    """
+
+    date: date
+    occupied_properties: int
+    total_properties: int
+    occupancy_pct: float | None
+
+    @classmethod
+    def from_domain(cls, point: OccupancyPoint) -> "OccupancyPointResponse":
+        return cls(
+            date=point.date,
+            occupied_properties=point.occupied_properties,
+            total_properties=point.total_properties,
+            occupancy_pct=_pct(point.occupancy_pct),
+        )
+
+
+class OccupancySeriesResponse(BaseModel):
+    """`GET /api/v1/dashboard/occupancy-series` (`dashboard-occupancy-series` R1, R4).
+
+    `data` is `None` — never a partial series — when the caller's role lacks
+    `Permission.READ_RESERVATIONS` (R4.3): the same "agregar no concede" convention
+    `OperationalKpisResponse` already applies, one block redacted as a whole rather than
+    field by field.
+    """
+
+    data: list[OccupancyPointResponse] | None
+
+    @classmethod
+    def from_domain(
+        cls, points: tuple[OccupancyPoint, ...] | None
+    ) -> "OccupancySeriesResponse":
+        return cls(
+            data=(
+                None
+                if points is None
+                else [OccupancyPointResponse.from_domain(point) for point in points]
+            )
         )

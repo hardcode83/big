@@ -111,11 +111,33 @@ class Settings(BaseSettings):
     # credentials it hands out itself. It is a domain constant in
     # `app/auth/domain/password_policy.py`, pinned to the generator by a test.
     #
-    # NO `SMTP_*` settings either, and that is also design D13: the six names are reserved by
-    # name and without value in `.env.example` for `hardening-release`. Rule 8 of
-    # `steering/security.md` requires a secret IN USE to fail fast when absent, and none of
-    # these is in use yet — declaring them here would make the app demand credentials no code
-    # reads.
+    # SMTP relay (change `smtp-delivery-adapter`, design D2). All six default empty/permissive
+    # so importing `Settings` never fails for a deployment that has not configured a relay —
+    # `adapter_registry()` is where a *partial* config (host set, something else missing)
+    # fails loud instead, which is the shape rule 8 of `steering/security.md` actually asks
+    # for: a secret IN USE must fail fast when absent, but nothing here is "in use" until
+    # `smtp_host` says so.
+    smtp_host: str = ""
+    smtp_port: int = 0
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
+
+    @field_validator("smtp_port", "smtp_use_tls", mode="before")
+    @classmethod
+    def _smtp_empty_string_means_unset(cls, value, info):
+        """`.env.example` ships these two uncommented with an empty value, same as the
+        four `str` SMTP fields (R6.3's own convention). Pydantic accepts `""` for a bare
+        `str` field, but not for `int`/`bool` — left un-coerced, `SMTP_PORT=`/
+        `SMTP_USE_TLS=` in every `.env` copied from the example would fail `Settings` at
+        import for a deployment that never set `SMTP_HOST` either, which is exactly the
+        "must still start" failure R2.1 forbids. Falls back to the field's own default
+        rather than a hardcoded literal, so the two stay in sync by construction.
+        """
+        if value == "":
+            return cls.model_fields[info.field_name].default
+        return value
 
     # No setting for the real-client-IP header, deliberately (change
     # `api-ingress-routing`, design D3). Resolving it is uvicorn's job:
@@ -248,20 +270,21 @@ class Settings(BaseSettings):
     # one, not a placeholder.
     guest_portal_support_channel: str | None = None
 
-    # Notification delivery (change `access-notifications`, design D4). No SMTP credential
-    # here: `ConsoleEmailAdapter` is the only `EMAIL` adapter and the real SMTP keys arrive
-    # with `hardening-release`. WhatsApp is no longer in that boat — `whatsapp_provider` and
-    # the Meta credentials just below are real, wired fields, not names merely reserved.
+    # Notification delivery (change `access-notifications`, design D4). `EMAIL`/`CONSOLE` read
+    # the six `smtp_*` fields above (change `smtp-delivery-adapter`); the real WhatsApp keys
+    # are no longer just reserved by rule 8 of `steering/security.md` — `whatsapp_provider` and
+    # the Meta credentials just below are real, wired fields.
     #
     # `notification_max_attempts` is what bounds duplicates. The dispatcher records the attempt
     # BEFORE calling the adapter, so a process that dies mid-send re-sends at most until this
     # ceiling instead of for ever — at-least-once, acotado, which is the trade design D4 takes
     # in exchange for not adding a `SENDING` state and its stuck-row failure mode.
     #
-    # **No backoff setting, deliberately**: `notification_logs` has no column for "next attempt
-    # at", and adding one to pace a console logger would be schema invented ahead of a need.
-    # A failed row is retried on the next tick until the ceiling. Revisit when a real SMTP
-    # adapter lands (`hardening-release`), which is also when rate limits start to matter.
+    # **No backoff setting, deliberately, still**: `notification_logs` has no column for "next
+    # attempt at", and adding one to pace a real relay would be schema invented ahead of a
+    # need. A failed row is retried on the next tick until the ceiling. The real SMTP adapter
+    # landed with `smtp-delivery-adapter`, and that change's own Out of scope keeps it this
+    # way on purpose — revisit only if rate limits start to matter in practice.
     notification_max_attempts: int = 3
     # How many rows one run drains per tenant. The job runs every minute, so a backlog drains
     # in slices instead of in one transaction that holds row locks for as long as the slowest

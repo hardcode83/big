@@ -18,20 +18,48 @@ def test_policy_entries_are_immutable_sets() -> None:
         assert isinstance(permissions, frozenset)
 
 
-def test_super_admin_holds_exactly_self_service_and_nothing_else() -> None:
-    """`super-admin-identity` R4.1: giving the role identity must not widen what it can do.
+def test_super_admin_holds_exactly_self_service_and_platform() -> None:
+    """`super-admin-identity` R4.1 + `platform-admin-api` R5.1.
 
-    Direct pin against `_SELF_SERVICE`, not derived from `is_allowed` checks elsewhere —
-    those prove individual permissions are absent, not that the set is exactly this one.
+    The original pin was against `_SELF_SERVICE` alone; the platform capability is the one
+    that arrived afterwards (`platform-admin-api` R5.1) and is held by `SUPER_ADMIN` and by
+    nobody else, exactly as every other operational permission inside a tenant is not.
+    Direct pin against the union, not derived from `is_allowed` checks elsewhere — those
+    prove individual permissions are absent, not that the set is exactly this one.
     """
-    assert ROLE_PERMISSIONS[UserRole.SUPER_ADMIN] == policy._SELF_SERVICE
+    assert ROLE_PERMISSIONS[UserRole.SUPER_ADMIN] == (
+        policy._SELF_SERVICE | policy._PLATFORM
+    )
     assert ROLE_PERMISSIONS[UserRole.SUPER_ADMIN] == frozenset(
         {
             Permission.READ_OWN_PROFILE,
             Permission.MANAGE_OWN_SESSION,
             Permission.READ_OWN_NOTIFICATIONS,
+            Permission.MANAGE_PLATFORM,
         }
     )
+
+
+def test_manage_platform_is_in_the_enum_but_only_super_admin_holds_it() -> None:
+    """R5.2 / D3 / D6: every other role that can authenticate stays denied.
+
+    Pinned both ways — the permission is in the catalogue AND the four operational roles
+    get `False` from `is_allowed` — so a future edit that adds `MANAGE_PLATFORM` to a
+    bundle (or removes it from the enum) trips at least one assertion here. The
+    `super-admin` affirmative is what the cross-tenant listing of D6 actually relies on;
+    its absence is a regression `saas-cross-tenant` will reach for.
+    """
+    assert Permission.MANAGE_PLATFORM in set(Permission)
+
+    assert is_allowed(UserRole.SUPER_ADMIN, Permission.MANAGE_PLATFORM) is True
+    for role in (
+        UserRole.TENANT_OWNER,
+        UserRole.PROPERTY_MANAGER,
+        UserRole.CLEANER,
+        UserRole.TECHNICIAN,
+    ):
+        assert is_allowed(role, Permission.MANAGE_PLATFORM) is False
+        assert Permission.MANAGE_PLATFORM not in ROLE_PERMISSIONS[role]
 
 
 SELF_SERVICE = (Permission.READ_OWN_PROFILE, Permission.MANAGE_OWN_SESSION)
@@ -307,6 +335,58 @@ def test_the_owner_manages_pricing_and_not_only_reads_it() -> None:
     """
     assert is_allowed(UserRole.TENANT_OWNER, Permission.MANAGE_PRICING_RULES)
     assert is_allowed(UserRole.TENANT_OWNER, Permission.MANAGE_PRICE_RECOMMENDATIONS)
+
+
+# --- `revenue-statements` (design D8) ----------------------------------------------
+
+STATEMENTS_PERMISSIONS = (
+    Permission.READ_OWNER_STATEMENTS,
+    Permission.MANAGE_OWNER_STATEMENTS,
+)
+
+
+def test_reading_and_managing_statements_are_distinct_permissions() -> None:
+    """The two are siblings, not stacked — `MANAGE` does not imply `READ` here as it does
+    elsewhere. D8 cites `_ACCESS_*` as the precedent; `_ACCESS_MANAGE` does include
+    `READ_ACCESS_RECORDS` (`_ACCESS_MANAGE = {READ_ACCESS_RECORDS, MANAGE_ACCESS_RECORDS}`),
+    but for statements the design says the owner reads the document and the manager
+    operates it, so the owner does not get `MANAGE`. Pinned here so the bundles don't
+    drift into the universal `_MANAGE ⊇ _READ` pattern."""
+    assert Permission.READ_OWNER_STATEMENTS != Permission.MANAGE_OWNER_STATEMENTS
+    granted = ROLE_PERMISSIONS[UserRole.TENANT_OWNER]
+    assert Permission.READ_OWNER_STATEMENTS in granted
+    assert Permission.MANAGE_OWNER_STATEMENTS not in granted
+    granted = ROLE_PERMISSIONS[UserRole.PROPERTY_MANAGER]
+    assert Permission.READ_OWNER_STATEMENTS in granted
+    assert Permission.MANAGE_OWNER_STATEMENTS in granted
+
+
+EXPECTED_STATEMENTS_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
+    UserRole.SUPER_ADMIN: frozenset(),
+    UserRole.TENANT_OWNER: frozenset({Permission.READ_OWNER_STATEMENTS}),
+    UserRole.PROPERTY_MANAGER: frozenset(STATEMENTS_PERMISSIONS),
+    UserRole.TECHNICIAN: frozenset(),
+    UserRole.CLEANER: frozenset(),
+}
+
+
+@pytest.mark.parametrize("role", list(UserRole))
+def test_the_statements_matrix_is_the_one_design_d8_decided(role: UserRole) -> None:
+    granted = ROLE_PERMISSIONS[role] & frozenset(STATEMENTS_PERMISSIONS)
+
+    assert granted == EXPECTED_STATEMENTS_PERMISSIONS[role]
+
+
+@pytest.mark.parametrize("role", [UserRole.CLEANER, UserRole.TECHNICIAN, UserRole.SUPER_ADMIN])
+def test_field_and_admin_roles_get_nothing_from_statements(role: UserRole) -> None:
+    """R7.1: the eleven routes sit behind one of these two, so holding none is what makes
+    the 403 structural instead of a check each router must remember. `SUPER_ADMIN` gets
+    nothing for the same reason it holds no operational permission today
+    (`steering/security.md` regla 1, cross-tenant stance)."""
+    for permission in STATEMENTS_PERMISSIONS:
+        assert not is_allowed(role, permission), (
+            f"{role.value} unexpectedly holds {permission.value}"
+        )
 
 
 @pytest.mark.parametrize("role", [UserRole.CLEANER, UserRole.TECHNICIAN])

@@ -9,6 +9,7 @@ No method commits: the transactional boundary is the use case (design D4).
 
 import uuid
 from collections.abc import Collection, Mapping, Sequence
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy import Select, func, select, update
@@ -447,6 +448,78 @@ class SqlAlchemyPropertyStateTransitionRepository:
         )
         model = result.scalar_one_or_none()
         return _to_transition(model) if model is not None else None
+
+    async def history_for_properties(
+        self,
+        tenant_id: uuid.UUID,
+        property_ids: Sequence[uuid.UUID],
+        start: date,
+        end: date,
+    ) -> dict[uuid.UUID, Sequence[PropertyStateTransition]]:
+        """Two statements, whatever the portfolio size (`dashboard-occupancy-series` R3.2,
+        design D2).
+
+        The first is the `DISTINCT ON (property_id)` trick `SqlAlchemyTimelineEventReader.
+        last_for_properties` already documents — Postgres keeps the first row of each group,
+        so the `ORDER BY` *is* the selection — narrowed to `created_at < start_instant`: the
+        state each property carried into the window. The second is a plain ascending range
+        scan over the window itself. **Not one statement**: a window function collapsed into
+        a `UNION` would answer the same question while introducing a second SQL idiom for a
+        pattern this codebase has already reviewed once.
+
+        `ix_property_state_transitions_property_id_created_at` covers the leading keys of
+        both, so no migration comes with this reader.
+
+        `id` after `created_at` in both orderings, ascending here and descending there, for
+        the reason `last_for_property` gives: transitions are written with the instant the
+        use case decided on, not `now()`, so two of one operation share `created_at` and
+        "which came first" would otherwise be whichever the planner returned.
+
+        The dates become UTC instants **here and only here** (R2.4): `start` at midnight,
+        `end` inclusive as a calendar day and therefore exclusive as an instant one day
+        later. Doing it in the adapter is what stops two callers disagreeing about where a
+        day begins.
+        """
+        ids = list(property_ids)
+        if not ids:
+            return {}
+        start_instant = datetime.combine(start, time.min, tzinfo=UTC)
+        end_instant_exclusive = datetime.combine(end + timedelta(days=1), time.min, tzinfo=UTC)
+        scope = (
+            PropertyStateTransitionModel.tenant_id == tenant_id,
+            PropertyStateTransitionModel.property_id.in_(ids),
+        )
+        entering = await self._session.execute(
+            select(PropertyStateTransitionModel)
+            .where(*scope, PropertyStateTransitionModel.created_at < start_instant)
+            .distinct(PropertyStateTransitionModel.property_id)
+            .order_by(
+                PropertyStateTransitionModel.property_id,
+                PropertyStateTransitionModel.created_at.desc(),
+                PropertyStateTransitionModel.id.desc(),
+            )
+        )
+        history: dict[uuid.UUID, list[PropertyStateTransition]] = {
+            model.property_id: [_to_transition(model)] for model in entering.scalars()
+        }
+        inside = await self._session.execute(
+            select(PropertyStateTransitionModel)
+            .where(
+                *scope,
+                PropertyStateTransitionModel.created_at >= start_instant,
+                PropertyStateTransitionModel.created_at < end_instant_exclusive,
+            )
+            .order_by(
+                PropertyStateTransitionModel.property_id,
+                PropertyStateTransitionModel.created_at,
+                PropertyStateTransitionModel.id,
+            )
+        )
+        for model in inside.scalars():
+            history.setdefault(model.property_id, []).append(_to_transition(model))
+        # Tuples out: the sequence is a reading of history, and a caller that could append to
+        # it would be editing an audit record it merely borrowed.
+        return {property_id: tuple(rows) for property_id, rows in history.items()}
 
 
 def _to_transition(model: PropertyStateTransitionModel) -> PropertyStateTransition:

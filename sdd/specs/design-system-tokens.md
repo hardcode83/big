@@ -63,9 +63,44 @@ The frontend exposes a brand-faithful design layer — color, typography, rhythm
 - THE SYSTEM SHALL leave `frontend/` with no `dark:` variant or any other variant that keys off `prefers-color-scheme` in non-test code; consumers follow the resolved theme by token, not by media query.
 - THE SYSTEM SHALL fail the guard if a non-test file names a colour utility against a token that the CSS does not declare, so a class like `bg-card` against an undeclared `--color-card` is caught instead of silently falling back to the page background.
 
+### Card primitive — the one place a card surface lives
+
+- THE SYSTEM SHALL expose a single `Card` primitive (`components/ui/card.tsx`) that owns the canonical card surface (`bg-surface`, `border`, `rounded-xl`, `shadow-sm`) and the `card-hover-gradient` effect, so every screen that needs a card-shaped container renders `Card` rather than restating the same `rounded-lg border bg-surface p-4 shadow-sm` div verbatim; the previous six duplicated copies across `features/dashboard/`, `features/properties/`, `features/cleaning/`, `features/cleaner/` and `features/pricing/` migrate onto it.
+- THE SYSTEM SHALL expose `Card`, `CardHeader` and `CardContent` as separate components — mirrors the shadcn `Card`/`CardHeader`/`CardContent` shape used elsewhere in the same `components/ui/` directory.
+- THE SYSTEM SHALL mark every `Card`, `CardHeader` and `CardContent` element with a `data-slot` attribute (`card`, `card-header`, `card-content`) so consumers can target the slot without coupling to its internal layout, exactly as `Button` and `Badge` already do.
+- THE SYSTEM SHALL compose `Card` with `cn()` and accept a `className` passthrough, so a screen that needs extra spacing or padding does not need to break out of the primitive.
+
+### Button.glow prop — composing the primary button's lift, not a second variant
+
+- THE SYSTEM SHALL expose a `glow` boolean prop on `Button` (`components/ui/button.tsx`) that layers the `btn-glow` utility (`app/globals.css`) onto the `default` variant, applying an ambient box-shadow at rest and a stronger shadow plus a 1 px lift on hover; the prop composes with `default`'s colour rules rather than introducing a `variant: "primary-glow"` that would duplicate them.
+- THE SYSTEM SHALL NOT wire the `glow` prop onto any call site that uses `size: "sm"` (`h-9`), because `h-9` stays below the 44 px `tap-target` floor (`@utility tap-target` in `globals.css`) and the lift would shrink the effective target on hover.
+- THE SYSTEM SHALL keep the prop boolean (not a multi-axis variant) so a future change to the primary button's base colour edits one place — `buttonVariants`'s `default` — and propagates to every `glow` consumer.
+
+### Component-level effects — `@utility` blocks, no new hex
+
+- THE SYSTEM SHALL declare the new component-level effects (`btn-glow`, `card-hover-gradient`, `text-glow`) as `@utility` blocks in `frontend/app/globals.css`, built from the already-declared `--color-primary` via `color-mix()`/alpha, never as new hex literals; the alpha steps (0.2 at rest, 0.3 on hover for `btn-glow`) are the reservations mockup's values, standardized as the reference per the restyle's fidelity reference rule.
+- THE SYSTEM SHALL keep `card-hover-gradient` decorative only: a 1 px `::before` bar across the top of `Card` whose opacity transitions from 0 to 1 on hover, with the `prefers-reduced-motion: reduce` block removing the transition while leaving the `:hover` rule (the bar still appears, it just snaps in); nothing carried by the bar alone, per the accessibility floor below.
+- THE SYSTEM SHALL narrow `text-glow` to the page `<h1>` of the two reference screens (reservations and dashboard) and to no other element; the utility is exported, but the restyle does not apply it globally.
+- THE SYSTEM SHALL declare `glassmorphism` (`bg-surface/60 backdrop-blur-md`, `bg-surface/80 backdrop-blur-xl`) using Tailwind v4 opacity modifiers on existing surface tokens, without a new `@utility` block; the only shipped precedent today is `features/landing/components/stats-band.tsx` (`landing-public`).
+- THE SYSTEM SHALL NOT add a page-level ambient wash (`body::before`, fixed `radial-gradient`), because the restyle scopes glow to primary actions and headings, not the page background.
+- THE SYSTEM SHALL fail the `color-tokens.test.ts` guard if any of these new utilities introduces a hex literal the test can see; the utilities are hand-authored CSS in `globals.css`, not class-name strings in `.ts/.tsx`, so the existing class-name scan does not parse their bodies — that absence is by design, and the guard is what enforces "no new hex".
+
+### Accessibility floor for hover-only affordances
+
+- THE SYSTEM SHALL NOT communicate any state or affordance through a hover transition alone: every element whose interactivity is conveyed by `card-hover-gradient`, a `group-hover:` colour change, or any other hover-only rule SHALL also carry a non-motion cue (a persistent colour, border, icon, or text) that survives under `prefers-reduced-motion: reduce` and is visible to touch and keyboard users who never trigger `:hover`.
+- WHERE an element already ends in a persistent always-visible action (e.g. `Link` on the dashboard property card, status pill on the reservation row), THE SYSTEM SHALL treat that persistent action as the non-motion cue and add nothing extra.
+- WHERE an element has no persistent affordance beyond an overlay `<Link>` (e.g. a reservation table row), THE SYSTEM SHALL render a static, always-rendered chevron icon inside the existing last cell, never a new column, to communicate the row is interactive.
+- THE SYSTEM SHALL keep `prefers-reduced-motion: reduce` killing the *transition* only, not the `:hover` rule itself, so a snap-in (no fade) is the worst case; the persistent cue is the floor.
+
+### Reservation status palette
+
+- THE SYSTEM SHALL paint a reservation's status badge with the shared `Tone` palette from `lib/ui/status-tone.ts`, sourced through a `Record<ReservationStatus, Tone>` declared in `features/reservations/lib/reservation-status-tone.ts` (frozen via `Object.freeze`), so the status column reads from the same palette every other operational-state badge reads from; the mapping is exhaustive over the generated union, so a new status fails at compile time once the OpenAPI types are regenerated.
+- THE SYSTEM SHALL NOT repurpose the PRD §9.1 operational-state palette to mean something else on the reservation row: the palette is shared, the reading of each tone is reservation-specific (amber = awaiting decision, blue = confirmed future stay, green = guest engaged with the stay, gray = transitional, red = stay did not happen as booked), and the rationale is documented at the call site, not invented per consumer.
+- THE SYSTEM SHALL fall back to the `gray` tone on a status that arrives from the wire outside the union, using `Object.hasOwn` rather than a bare lookup, so a hostile or out-of-sync value cannot return an inherited function or undefined.
+
 ## Key files
 
-- `frontend/app/globals.css` — the three token-bearing blocks (light on `:root`, dark via media query, dark via attribute), `@theme`/`@theme inline` for Tailwind v4, `@layer base`, `prefers-reduced-motion`, `tap-target`, `pb-safe`, focus indicator.
+- `frontend/app/globals.css` — the three token-bearing blocks (light on `:root`, dark via media query, dark via attribute), `@theme`/`@theme inline` for Tailwind v4, `@layer base`, `prefers-reduced-motion`, `tap-target`, `pb-safe`, focus indicator, and the `@utility` blocks for `btn-glow`, `card-hover-gradient`, `text-glow`.
 - `frontend/app/layout.tsx` — root layout that paints `<html lang data-theme className={…font variables…}>` from the resolved locale and theme, and registers `next/font` for Inter and JetBrains Mono.
 - `frontend/lib/config/constants.ts` — `THEME_COOKIE`, `SUPPORTED_THEMES`, `Theme`, `isTheme` alongside the locale declarations.
 - `frontend/lib/theme/theme.ts` — `resolveTheme()` (isomorphic) and the `THEME_ATTRIBUTE` constant.
@@ -73,10 +108,15 @@ The frontend exposes a brand-faithful design layer — color, typography, rhythm
 - `frontend/features/shell/components/theme-switcher.tsx` — the three-state accessible control mounted in `Topbar`'s end slot; the `LocaleSwitcher` was reshaped into a single-button action control so the two controls do not compete for space in the topbar.
 - `frontend/features/shell/components/topbar.tsx` — async Server Component that calls `getServerTheme()` and mounts the switcher.
 - `frontend/features/shell/components/{workspace,cleaner,technician,public,guest}-shell.tsx` — the five shells that invoke `await Topbar(…)` so the async component resolves at server render.
+- `frontend/components/ui/card.tsx` — the new `Card`, `CardHeader` and `CardContent` primitives; the one place the canonical card surface lives.
+- `frontend/components/ui/button.tsx` — `buttonVariants` plus the `glow` boolean prop that composes the `btn-glow` utility onto the `default` variant.
 - `frontend/lib/ui/status-tone.ts` — the single badge palette (`Tone`, `TONE_BADGE_CLASS`), one string per tone with no `dark:` variant.
 - `frontend/features/incidents/lib/severity-tone.ts` — `Record<IncidentSeverity, Tone>` and `severityColorGroup()` replacing the two duplicated `SEVERITY_COLOR` tables.
+- `frontend/features/reservations/lib/reservation-status-tone.ts` — `Record<ReservationStatus, Tone>` and `reservationStatusTone()`; `Object.freeze`-d and exhaustive over the generated union.
 - `frontend/locales/{es,en}/navigation.json` — `themeSwitcher.{label,light,dark,system}`.
 - `frontend/test/color-tokens.test.ts` — the five-comparison guard (raw scales, `dark:`/`prefers-color-scheme` variants, declared-token coverage, arbitrary values, inline hex) with patterns extracted into `test/color-tokens.ts`.
+- `frontend/components/ui/button.test.tsx` — pins the `glow` prop's accessibility (name/role preserved, no disabled-state regression).
+- `frontend/features/reservations/lib/reservation-status-tone.test.ts` — exhaustiveness of the `Record` over `ReservationStatus` and the fallback behaviour of `reservationStatusTone()`.
 - `frontend/app/globals.tokens.test.ts` — asserts the three blocks declare the same set of token names and that the two dark blocks declare identical values.
 - `frontend/app/globals.contrast.test.ts` — parses the token values, computes WCAG ratios for every declared pair, and fails below threshold.
 - `frontend/test/theme-client-state.test.ts` — pins the cookie + attribute + `aria-pressed` triad of the switcher.

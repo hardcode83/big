@@ -41,6 +41,11 @@ DECLARED_DIVERGENCES = (
     # `auth-account-recovery` R6.1: password recovery is not an operational event, so §14's
     # catalogue — cleanings, incidents, technicians, guests, prices, SLA — has no slot for it.
     "PASSWORD_RESET_REQUESTED",
+    # `staff-messaging` design D8: a staff-to-manager thread scoped to a cleaning task or an
+    # incident, not to the guest-facing `Conversation`. §14 has no slot for either — the
+    # catalogue is about the operational event itself, not about staff discussing it.
+    "CLEANING_TASK_MESSAGE",
+    "INCIDENT_MESSAGE",
 )
 
 

@@ -34,7 +34,10 @@ export function ReservationsFilters({
   const { t } = useTranslation("reservations");
 
   return (
-    <div className="flex flex-wrap items-end gap-3" aria-label={t("fields.status")}>
+    <div
+      className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface/60 p-3 backdrop-blur-md"
+      aria-label={t("fields.status")}
+    >
       <div>
         <label
           className="mb-1 block text-xs font-medium text-muted-foreground"
@@ -117,7 +120,7 @@ export function ReservationsFilters({
       </div>
       <button
         type="button"
-        className="rounded-md border bg-background px-3 py-1 text-sm"
+        className="tap-target rounded-md border bg-background px-3 py-1 text-body-base transition-colors hover:bg-accent hover:text-accent-foreground"
         onClick={() => onChange({})}
       >
         {t("fields.clearFilters")}

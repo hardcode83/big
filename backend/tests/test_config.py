@@ -391,15 +391,41 @@ def test_there_is_no_password_minimum_length_setting() -> None:
     assert not [name for name in Settings.model_fields if "password_min" in name]
 
 
-def test_no_smtp_setting_is_declared_before_it_is_used() -> None:
-    """Design D13 and rule 8 of `steering/security.md`, asserted as an absence.
+def test_smtp_settings_default_to_empty_permissive_values() -> None:
+    """Change `smtp-delivery-adapter`, design D2 — importing `Settings` must never fail for
+    a deployment that has not configured a relay (R2.1). Superseded the previous absence
+    test: `hardening-release` no longer owns these six names, this change does."""
+    settings = Settings(_env_file=None, **_REQUIRED)
 
-    The six `SMTP_*` names are reserved by name and without value in `.env.example` for
-    `hardening-release`. Rule 8 requires a secret IN USE to fail fast when it is missing;
-    declaring these now would make the application demand credentials no code reads, which
-    is how a fail-fast rule gets a reputation for crying wolf.
-    """
-    assert not [name for name in Settings.model_fields if name.startswith("smtp_")]
+    assert settings.smtp_host == ""
+    assert settings.smtp_port == 0
+    assert settings.smtp_username == ""
+    assert settings.smtp_password == ""
+    assert settings.smtp_from_email == ""
+    assert settings.smtp_use_tls is True
+
+
+@pytest.mark.parametrize("env_value", ["", "0"])
+def test_smtp_port_empty_string_falls_back_to_default(
+    monkeypatch: pytest.MonkeyPatch, env_value: str
+) -> None:
+    """`.env.example` ships `SMTP_PORT=` uncommented with an empty value (same convention
+    as the four `str` SMTP fields), which pydantic-settings cannot parse as `int` on its
+    own — left un-coerced, every `.env` copied from the example without setting `SMTP_HOST`
+    would fail `Settings` at import (R2.1)."""
+    monkeypatch.setenv("SMTP_PORT", env_value)
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.smtp_port == (0 if env_value == "" else int(env_value))
+
+
+def test_smtp_use_tls_empty_string_falls_back_to_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SMTP_USE_TLS", "")
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.smtp_use_tls is True
 
 
 def test_notification_delivery_has_its_documented_defaults() -> None:

@@ -3,12 +3,14 @@
 In code, inside the image — not a host crontab. `steering/infra.md`'s IaC-first norm and
 the plain fact that a schedule outside the artefact cannot be reviewed in a Pull Request.
 
-**Two tables, one calendar.** `CADENCES` holds the jobs that run on a period, `DAILY_JOBS`
-the ones that run at an hour of the day, and `beat_schedule()` is derived from both — so the
-calendar still has a single source (`revenue-pricing` design D8). The split is not cosmetic:
-a periodic job sizes its lock through `lock_ttl_for` from the very same number beat uses, so
-a cadence cannot be changed in one place and stay stale in the other, while a daily job
-carries its TTL explicitly because that derivation would give it a three-day lock.
+**Three tables, one calendar.** `CADENCES` holds the jobs that run on a period, `DAILY_JOBS`
+the ones that run at an hour of the day, and `MONTHLY_JOBS` the ones that run on a day of
+the month (`revenue-statements` design D11). `beat_schedule()` is derived from all three —
+so the calendar still has a single source. The split is not cosmetic: a periodic job sizes
+its lock through `lock_ttl_for` from the very same number beat uses, so a cadence cannot be
+changed in one place and stay stale in the other, while a daily job carries its TTL
+explicitly because that derivation would give it a three-day lock, and a monthly job
+carries its `day_of_month` explicitly because `crontab(month_of_year=...)` would not.
 """
 
 from dataclasses import dataclass
@@ -61,6 +63,10 @@ CADENCES: dict[str, timedelta] = {
     # a call to whatever sits behind `IncidentClassifier` — and the day that is a real AI
     # provider, the cadence is the ceiling on what it is asked.
     "classify_incidents": timedelta(minutes=5),
+    # Every five minutes, from `revenue-statements` (its D4). The reconciliation applies
+    # owner answers to expense rows; the SQL is idempotent on the row state, so a faster
+    # cadence would not buy anything but a tighter feedback loop on the manager's screen.
+    "reconcile_owner_approvals_for_expenses": timedelta(minutes=5),
     # `revenue-reviews` (design D2). Same cadence and same reasoning as
     # `classify_incidents`: PRD §18 declares the pipeline and says nothing about what
     # triggers it. Five minutes is the ceiling on what the analyser is asked, and the
@@ -100,6 +106,39 @@ DAILY_JOBS: dict[str, DailySchedule] = {
 }
 
 
+@dataclass(frozen=True)
+class MonthlySchedule:
+    """A day of the month and an hour of the day (`revenue-statements` design D11).
+
+    **`day_of_month` is a 1-based day of the UTC calendar**, like `DailySchedule.hour`,
+    and `hour` is UTC for the same reason (`revenue-pricing` D8): the worker never
+    interprets zones, and a tenant's local hour is derived from its own property time.
+
+    **`lock_ttl` is explicit and must not come from `lock_ttl_for`**, for the same reason
+    `DailySchedule` does not: deriving from a cadence would be wrong-shaped — there is no
+    cadence on a monthly job, and `lock_ttl_for(cadence)` here would couple the TTL to a
+    duration that has nothing to do with the run. Six hours covers a 100-property tenant
+    on a slow day without wedging the next monthly window if a worker dies mid-run.
+    """
+
+    day_of_month: int
+    hour: int
+    lock_ttl: timedelta
+
+
+#: Jobs that run on a specific day of the month rather than at an hour of the day
+#: (`revenue-statements` design D11). A `crontab(month_of_year='1')` does not read as a
+#: monthly job — Celery supports it, but the legibility costs more than the dataclass.
+MONTHLY_JOBS: dict[str, MonthlySchedule] = {
+    #: `revenue-statements` R1.1 / D11 — the monthly liquidation. Day 1 at 02:00 UTC is the
+    #: PRD §8.3 cadence for "monthly" plus the design's choice of hour; six hours of lock
+    #: against a run measured in minutes, with margin for a tenant on the slow side.
+    "generate_owner_statements": MonthlySchedule(
+        day_of_month=1, hour=2, lock_ttl=timedelta(hours=6)
+    ),
+}
+
+
 #: Tasks that have no place on the calendar at all, because nothing fires them on a clock.
 #:
 #: The first one arrives with `whatsapp-cloud-adapter` (design D7): the anonymous WhatsApp
@@ -118,7 +157,8 @@ ON_DEMAND_TASKS: frozenset[str] = frozenset({"process_inbound_whatsapp_message"}
 
 
 def beat_schedule() -> dict[str, dict]:
-    """The `beat_schedule` Celery expects, derived from `CADENCES` and `DAILY_JOBS`."""
+    """The `beat_schedule` Celery expects, derived from `CADENCES`, `DAILY_JOBS` and
+    `MONTHLY_JOBS` (`revenue-statements` D11)."""
     schedule: dict[str, dict] = {
         f"{name}-every-{int(cadence.total_seconds())}s": {
             "task": name,
@@ -133,6 +173,19 @@ def beat_schedule() -> dict[str, dict]:
                 "schedule": crontab(hour=daily.hour, minute=0),
             }
             for name, daily in DAILY_JOBS.items()
+        }
+    )
+    schedule.update(
+        {
+            f"{name}-monthly-{monthly.day_of_month:02d}{monthly.hour:02d}00-utc": {
+                "task": name,
+                "schedule": crontab(
+                    day_of_month=monthly.day_of_month,
+                    hour=monthly.hour,
+                    minute=0,
+                ),
+            }
+            for name, monthly in MONTHLY_JOBS.items()
         }
     )
     return schedule

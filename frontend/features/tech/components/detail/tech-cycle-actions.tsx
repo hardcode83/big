@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { ApiError } from "@/lib/api";
 import {
   conflictReason,
@@ -92,80 +93,84 @@ export function TechCycleActions({ incident }: { incident: IncidentDetailDto }) 
   // produces. Returning early here would swallow the message R3.7 requires.
   if (actions.length === 0) {
     return (
-      <section className="flex flex-col gap-2 rounded-lg border bg-surface p-4">
-        {cycleError ? (
-          <p role="alert" className="text-sm text-state-error-text">
-            {cycleError}
+      <section>
+        <Card className="flex flex-col gap-2 p-4">
+          {cycleError ? (
+            <p role="alert" className="text-body-base text-state-error-text">
+              {cycleError}
+            </p>
+          ) : null}
+          <p className="text-body-base text-muted-foreground">
+            {t(`actions.none.${techNoActionReason(incident.status)}`)}
           </p>
-        ) : null}
-        <p className="text-sm text-muted-foreground">
-          {t(`actions.none.${techNoActionReason(incident.status)}`)}
-        </p>
+        </Card>
       </section>
     );
   }
 
   return (
-    <section className="flex flex-col gap-4 rounded-lg border bg-surface p-4">
-      <h2 className="text-base font-semibold text-foreground">
-        {t("actions.title")}
-      </h2>
+    <section>
+      <Card className="flex flex-col gap-4 p-4">
+        <h2 className="text-body-lg font-semibold text-foreground">
+          {t("actions.title")}
+        </h2>
 
-      {offersEta ? (
-        <TechEtaField
-          value={eta}
-          onChange={setEta}
-          disabled={cycle.isPending}
-          error={etaWas422 ? t("eta.invalid") : undefined}
-        />
-      ) : null}
+        {offersEta ? (
+          <TechEtaField
+            value={eta}
+            onChange={setEta}
+            disabled={cycle.isPending}
+            error={etaWas422 ? t("eta.invalid") : undefined}
+          />
+        ) : null}
 
-      {cycleActions.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          {cycleActions.map((action) => (
-            <Button
-              key={action}
-              type="button"
-              className="min-h-11"
-              variant={action === "reject" ? "outline" : "default"}
-              disabled={cycle.isPending}
-              onClick={() =>
-                cycle.mutate({
-                  incidentId: incident.id,
-                  action,
-                  ...(ETA_ACTIONS.includes(action)
-                    ? { etaAt: etaToInstant(eta) }
-                    : {}),
-                })
-              }
-            >
-              {t(`actions.${action}`)}
-            </Button>
-          ))}
-        </div>
-      ) : null}
+        {cycleActions.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {cycleActions.map((action) => (
+              <Button
+                key={action}
+                type="button"
+                className="tap-target"
+                variant={action === "reject" ? "outline" : "default"}
+                disabled={cycle.isPending}
+                onClick={() =>
+                  cycle.mutate({
+                    incidentId: incident.id,
+                    action,
+                    ...(ETA_ACTIONS.includes(action)
+                      ? { etaAt: etaToInstant(eta) }
+                      : {}),
+                  })
+                }
+              >
+                {t(`actions.${action}`)}
+              </Button>
+            ))}
+          </div>
+        ) : null}
 
-      {cycleError && !etaWas422 ? (
-        <p role="alert" className="text-sm text-state-error-text">
-          {cycleError}
-        </p>
-      ) : null}
+        {cycleError && !etaWas422 ? (
+          <p role="alert" className="text-body-base text-state-error-text">
+            {cycleError}
+          </p>
+        ) : null}
 
-      {offersResolve ? (
-        <TechResolveForm
-          isPending={resolve.isPending}
-          serverError={
-            resolve.error
-              ? resolveIs422
-                ? t("resolve.errors.server")
-                : messageFor(resolve.error)
-              : undefined
-          }
-          onSubmit={(input) =>
-            resolve.mutate({ incidentId: incident.id, ...input })
-          }
-        />
-      ) : null}
+        {offersResolve ? (
+          <TechResolveForm
+            isPending={resolve.isPending}
+            serverError={
+              resolve.error
+                ? resolveIs422
+                  ? t("resolve.errors.server")
+                  : messageFor(resolve.error)
+                : undefined
+            }
+            onSubmit={(input) =>
+              resolve.mutate({ incidentId: incident.id, ...input })
+            }
+          />
+        ) : null}
+      </Card>
     </section>
   );
 }

@@ -54,6 +54,7 @@ from app.maintenance.domain.entities import (
     IncidentPhoto,
     CONVERSATION_INCIDENT_TITLES,
     Incident,
+    IncidentMessage,
     OwnerApproval,
 )
 from app.maintenance.domain.enums import (
@@ -82,6 +83,7 @@ from app.maintenance.domain.notifications import (
     incident_rejection_notification,
     owner_approval_notification,
     sla_minutes_for,
+    staff_message_notification,
     technician_assignment_notification,
 )
 from app.maintenance.domain.ports import IncidentClassifier, LiveCleaningTaskQuery
@@ -89,6 +91,8 @@ from app.maintenance.domain.read_models import IncidentContext
 from app.maintenance.domain.repositories import (
     IncidentPhotoRepository,
     IncidentFilters,
+    IncidentMessagePage,
+    IncidentMessageRepository,
     IncidentPage,
     IncidentQuery,
     IncidentRepository,
@@ -2733,4 +2737,211 @@ class ListIncidentPhotosUseCase:
         return tuple(
             UploadedIncidentPhoto(photo=photo, url=storage.signed_url(photo.storage_key))
             for photo in photos
+        )
+
+
+#: The mirror of `app.cleaning.application.use_cases._MANAGER_PAGE_SIZE`: R4.2 promises
+#: **all** active managers, so this bounds one round-trip while paging, not the recipient
+#: count. There is no existing manager fan-out in this module to reuse — R4.2/design D9 want
+#: `PROPERTY_MANAGER` alone, with no "assigned manager" concept and no `TENANT_OWNER` fallback.
+_MANAGER_PAGE_SIZE = 20
+
+
+class SendIncidentMessageUseCase:
+    """One message on an incident's staff thread, plus the notification it triggers
+    (`staff-messaging` R2, R3.3, R4).
+
+    Resolves the incident through `_load_incident_in_scope` first, exactly as
+    `ListIncidentPhotosUseCase` does and for the same two rules: the incident is resolved
+    **inside the tenant**, and a `TECHNICIAN` only reaches the incidents assigned to them
+    (R2.3) — both answered with the shared, byte-identical `IncidentNotFoundError` so another
+    tenant's incident and an unowned one of this tenant are indistinguishable from an id that
+    never existed.
+
+    `author_id`/`author_role` come from `actor` alone, **never from a request field**:
+    `author_role` is the persisted `UserRole` frozen at the instant of writing (design D2),
+    not a value the client could pick, and not `MessageSenderType` — reusing that enum is
+    exactly what R3.3 forbids.
+
+    The message row and every notification row it fans out are one transaction (design D9):
+    `uow.commit()` is called once, after all of them are staged.
+    """
+
+    def __init__(
+        self,
+        *,
+        incidents: IncidentRepository,
+        messages: IncidentMessageRepository,
+        users: UserRepository,
+        configs: TenantConfigRepository,
+        notifications: NotificationLogRepository,
+        uow: UnitOfWork,
+    ) -> None:
+        self._incidents = incidents
+        self._messages = messages
+        self._users = users
+        self._configs = configs
+        self._notifications = notifications
+        self._uow = uow
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        incident_id: uuid.UUID,
+        actor: IncidentActor,
+        content: str,
+        now: datetime,
+    ) -> IncidentMessage:
+        incident = await _load_incident_in_scope(
+            self._incidents, tenant_id, incident_id, actor
+        )
+
+        message = IncidentMessage(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            incident_id=incident.id,
+            author_id=actor.user_id,
+            author_role=actor.role,
+            content=content,
+            created_at=now,
+        )
+        await self._messages.add(tenant_id, message)
+
+        if actor.role is UserRole.TECHNICIAN:
+            # R4.2/D9 — every active manager of the tenant, one row each. No owner fallback:
+            # R4.2 names `PROPERTY_MANAGER` alone, and D9 rejects introducing an "assigned
+            # manager" concept this thread has no use for.
+            await self._notify_managers(
+                tenant_id=tenant_id, incident=incident, message=message, now=now
+            )
+        elif incident.assigned_technician_id is not None:
+            # R4.3 — the assigned technician alone. An incident with no assignee has nobody
+            # to tell.
+            await self._notify_technician(
+                tenant_id=tenant_id, incident=incident, message=message, now=now
+            )
+
+        await self._uow.commit()
+        return message
+
+    async def _notify_managers(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        incident: Incident,
+        message: IncidentMessage,
+        now: datetime,
+    ) -> None:
+        managers = []
+        page_number = 1
+        while True:
+            page = await self._users.list(
+                tenant_id,
+                UserFilters(role=UserRole.PROPERTY_MANAGER, status=UserStatus.ACTIVE),
+                page=page_number,
+                per_page=_MANAGER_PAGE_SIZE,
+            )
+            managers.extend(page.items)
+            if not page.items or len(managers) >= page.total:
+                break
+            page_number += 1
+
+        if not managers:
+            # Not a failure (R4.2 does not promise a recipient exists): the message is still
+            # persisted, and this is the observable trace that nobody was told.
+            logger.info(
+                "maintenance.staff_message_without_manager",
+                extra={"tenant_id": str(tenant_id), "incident_id": str(incident.id)},
+            )
+            return
+
+        config = await self._configs.get_or_create(tenant_id, now)
+        for manager in managers:
+            await dispatch_and_persist(
+                notifications=self._notifications,
+                tenant_id=tenant_id,
+                recipient=manager,
+                config=config,
+                notification_type=NotificationType.INCIDENT_MESSAGE.value,
+                recipient_role=manager.role.value,
+                log_builder=staff_message_notification,
+                incident_id=incident.id,
+                message_id=message.id,
+                recipient_id=manager.id,
+                now=now,
+            )
+
+    async def _notify_technician(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        incident: Incident,
+        message: IncidentMessage,
+        now: datetime,
+    ) -> None:
+        technician = await self._users.get_active_by_id(
+            tenant_id, incident.assigned_technician_id
+        )
+        if technician is None:
+            logger.info(
+                "maintenance.staff_message_without_technician",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "incident_id": str(incident.id),
+                    "reason": "inactive",
+                },
+            )
+            return
+
+        config = await self._configs.get_or_create(tenant_id, now)
+        await dispatch_and_persist(
+            notifications=self._notifications,
+            tenant_id=tenant_id,
+            recipient=technician,
+            config=config,
+            notification_type=NotificationType.INCIDENT_MESSAGE.value,
+            recipient_role=technician.role.value,
+            log_builder=staff_message_notification,
+            incident_id=incident.id,
+            message_id=message.id,
+            recipient_id=technician.id,
+            now=now,
+        )
+
+
+class ListIncidentMessagesUseCase:
+    """R2.2 — an incident's message thread, chronological, paginated.
+
+    Resolves the incident through `_load_incident_in_scope` first, mirroring
+    `ListIncidentPhotosUseCase`: the incident is resolved **inside the tenant** first, so an
+    unowned incident's 404 is the shared, byte-identical `IncidentNotFoundError` and not an
+    empty page (R2.3) — reading `list_for_incident` directly would answer an empty page for
+    both a neighbour's incident and one that plain does not exist, which tells an
+    unauthorised caller that the id resolves to *something*.
+    """
+
+    def __init__(
+        self,
+        *,
+        incidents: IncidentRepository,
+        messages: IncidentMessageRepository,
+    ) -> None:
+        self._incidents = incidents
+        self._messages = messages
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        incident_id: uuid.UUID,
+        actor: IncidentActor,
+        page: int,
+        per_page: int,
+    ) -> IncidentMessagePage:
+        incident = await _load_incident_in_scope(
+            self._incidents, tenant_id, incident_id, actor
+        )
+        return await self._messages.list_for_incident(
+            tenant_id, incident.id, page=page, per_page=per_page
         )

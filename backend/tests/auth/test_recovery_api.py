@@ -13,6 +13,7 @@ import pytest_asyncio
 
 from app.auth.domain.enums import UserRole
 from app.auth.infrastructure.models import UserModel, UserSessionModel
+from app.core.config import settings
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.auth.conftest import PASSWORD, auth_header, insert_user
@@ -448,6 +449,32 @@ async def test_only_the_resolvable_account_gets_a_row(api, db_session, tenant_a)
     assert tokens[0].user_id == known.id
     assert len(rows) == 1
     assert rows[0].recipient_user_id == known.id
+
+
+@pytest.mark.asyncio
+async def test_partial_smtp_config_answers_generic_500(
+    api, db_session, tenant_a, monkeypatch
+) -> None:
+    """R2.2's risk mitigation (design D2's "Risks & mitigations"): `SMTPConfigurationError`
+    must not leak a stack trace, a missing-field name, or any other config detail to the
+    anonymous caller — it falls to the same generic `NotificationDomainError` 500 envelope
+    every other unmapped notifications error gets (`register_notification_error_handlers`).
+    """
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(settings, "smtp_port", 0)
+    monkeypatch.setattr(settings, "smtp_from_email", "noreply@example.com")
+    monkeypatch.setattr(settings, "smtp_username", "relay-user")
+    monkeypatch.setattr(settings, "smtp_password", "relay-pass")
+    user = await insert_user(db_session, tenant=tenant_a)
+
+    response = await _forgot(api, user.email)
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["error"]["code"] == "INTERNAL_ERROR"
+    assert body["error"]["message"] == "Unexpected notification error"
+    assert "smtp_port" not in response.text
+    assert "SMTP_HOST" not in response.text
 
 
 @pytest.mark.asyncio

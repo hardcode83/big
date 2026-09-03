@@ -8,7 +8,7 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 
 ### Build y publicación de imágenes (`.github/workflows/deploy-dev.yml`)
 
-- WHEN se hace push a `main` y el diff toca `backend/**`, `frontend/**`, sus Dockerfiles/lockfiles, `VERSION`, `docker-compose.deploy.yml` o el propio workflow (o en `workflow_dispatch`), THE SYSTEM SHALL construir las imágenes `target: prod` de backend y frontend para `linux/arm64` y publicarlas en GHCR bajo el namespace del owner del repo (`ghcr.io/<owner>/autohostai-{backend,frontend}`), autenticando con el `GITHUB_TOKEN` (`packages: write`).
+- WHEN se hace push a `main` y el diff toca `backend/**`, `frontend/**`, sus Dockerfiles/lockfiles, `VERSION`, `docker-compose.deploy.yml` o el propio workflow (o en `workflow_dispatch`), THE SYSTEM SHALL construir las imágenes `target: prod` de backend y frontend para `linux/arm64` y publicarlas en GHCR bajo el namespace del owner del repo (`ghcr.io/<owner>/autohostai-{backend,frontend}`), autenticando con el `GITHUB_TOKEN` (`packages: write`) y hacer `docker logout ghcr.io` (`if: always()`) al terminar — igual que el job `deploy` (línea 57), la credencial no debe sobrevivir al job en el runner persistente (`ci-runner-oci`).
 - THE SYSTEM SHALL etiquetar cada imagen con el **SHA de commit** (`sha-<commit>`, inmutable — el que consume el deploy) y con el tag móvil `dev`.
 - THE SYSTEM SHALL pasar las `NEXT_PUBLIC_*` como **build-args** (horneadas en el bundle de Next standalone), nunca como config de runtime.
 - THE SYSTEM SHALL componer la identidad de build en un **único job previo** (`provenance`), del que dependen los dos builds, de modo que ambas imágenes reciban idénticos valores por construcción y no por disciplina. Ese job lee la base de `VERSION`, la valida y falla el build si no tiene forma `X.Y.Z`. Comportamiento completo en `app-version-visibility`.
@@ -55,7 +55,7 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 
 - WHEN las imágenes se han publicado con éxito para un commit de `main`, THE SYSTEM SHALL ejecutar el deploy en un runner self-hosted en la VM (`runs-on: [self-hosted, dev]`), solo desde `main`, con `concurrency` (un deploy a la vez) y `timeout-minutes`.
 - THE SYSTEM SHALL autenticar el pull de GHCR con el **`GITHUB_TOKEN`** del job (`packages: read`) — no con la GitHub App — y hacer `docker logout` al terminar.
-- THE SYSTEM SHALL renderizar el `.env` de runtime **leyendo los secrets del OCI Vault** por instance principal con `chmod 600`, y fallar el deploy nombrando la clave si alguna no se puede leer, antes de tocar contenedores. Los secrets aprovisionados con la VM se leen por OCID (`secret-bundle get`, con los OCID en `/etc/autohostai-deploy.env`); los añadidos después —hoy el token del túnel— **por nombre** (`get-secret-bundle-by-name`), porque `cloud-init` no puede reescribir ese fichero en la máquina viva.
+- THE SYSTEM SHALL renderizar el `.env` de runtime **leyendo los secrets del OCI Vault** por instance principal con `chmod 600`, y fallar el deploy nombrando la clave si alguna no se puede leer, antes de tocar contenedores. Los secrets aprovisionados con la VM se leen por OCID (`secret-bundle get`, con los OCID en `/etc/autohostai-deploy.env`); los añadidos después —el token del túnel, los cuatro de medios y los seis `SMTP_*`— **por nombre** (`get-secret-bundle-by-name`), porque `cloud-init` no puede reescribir ese fichero en la máquina viva.
 - WHEN termina `docker compose up -d --wait`, THE SYSTEM SHALL considerar el deploy exitoso solo si todos los servicios quedan `healthy` dentro del timeout; IF alguno no lo alcanza, THEN THE SYSTEM SHALL fallar el job y volcar `docker compose logs`.
 - WHEN `up -d --wait` ha terminado con éxito, THE SYSTEM SHALL comprobar además que el **origen es alcanzable desde la red de ingress** y THE SYSTEM SHALL fallar el job si no lo es. Existe porque `up -d --wait` **no puede** detectar ese fallo: el healthcheck de `cloudflared` es `tunnel ready`, que solo comprueba la conexión con el edge, y el del `frontend` corre dentro de su propio contenedor contra `127.0.0.1:3000`; sin esta comprobación, dejar `frontend` fuera de la red de ingress pasaría en verde y la URL pública serviría 502 (change `ingress-https-hardening`).
 - THE SYSTEM SHALL **descubrir** la red del túnel inspeccionando el contenedor de `cloudflared` en vez de cablear su nombre, y THE SYSTEM SHALL exigir que esté conectado a exactamente una red, fallando con un mensaje que lo diga si no. THE SYSTEM SHALL acotar esa sonda en el tiempo a varios niveles (timeout del paso, timeout de la petición y espera acotada) y THE SYSTEM SHALL garantizar su limpieza con un `trap` cuyas propias órdenes van acotadas con `--kill-after`, porque señalar al cliente de `docker` no termina un contenedor que gestiona el daemon. La garantía de limpieza es **acotada, no incondicional**: si `dockerd` no responde dentro de la ventana de SIGTERM del runner, el job falla igual pero el contenedor efímero puede quedar hasta que lo barra el deploy siguiente.
@@ -68,7 +68,9 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 - WHERE la VM viva no puede recibir el `cloud-init` por Terraform (`metadata` ForceNew + `ignore_changes`), THE SYSTEM SHALL ejecutar el mismo bootstrap a mano una sola vez sobre la instancia (documentado en `RUNBOOK.md` §6).
 - THE SYSTEM SHALL generar los secrets de runtime (`POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY` — clave Fernet válida) con Terraform (`random_*`) y guardarlos, junto con la clave de la App, como `oci_vault_secret`; `POSTGRES_DB`/`POSTGRES_USER` son variables no sensibles.
 - THE SYSTEM SHALL escribir al `.env` del despliegue las cinco variables del almacén de objetos —`S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`— leyendo del Vault **por nombre** los cuatro secretos de medios (nombres deterministas a partir de `ENV`, como el token del túnel) y derivando el nombre del bucket del propio `ENV`. Cero pasos manuales por entorno.
-- IF alguno de esos secretos no se puede leer del Vault, THEN THE SYSTEM SHALL fallar el paso «Render .env» **nombrando la clave ausente**. Es fail-fast deliberado y seguro: ocurre antes del `pull` y del `up`, así que la VM sigue sirviendo la versión anterior. La causa más probable es un OCID olvidado en la enumeración de la policy del runner.
+- THE SYSTEM SHALL escribir al `.env` las seis variables `SMTP_*` (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS`) leyendo del Vault **por nombre** los seis secretos `autohostai-<env>-smtp-*` que Terraform crea junto con el propio relay (ver `infra-dev-terraform`): ningún GitHub Actions secret nuevo, y las credenciales del relay no existen fuera del state de Terraform y del Vault (change `smtp-delivery-adapter`).
+- THE SYSTEM SHALL escribir al `.env` `FRONTEND_BASE_URL=https://<PUBLIC_HOSTNAME>` desde la **variable de repo** `PUBLIC_HOSTNAME` (no es un secreto), fallando el paso si no está definida, y `docker-compose.deploy.yml` SHALL pasarla al servicio del backend. Existe porque el primer correo real entregado (`smtp-delivery-adapter`, 2026-09-03) llegó con enlaces `http://localhost:3000`: el backend usaba su default sin que nadie lo notara mientras el correo no salía de un log.
+- IF alguno de esos secretos no se puede leer del Vault, THEN THE SYSTEM SHALL fallar el paso «Render .env» **nombrando la clave ausente**. Es fail-fast deliberado y seguro: ocurre antes del `pull` y del `up`, así que la VM sigue sirviendo la versión anterior. La causa más probable es un OCID olvidado en la enumeración de la policy del runner. El contrato se probó solo, en producción del propio flujo: el deploy auto-disparado por el merge de `smtp-delivery-adapter` falló exactamente aquí —«Render .env» nombrando `SMTP_HOST`— porque el apply de infra que crea los secretos aún no había corrido, y la VM siguió sirviendo la versión anterior.
 - THE SYSTEM SHALL NOT incluir las variables `BOOTSTRAP_*`, `SEED_*` ni `DEMO_ACCOUNT_PASSWORD` en ese `.env`: el paso lo **trunca y lo regenera** en cada ejecución con solo lo que la aplicación necesita en runtime. Los comandos que las requieren se ejecutan pasándolas en línea (procedimiento en `RUNBOOK-seed-demo.md`); `DEMO_ACCOUNT_PASSWORD` la inyecta su propio workflow leyéndola del Vault, y por eso el reset programado sigue funcionando aunque esa variable no esté en ningún fichero de la VM.
 
 ### Segundo workflow sobre el mismo runner (`.github/workflows/demo-reset.yml`)
@@ -85,10 +87,15 @@ el comportamiento del reset se especifica en [`demo-tenant`](demo-tenant.md).
   publicar la base de datos, requerir SSH ni tocar el security list. Es la razón por la que el runner
   local es el único mecanismo posible: el `metadata` de la instancia es ForceNew con
   `ignore_changes`, así que un cron por cloud-init no llegaría nunca a la VM viva.
-- THE SYSTEM SHALL hacer `checkout` con `clean: false`. El `.env` del despliegue **no está
-  versionado** y vive en el workspace compartido del runner: un checkout limpio lo borraría y dejaría
-  al deploy siguiente sin `.env` hasta re-renderizarlo. La deuda que esto nombra —extraer el paso
-  «Render .env» a un script versionado compartido por los dos workflows— queda declarada y no pagada.
+- THE SYSTEM SHALL hacer `checkout` con su comportamiento **por defecto** (`clean: true`).
+  **Corregido por `ci-runner-oci`** (2026-09-04): el `.env` del despliegue **no está versionado**
+  y ya no vive en el workspace del checkout, sino en `$HOME/.autohostai-dev-runtime.env` — fuera
+  de `$GITHUB_WORKSPACE` y de `$RUNNER_TEMP`. Con `clean: false` el `.env` sobrevivía mientras el
+  workspace fuera solo del deploy y el reset; desde que 7 workflows `pull_request`-triggered más
+  comparten ese mismo disco físico, el `git clean -ffdx` del checkout por defecto de *cualquiera*
+  de ellos lo habría borrado igual, así que `clean: false` dejó de proteger nada y se retiró. La
+  deuda que esto nombraba —extraer el paso «Render .env» a un script versionado compartido por
+  los dos workflows— sigue declarada y sin pagar.
 - THE SYSTEM SHALL comprobar como precondición, antes de tocar nada, que ese `.env` existe y que
   `postgres` está corriendo, fallando en rojo si no.
 - THE SYSTEM SHALL leer del Vault **por nombre** y con instance principal el único secreto que
@@ -111,7 +118,7 @@ el comportamiento del reset se especifica en [`demo-tenant`](demo-tenant.md).
 
 ## Estado
 
-Desplegado y verificado end-to-end (deploy verde, todos los servicios `healthy`, 2026-07-29). El repo vive en la org `autohostai-labs`.
+Desplegado y verificado end-to-end (deploy verde, todos los servicios `healthy`, 2026-07-29). El repo vive en la org `autohostai-labs`. Desde `smtp-delivery-adapter` (2026-09-03) el `.env` renderizado lleva además las seis `SMTP_*` y `FRONTEND_BASE_URL`, verificadas en la VM con el primer correo real entregado.
 
 El **TLS/HTTPS ya está resuelto** por el change `ingress-https-dev`: la app se sirve en `https://autohostai.digitalsec.work` a través de un Cloudflare Tunnel y los puertos 8000/3000 dejaron de estar expuestos. Ver su spec.
 

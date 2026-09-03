@@ -25,7 +25,14 @@ dependencies = [
     # `devops/Dockerfile`'s prod stage installs with `uv sync --frozen --no-dev`. Same trap
     # that `httpx` fell into below, and the same reason it is spelled out here.
     "cryptography>=44.0",
+    # `platform-admin-api` (R1.1, R3.6): the operator-facing endpoints of the new platform
+    # surface type `billing_email` and `email` as pydantic's `EmailStr`, which depends on
+    # this package. The tenants-scoped `POST /api/v1/users` keeps the `EMAIL_PATTERN` regex
+    # of `app.auth.api.user_schemas` on purpose (no dependency needed there); the platform
+    # operator's address is exactly the place where the stricter check earns its dependency.
+    "email-validator>=2.0",
     "fastapi>=0.139.0",
+    "fpdf2>=2.8.2",
     # Runtime dependency since `channex-staging-adapter` (design D4): `ChannexAdapter`
     # talks HTTP in production code, so a dev-group httpx would be absent from the
     # deployed image — `devops/Dockerfile`'s prod stage installs with
