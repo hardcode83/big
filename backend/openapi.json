@@ -4452,6 +4452,67 @@
         "title": "NotificationType",
         "type": "string"
       },
+      "OccupancyPointResponse": {
+        "description": "One day of the weekly occupancy series (`dashboard-occupancy-series` R1.2, R1.4).\n\nExactly the four fields `OccupancyPoint` carries — no colour, no weekday label: PRD\n§9.1 leaves both to the frontend, which derives them from `date`, the same line\n`PropertyDashboardCard` already holds for `operational_state`.",
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "occupancy_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occupancy Pct"
+          },
+          "occupied_properties": {
+            "title": "Occupied Properties",
+            "type": "integer"
+          },
+          "total_properties": {
+            "title": "Total Properties",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "occupied_properties",
+          "total_properties",
+          "occupancy_pct"
+        ],
+        "title": "OccupancyPointResponse",
+        "type": "object"
+      },
+      "OccupancySeriesResponse": {
+        "description": "`GET /api/v1/dashboard/occupancy-series` (`dashboard-occupancy-series` R1, R4).\n\n`data` is `None` — never a partial series — when the caller's role lacks\n`Permission.READ_RESERVATIONS` (R4.3): the same \"agregar no concede\" convention\n`OperationalKpisResponse` already applies, one block redacted as a whole rather than\nfield by field.",
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/OccupancyPointResponse"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "OccupancySeriesResponse",
+        "type": "object"
+      },
       "OpenIncidentCountsResponse": {
         "description": "The `open_incidents` block of `GET /dashboard/operational-kpis` (R3).",
         "properties": {
@@ -12455,6 +12516,53 @@
         "summary": "Resolve a conversation",
         "tags": [
           "messaging"
+        ]
+      }
+    },
+    "/api/v1/dashboard/occupancy-series": {
+      "get": {
+        "description": "Seven points, Monday to Sunday of the caller's current ISO week (`dashboard-occupancy-series` R1), one per calendar day: how many of the tenant's active properties are occupied that day out of how many are active in total, and the resulting percentage. 'Occupied' unions reservation coverage with `BLOCKED_BY_OWNER`/`OUT_OF_SERVICE` transition coverage, snapshotted at the end of each UTC day. No colour and no weekday label: the frontend derives both from `date`, the same line the other two dashboard routes already hold for `operational_state`. `data` comes back `null` — never a partial series — when the caller's role lacks `Permission.READ_RESERVATIONS`, the same 'agregar no concede' rule `operational_kpis` applies.",
+        "operationId": "get_occupancy_series_api_v1_dashboard_occupancy_series_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccupancySeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Weekly tenant-wide occupancy series",
+        "tags": [
+          "dashboard"
         ]
       }
     },

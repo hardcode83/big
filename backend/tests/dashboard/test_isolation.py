@@ -13,7 +13,7 @@ instead of the `404` or the filtered `200` under test.
 """
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -24,6 +24,11 @@ from app.cleaning.infrastructure.models import CleaningTaskModel
 from app.guests.infrastructure.models import GuestModel
 from app.maintenance.domain.enums import IncidentSeverity, IncidentSource, IncidentStatus
 from app.maintenance.infrastructure.models import IncidentModel
+from app.properties.domain.entities import PropertyStateTransition
+from app.properties.domain.enums import PropertyOperationalState, StateTransitionTriggeredBy
+from app.properties.infrastructure.repositories import (
+    SqlAlchemyPropertyStateTransitionRepository,
+)
 from app.reservations.domain.enums import ReservationChannel, ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType, TimelineSeverity
@@ -32,6 +37,10 @@ from tests.cleaning.conftest import insert_template
 from tests.dashboard.conftest import TODAY, auth_header
 
 COLLECTION = "/api/v1/dashboard/properties"
+OCCUPANCY_SERIES = "/api/v1/dashboard/occupancy-series"
+
+# `TODAY` (2026-08-09) is a Sunday; the ISO week it closes runs Monday to Sunday.
+WEEK_START = date(2026, 8, 3)
 NEIGHBOUR_MARKERS = (
     "PAJARITOS8",
     "NEIGHBOUR-REF",
@@ -309,3 +318,69 @@ async def test_open_incidents_does_not_include_a_neighbours_urgent_incident(
 
     assert response.status_code == 200
     assert response.json()["open_incidents"] == {"total": 0, "urgent": 0}
+
+
+# --- `/dashboard/occupancy-series` (`dashboard-occupancy-series` R4.4) --------------------
+
+
+@pytest_asyncio.fixture
+async def neighbour_blocked_transition(db_session, tenant_b, neighbour_world):
+    """Tenant B's property blocked by its owner before the week and never released — the
+    second of R2.1's occupancy conditions, on top of `neighbour_world`'s reservation
+    (which already covers `TODAY`, the week's Sunday)."""
+    await SqlAlchemyPropertyStateTransitionRepository(db_session).add(
+        tenant_b.id,
+        PropertyStateTransition(
+            id=uuid.uuid4(),
+            tenant_id=tenant_b.id,
+            property_id=neighbour_world.id,
+            from_state=PropertyOperationalState.VACANT_READY,
+            to_state=PropertyOperationalState.OUT_OF_SERVICE,
+            triggered_by=StateTransitionTriggeredBy.SYSTEM,
+            created_at=datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
+            reason="neighbour's boiler is broken",
+        ),
+    )
+    return neighbour_world
+
+
+@pytest.mark.asyncio
+async def test_the_series_total_does_not_count_a_neighbours_property(
+    api, owner_headers, property_a, neighbour_blocked_transition
+) -> None:
+    """Tenant A has one active property; tenant B has one too. A leaking
+    `list_by_status` would double `total_properties` on every point."""
+    response = await api.get(OCCUPANCY_SERIES, headers=owner_headers)
+
+    assert response.status_code == 200
+    points = response.json()["data"]
+    assert len(points) == 7
+    assert all(point["total_properties"] == 1 for point in points)
+
+
+@pytest.mark.asyncio
+async def test_the_series_does_not_count_a_neighbours_reservation_night(
+    api, owner_headers, property_a, neighbour_blocked_transition
+) -> None:
+    """Tenant B's reservation covers `TODAY` (the week's Sunday) and tenant A has none at
+    all: a leaking `list_for_properties` would show one occupied property on that point."""
+    response = await api.get(OCCUPANCY_SERIES, headers=owner_headers)
+
+    points = response.json()["data"]
+    sunday = next(point for point in points if point["date"] == TODAY.isoformat())
+    assert sunday["occupied_properties"] == 0
+
+
+@pytest.mark.asyncio
+async def test_the_series_does_not_count_a_neighbours_blocked_transition(
+    api, owner_headers, property_a, neighbour_blocked_transition
+) -> None:
+    """Tenant B's property has been `OUT_OF_SERVICE` since before the week and never
+    released — occupied on all seven of *its own* points — while tenant A's property has
+    no transition at all. A leaking `history_for_properties` would show tenant A occupied
+    on every point too."""
+    response = await api.get(OCCUPANCY_SERIES, headers=owner_headers)
+
+    points = response.json()["data"]
+    assert all(point["occupied_properties"] == 0 for point in points)
+    assert all(point["occupancy_pct"] == 0.0 for point in points)

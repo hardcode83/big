@@ -615,6 +615,12 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         # permission that guards its source domain — never a second gate at the router.
         # Asserted per role in `tests/dashboard/test_api.py`.
         "/api/v1/dashboard/operational-kpis",
+        # `dashboard-occupancy-series` R4.2: same door again
+        # (`require(Permission.READ_PROPERTIES)`). Its single field, `data`, is redacted to
+        # `null` as a whole inside the use case when the caller's role lacks the finer
+        # `READ_RESERVATIONS` — never a second gate at the router. Asserted per role in
+        # `tests/dashboard/test_api.py`.
+        "/api/v1/dashboard/occupancy-series",
         # `revenue-pricing`: the seven routes of PRD §23 over five paths, on two routers
         # because they are two aggregates (design D1). Every one is authenticated — the
         # module has no anonymous door, and the nightly generator reaches the same use case

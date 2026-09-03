@@ -36,6 +36,7 @@ than aborting the batch.
 import uuid
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Any, Protocol
 
 from app.core.encrypted_secret import EncryptedSecret
@@ -451,5 +452,45 @@ class PropertyStateTransitionRepository(Protocol):
         alike. The caller cannot tell those apart from here, which is deliberate: it is
         `PropertyRepository.get` that decides whether the property exists for this tenant,
         and this method never becomes a second, weaker answer to that question.
+        """
+        ...
+
+    async def history_for_properties(
+        self,
+        tenant_id: uuid.UUID,
+        property_ids: Sequence[uuid.UUID],
+        start: date,
+        end: date,
+    ) -> dict[uuid.UUID, Sequence[PropertyStateTransition]]:
+        """Enough history to know each property's state **through** `[start, end]`
+        (`dashboard-occupancy-series` R3.1, design D2).
+
+        `last_for_property` above answers "what is it doing now". A day-by-day series needs
+        something it cannot give: the state a property was *already* in when the window
+        opened. A flat that entered `OCCUPIED_ESTIMATED` on Saturday and never moved again has no
+        transition inside a Monday-to-Sunday week, and reading only the window would report
+        it vacant for all seven days. So the sequence of each property present holds, in
+        chronological order, **the one transition immediately before `start` if it exists**,
+        followed by every transition inside the window.
+
+        `end` is inclusive as a calendar date, and both bounds are resolved against the
+        **UTC** calendar day (R2.4) — the adapter owns that conversion, so no caller can
+        disagree with another about where a day begins.
+
+        Dispersed, per the batch convention of `sdd/specs/dashboard-api.md` ("Composición
+        por lotes"): a property with neither an entering transition nor one in the window is
+        **absent**, not mapped to an empty sequence. An empty `property_ids` returns an empty
+        mapping without querying.
+
+        **Fixed cost (R3.2).** The whole answer resolves in a number of statements that does
+        not grow with the portfolio — the reason the ids are a parameter rather than
+        something this method resolves itself, exactly as `list_for_properties`,
+        `last_for_properties` and `count_open_for_properties` already do.
+
+        A **read**, and the port's docstring on `add` already settled that readers belong
+        here: what this port refuses is `save`, `update` and `delete`. That matters more than
+        usual for this one — `property_state_transitions` is the audit record of property
+        state (rule 9 of `sdd/steering/security.md`), so the series is *derived* from the
+        rows and never repairs, backfills or normalises them.
         """
         ...

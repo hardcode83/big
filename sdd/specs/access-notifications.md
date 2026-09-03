@@ -442,11 +442,17 @@ escritos aunque desapareciesen sus builders. Y sin la segunda, `SLA_BREACH` y
 `test_free_text_sink_contract.py` documenta sobre el suyo: un guardián que lee texto se sortea
 escribiendo el nombre en un comentario.
 
-**Los catorce con escritor y los cuatro sin él** viven en la tabla de la regla 11 de
-`steering/security.md` — este módulo no los enumera aquí para no duplicar el censo; la única
+**Los dieciséis con escritor y los cuatro sin él** viven en `WITH_WRITER`/`WITHOUT_WRITER` de
+`test_writer_census.py` — este módulo no los enumera aquí para no duplicar el censo; la única
 excepción nominal a PRD §14 que añade `revenue-reviews` es `REVIEW_RESPONSE_APPROVED`, con
-escritor declarado en `reviews/domain/notifications.py`. Los dos tipos de texto libre que **no**
-son miembros del enum —`INCIDENT_REJECTED` y `LEGAL_REGISTRATION_FAILED`, sobre la columna
+escritor declarado en `reviews/domain/notifications.py`. `staff-messaging` añade los dos últimos
+—`CLEANING_TASK_MESSAGE` (`cleaning/domain/notifications.py`) e `INCIDENT_MESSAGE`
+(`maintenance/domain/notifications.py`), cada una construida por un `staff_message_notification`
+gemelo cuyo `body` lleva solo `message_id` y `task_id`/`incident_id` más un texto constante,
+**nunca** el `content` del mensaje (regla 11 de `steering/security.md`, misma disciplina que
+`assignment_notification`)—, subiendo el total de catorce a dieciséis sin ampliar el catálogo de
+PRD §14 más allá de esa excepción ya declarada. Los dos tipos de texto libre que **no** son
+miembros del enum —`INCIDENT_REJECTED` y `LEGAL_REGISTRATION_FAILED`, sobre la columna
 `String(100)`— quedan fuera del censo por construcción: no hay `NotificationType.<X>` que casar.
 
 ### La bandeja in-app

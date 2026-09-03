@@ -332,6 +332,13 @@ export interface paths {
      */
     post: operations["resolve_conversation_api_v1_conversations__conversation_id__resolve_post"];
   };
+  "/api/v1/dashboard/occupancy-series": {
+    /**
+     * Weekly tenant-wide occupancy series
+     * @description Seven points, Monday to Sunday of the caller's current ISO week (`dashboard-occupancy-series` R1), one per calendar day: how many of the tenant's active properties are occupied that day out of how many are active in total, and the resulting percentage. 'Occupied' unions reservation coverage with `BLOCKED_BY_OWNER`/`OUT_OF_SERVICE` transition coverage, snapshotted at the end of each UTC day. No colour and no weekday label: the frontend derives both from `date`, the same line the other two dashboard routes already hold for `operational_state`. `data` comes back `null` — never a partial series — when the caller's role lacks `Permission.READ_RESERVATIONS`, the same 'agregar no concede' rule `operational_kpis` applies.
+     */
+    get: operations["get_occupancy_series_api_v1_dashboard_occupancy_series_get"];
+  };
   "/api/v1/dashboard/operational-kpis": {
     /**
      * Tenant-wide operational counts
@@ -3030,6 +3037,40 @@ export interface components {
      * @enum {string}
      */
     NotificationType: "CLEANING_TASK_ASSIGNED" | "CLEANING_NO_RESPONSE" | "CLEANING_COMPLETED" | "CLEANING_FAILED" | "INCIDENT_CREATED_CRITICAL" | "INCIDENT_CREATED_HIGH" | "OWNER_APPROVAL_REQUIRED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_NO_RESPONSE" | "GUEST_ESCALATION" | "LOCK_ALERT" | "CHECKIN_REMINDER_24H" | "CHECKIN_REMINDER_2H" | "CHECKOUT_REMINDER" | "PRICE_RECOMMENDATION" | "SLA_BREACH" | "REVIEW_RESPONSE_APPROVED" | "PASSWORD_RESET_REQUESTED" | "CLEANING_TASK_MESSAGE" | "INCIDENT_MESSAGE";
+    /**
+     * OccupancyPointResponse
+     * @description One day of the weekly occupancy series (`dashboard-occupancy-series` R1.2, R1.4).
+     *
+     * Exactly the four fields `OccupancyPoint` carries — no colour, no weekday label: PRD
+     * §9.1 leaves both to the frontend, which derives them from `date`, the same line
+     * `PropertyDashboardCard` already holds for `operational_state`.
+     */
+    OccupancyPointResponse: {
+      /**
+       * Date
+       * Format: date
+       */
+      date: string;
+      /** Occupancy Pct */
+      occupancy_pct: number | null;
+      /** Occupied Properties */
+      occupied_properties: number;
+      /** Total Properties */
+      total_properties: number;
+    };
+    /**
+     * OccupancySeriesResponse
+     * @description `GET /api/v1/dashboard/occupancy-series` (`dashboard-occupancy-series` R1, R4).
+     *
+     * `data` is `None` — never a partial series — when the caller's role lacks
+     * `Permission.READ_RESERVATIONS` (R4.3): the same "agregar no concede" convention
+     * `OperationalKpisResponse` already applies, one block redacted as a whole rather than
+     * field by field.
+     */
+    OccupancySeriesResponse: {
+      /** Data */
+      data: components["schemas"]["OccupancyPointResponse"][] | null;
+    };
     /**
      * OpenIncidentCountsResponse
      * @description The `open_incidents` block of `GET /dashboard/operational-kpis` (R3).
@@ -6683,6 +6724,32 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Weekly tenant-wide occupancy series
+   * @description Seven points, Monday to Sunday of the caller's current ISO week (`dashboard-occupancy-series` R1), one per calendar day: how many of the tenant's active properties are occupied that day out of how many are active in total, and the resulting percentage. 'Occupied' unions reservation coverage with `BLOCKED_BY_OWNER`/`OUT_OF_SERVICE` transition coverage, snapshotted at the end of each UTC day. No colour and no weekday label: the frontend derives both from `date`, the same line the other two dashboard routes already hold for `operational_state`. `data` comes back `null` — never a partial series — when the caller's role lacks `Permission.READ_RESERVATIONS`, the same 'agregar no concede' rule `operational_kpis` applies.
+   */
+  get_occupancy_series_api_v1_dashboard_occupancy_series_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OccupancySeriesResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
