@@ -11,9 +11,9 @@ puente entre "el rol existe y se autentica" (`super-admin-identity`) y "la conso
 operador aterriza" (`super-admin-console`), y no se solapa con la superficie de tenants o
 de users existente porque vive en su propio router bajo `/api/v1/platform`.
 
-El *cómo se opera* (reglas duras, diagnósticos, advertencias) vive en
-[`docs/super-admin-console.md`](../../docs/super-admin-console.md) cuando aterrice la
-consola; aquí documenta el *qué hace* el backend que esa consola consume.
+El *cómo se opera* la superficie —reglas duras, diagnósticos, advertencias— lo escribirá
+`super-admin-console` cuando aterrice la consola de operador (corte c de la partición); aquí
+documenta el *qué hace* el backend que esa consola consume.
 
 ## Requirements
 
