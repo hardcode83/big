@@ -399,3 +399,14 @@ jobs:
       - name: Logout GHCR
         if: always()
         run: docker logout ghcr.io || true
+
+      - name: Borrar .env del workspace
+        # El workspace del runner es compartido entre workflows (self-hosted, un solo checkout
+        # físico por repo — demo-reset.yml usa `clean: false` justo porque lo comparte con este
+        # job). Desde ci-runner-oci, 7 workflows `pull_request`-triggered corren en el mismo
+        # runner; un PR que ponga `clean: false` en su propio `actions/checkout` podría leer un
+        # `.env` que quedara sin borrar. `if: always()` porque el fichero se escribe temprano en
+        # el job (paso "Render .env") y tiene que desaparecer pase lo que pase después
+        # (hallazgo del panel de seguridad, tercera pasada — ver design.md Risks & mitigations).
+        if: always()
+        run: rm -f .env
