@@ -453,3 +453,30 @@ def require(permission: Permission) -> Callable[..., Awaitable[AuthenticatedRequ
 
     setattr(dependency, REQUIRED_PERMISSION_ATTR, permission)
     return dependency
+
+
+def require_any(*permissions: Permission) -> Callable[..., Awaitable[AuthenticatedRequest]]:
+    """`require`'s sibling for a route two disjoint roles can both reach (`staff-messaging`
+    design D3): authorised when the caller's role holds **any** of `permissions`.
+
+    Exists because `cleaning`'s staff-message thread has no single permission that covers
+    both writers — `EXECUTE_CLEANING_TASKS` is the cleaner's alone and `MANAGE_CLEANING_TASKS`
+    is the manager's alone (`auth/domain/policy.py`), and R3.1 refuses to add a new permission
+    just to name their union.
+
+    **The tag carries a `frozenset`, not a single `Permission`** — the one thing this function
+    does differently from `require`. `tests/test_route_authorization.py`'s route walk reads
+    `REQUIRED_PERMISSION_ATTR` off the dependency and needs to see every permission a route
+    declares, not one arbitrary member of the set; a scalar tag would let the walk observe only
+    whichever permission this function happened to check first.
+    """
+
+    permission_set = frozenset(permissions)
+
+    async def dependency(authenticated: AuthenticatedDep) -> AuthenticatedRequest:
+        if not any(is_allowed(authenticated.context.role, permission) for permission in permission_set):
+            raise ForbiddenError("Role is not allowed to perform this action")
+        return authenticated
+
+    setattr(dependency, REQUIRED_PERMISSION_ATTR, permission_set)
+    return dependency

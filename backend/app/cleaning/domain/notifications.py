@@ -213,3 +213,44 @@ def validation_failed_notification(
         related_type=RELATED_TYPE_CLEANING_TASK,
         related_id=task_id,
     )
+
+def staff_message_notification(
+    *,
+    tenant_id: uuid.UUID,
+    task_id: uuid.UUID,
+    message_id: uuid.UUID,
+    recipient_id: uuid.UUID,
+    recipient_contact: str = "",
+    now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
+) -> NotificationLog:
+    """What the other side of a task's message thread is told (`staff-messaging` R4).
+
+    Same shape as `assignment_notification`/`no_cleaner_available_notification`, and the
+    same discipline on `body` (rule 11 of `sdd/steering/security.md`, design D8): it carries
+    only `message_id` and `task_id` plus a constant text, **never `content`** — the message
+    itself lives behind the thread's own authorisation, not in a notification row a much
+    wider set of code paths can read.
+
+    **No `sla_deadline_at`** (design D8): a staff message has no response deadline, so there
+    is nothing here for `list_sla_breach_candidates` to ever pick up.
+    """
+    return NotificationLog(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        recipient_user_id=recipient_id,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
+        notification_type=NotificationType.CLEANING_TASK_MESSAGE.value,
+        created_at=now,
+        updated_at=now,
+        subject="New cleaning task message",
+        body=(
+            f"You have a new message on a cleaning task. "
+            f"Task {task_id}, message {message_id}."
+        ),
+        status=NotificationStatus.PENDING,
+        related_type=RELATED_TYPE_CLEANING_TASK,
+        related_id=task_id,
+    )

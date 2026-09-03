@@ -51,6 +51,12 @@ class NotificationType(str, enum.Enum):
     # `specs/access-notifications.md` forbids from logging content or recipient — so not even
     # a developer can read the link from the log. See `docs/auth-account-recovery.md`.
     PASSWORD_RESET_REQUESTED = "PASSWORD_RESET_REQUESTED"
+    # `staff-messaging` design D8. Two more, the same kind of divergence
+    # `REVIEW_RESPONSE_APPROVED` and `PASSWORD_RESET_REQUESTED` already declared: PRD §14 has
+    # no slot for a staff-to-manager thread scoped to a cleaning task or an incident, and the
+    # body of each carries only ids and a constant text — never the message's `content` (R4).
+    CLEANING_TASK_MESSAGE = "CLEANING_TASK_MESSAGE"
+    INCIDENT_MESSAGE = "INCIDENT_MESSAGE"
 
 
 class NotificationChannel(str, enum.Enum):
