@@ -210,6 +210,24 @@ export interface paths {
      */
     post: operations["report_task_incident_api_v1_cleaning_tasks__task_id__incidents_post"];
   };
+  "/api/v1/cleaning-tasks/{task_id}/messages": {
+    /**
+     * List a cleaning task's staff thread
+     * @description The task's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_CLEANING_TASKS` alone — `CLEANER`, `PROPERTY_MANAGER` and `TENANT_OWNER` already hold it, so reading needs no `or`.
+     *
+     * **Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her; an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` or `TENANT_OWNER` reaches every task of the tenant.
+     */
+    get: operations["list_cleaning_task_messages_api_v1_cleaning_tasks__task_id__messages_get"];
+    /**
+     * Send a message on a cleaning task's staff thread
+     * @description Writes one message to the task's staff-to-manager thread and notifies the other side: a `CLEANER` sending one notifies every active `PROPERTY_MANAGER` of the tenant, and a `PROPERTY_MANAGER` sending one notifies the task's assigned cleaner, if any (R4).
+     *
+     * Gated by `EXECUTE_CLEANING_TASKS` **or** `MANAGE_CLEANING_TASKS` — no new permission is declared; the two that already exist cover the cleaner and the manager respectively.
+     *
+     * **Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her — the same restriction `_load_task` already applies to every other cleaning-task endpoint — so an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` reaches every task of the tenant.
+     */
+    post: operations["send_cleaning_task_message_api_v1_cleaning_tasks__task_id__messages_post"];
+  };
   "/api/v1/cleaning-tasks/{task_id}/photo-requirements": {
     /**
      * Which photo categories this cleaning task asks for
@@ -313,6 +331,13 @@ export interface paths {
      * @description Closes the escalation with it when there is one, because no route resolves that axis on its own and a conversation resolved with its handover left pending would sit for ever in whatever list asks for pending handovers.
      */
     post: operations["resolve_conversation_api_v1_conversations__conversation_id__resolve_post"];
+  };
+  "/api/v1/dashboard/occupancy-series": {
+    /**
+     * Weekly tenant-wide occupancy series
+     * @description Seven points, Monday to Sunday of the caller's current ISO week (`dashboard-occupancy-series` R1), one per calendar day: how many of the tenant's active properties are occupied that day out of how many are active in total, and the resulting percentage. 'Occupied' unions reservation coverage with `BLOCKED_BY_OWNER`/`OUT_OF_SERVICE` transition coverage, snapshotted at the end of each UTC day. No colour and no weekday label: the frontend derives both from `date`, the same line the other two dashboard routes already hold for `operational_state`. `data` comes back `null` — never a partial series — when the caller's role lacks `Permission.READ_RESERVATIONS`, the same 'agregar no concede' rule `operational_kpis` applies.
+     */
+    get: operations["get_occupancy_series_api_v1_dashboard_occupancy_series_get"];
   };
   "/api/v1/dashboard/operational-kpis": {
     /**
@@ -499,6 +524,24 @@ export interface paths {
      */
     post: operations["en_route_incident_api_v1_incidents__incident_id__en_route_post"];
   };
+  "/api/v1/incidents/{incident_id}/messages": {
+    /**
+     * List an incident's staff thread
+     * @description The incident's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_INCIDENTS` alone — `TECHNICIAN`, `PROPERTY_MANAGER` and `TENANT_OWNER` already hold it, so reading needs no `or`.
+     *
+     * **Row-level scoping is derived inside the use case, never from a request field.** A `TECHNICIAN` reaches only the incident assigned to them; an unowned incident and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` or `TENANT_OWNER` reaches every incident of the tenant.
+     */
+    get: operations["list_incident_messages_api_v1_incidents__incident_id__messages_get"];
+    /**
+     * Send a message on an incident's staff thread
+     * @description Writes one message to the incident's staff-to-manager thread and notifies the other side: a `TECHNICIAN` sending one notifies every active `PROPERTY_MANAGER` of the tenant, and a `PROPERTY_MANAGER` sending one notifies the incident's assigned technician, if any (R4).
+     *
+     * Gated by `EXECUTE_INCIDENTS` alone — no new permission is declared, and no `or` is needed: `EXECUTE_INCIDENTS` already covers both the technician and the manager (design D3).
+     *
+     * **Row-level scoping is derived inside the use case, never from a request field.** A `TECHNICIAN` reaches only the incident assigned to them — the same restriction `_load_incident_in_scope` already applies to every other incident endpoint — so an unowned incident and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` reaches every incident of the tenant.
+     */
+    post: operations["send_incident_message_api_v1_incidents__incident_id__messages_post"];
+  };
   "/api/v1/incidents/{incident_id}/photos": {
     /**
      * List the photos of an incident
@@ -666,6 +709,20 @@ export interface paths {
      * A `property_id` that is unknown, another tenant's, or not `ACTIVE` is a `422` (D9): it is a body field, not a path identifier. `period_end` must be the last day of a calendar month (R2.5).
      */
     post: operations["generate_owner_statement_api_v1_owner_statements_generate_post"];
+  };
+  "/api/v1/platform/tenants": {
+    /**
+     * Create a tenant (SUPER_ADMIN only)
+     * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
+     */
+    post: operations["create_tenant_api_v1_platform_tenants_post"];
+  };
+  "/api/v1/platform/tenants/{tenant_id}/users": {
+    /**
+     * Create a user in a named tenant (SUPER_ADMIN only)
+     * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
+     */
+    post: operations["create_user_in_tenant_api_v1_platform_tenants__tenant_id__users_post"];
   };
   "/api/v1/price-recommendations": {
     /**
@@ -1452,6 +1509,49 @@ export interface components {
       validated_by_user_id: string | null;
       validation_status: components["schemas"]["CleaningValidationStatus"];
     };
+    /**
+     * CleaningTaskMessagePageResponse
+     * @description The envelope of PRD §23, the `CleaningTaskPageResponse` pattern.
+     */
+    CleaningTaskMessagePageResponse: {
+      /** Data */
+      data: components["schemas"]["CleaningTaskMessageResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * CleaningTaskMessageResponse
+     * @description One message of a task's staff thread. **An allowlist, never a dump of the entity**
+     * (the rule this module opens with) — even though `CleaningTaskMessage` has no field this
+     * change needs to exclude, `from_domain` is the only way in, the `CleaningPhotoResponse`
+     * discipline and not an accident.
+     */
+    CleaningTaskMessageResponse: {
+      /**
+       * Author Id
+       * Format: uuid
+       */
+      author_id: string;
+      author_role: components["schemas"]["UserRole"];
+      /** Content */
+      content: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+    };
     /** CleaningTaskPageResponse */
     CleaningTaskPageResponse: {
       /** Data */
@@ -1664,6 +1764,19 @@ export interface components {
       reservation_id?: string | null;
     };
     /**
+     * CreatedPlatformUserResponse
+     * @description The user plus the one-time secret (`platform-admin-api` R3.1, design D10).
+     *
+     * Two-shape separation, the same rule `CreatedUserResponse` follows: the temporary password
+     * lives on this type and not on `PlatformUserResponse`, so it cannot leak into a listing or
+     * a detail by somebody adding an optional attribute "just in case".
+     */
+    CreatedPlatformUserResponse: {
+      /** Temporary Password */
+      temporary_password: string;
+      user: components["schemas"]["PlatformUserResponse"];
+    };
+    /**
      * CreatedUserResponse
      * @description A separate type, and the only shape that carries the one-time secret (design D10).
      *
@@ -1693,6 +1806,28 @@ export interface components {
       content: string;
       /** Sender Type */
       sender_type?: "GUEST" | null;
+    };
+    /**
+     * CreatePlatformUserRequest
+     * @description What `POST /api/v1/platform/tenants/{tenant_id}/users` accepts (R3.1, R3.5, R3.6).
+     *
+     * The body is the same shape the tenants-scoped `CreateUserRequest` uses, minus the fields
+     * the platform operator never sees: no `tenant_id` (it comes from the path), no
+     * `preferred_language` (the tenant's `default_language` decides — `CreateUserInTenantUseCase`
+     * threads it through). `phone` is kept optional so the optional-`null` semantics the user
+     * module enforces are reused verbatim.
+     */
+    CreatePlatformUserRequest: {
+      /**
+       * Email
+       * Format: email
+       */
+      email: string;
+      /** Full Name */
+      full_name: string;
+      /** Phone */
+      phone?: string | null;
+      role: components["schemas"]["UserRole"];
     };
     /**
      * CreatePricingRuleRequest
@@ -1894,6 +2029,36 @@ export interface components {
       reservation_id?: string | null;
       /** Reviewer Name */
       reviewer_name?: string | null;
+    };
+    /**
+     * CreateTenantRequest
+     * @description What `POST /api/v1/platform/tenants` accepts (R1.1, R1.3).
+     *
+     * The five fields are the same ones `Tenant.update` accepts on a PATCH — reusing them keeps
+     * the boundary `Tenant` enforces ("every guard is the same function `update` uses", design
+     * D2). No `status`: a tenant is born ACTIVE.
+     *
+     * `name` requires `min_length=1` so an empty string is a `422` naming the field, not a
+     * row created from a blank value (R1.3).
+     */
+    CreateTenantRequest: {
+      /**
+       * Billing Email
+       * Format: email
+       */
+      billing_email: string;
+      /** Country */
+      country: string;
+      /**
+       * Default Language
+       * @default es
+       * @enum {string}
+       */
+      default_language?: "es" | "en";
+      /** Name */
+      name: string;
+      /** Timezone */
+      timezone: string;
     };
     /** CreateUserRequest */
     CreateUserRequest: {
@@ -2425,6 +2590,49 @@ export interface components {
       /** Eta At */
       eta_at?: string | null;
     };
+    /**
+     * IncidentMessagePageResponse
+     * @description The envelope of PRD §23, the `CleaningTaskMessagePageResponse` pattern.
+     */
+    IncidentMessagePageResponse: {
+      /** Data */
+      data: components["schemas"]["IncidentMessageResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * IncidentMessageResponse
+     * @description One message of an incident's staff thread. **An allowlist, never a dump of the entity**
+     * (the rule this module opens with) — even though `IncidentMessage` has no field this change
+     * needs to exclude, `from_domain` is the only way in, the `IncidentPhotoResponse` discipline
+     * and not an accident.
+     */
+    IncidentMessageResponse: {
+      /**
+       * Author Id
+       * Format: uuid
+       */
+      author_id: string;
+      author_role: components["schemas"]["UserRole"];
+      /** Content */
+      content: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+    };
     /** IncidentPageResponse */
     IncidentPageResponse: {
       /** Items */
@@ -2828,7 +3036,41 @@ export interface components {
      * inherits these names.
      * @enum {string}
      */
-    NotificationType: "CLEANING_TASK_ASSIGNED" | "CLEANING_NO_RESPONSE" | "CLEANING_COMPLETED" | "CLEANING_FAILED" | "INCIDENT_CREATED_CRITICAL" | "INCIDENT_CREATED_HIGH" | "OWNER_APPROVAL_REQUIRED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_NO_RESPONSE" | "GUEST_ESCALATION" | "LOCK_ALERT" | "CHECKIN_REMINDER_24H" | "CHECKIN_REMINDER_2H" | "CHECKOUT_REMINDER" | "PRICE_RECOMMENDATION" | "SLA_BREACH" | "REVIEW_RESPONSE_APPROVED" | "PASSWORD_RESET_REQUESTED";
+    NotificationType: "CLEANING_TASK_ASSIGNED" | "CLEANING_NO_RESPONSE" | "CLEANING_COMPLETED" | "CLEANING_FAILED" | "INCIDENT_CREATED_CRITICAL" | "INCIDENT_CREATED_HIGH" | "OWNER_APPROVAL_REQUIRED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_NO_RESPONSE" | "GUEST_ESCALATION" | "LOCK_ALERT" | "CHECKIN_REMINDER_24H" | "CHECKIN_REMINDER_2H" | "CHECKOUT_REMINDER" | "PRICE_RECOMMENDATION" | "SLA_BREACH" | "REVIEW_RESPONSE_APPROVED" | "PASSWORD_RESET_REQUESTED" | "CLEANING_TASK_MESSAGE" | "INCIDENT_MESSAGE";
+    /**
+     * OccupancyPointResponse
+     * @description One day of the weekly occupancy series (`dashboard-occupancy-series` R1.2, R1.4).
+     *
+     * Exactly the four fields `OccupancyPoint` carries — no colour, no weekday label: PRD
+     * §9.1 leaves both to the frontend, which derives them from `date`, the same line
+     * `PropertyDashboardCard` already holds for `operational_state`.
+     */
+    OccupancyPointResponse: {
+      /**
+       * Date
+       * Format: date
+       */
+      date: string;
+      /** Occupancy Pct */
+      occupancy_pct: number | null;
+      /** Occupied Properties */
+      occupied_properties: number;
+      /** Total Properties */
+      total_properties: number;
+    };
+    /**
+     * OccupancySeriesResponse
+     * @description `GET /api/v1/dashboard/occupancy-series` (`dashboard-occupancy-series` R1, R4).
+     *
+     * `data` is `None` — never a partial series — when the caller's role lacks
+     * `Permission.READ_RESERVATIONS` (R4.3): the same "agregar no concede" convention
+     * `OperationalKpisResponse` already applies, one block redacted as a whole rather than
+     * field by field.
+     */
+    OccupancySeriesResponse: {
+      /** Data */
+      data: components["schemas"]["OccupancyPointResponse"][] | null;
+    };
     /**
      * OpenIncidentCountsResponse
      * @description The `open_incidents` block of `GET /dashboard/operational-kpis` (R3).
@@ -3063,6 +3305,47 @@ export interface components {
       required: boolean;
       /** Uploaded */
       uploaded: boolean;
+    };
+    /**
+     * PlatformUserResponse
+     * @description The user shape the platform endpoint returns (R3.1).
+     *
+     * A separate type from `auth.UserResponse` for one reason: this one carries `tenant_id`.
+     * The tenants-scoped endpoints derive `tenant_id` from the token, so it would always equal
+     * the caller's own — printing it would be a no-op — and `UserResponse` deliberately omits
+     * it. The platform operator names the tenant in the path, so the response has to echo it
+     * back; this type is the visible diff that declares that.
+     */
+    PlatformUserResponse: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Email */
+      email: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Last Login At */
+      last_login_at: string | null;
+      /** Name */
+      name: string;
+      /** Phone */
+      phone: string | null;
+      /** Preferred Language */
+      preferred_language: string;
+      role: components["schemas"]["UserRole"];
+      status: components["schemas"]["UserStatus"];
+      /** Tenant Id */
+      tenant_id: string | null;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /**
      * PMSProvider
@@ -4108,6 +4391,49 @@ export interface components {
       reason: string;
       /** Reference */
       reference?: string | null;
+    };
+    /**
+     * SendCleaningTaskMessageRequest
+     * @description `POST /cleaning-tasks/{task_id}/messages` (R1.1, R5.1, R5.2).
+     *
+     * The exact shape of `CompleteIncidentRequest.materials` (design D5): `storable_text` guards
+     * against a value asyncpg cannot store, `Field(min_length=1, max_length=...)` rejects an
+     * empty or oversized body as a `422` before anything reaches the use case, and
+     * `str_strip_whitespace=True` means the maximum counts characters *after* stripping — so a
+     * whitespace-only message is refused rather than persisted.
+     *
+     * **The bound is imported, never re-derived**: `MAX_CLEANING_TASK_MESSAGE_LENGTH` lives in
+     * `app/cleaning/domain/entities.py`, the module that owns the column — its DDL is next door
+     * in that module's `infrastructure/models.py`.
+     *
+     * `MultiLineText` rather than `SingleLineText`: a staff message can span more than one line,
+     * the same choice `ReportTaskIncidentRequest.description` makes.
+     */
+    SendCleaningTaskMessageRequest: {
+      /** Content */
+      content: string;
+    };
+    /**
+     * SendIncidentMessageRequest
+     * @description `POST /incidents/{incident_id}/messages` (R2, R5.1, R5.2).
+     *
+     * The exact shape of `app.cleaning.api.schemas.SendCleaningTaskMessageRequest`, itself the
+     * shape of `ResolveIncidentRequest.materials` (design D5): `storable_text` guards against a
+     * value asyncpg cannot store, `Field(min_length=1, max_length=...)` rejects an empty or
+     * oversized body as a `422` before anything reaches the use case, and
+     * `str_strip_whitespace=True` means the maximum counts characters *after* stripping — so a
+     * whitespace-only message is refused rather than persisted.
+     *
+     * **The bound is imported, never re-derived**: `MAX_INCIDENT_MESSAGE_LENGTH` lives in
+     * `app/maintenance/domain/entities.py`, the module that owns the column — its DDL is next
+     * door in that module's `infrastructure/models.py`.
+     *
+     * `MultiLineText` rather than `SingleLineText`: a staff message can span more than one line,
+     * the same choice `ResolveIncidentRequest.materials` makes.
+     */
+    SendIncidentMessageRequest: {
+      /** Content */
+      content: string;
     };
     /**
      * SetDocumentRequest
@@ -5751,6 +6077,101 @@ export interface operations {
     };
   };
   /**
+   * List a cleaning task's staff thread
+   * @description The task's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_CLEANING_TASKS` alone — `CLEANER`, `PROPERTY_MANAGER` and `TENANT_OWNER` already hold it, so reading needs no `or`.
+   *
+   * **Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her; an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` or `TENANT_OWNER` reaches every task of the tenant.
+   */
+  list_cleaning_task_messages_api_v1_cleaning_tasks__task_id__messages_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskMessagePageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Send a message on a cleaning task's staff thread
+   * @description Writes one message to the task's staff-to-manager thread and notifies the other side: a `CLEANER` sending one notifies every active `PROPERTY_MANAGER` of the tenant, and a `PROPERTY_MANAGER` sending one notifies the task's assigned cleaner, if any (R4).
+   *
+   * Gated by `EXECUTE_CLEANING_TASKS` **or** `MANAGE_CLEANING_TASKS` — no new permission is declared; the two that already exist cover the cleaner and the manager respectively.
+   *
+   * **Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her — the same restriction `_load_task` already applies to every other cleaning-task endpoint — so an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` reaches every task of the tenant.
+   */
+  send_cleaning_task_message_api_v1_cleaning_tasks__task_id__messages_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SendCleaningTaskMessageRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskMessageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task does not exist for this caller — an unknown id, another tenant's task, and (for a `CLEANER`) another cleaner's task are all answered this way, indistinguishably. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The body is not a single non-empty `content` the database can store within `MAX_CLEANING_TASK_MESSAGE_LENGTH`, or it carries a field this operation does not accept. */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * Which photo categories this cleaning task asks for
    * @description The photo categories the task's checklist template declares, each with the label the template's author wrote, whether the close demands it, and whether one has already been uploaded. It exists so a `CLEANER` can be shown **a button per category** without holding `READ_CLEANING_TEMPLATES`.
    *
@@ -6303,6 +6724,32 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Weekly tenant-wide occupancy series
+   * @description Seven points, Monday to Sunday of the caller's current ISO week (`dashboard-occupancy-series` R1), one per calendar day: how many of the tenant's active properties are occupied that day out of how many are active in total, and the resulting percentage. 'Occupied' unions reservation coverage with `BLOCKED_BY_OWNER`/`OUT_OF_SERVICE` transition coverage, snapshotted at the end of each UTC day. No colour and no weekday label: the frontend derives both from `date`, the same line the other two dashboard routes already hold for `operational_state`. `data` comes back `null` — never a partial series — when the caller's role lacks `Permission.READ_RESERVATIONS`, the same 'agregar no concede' rule `operational_kpis` applies.
+   */
+  get_occupancy_series_api_v1_dashboard_occupancy_series_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OccupancySeriesResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
@@ -7361,6 +7808,101 @@ export interface operations {
     };
   };
   /**
+   * List an incident's staff thread
+   * @description The incident's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_INCIDENTS` alone — `TECHNICIAN`, `PROPERTY_MANAGER` and `TENANT_OWNER` already hold it, so reading needs no `or`.
+   *
+   * **Row-level scoping is derived inside the use case, never from a request field.** A `TECHNICIAN` reaches only the incident assigned to them; an unowned incident and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` or `TENANT_OWNER` reaches every incident of the tenant.
+   */
+  list_incident_messages_api_v1_incidents__incident_id__messages_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentMessagePageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Send a message on an incident's staff thread
+   * @description Writes one message to the incident's staff-to-manager thread and notifies the other side: a `TECHNICIAN` sending one notifies every active `PROPERTY_MANAGER` of the tenant, and a `PROPERTY_MANAGER` sending one notifies the incident's assigned technician, if any (R4).
+   *
+   * Gated by `EXECUTE_INCIDENTS` alone — no new permission is declared, and no `or` is needed: `EXECUTE_INCIDENTS` already covers both the technician and the manager (design D3).
+   *
+   * **Row-level scoping is derived inside the use case, never from a request field.** A `TECHNICIAN` reaches only the incident assigned to them — the same restriction `_load_incident_in_scope` already applies to every other incident endpoint — so an unowned incident and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` reaches every incident of the tenant.
+   */
+  send_incident_message_api_v1_incidents__incident_id__messages_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SendIncidentMessageRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["IncidentMessageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The incident does not exist for this caller — an unknown id, another tenant's incident, and (for a `TECHNICIAN`) another technician's incident are all answered this way, indistinguishably. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The body is not a single non-empty `content` the database can store within `MAX_INCIDENT_MESSAGE_LENGTH`, or it carries a field this operation does not accept. */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List the photos of an incident
    * @description Oldest first, so `BEFORE` and `AFTER` read in the order the work happened. Each entry carries a signed URL **minted for this response**; a URL from an earlier response may already have expired.
    *
@@ -8131,6 +8673,85 @@ export interface operations {
       201: {
         content: {
           "application/json": components["schemas"]["OwnerStatementGenerationReportResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a tenant (SUPER_ADMIN only)
+   * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
+   */
+  create_tenant_api_v1_platform_tenants_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateTenantRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["TenantResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a user in a named tenant (SUPER_ADMIN only)
+   * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
+   */
+  create_user_in_tenant_api_v1_platform_tenants__tenant_id__users_post: {
+    parameters: {
+      path: {
+        tenant_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreatePlatformUserRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["CreatedPlatformUserResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

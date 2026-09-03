@@ -26,10 +26,17 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.auth.domain.enums import UserRole
 from app.core.storable_text import MultiLineText
 from app.maintenance.application.use_cases import UploadedIncidentPhoto
-from app.maintenance.domain.entities import MAX_MATERIALS, Incident
+from app.maintenance.domain.entities import (
+    MAX_INCIDENT_MESSAGE_LENGTH,
+    MAX_MATERIALS,
+    Incident,
+    IncidentMessage,
+)
 from app.maintenance.domain.read_models import IncidentContext
+from app.maintenance.domain.repositories import IncidentMessagePage
 from app.maintenance.domain.enums import (
     IncidentCategory,
     IncidentPhotoStage,
@@ -352,3 +359,77 @@ class IncidentPhotoListResponse(BaseModel):
         the `201`.
         """
         return cls(items=[IncidentPhotoResponse.from_upload(item) for item in uploaded])
+
+
+# --- incident messages (`staff-messaging`) ----------------------------------------
+
+
+class SendIncidentMessageRequest(BaseModel):
+    """`POST /incidents/{incident_id}/messages` (R2, R5.1, R5.2).
+
+    The exact shape of `app.cleaning.api.schemas.SendCleaningTaskMessageRequest`, itself the
+    shape of `ResolveIncidentRequest.materials` (design D5): `storable_text` guards against a
+    value asyncpg cannot store, `Field(min_length=1, max_length=...)` rejects an empty or
+    oversized body as a `422` before anything reaches the use case, and
+    `str_strip_whitespace=True` means the maximum counts characters *after* stripping — so a
+    whitespace-only message is refused rather than persisted.
+
+    **The bound is imported, never re-derived**: `MAX_INCIDENT_MESSAGE_LENGTH` lives in
+    `app/maintenance/domain/entities.py`, the module that owns the column — its DDL is next
+    door in that module's `infrastructure/models.py`.
+
+    `MultiLineText` rather than `SingleLineText`: a staff message can span more than one line,
+    the same choice `ResolveIncidentRequest.materials` makes.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    content: Annotated[
+        MultiLineText, Field(min_length=1, max_length=MAX_INCIDENT_MESSAGE_LENGTH)
+    ]
+
+
+class IncidentMessageResponse(BaseModel):
+    """One message of an incident's staff thread. **An allowlist, never a dump of the entity**
+    (the rule this module opens with) — even though `IncidentMessage` has no field this change
+    needs to exclude, `from_domain` is the only way in, the `IncidentPhotoResponse` discipline
+    and not an accident.
+    """
+
+    id: uuid.UUID
+    author_id: uuid.UUID
+    author_role: UserRole
+    content: str
+    created_at: datetime
+
+    @classmethod
+    def from_domain(cls, message: IncidentMessage) -> "IncidentMessageResponse":
+        return cls(
+            id=message.id,
+            author_id=message.author_id,
+            author_role=message.author_role,
+            content=message.content,
+            created_at=message.created_at,
+        )
+
+
+class IncidentMessagePageResponse(BaseModel):
+    """The envelope of PRD §23, the `CleaningTaskMessagePageResponse` pattern."""
+
+    data: list[IncidentMessageResponse]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
+
+    @classmethod
+    def build(
+        cls, page: IncidentMessagePage, *, page_number: int, per_page: int
+    ) -> "IncidentMessagePageResponse":
+        return cls(
+            data=[IncidentMessageResponse.from_domain(item) for item in page.items],
+            total=page.total,
+            page=page_number,
+            per_page=per_page,
+            total_pages=(page.total + per_page - 1) // per_page if per_page else 0,
+        )

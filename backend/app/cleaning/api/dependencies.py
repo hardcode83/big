@@ -30,9 +30,11 @@ from app.cleaning.application.use_cases import (
     GetPhotoRequirementsUseCase,
     ListChecklistTemplatesUseCase,
     ListCleaningPhotosUseCase,
+    ListCleaningTaskMessagesUseCase,
     ListCleaningTasksUseCase,
     RejectCleaningTaskUseCase,
     ReportTaskIncidentUseCase,
+    SendCleaningTaskMessageUseCase,
     StartCleaningTaskUseCase,
     UploadCleaningPhotoUseCase,
     ValidateCleaningTaskUseCase,
@@ -42,6 +44,7 @@ from app.cleaning.infrastructure.repositories import (
     SqlAlchemyCleaningChecklistCompletionRepository,
     SqlAlchemyCleaningChecklistTemplateRepository,
     SqlAlchemyCleaningPhotoRepository,
+    SqlAlchemyCleaningTaskMessageRepository,
     SqlAlchemyCleaningTaskRepository,
     SqlAlchemyUnscopedCleaningPhotoLocationQuery,
 )
@@ -360,4 +363,31 @@ def get_serve_cleaning_photo_use_case(
         configs=SqlAlchemyTenantConfigRepository(session),
         storage=storage,
         signing_key=signing_key,
+    )
+
+
+def get_send_cleaning_task_message_use_case(
+    session: SessionDep,
+) -> SendCleaningTaskMessageUseCase:
+    """`staff-messaging` R1, R4 — the message-thread write, plus the notification fan-out it
+    triggers. No `_lifecycle_kwargs`: sending a message moves no property state, so it takes
+    only the repositories it actually reads and writes, the shape
+    `get_upload_cleaning_photo_use_case` already sets for a non-lifecycle mutation."""
+    return SendCleaningTaskMessageUseCase(
+        tasks=SqlAlchemyCleaningTaskRepository(session),
+        messages=SqlAlchemyCleaningTaskMessageRepository(session),
+        users=SqlAlchemyUserRepository(session),
+        configs=SqlAlchemyTenantConfigRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+
+
+def get_list_cleaning_task_messages_use_case(
+    session: SessionDep,
+) -> ListCleaningTaskMessagesUseCase:
+    """R1.2 — reads only, so no unit of work and no audit repository."""
+    return ListCleaningTaskMessagesUseCase(
+        tasks=SqlAlchemyCleaningTaskRepository(session),
+        messages=SqlAlchemyCleaningTaskMessageRepository(session),
     )

@@ -39,6 +39,7 @@ from app.dashboard.domain.labels import (
     RESPONSIBLE_LABELS,
 )
 from app.dashboard.domain.next_action import next_action_for
+from app.dashboard.domain.occupancy import occupancy_series, week_bounds
 from app.dashboard.domain.read_models import (
     AccessBlock,
     ApprovalBlock,
@@ -47,6 +48,7 @@ from app.dashboard.domain.read_models import (
     GuestBlock,
     IncidentBlock,
     NextActionBlock,
+    OccupancyPoint,
     OpenIncidentCountsBlock,
     OperationalKpis,
     PropertyDashboardCard,
@@ -57,8 +59,13 @@ from app.guests.domain.repositories import GuestRepository
 from app.maintenance.domain.repositories import IncidentReader, OwnerApprovalReader
 from app.maintenance.domain.value_objects import OpenIncidentCounts
 from app.properties.domain.entities import Property
+from app.properties.domain.enums import PropertyStatus
 from app.properties.domain.exceptions import PropertyNotFoundError
-from app.properties.domain.repositories import PropertyFilters, PropertyRepository
+from app.properties.domain.repositories import (
+    PropertyFilters,
+    PropertyRepository,
+    PropertyStateTransitionRepository,
+)
 from app.reservations.domain.entities import Reservation
 from app.reservations.domain.repositories import ReservationRepository
 from app.statements.domain.repositories import ExpenseReader
@@ -428,6 +435,52 @@ class GetOperationalKpisUseCase:
             upcoming_checkins=upcoming_checkins,
             open_incidents=open_incidents,
         )
+
+
+class GetOccupancySeriesUseCase:
+    """`GET /api/v1/dashboard/occupancy-series` (`dashboard-occupancy-series` R1, R4, D5).
+
+    One tenant-wide series of seven points (Monday to Sunday of the current ISO week),
+    gated on a single permission rather than redacted per field like
+    `GetOperationalKpisUseCase` above: a role lacking `Permission.READ_RESERVATIONS` gets
+    the whole series back as `None`, with **zero** domain queries — never a series built
+    only from blocks/out-of-service days, because reservations is the majority source of
+    an occupied night and a partial series with the same shape is a different number
+    wearing the same contract (R4.3). `Permission.READ_PROPERTIES` gates the route itself
+    (`require()` in the router); this use case does not re-check it.
+    """
+
+    def __init__(
+        self,
+        *,
+        properties: PropertyRepository,
+        reservations: ReservationRepository,
+        transitions: PropertyStateTransitionRepository,
+    ) -> None:
+        self._properties = properties
+        self._reservations = reservations
+        self._transitions = transitions
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, role: UserRole, today: date
+    ) -> tuple[OccupancyPoint, ...] | None:
+        if not is_allowed(role, Permission.READ_RESERVATIONS):
+            return None
+
+        week_start, week_end = week_bounds(today)
+        active_properties = await self._properties.list_by_status(
+            tenant_id, PropertyStatus.ACTIVE
+        )
+        property_ids = [item.id for item in active_properties]
+
+        reservations = await self._reservations.list_for_properties(
+            tenant_id, property_ids, week_start, week_end
+        )
+        transitions_by_property = await self._transitions.history_for_properties(
+            tenant_id, property_ids, week_start, week_end
+        )
+
+        return occupancy_series(week_start, property_ids, reservations, transitions_by_property)
 
 
 def _open_incident_counts_block(counts: OpenIncidentCounts) -> OpenIncidentCountsBlock:

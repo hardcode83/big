@@ -1038,6 +1038,79 @@
         "title": "CleaningTaskListItemResponse",
         "type": "object"
       },
+      "CleaningTaskMessagePageResponse": {
+        "description": "The envelope of PRD §23, the `CleaningTaskPageResponse` pattern.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CleaningTaskMessageResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "CleaningTaskMessagePageResponse",
+        "type": "object"
+      },
+      "CleaningTaskMessageResponse": {
+        "description": "One message of a task's staff thread. **An allowlist, never a dump of the entity**\n(the rule this module opens with) — even though `CleaningTaskMessage` has no field this\nchange needs to exclude, `from_domain` is the only way in, the `CleaningPhotoResponse`\ndiscipline and not an accident.",
+        "properties": {
+          "author_id": {
+            "format": "uuid",
+            "title": "Author Id",
+            "type": "string"
+          },
+          "author_role": {
+            "$ref": "#/components/schemas/UserRole"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "author_id",
+          "author_role",
+          "content",
+          "created_at"
+        ],
+        "title": "CleaningTaskMessageResponse",
+        "type": "object"
+      },
       "CleaningTaskPageResponse": {
         "properties": {
           "data": {
@@ -1608,6 +1681,45 @@
           "content"
         ],
         "title": "CreateMessageRequest",
+        "type": "object"
+      },
+      "CreatePlatformUserRequest": {
+        "additionalProperties": false,
+        "description": "What `POST /api/v1/platform/tenants/{tenant_id}/users` accepts (R3.1, R3.5, R3.6).\n\nThe body is the same shape the tenants-scoped `CreateUserRequest` uses, minus the fields\nthe platform operator never sees: no `tenant_id` (it comes from the path), no\n`preferred_language` (the tenant's `default_language` decides — `CreateUserInTenantUseCase`\nthreads it through). `phone` is kept optional so the optional-`null` semantics the user\nmodule enforces are reused verbatim.",
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "full_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Full Name",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 30,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
+          }
+        },
+        "required": [
+          "email",
+          "full_name",
+          "role"
+        ],
+        "title": "CreatePlatformUserRequest",
         "type": "object"
       },
       "CreatePricingRuleRequest": {
@@ -2251,6 +2363,51 @@
         "title": "CreateReviewRequest",
         "type": "object"
       },
+      "CreateTenantRequest": {
+        "additionalProperties": false,
+        "description": "What `POST /api/v1/platform/tenants` accepts (R1.1, R1.3).\n\nThe five fields are the same ones `Tenant.update` accepts on a PATCH — reusing them keeps\nthe boundary `Tenant` enforces (\"every guard is the same function `update` uses\", design\nD2). No `status`: a tenant is born ACTIVE.\n\n`name` requires `min_length=1` so an empty string is a `422` naming the field, not a\nrow created from a blank value (R1.3).",
+        "properties": {
+          "billing_email": {
+            "format": "email",
+            "title": "Billing Email",
+            "type": "string"
+          },
+          "country": {
+            "maxLength": 2,
+            "minLength": 2,
+            "title": "Country",
+            "type": "string"
+          },
+          "default_language": {
+            "default": "es",
+            "enum": [
+              "es",
+              "en"
+            ],
+            "title": "Default Language",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "timezone": {
+            "maxLength": 50,
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "billing_email",
+          "country",
+          "timezone"
+        ],
+        "title": "CreateTenantRequest",
+        "type": "object"
+      },
       "CreateUserRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2314,6 +2471,25 @@
           "header_name"
         ],
         "title": "CreateWebhookEndpointRequest",
+        "type": "object"
+      },
+      "CreatedPlatformUserResponse": {
+        "additionalProperties": false,
+        "description": "The user plus the one-time secret (`platform-admin-api` R3.1, design D10).\n\nTwo-shape separation, the same rule `CreatedUserResponse` follows: the temporary password\nlives on this type and not on `PlatformUserResponse`, so it cannot leak into a listing or\na detail by somebody adding an optional attribute \"just in case\".",
+        "properties": {
+          "temporary_password": {
+            "title": "Temporary Password",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/PlatformUserResponse"
+          }
+        },
+        "required": [
+          "user",
+          "temporary_password"
+        ],
+        "title": "CreatedPlatformUserResponse",
         "type": "object"
       },
       "CreatedUserResponse": {
@@ -3370,6 +3546,79 @@
         "title": "IncidentEtaRequest",
         "type": "object"
       },
+      "IncidentMessagePageResponse": {
+        "description": "The envelope of PRD §23, the `CleaningTaskMessagePageResponse` pattern.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/IncidentMessageResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "IncidentMessagePageResponse",
+        "type": "object"
+      },
+      "IncidentMessageResponse": {
+        "description": "One message of an incident's staff thread. **An allowlist, never a dump of the entity**\n(the rule this module opens with) — even though `IncidentMessage` has no field this change\nneeds to exclude, `from_domain` is the only way in, the `IncidentPhotoResponse` discipline\nand not an accident.",
+        "properties": {
+          "author_id": {
+            "format": "uuid",
+            "title": "Author Id",
+            "type": "string"
+          },
+          "author_role": {
+            "$ref": "#/components/schemas/UserRole"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "author_id",
+          "author_role",
+          "content",
+          "created_at"
+        ],
+        "title": "IncidentMessageResponse",
+        "type": "object"
+      },
       "IncidentPageResponse": {
         "properties": {
           "items": {
@@ -4196,10 +4445,73 @@
           "PRICE_RECOMMENDATION",
           "SLA_BREACH",
           "REVIEW_RESPONSE_APPROVED",
-          "PASSWORD_RESET_REQUESTED"
+          "PASSWORD_RESET_REQUESTED",
+          "CLEANING_TASK_MESSAGE",
+          "INCIDENT_MESSAGE"
         ],
         "title": "NotificationType",
         "type": "string"
+      },
+      "OccupancyPointResponse": {
+        "description": "One day of the weekly occupancy series (`dashboard-occupancy-series` R1.2, R1.4).\n\nExactly the four fields `OccupancyPoint` carries — no colour, no weekday label: PRD\n§9.1 leaves both to the frontend, which derives them from `date`, the same line\n`PropertyDashboardCard` already holds for `operational_state`.",
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "occupancy_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occupancy Pct"
+          },
+          "occupied_properties": {
+            "title": "Occupied Properties",
+            "type": "integer"
+          },
+          "total_properties": {
+            "title": "Total Properties",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "occupied_properties",
+          "total_properties",
+          "occupancy_pct"
+        ],
+        "title": "OccupancyPointResponse",
+        "type": "object"
+      },
+      "OccupancySeriesResponse": {
+        "description": "`GET /api/v1/dashboard/occupancy-series` (`dashboard-occupancy-series` R1, R4).\n\n`data` is `None` — never a partial series — when the caller's role lacks\n`Permission.READ_RESERVATIONS` (R4.3): the same \"agregar no concede\" convention\n`OperationalKpisResponse` already applies, one block redacted as a whole rather than\nfield by field.",
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/OccupancyPointResponse"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "OccupancySeriesResponse",
+        "type": "object"
       },
       "OpenIncidentCountsResponse": {
         "description": "The `open_incidents` block of `GET /dashboard/operational-kpis` (R3).",
@@ -4618,6 +4930,95 @@
           "data"
         ],
         "title": "PhotoRequirementsResponse",
+        "type": "object"
+      },
+      "PlatformUserResponse": {
+        "additionalProperties": false,
+        "description": "The user shape the platform endpoint returns (R3.1).\n\nA separate type from `auth.UserResponse` for one reason: this one carries `tenant_id`.\nThe tenants-scoped endpoints derive `tenant_id` from the token, so it would always equal\nthe caller's own — printing it would be a no-op — and `UserResponse` deliberately omits\nit. The platform operator names the tenant in the path, so the response has to echo it\nback; this type is the visible diff that declares that.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "preferred_language": {
+            "title": "Preferred Language",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UserStatus"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "name",
+          "email",
+          "role",
+          "status",
+          "phone",
+          "preferred_language",
+          "last_login_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PlatformUserResponse",
         "type": "object"
       },
       "PortalMessageSender": {
@@ -6973,6 +7374,40 @@
           "reason"
         ],
         "title": "RowErrorResponse",
+        "type": "object"
+      },
+      "SendCleaningTaskMessageRequest": {
+        "additionalProperties": false,
+        "description": "`POST /cleaning-tasks/{task_id}/messages` (R1.1, R5.1, R5.2).\n\nThe exact shape of `CompleteIncidentRequest.materials` (design D5): `storable_text` guards\nagainst a value asyncpg cannot store, `Field(min_length=1, max_length=...)` rejects an\nempty or oversized body as a `422` before anything reaches the use case, and\n`str_strip_whitespace=True` means the maximum counts characters *after* stripping — so a\nwhitespace-only message is refused rather than persisted.\n\n**The bound is imported, never re-derived**: `MAX_CLEANING_TASK_MESSAGE_LENGTH` lives in\n`app/cleaning/domain/entities.py`, the module that owns the column — its DDL is next door\nin that module's `infrastructure/models.py`.\n\n`MultiLineText` rather than `SingleLineText`: a staff message can span more than one line,\nthe same choice `ReportTaskIncidentRequest.description` makes.",
+        "properties": {
+          "content": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "SendCleaningTaskMessageRequest",
+        "type": "object"
+      },
+      "SendIncidentMessageRequest": {
+        "additionalProperties": false,
+        "description": "`POST /incidents/{incident_id}/messages` (R2, R5.1, R5.2).\n\nThe exact shape of `app.cleaning.api.schemas.SendCleaningTaskMessageRequest`, itself the\nshape of `ResolveIncidentRequest.materials` (design D5): `storable_text` guards against a\nvalue asyncpg cannot store, `Field(min_length=1, max_length=...)` rejects an empty or\noversized body as a `422` before anything reaches the use case, and\n`str_strip_whitespace=True` means the maximum counts characters *after* stripping — so a\nwhitespace-only message is refused rather than persisted.\n\n**The bound is imported, never re-derived**: `MAX_INCIDENT_MESSAGE_LENGTH` lives in\n`app/maintenance/domain/entities.py`, the module that owns the column — its DDL is next\ndoor in that module's `infrastructure/models.py`.\n\n`MultiLineText` rather than `SingleLineText`: a staff message can span more than one line,\nthe same choice `ResolveIncidentRequest.materials` makes.",
+        "properties": {
+          "content": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "SendIncidentMessageRequest",
         "type": "object"
       },
       "SetDocumentRequest": {
@@ -10838,6 +11273,186 @@
         ]
       }
     },
+    "/api/v1/cleaning-tasks/{task_id}/messages": {
+      "get": {
+        "description": "The task's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_CLEANING_TASKS` alone — `CLEANER`, `PROPERTY_MANAGER` and `TENANT_OWNER` already hold it, so reading needs no `or`.\n\n**Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her; an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` or `TENANT_OWNER` reaches every task of the tenant.",
+        "operationId": "list_cleaning_task_messages_api_v1_cleaning_tasks__task_id__messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskMessagePageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List a cleaning task's staff thread",
+        "tags": [
+          "cleaning"
+        ]
+      },
+      "post": {
+        "description": "Writes one message to the task's staff-to-manager thread and notifies the other side: a `CLEANER` sending one notifies every active `PROPERTY_MANAGER` of the tenant, and a `PROPERTY_MANAGER` sending one notifies the task's assigned cleaner, if any (R4).\n\nGated by `EXECUTE_CLEANING_TASKS` **or** `MANAGE_CLEANING_TASKS` — no new permission is declared; the two that already exist cover the cleaner and the manager respectively.\n\n**Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her — the same restriction `_load_task` already applies to every other cleaning-task endpoint — so an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` reaches every task of the tenant.",
+        "operationId": "send_cleaning_task_message_api_v1_cleaning_tasks__task_id__messages_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendCleaningTaskMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskMessageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The task does not exist for this caller — an unknown id, another tenant's task, and (for a `CLEANER`) another cleaner's task are all answered this way, indistinguishably."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The body is not a single non-empty `content` the database can store within `MAX_CLEANING_TASK_MESSAGE_LENGTH`, or it carries a field this operation does not accept."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Send a message on a cleaning task's staff thread",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
     "/api/v1/cleaning-tasks/{task_id}/photo-requirements": {
       "get": {
         "description": "The photo categories the task's checklist template declares, each with the label the template's author wrote, whether the close demands it, and whether one has already been uploaded. It exists so a `CLEANER` can be shown **a button per category** without holding `READ_CLEANING_TEMPLATES`.\n\n**Belonging to this collection and `required` are two different facts.** A `photo_type` listed here may be uploaded; `required: true` additionally means the close will refuse without it. An optional category is listed, because the upload admits it.\n\n**A `photo_type` that is not in this collection is exactly what `POST /cleaning-tasks/{task_id}/photos` answers `404` for.** The two routes read the same template, so the relation is a guarantee and not a coincidence to be discovered by trying identifiers.\n\nOrder is the template's own — the order its author declared, which is the order the work is done in — and it is stable across requests.\n\n`uploaded` reports what is already filed and decides nothing: whether the task may be closed is answered by `POST /cleaning-tasks/{task_id}/complete` and by nothing else. A template that declares no photo answers `200` with an empty collection, never a `404`.\n\nAnswered whatever the task's status: the cleaner needs to know what will be asked of her **before** starting, not only while in progress. A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant, and that restriction comes from the token's persisted role — no request field can widen it.",
@@ -11901,6 +12516,53 @@
         "summary": "Resolve a conversation",
         "tags": [
           "messaging"
+        ]
+      }
+    },
+    "/api/v1/dashboard/occupancy-series": {
+      "get": {
+        "description": "Seven points, Monday to Sunday of the caller's current ISO week (`dashboard-occupancy-series` R1), one per calendar day: how many of the tenant's active properties are occupied that day out of how many are active in total, and the resulting percentage. 'Occupied' unions reservation coverage with `BLOCKED_BY_OWNER`/`OUT_OF_SERVICE` transition coverage, snapshotted at the end of each UTC day. No colour and no weekday label: the frontend derives both from `date`, the same line the other two dashboard routes already hold for `operational_state`. `data` comes back `null` — never a partial series — when the caller's role lacks `Permission.READ_RESERVATIONS`, the same 'agregar no concede' rule `operational_kpis` applies.",
+        "operationId": "get_occupancy_series_api_v1_dashboard_occupancy_series_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccupancySeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Weekly tenant-wide occupancy series",
+        "tags": [
+          "dashboard"
         ]
       }
     },
@@ -13935,6 +14597,186 @@
         ]
       }
     },
+    "/api/v1/incidents/{incident_id}/messages": {
+      "get": {
+        "description": "The incident's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_INCIDENTS` alone — `TECHNICIAN`, `PROPERTY_MANAGER` and `TENANT_OWNER` already hold it, so reading needs no `or`.\n\n**Row-level scoping is derived inside the use case, never from a request field.** A `TECHNICIAN` reaches only the incident assigned to them; an unowned incident and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` or `TENANT_OWNER` reaches every incident of the tenant.",
+        "operationId": "list_incident_messages_api_v1_incidents__incident_id__messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentMessagePageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List an incident's staff thread",
+        "tags": [
+          "maintenance"
+        ]
+      },
+      "post": {
+        "description": "Writes one message to the incident's staff-to-manager thread and notifies the other side: a `TECHNICIAN` sending one notifies every active `PROPERTY_MANAGER` of the tenant, and a `PROPERTY_MANAGER` sending one notifies the incident's assigned technician, if any (R4).\n\nGated by `EXECUTE_INCIDENTS` alone — no new permission is declared, and no `or` is needed: `EXECUTE_INCIDENTS` already covers both the technician and the manager (design D3).\n\n**Row-level scoping is derived inside the use case, never from a request field.** A `TECHNICIAN` reaches only the incident assigned to them — the same restriction `_load_incident_in_scope` already applies to every other incident endpoint — so an unowned incident and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` reaches every incident of the tenant.",
+        "operationId": "send_incident_message_api_v1_incidents__incident_id__messages_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendIncidentMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentMessageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The incident does not exist for this caller — an unknown id, another tenant's incident, and (for a `TECHNICIAN`) another technician's incident are all answered this way, indistinguishably."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The body is not a single non-empty `content` the database can store within `MAX_INCIDENT_MESSAGE_LENGTH`, or it carries a field this operation does not accept."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Send a message on an incident's staff thread",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
     "/api/v1/incidents/{incident_id}/photos": {
       "get": {
         "description": "Oldest first, so `BEFORE` and `AFTER` read in the order the work happened. Each entry carries a signed URL **minted for this response**; a URL from an earlier response may already have expired.\n\n`READ_INCIDENTS`, so a `TENANT_OWNER` can read the evidence as well as the manager — reading it is what they do, uploading it is the technician's. A `TECHNICIAN` sees only the incidents assigned to them, and that restriction is derived from the token's role with no parameter that can widen it.",
@@ -15431,6 +16273,152 @@
         "summary": "Download the statement as a PDF",
         "tags": [
           "statements"
+        ]
+      }
+    },
+    "/api/v1/platform/tenants": {
+      "post": {
+        "description": "Requires SUPER_ADMIN — issues MANAGE_PLATFORM.",
+        "operationId": "create_tenant_api_v1_platform_tenants_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTenantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a tenant (SUPER_ADMIN only)",
+        "tags": [
+          "platform"
+        ]
+      }
+    },
+    "/api/v1/platform/tenants/{tenant_id}/users": {
+      "post": {
+        "description": "Requires SUPER_ADMIN — issues MANAGE_PLATFORM.",
+        "operationId": "create_user_in_tenant_api_v1_platform_tenants__tenant_id__users_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlatformUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedPlatformUserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a user in a named tenant (SUPER_ADMIN only)",
+        "tags": [
+          "platform"
         ]
       }
     },

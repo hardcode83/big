@@ -28,6 +28,8 @@ Allow group autohostai-dev-terraform to manage secret-family in tenancy
 Allow group autohostai-dev-terraform to read compartments in tenancy
 Allow group autohostai-dev-terraform to manage dynamic-groups in tenancy
 Allow group autohostai-dev-terraform to manage policies in tenancy
+Allow group autohostai-dev-terraform to manage email-family in tenancy
+Allow group autohostai-dev-terraform to manage credentials in tenancy
 ```
 
 > Si el grupo está en un domain distinto del Default, cualificar: `Allow group 'NombreDominio'/'autohostai-dev-terraform' to ...`.
@@ -51,6 +53,16 @@ Decisión del usuario en el gate de diseño (OQ1, 2026-08-15), con la misma prio
 
 Alternativa rechazada, descrita entera porque es la que habría que retomar si la revisión decide lo contrario: crear el usuario y su Customer Secret Key **fuera de Terraform** (procedimiento en el RUNBOOK) e inyectar el par como variables sensibles desde GitHub Secrets, tal como ya se hace con `github_app_private_key`. Mantiene `svc-terraform-dev` sin `manage users`, a cambio de un paso manual por entorno y de una rotación que deja de ser código.
 
+**Ampliación 2026-09-02 (change `smtp-delivery-adapter`) — nueva sentencia, no una relajación del mismo tipo que las dos anteriores.** El change aprovisiona el relay de OCI Email Delivery por Terraform (D6 de `design.md`): `oci_email_email_domain`, `oci_email_dkim` y `oci_email_sender` son un **tipo de recurso nuevo** para esta policy, `email-family`, que ninguna sentencia anterior cubre — a diferencia de `manage users`/`manage groups`/`manage buckets`, que solo ampliaron el alcance de verbos ya usados por otro recurso.
+
+`manage email-family in tenancy` y no `use`: `svc-terraform-dev` necesita crear y actualizar estos recursos (`EMAIL_DOMAIN_CREATE`, `APPROVED_SENDER_CREATE`, y sus equivalentes de DKIM), no solo enviar correo con ellos — enviar (`SmtpSend`, permiso `APPROVED_SENDER_USE`) es un verbo **distinto y mucho más acotado** que sí se aplica al usuario de servicio `autohostai-${var.env}-smtp` que el propio `main.tf` crea, vía `oci_identity_policy.smtp_send_access` (`Allow group autohostai-${var.env}-smtp to use approved-senders in compartment id ...`) — esa policy la aplica el pipeline como parte del mismo apply, no un admin de la tenancy, porque `svc-terraform-dev` ya tiene `manage policies` (ampliación 2026-07-29) y `email-family`/`use approved-senders` no son verbos que necesiten relajar el mínimo privilegio de ese usuario de servicio SMTP: solo puede enviar correo, nada de gestionar el dominio ni los approved senders.
+
+Mismo precedente que las dos ampliaciones anteriores: una sentencia de tenancy nueva la aplica un **admin de la tenancy en la consola OCI**, fuera de `main.tf`, antes del primer `terraform apply` que declare estos recursos — si no se aplica antes, el `apply` falla con `NotAuthorizedOrNotFound` al crear `oci_email_email_domain.smtp`.
+
+**Segunda sentencia nueva, descubierta en el primer `apply` real contra dev (2026-09-03) y no anticipada en el gate de diseño**: `manage credentials in tenancy`. `oci_identity_smtp_credential.smtp` falló con `404-NotAuthorizedOrNotFound` (`POST .../users/{id}/smtpCredentials`) incluso con `manage email-family` ya aplicado — la referencia de policies de OCI es explícita en que las credenciales SMTP de un usuario son un **resource-type propio**, `credentials`, distinto del genérico `users` que ya cubre auth tokens, API keys y Customer Secret Keys (por eso `oci_identity_customer_secret_key.media` nunca necesitó esta sentencia: es un recurso de `users`, no de `credentials`). No se detectó antes porque ni `/sdd:run` ni `/sdd:review` tienen credenciales OCI reales — la única forma de encontrarlo era un `apply` de verdad.
+
+**`smtp_send_access` es mínima en el verbo, no en el alcance, y hay que decirlo con la misma honestidad que el punto 2 de "Policy del runner" de abajo aplica a `var.compartment_ocid`.** El verbo es correcto (`use approved-senders`, el permiso `APPROVED_SENDER_USE` que cubre exactamente `SmtpSend` — nada de `manage`, nada de `email-family`): una credencial SMTP filtrada no puede crear ni modificar dominios ni approved senders. Pero `var.compartment_ocid` es **hoy la raíz de la tenancy** (ver "Mejora futura" al final de este documento), y una concesión ahí la hereda todo compartment descendiente, sin condición que la acote a un `oci_email_sender` concreto — OCI no expone una variable de policy para eso. Consecuencia real: una credencial SMTP filtrada podría enviar como **cualquier** approved sender presente o futuro de la tenancy, no solo como `noreply@mail.${var.public_hostname}`. Se acepta por lo mismo que las dos relajaciones de arriba — *todo como código, cero pasos manuales por entorno* —, y queda ligado a la misma mejora futura: un compartment `dev` dedicado acotaría esta sentencia a `in compartment dev` igual que al resto.
+
 **Sin cambios por el change `ingress-https-dev` (2026-07-29):** el ingress HTTPS añade recursos de **Cloudflare** (otro provider, otra API) más un `oci_vault_secret` y una ampliación de la policy del runner. Ambas cosas caen en verbos que `svc-terraform-dev` ya tiene (`manage secret-family`, `manage policies`), así que **no hace falta ampliar esta policy**.
 
 ## Policy del runner (creada por Terraform, no por un admin)
@@ -68,8 +80,16 @@ Allow dynamic-group autohostai-dev-runner to read secret-bundles in compartment 
              target.secret.id = '<media-secret-access-key>',
              target.secret.id = '<media-s3-endpoint>',
              target.secret.id = '<media-region>',
-             target.secret.id = '<demo-account-password>'}
+             target.secret.id = '<demo-account-password>',
+             target.secret.id = '<smtp-host>',
+             target.secret.id = '<smtp-port>',
+             target.secret.id = '<smtp-username>',
+             target.secret.id = '<smtp-password>',
+             target.secret.id = '<smtp-from-email>',
+             target.secret.id = '<smtp-use-tls>'}
 ```
+
+Los seis últimos entran con `smtp-delivery-adapter` (2026-09-02), en el mismo apply que crea los seis secretos (`oci_vault_secret.smtp_*` en `main.tf`) — misma mitigación que los cuatro de medios: olvidar uno haría fallar "Render .env" nombrando la clave, en vez de dejar el runner ciego a un secreto que sí existe.
 
 **Una sola sentencia y una sola clase de condición**, desde el change `ingress-https-hardening` (2026-08-04). Los cuatro de medios entraron con `object-storage-provisioning` (2026-08-15) y el último, `demo-account-password`, con `demo-user` (2026-08-24), cada uno en el mismo `apply` que crea su secreto — que es la mitigación del punto 1 de abajo. Ese último lo lee el workflow `demo-reset` y no el deploy, y lo resuelve **por nombre** como el token del túnel, así que le vale igual esta condición por OCID. **Este bloque es el espejo de `oci_identity_policy.dev_runner_read_secrets` en `main.tf` y tiene que contarlos igual**: si al auditar ves una enumeración viva con más entradas que esta, lo primero que hay que descartar es que este documento se quedó atrás, no que alguien ensanchó el acceso.
 

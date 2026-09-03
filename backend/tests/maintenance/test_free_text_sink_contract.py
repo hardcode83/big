@@ -426,6 +426,13 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
         # reference to `IncidentModel`, no `.description =` assignment and no session at all.
         # It cannot write a column; it declares OpenAPI prose for one anonymous route.
         "maintenance/api/photos_router.py": {"description"},
+        # `staff-messaging` section 5. Same shape as `photos_router.py` right above: it names
+        # `description` exactly twice, once per route decorator, both FastAPI's own OpenAPI
+        # prose for `POST`/`GET /incidents/{incident_id}/messages`. It writes `content` — not a
+        # sink column of *this* census, `incident_messages.content` is a different column under
+        # a different exception (rule 11's excepción 3, its own row) — and holds no session, so
+        # it cannot write `incidents.title`/`description` either way.
+        "maintenance/api/messages_router.py": {"description"},
         # `seed-data-demo-extension`: the demo seed is the third writer of both columns and the
         # first one outside `maintenance/`. It is here rather than waved through because its
         # contract is declared in the census — **closed form by discipline**: the three PRD §27

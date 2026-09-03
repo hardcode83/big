@@ -29,18 +29,21 @@ from app.auth.domain.policy import Permission
 from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.dashboard.api.dependencies import (
     get_dashboard_cards_use_case,
+    get_occupancy_series_use_case,
     get_operational_kpis_use_case,
     get_property_dashboard_use_case,
 )
 from app.dashboard.api.schemas import (
     MAX_PAGE,
     MAX_PER_PAGE,
+    OccupancySeriesResponse,
     OperationalKpisResponse,
     PropertyDashboardPageResponse,
     PropertyDetailResponse,
 )
 from app.dashboard.application.use_cases import (
     GetDashboardCardsUseCase,
+    GetOccupancySeriesUseCase,
     GetOperationalKpisUseCase,
     GetPropertyDashboardUseCase,
 )
@@ -165,3 +168,35 @@ async def get_operational_kpis(
         today=today,
     )
     return OperationalKpisResponse.from_domain(kpis)
+
+
+@router.get(
+    "/dashboard/occupancy-series",
+    response_model=OccupancySeriesResponse,
+    summary="Weekly tenant-wide occupancy series",
+    description=(
+        "Seven points, Monday to Sunday of the caller's current ISO week "
+        "(`dashboard-occupancy-series` R1), one per calendar day: how many of the tenant's "
+        "active properties are occupied that day out of how many are active in total, and "
+        "the resulting percentage. 'Occupied' unions reservation coverage with "
+        "`BLOCKED_BY_OWNER`/`OUT_OF_SERVICE` transition coverage, snapshotted at the end of "
+        "each UTC day. No colour and no weekday label: the frontend derives both from "
+        "`date`, the same line the other two dashboard routes already hold for "
+        "`operational_state`. `data` comes back `null` — never a partial series — when the "
+        "caller's role lacks `Permission.READ_RESERVATIONS`, the same 'agregar no concede' "
+        "rule `operational_kpis` applies."
+    ),
+)
+async def get_occupancy_series(
+    authenticated: ReadDep,
+    today: TodayDep,
+    use_case: Annotated[
+        GetOccupancySeriesUseCase, Depends(get_occupancy_series_use_case)
+    ],
+) -> OccupancySeriesResponse:
+    points = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        role=authenticated.context.role,
+        today=today,
+    )
+    return OccupancySeriesResponse.from_domain(points)
