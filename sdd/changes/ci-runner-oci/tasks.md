@@ -28,7 +28,7 @@
 
 - [x] 5.1 `.github/workflows/deploy-dev.yml` (3 jobs a migrar: `provenance`, `build-backend`, `build-frontend`): `runs-on` de los 3 a `[self-hosted, dev]`. El job `deploy` ya está en `[self-hosted, dev]`, sin cambios. Mantener `concurrency` exacto: `build-backend-${{ github.ref }}` y `build-frontend-${{ github.ref }}` con `cancel-in-progress: true` en los builds, `group: deploy-dev` con `cancel-in-progress: false` en el deploy (compartido con `demo-reset.yml`, ver D4). `docker/login-action` sigue usando `GITHUB_TOKEN` (`packages: write`) — sin nuevo secret (R5). Cabecera de comentario. [R1] [R2] [R3] [R5] [R7]
 
-## 6. Migrate multiarch-build-check.yml (QEMU caveat)
+## 6. Migrate multiarch-build-check.yml (QEMU caveat) <!-- panel: PASS 2026-09-03 -->
 
 - [x] 6.1 `.github/workflows/multiarch-build-check.yml` (2 jobs: `build-backend`, `build-frontend`): `runs-on` a `[self-hosted, dev]`. Mantener `docker/setup-qemu-action@v3` + `docker/setup-buildx-action@v3` + `docker/build-push-action@v6` con `platforms: linux/amd64,linux/arm64`, `push: false`. Cabecera de comentario. **SI** la verificación de §1.2 reveló que QEMU no se registra en binfmt, **revertir solo este workflow** a `runs-on: ubuntu-latest` y declarar la excepción ("9 de 10 migrados, 1 excepción deliberada") en la tabla del runbook (D5, R4). [R1] [R2] [R4] [R7]
 
