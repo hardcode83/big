@@ -321,6 +321,11 @@ Comandos de consola del backend (no hay endpoint para ninguno, a propósito):
 Push a `main` que toque `backend/**`/`frontend/**` → `.github/workflows/deploy-dev.yml` construye las imágenes `prod` arm64, las publica en GHCR y las despliega en la VM dev (Oracle Cloud) mediante un runner self-hosted que corre en la propia VM (deploy local, sin SSH). Detalle de operación en [`infra/environments/dev/RUNBOOK.md`](infra/environments/dev/RUNBOOK.md) §6.
 
 La app desplegada se sirve en **https://autohostai.digitalsec.work**, a través de un Cloudflare Tunnel: `cloudflared` corre en la VM y abre una conexión saliente al edge, que termina TLS y entrega al frontend por una red de compose dedicada al ingress — desde la que **no** se alcanzan `postgres`, `redis` ni `backend`, para que el routing remoto del túnel no pueda publicarlos. **Los puertos 8000 y 3000 ya no están expuestos** — el security list de la VM solo permite SSH (22), y no hay ningún puerto entrante para HTTP/HTTPS. Decisión y alternativas en [`docs/adr/0003-https-ingress-dev.md`](docs/adr/0003-https-ingress-dev.md); operación y diagnóstico en [`RUNBOOK.md`](infra/environments/dev/RUNBOOK.md) §7.
+
+## CI / runner self-hosted
+
+Los 10 workflows bajo `.github/workflows/` corren en el runner self-hosted de la VM dev (Oracle Cloud) con label `[self-hosted, dev]` — provisión y diagnóstico en [`infra/environments/dev/RUNBOOK.md`](infra/environments/dev/RUNBOOK.md) §6. No consumen minutos de GitHub-hosted; la vuelta a `ubuntu-latest` cuando haga falta (runner VM caída, regresión por incompatibilidad de algún job) es un `git revert` del PR de migración. Procedimiento, comando exacto y validación en [`docs/ci-runner-rollback.md`](docs/ci-runner-rollback.md) (runbook versionado en el repo, R6 del change `ci-runner-oci`).
+
 - `docs/` — documentación extendida por capability y diagramas (`docs/diagrams/`: C4, hexagonal, ER, state machine, secuencias).
 - `infra/` — IaC por entorno (Terraform), no por dominio de negocio; ver `infra/environments/<entorno>/README.md`.
 - `.github/workflows/` — pipelines de CI/CD (GitHub Actions).
