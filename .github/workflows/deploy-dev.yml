@@ -1,3 +1,6 @@
+# Runner self-hosted en la VM dev (label `[self-hosted, dev]`). Rollback: ver
+# docs/ci-runner-rollback.md (procedimiento + SHA del commit de migración).
+# Cambio: ci-runner-oci (PR <migration-pr>).
 name: deploy-dev
 
 # CD del entorno dev: construye las imágenes `prod` arm64 de backend/frontend, las publica
@@ -21,7 +24,7 @@ jobs:
   # Un job propio, no un step en cada build: R1.5 exige que las dos imágenes lleven
   # idéntica cadena, y calcularlo dos veces es exactamente cómo se desincronizan (D2).
   provenance:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     permissions:
       contents: read
     outputs:
@@ -62,7 +65,7 @@ jobs:
   build-backend:
     needs: provenance
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 20
     concurrency:
       group: build-backend-${{ github.ref }}
@@ -101,7 +104,7 @@ jobs:
   build-frontend:
     needs: provenance
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 20
     concurrency:
       group: build-frontend-${{ github.ref }}
