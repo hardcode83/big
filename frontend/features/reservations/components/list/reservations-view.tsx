@@ -87,7 +87,7 @@ export function ReservationsView() {
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      <h1 className="text-xl font-semibold text-foreground">
+      <h1 className="text-xl font-semibold text-foreground text-glow">
         {tNav("routes.reservations.title")}
       </h1>
       <ReservationsFilters value={filters} onChange={setFilters} />

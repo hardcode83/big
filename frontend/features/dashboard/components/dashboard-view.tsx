@@ -87,7 +87,7 @@ export function DashboardView() {
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      <h1 className="text-headline-md font-semibold text-foreground">
+      <h1 className="text-headline-md font-semibold text-foreground text-glow">
         {tNav("routes.dashboard.title")}
       </h1>
       {body()}
