@@ -157,7 +157,7 @@ Rejected: dividir en `[self-hosted, dev, ci]` y `[self-hosted, dev, cd]` con un 
 ## Data & interfaces
 
 - **Sin cambios de esquema**, **sin nuevos secrets/variables** (R5 del proposal), **sin nuevas API contracts**.
-- **Sin cambios de variables en `.env`**: `deploy-dev.yml` sigue escribiéndolo igual en su workspace; `demo-reset.yml` lo **lee** (no lo escribe — corregido 2026-09-03, `sdd-security` cuarta pasada) del mismo workspace compartido, con su precondición explícita si no existe; los demás workflows no tocan `.env`.
+- **Sin cambios de variables en `.env`**: mismo contenido de siempre, pero desde la sexta pasada (`sdd-security`) `deploy-dev.yml` lo escribe en `$HOME/.autohostai-dev-runtime.env` en vez del workspace del checkout (ver Risks & mitigations); `demo-reset.yml` lo **lee** de esa misma ruta, con su precondición explícita si no existe; los demás workflows no tocan `.env`.
 - **Sin nuevas Actions**: las acciones usadas hoy (`actions/checkout@<sha>`, `astral-sh/setup-uv@<sha>`, `hashicorp/setup-terraform@<sha>`, `docker/setup-buildx-action@<sha>`, `docker/setup-qemu-action@<sha>`, `docker/login-action@<sha>`, `docker/build-push-action@<sha>`, `actions/setup-node@<sha>`) siguen siendo las mismas. Pineadas por SHA en los 9 workflows migrados; **excepción preexistente, fuera de esta migración**: `multiarch-build-check.yml` usa tags mutables (`@v3`/`@v4`/`@v6`) porque se queda en `ubuntu-latest` (D5) y este change no toca sus steps — su diff es solo la cabecera de excepción (comentario). Corregir su pinning, si se decide, es un change aparte.
 - **Sin cambios de labels ni de Actions Variables**: el label `dev` ya está en el runner; `vars.GH_APP_ID`, `vars.GH_APP_INSTALLATION_ID`, etc. siguen leyéndose igual desde los workflows (R5).
 
