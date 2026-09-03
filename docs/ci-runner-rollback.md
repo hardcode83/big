@@ -8,7 +8,7 @@ Referencias rápidas: PR de migración `<n>` · SHA del commit `<migration_sha>`
 
 ## 1. Resumen
 
-El change `ci-runner-oci` migra 9 de los 10 workflows bajo `.github/workflows/` al runner self-hosted de la VM `dev` con label `[self-hosted, dev]` (la excepción es `multiarch-build-check.yml`, ver §2). Antes del merge del PR, cada workflow migrado ha corrido al menos una vez verde en el runner (R7). Tras el merge:
+El change `ci-runner-oci` migra 9 de los 10 workflows bajo `.github/workflows/` al runner self-hosted de la VM `dev` con label `[self-hosted, dev]` (la excepción es `multiarch-build-check.yml`, ver §2). Antes del merge del PR, cada workflow migrado ha corrido al menos una vez verde en el runner (R7) — **salvo 6 jobs que no tienen evidencia runner-side posible antes de mergear** (`deploy-dev`: `build-backend`/`build-frontend`/`deploy`; `infra-dev`: `plan`/`apply`/`check` — gateados a `main` o filtrados por `paths` que este PR no toca; `r7-evidence.md` los registra `skipped`, no `success`). Su primera evidencia real llega con el primer run que sí los dispare tras el merge — riesgo aceptado, ver `design.md` Risks & mitigations. Tras el merge:
 
 - **PR**: `<n>`
 - **Commit**: `<migration_sha>` (SHA del merge; o del squash si el PR se fusionó por squash)
