@@ -63,14 +63,33 @@ mismos `_require_text` / `_require_email` / `normalise_country` / `normalise_tim
 `normalise_language` que ya usa `Tenant.update`. `backend/app/tenants/domain/repositories.py`
 gana un método `add(tenant: Tenant, config: TenantConfig) -> None` que persiste los dos con
 `session.add`, y `backend/app/tenants/infrastructure/repositories.py` lo implementa
-insertando ambos modelos y haciendo un único `flush`. La unicidad de nombre se delega a un
-`UniqueConstraint('name', name='uq_tenants_name')` que **esta entrada añade** mediante una
-migración nueva (`tenants_name_unique`, encadenada a `c22b8ae01096`): la baseline
-`4a5faad7796b_baseline_domain_foundation_core.py` crea `tenants.name` como `String(200)`
-sin restricción, y `bootstrap.py:176` documenta expresamente la ausencia. La migración
-también pone `unique=True` en `TenantModel.name`. El `IntegrityError` que el índice levanta
-se traduce a `TenantAlreadyExistsError` y de ahí a 409 por el caso de uso, igual que
-`user-management` traduce la violación de `uq_users_lower_email`.
+insertando ambos modelos con **dos `flush`, no uno** — enmienda a lo que esta entrada dijo
+primero, y la razón importa: `tenant_configs.tenant_id` es una `ForeignKey` a `tenants.id`,
+dos `session.add` no garantizan el orden de INSERT en SQLAlchemy 2, y un único `flush` al
+final haría competir el fallo de la FK con la violación de UNIQUE que queremos traducir. El
+primer `flush` es lo que hace aflorar `uq_tenants_name` limpiamente.
+
+La unicidad de nombre se delega a un `UniqueConstraint('name', name='uq_tenants_name')` que
+**esta entrada añade** mediante una migración nueva (`936fef5a01b1_tenants_name_unique.py`):
+la baseline `4a5faad7796b_baseline_domain_foundation_core.py` crea `tenants.name` como
+`String(200)` sin restricción, y `bootstrap.py:176` documenta expresamente la ausencia.
+
+Esa migración **no** se encadena a `c22b8ae01096` como esta entrada previó: cuando se escribió
+había dos cabezas paralelas (`c22b8ae01096` de `super-admin-identity` y `r3v1ew5a03` de
+`revenue-reviews`), así que cuelga de una merge revision propia, `936fef59b1d4`. Y `main`
+mergeó esas dos mismas cabezas por su lado (`a1b2c3d4e5f6`), de modo que sincronizar la base
+dejó de nuevo dos cabezas y hizo falta una tercera merge revision, `4ba1f499f7c2`, para que
+`alembic upgrade head` del contenedor `migrate` vuelva a tener un único destino. Son tres
+ficheros de migración en total, dos de ellos sin operación de esquema.
+
+La restricción se declara **en `__table_args__` con ese nombre explícito**, no con
+`unique=True` en la columna: `unique=True` deja que el backend elija el nombre (Postgres
+deriva `tenants_name_key`), y entonces los dos caminos de esquema discrepan —la BD de test se
+construye con `create_all` desde el metadata, la desplegada por la migración—, lo que obligaba
+a que la traducción del `IntegrityError` buscase dos grafías. Con un nombre explícito los dos
+caminos producen la misma restricción y la traducción tiene una sola cosa que reconocer. Ese
+`IntegrityError` se traduce a `TenantAlreadyExistsError` y de ahí a 409 por el caso de uso,
+igual que `user-management` traduce la violación de `uq_users_lower_email`.
 
 **Why:** el bootstrap ya hace esto a mano y vale como prueba de que la operación existe; lo
 que falta es darle la forma de dominio (validación centralizada en la entidad, no en
@@ -228,10 +247,19 @@ Dos rutas nuevas en `backend/app/platform/api/router.py`, montadas en `app/main.
 
 ### Schema
 
-Ninguna migración nueva. El escritor usa las tablas que ya están: `tenants` (cinco campos
-que ya existen en `tenants`/`tenant_configs`), `users` (las cinco columnas que ya tiene el
-esquema), `audit_logs` (la fila existente con `tenant_id` rellenado por la entidad
-afectada, no por la sesión).
+**Ninguna columna nueva, pero sí tres migraciones** (esta sección decía «ninguna migración
+nueva» y contradecía a D2, que siempre pidió una): `936fef5a01b1_tenants_name_unique.py`
+añade `uq_tenants_name` sobre `tenants(name)` —la única operación de esquema del change— y
+las otras dos, `936fef59b1d4` y `4ba1f499f7c2`, son merge revisions vacías que reunifican la
+cadena (ver D2). Sin backfill a propósito: el bootstrap es el único escritor previo de
+`tenants.name` y ya rechaza duplicados, así que la migración está diseñada para fallar
+ruidosamente si alguna BD trajera nombres repetidos, en vez de elegir en silencio qué fila
+sobrevive.
+
+El escritor usa las tablas que ya están: `tenants` (cinco campos que ya existen en
+`tenants`/`tenant_configs`), `users` (las cinco columnas que ya tiene el esquema),
+`audit_logs` (la fila existente con `tenant_id` rellenado por la entidad afectada, no por la
+sesión).
 
 ### Config
 

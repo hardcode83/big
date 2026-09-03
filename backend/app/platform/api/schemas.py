@@ -26,6 +26,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.auth.api.user_schemas import MAX_PHONE
 from app.auth.domain.entities import User
 from app.auth.domain.enums import UserRole, UserStatus
 
@@ -90,8 +91,13 @@ class CreatePlatformUserRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
     email: EmailStr
-    full_name: str = Field(max_length=MAX_NAME)
-    phone: str | None = None
+    # `min_length=1` for the same reason `CreateTenantRequest.name` carries it: an empty
+    # string has to be a 422 naming the field, not a row created from a blank value
+    # (R1.3/R3.6). `phone` is bounded by the very constant the route this body mirrors
+    # uses (`CreateUserRequest`, `app.auth.api.user_schemas`) — R4.3 asks for the same
+    # validation, and an unbounded string was not it.
+    full_name: str = Field(min_length=1, max_length=MAX_NAME)
+    phone: str | None = Field(default=None, max_length=MAX_PHONE)
     role: UserRole
 
     _check_role = field_validator("role")(_reject_super_admin)

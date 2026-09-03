@@ -142,6 +142,16 @@ async def test_post_tenants_with_an_invalid_body_answers_422_with_the_prd_envelo
     # All three fields the body broke are named in the envelope.
     assert {"name", "billing_email", "country"} <= failed_fields
 
+    # R1.3's other half, which was unpinned: the envelope leaks NOTHING else. The
+    # serialiser in `app/core/errors.py` is an allowlist of exactly three keys, and this
+    # is what holds it to that: handing Pydantic's raw error through would add `input`
+    # — the value the caller submitted, echoed back — plus `url` and sometimes `ctx`.
+    for item in body["error"]["details"]["errors"]:
+        assert set(item) == {"loc", "type", "msg"}, item
+    serialised = response.text.lower()
+    for leak in ("sqlalchemy", "asyncpg", "psycopg", "traceback", "uq_"):
+        assert leak not in serialised, leak
+
 
 # --- 4.10 happy path: POST /platform/tenants/{id}/users (R3.1, R3.4) ----------------
 
@@ -178,6 +188,37 @@ async def test_post_users_with_role_super_admin_answers_422(
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+# --- R3.6 invalid body on the user endpoint ----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_post_users_with_an_invalid_body_answers_422_with_the_failing_fields(
+    api, tenant_a, super_admin
+) -> None:
+    """R3.6: the user route's OWN body validation.
+
+    The tenant route had this test and this one did not, so a criterion the change states
+    was resting on its sibling: nothing here would have failed if
+    `CreatePlatformUserRequest` had lost its field rules.
+    """
+    response = await api.post(
+        f"/api/v1/platform/tenants/{tenant_a.id}/users",
+        json={
+            "email": "not-an-email",
+            "full_name": "",
+            "phone": None,
+            "role": UserRole.PROPERTY_MANAGER.value,
+        },
+        headers=auth_header(api, super_admin),
+    )
+
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    failed_fields = {item["loc"][-1] for item in body["error"]["details"]["errors"]}
+    assert {"email", "full_name"} <= failed_fields, failed_fields
 
 
 # --- 4.12 SUSPENDED and missing tenant are indistinguishable (R3.3) -----------------

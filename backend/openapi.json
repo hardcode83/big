@@ -1694,12 +1694,14 @@
           },
           "full_name": {
             "maxLength": 200,
+            "minLength": 1,
             "title": "Full Name",
             "type": "string"
           },
           "phone": {
             "anyOf": [
               {
+                "maxLength": 30,
                 "type": "string"
               },
               {

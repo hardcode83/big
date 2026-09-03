@@ -20,7 +20,9 @@ from app.tenants.infrastructure.models import TenantConfigModel, TenantModel
 # Substring-matched against `IntegrityError.orig` so a Postgres-level rename still maps
 # here, and so a future UNIQUE on a *different* column reaches the router unmapped
 # rather than a 409 it cannot justify.
-_UNIQUE_NAME_CONSTRAINTS = frozenset({"uq_tenants_name", "tenants_name_key"})
+# Both schema paths (`create_all` from the model metadata, and the migration) now name
+# this constraint identically, so there is exactly one spelling to recognise.
+_UNIQUE_NAME_CONSTRAINT = "uq_tenants_name"
 
 # `status` is absent on purpose (R5.3), and so are the identity columns.
 TENANT_WRITABLE = frozenset(
@@ -100,7 +102,7 @@ class SqlAlchemyTenantRepository:
         try:
             await self._session.flush()
         except IntegrityError as error:
-            if any(name in str(error.orig) for name in _UNIQUE_NAME_CONSTRAINTS):
+            if _UNIQUE_NAME_CONSTRAINT in str(error.orig):
                 raise TenantAlreadyExistsError(
                     f"A tenant named {tenant.name!r} already exists"
                 ) from error
