@@ -513,6 +513,14 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/conversations/{conversation_id}/messages",
         "/api/v1/conversations/{conversation_id}/escalate",
         "/api/v1/conversations/{conversation_id}/resolve",
+        # `platform-admin-api` R6.1: the cross-tenant surface, two routes under one router,
+        # both gated on `MANAGE_PLATFORM` (held by `SUPER_ADMIN` and nobody else,
+        # `app.auth.domain.policy`). Asserted per role in
+        # `tests/platform/test_api.py::test_post_tenants_with_a_non_super_admin_token_and_an_invalid_body_answers_403`
+        # — the gate cuts BEFORE body validation, so an invalid body plus a non-SUPER_ADMIN
+        # token still answers `403` (R1.4 / 4.14).
+        "/api/v1/platform/tenants",
+        "/api/v1/platform/tenants/{tenant_id}/users",
     }
 
 

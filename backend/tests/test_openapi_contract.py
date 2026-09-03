@@ -155,6 +155,11 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         "pricing-rules",
         "price-recommendations",
         "provenance",
+        # `platform-admin-api` (R6.1, D5): the cross-tenant surface under one prefix. The two
+        # routes share `MANAGE_PLATFORM` and live on `platform_router` (`app.platform.api.router`),
+        # mounted last in `app.main` so a load failure here does not break the routers that
+        # already registered.
+        "platform",
     }
 
 
