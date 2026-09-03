@@ -199,7 +199,7 @@ Categorías:
   needs: frontend-foundation · size: L · kind: feature
 - [x] landing-public — [FE] **la página pública de producto en `/`**, que hoy es un `redirect("/dashboard")` y no existe en PRD §24. Entra ya por decisión de Jose (2026-08-23). Enmienda el `SHALL` de `specs/frontend-foundation.md:60` (*«Every surface is `noindex, nofollow`»*) y cambia el punto de entrada de la app … → changes/archive/2026-08-25-landing-public/
   needs: design-system-tokens · size: M · kind: feature
-- [ ] visual-restyle-workspace — [FE] **aplicar los tokens nuevos a las pantallas ya entregadas**: solo piel, sin arquitectura de información ni datos ni endpoints. Deja fuera, con motivo escrito, la reducción del sidebar de 13 destinos a 6, la rejilla con foto de `/properties` y los cuatro bloques agregados del dashboard …
+- [x] visual-restyle-workspace — [FE] **aplicar los tokens nuevos a las pantallas ya entregadas**: solo piel, sin arquitectura de información ni datos ni endpoints. Deja fuera, con motivo escrito, la reducción del sidebar de 13 destinos a 6, la rejilla con foto de `/properties` y los cuatro bloques agregados del dashboard … → changes/archive/2026-09-04-visual-restyle-workspace/
   needs: design-system-tokens · size: L · kind: feature
 - [x] reservation-amount-empty-render — [TECH] **la lista de reservas pinta un código de divisa suelto cuando no hay importe**: `{row.grossAmount ?? ""} {row.currency}` sale como « EUR». Replicado en cuatro sitios, y el propio fichero ya usa el idioma correcto (`?? "—"`) diez líneas antes. Se entregó así porque ningún test renderiza el caso nulo. Descubierto analizando el export de Stitch … → changes/archive/2026-08-25-reservation-amount-empty-render/
   size: S · kind: tech
