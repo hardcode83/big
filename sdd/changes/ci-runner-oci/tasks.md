@@ -36,7 +36,17 @@
 
 - [x] 7.1 `.github/workflows/demo-reset.yml`: el `runs-on: [self-hosted, dev]` ya está (caso base). Solo actualizar la cabecera de comentario para incluir el puntero al runbook. [R1]
 - [x] 7.2 Rellenar la tabla de `docs/ci-runner-rollback.md` §2 con los valores reales: workflow / `runs-on` previo / `runs-on` actual / excepción (multiarch-build-check si QEMU falló). Confirmar que la tabla cubre los 10 workflows y coincide con los `.yml` migrados (R6.1, R6.3). Verificar que `pr-review-cicd` (cuando se añada el chequeo de `runs-on:`) lo dé por bueno.
-- [ ] 7.3 Verificación end-to-end (R7): ejecutar `gh run list --workflow=<name> --json name,conclusion,runner --limit 1` por los 10 workflows contra el commit del PR. Para los que no se disparen en push/PR (típicamente `demo-reset.yml` por schedule), correr `workflow_dispatch` ad-hoc. Adjuntar la salida al PR como evidencia. Si algún workflow queda rojo, NO abrir el PR — escribir el bloqueo en `STATE.md` y `BLOCKED.md`, y reabrir §5 o §6 según corresponda. [R7]
+- [ ] 7.3 Verificación end-to-end (R7): ejecutar `gh run list --workflow=<name> --json name,conclusion,runner --limit 1` por los 10 workflows contra el commit del PR. Para los que no se disparen en push/PR (típicamente `demo-reset.yml` por schedule), correr `workflow_dispatch` ad-hoc. Adjuntar la salida al PR como evidencia. Si algún workflow queda rojo, NO abrir el PR — escribir el bloqueo en `STATE.md` y `BLOCKED.md`, y reabrir §5 o §6 según corresponda. [R7] **Primera pasada 2026-09-03 (branch `sdd/ci-runner-oci` @ `f82a035`)**: 5 verdes, 4 rojos por tooling implícito de `ubuntu-latest` → design D11 y §8. Se cierra tras §8.5.
+
+## 8. Tooling pins — enmienda D11 tras la verificación R7
+
+<!-- Añadida el 2026-09-03 por deviación (skill run, paso 4): D3 «solo runs-on» dejó 4 jobs en rojo en el runner. Detalle medido en design.md D11. -->
+
+- [ ] 8.1 Crear `backend/.python-version` con el contenido `3.12` (misma versión que `python:3.12-slim` en `backend/devops/Dockerfile`). Verificar que `uv` lo honra: `cd backend && uv python find` debe resolver 3.12 si hay uv disponible; si no, se verifica en 8.5 con la línea «Using CPython 3.12.x» del log de `backend-tests-suite`. [R7] [D11]
+- [ ] 8.2 `.github/workflows/deploy-dev.yml`, job `provenance`: añadir tras el `actions/checkout` el paso `- uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4` con `with: node-version: "22"` (mismo pin y versión que `frontend-tests.yml:78-80`; sin `cache`, el job no instala dependencias). Nada más cambia en el fichero. [R3] [R7] [D11]
+- [ ] 8.3 `.github/workflows/frontend-tests.yml`, job `provenance-contract`: añadir inmediatamente antes del paso `Version parity` el paso `- uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0` con `with: python-version: "3.12"`. Nada más cambia. [R7] [D11]
+- [ ] 8.4 `.github/workflows/rule11-ownership.yml`: añadir inmediatamente antes del paso `La propiedad de un sumidero se declara en un solo sitio` el mismo paso `actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0` con `python-version: "3.12"`. Nada más cambia. [R7] [D11]
+- [ ] 8.5 Re-verificación R7 de los cuatro workflows tocados (`backend-tests`, `deploy-dev`, `frontend-tests`, `rule11-ownership`) por `workflow_dispatch` sobre la rama: los jobs no gateados a `main` terminan `success` con `runner_name = autohostai-dev-vm` (API REST de jobs), y `backend-tests-suite` registra «Using CPython 3.12». Regenerar `sdd/changes/ci-runner-oci/r7-evidence.md` con la tabla completa (los 5 verdes de la primera pasada siguen valiendo: sus ficheros no cambian en §8) y cerrar 7.3. [R7]
 
 ## Implementation Notes
 

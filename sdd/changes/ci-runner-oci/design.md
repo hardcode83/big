@@ -35,6 +35,8 @@ Razón: el patrón actual ya está declarado y la rotación de versiones vive en
 
 Rejected: pre-instalar todo en `runner-bootstrap.sh` — centraliza pero oscurece qué versión ejecuta realmente cada workflow; cualquier `bump` exige `RUNBOOK §6` (re-bootstrap manual sobre la VM viva, ya documentado por `oci-source-id-update-replaces-boot-volume` como delicada). Pre-instalar solo `qemu-user-static` para `multiarch-build-check` —asimétrico, y la acción `docker/setup-qemu-action@v3` lo trae al runner vía imagen, sin tocar el host.
 
+**Enmienda 2026-09-03 (hallazgo de R7, ver D11).** La premisa «las acciones ya traen el tooling» era cierta solo para el tooling que los workflows *declaraban*. Cuatro jobs usaban además tooling que `ubuntu-latest` preinstala y que nadie había declarado: `node` a pelo en `deploy-dev/provenance`, y un `python3` ≥ 3.11 implícito detrás de `make check-version-parity` y `make check-rule11-ownership`; y `uv sync` resolvía el intérprete contra el `/usr/bin/python3` 3.12.3 del runner de GitHub sin que ningún fichero lo fijara. La decisión D2 se mantiene y se aplica con más rigor: **ese tooling también se declara por job** (acción pineada o fichero de versión del proyecto), nunca en el bootstrap de la VM.
+
 ### D3 — Cambios en cada `.yml`: solo `runs-on` + cabecera del runbook
 
 **Chosen:** la migración de un workflow consiste en:
@@ -48,7 +50,9 @@ Rejected: pre-instalar todo en `runner-bootstrap.sh` — centraliza pero oscurec
 # Migration: change ci-runner-oci (PR <n>).
 ```
 
-El resto del workflow (actions pineadas por SHA, `permissions`, `concurrency`, `timeout-minutes`, `env`, `on:`) queda **byte a byte**. R2 del proposal exige preservar esos campos; este design no toca nada más.
+3. **(Enmienda 2026-09-03, D11)** Donde el job usaba tooling que `ubuntu-latest` preinstala sin declararlo, añadir el paso que lo declara — la acción de setup correspondiente con el mismo pin que ya usa el repo, o el fichero de versión del proyecto. Nada más.
+
+El resto del workflow (actions pineadas por SHA, `permissions`, `concurrency`, `timeout-minutes`, `env`, `on:`) queda **byte a byte**. R2 del proposal exige preservar esos campos; este design no toca nada más. La formulación original de este punto decía «solo `runs-on` + cabecera»; la verificación R7 del 2026-09-03 demostró que esa forma dejaba cuatro jobs en rojo en el runner (D11), y se enmendó aquí y en R2.3 del proposal.
 
 Rejected: tocar `actions/checkout` con `clean: false` por defecto — solo `demo-reset.yml` lo necesita hoy (`specs/app-deploy-dev.md §74-77`) y solo porque comparte workspace con `deploy`. El resto hace checkout limpio. Cambiar el default contaminaría el árbol del runner con artefactos de un job en otro.
 
@@ -120,6 +124,25 @@ Rejected: ejecutar `gh run list` programáticamente en CI — el panel de `/sdd:
 **Chosen:** los 10 workflows comparten el mismo runner físico. Se confía en las `concurrency.cancel-in-progress: true` por ref de cada workflow para acotar la presión cuando entran pushes seguidos al mismo PR. Riesgos (OOM, CPU) documentados en "Risks & mitigations".
 
 Rejected: dividir en `[self-hosted, dev, ci]` y `[self-hosted, dev, cd]` con un segundo runner físico — hoy hay una sola VM; el coste de la segunda (4 OCPU/24 GB/200 GB adicionales) no se justifica para el ahorro marginal (la suite del backend es 6m15s y la del frontend 1-2 min; con un solo runner, una ráfaga de PRs concurrentes encola, pero cancela por ref). Mantener un pool y serializar — destruiría el paralelismo del que las suites se benefician hoy en GH-hosted.
+
+### D11 — Tooling implícito de `ubuntu-latest`: pin explícito por job (enmienda tras R7, 2026-09-03)
+
+**Contexto medido.** Primer `workflow_dispatch` de los 9 workflows migrados sobre `sdd/ci-runner-oci` (runner `autohostai-dev-vm`, labels `self-hosted,dev`): 5 verdes (`api-contract`, `compose-ports`, `frontend-api-contract`, `multiarch-build-check` en GH-hosted por D5, `infra-dev` todo skipped por gating a `main`) y **4 rojos por la misma causa**:
+
+- `deploy-dev` / `provenance` (run 33763676598): `node: command not found`. El job ejecuta `node frontend/scripts/build-identity.mjs` sin `actions/setup-node`.
+- `frontend-tests` / `provenance-contract` (run 33763690752): `make check-version-parity` → `import tomllib` → `ModuleNotFoundError`. El `python3` del sistema de la VM es 3.10; `tomllib` exige 3.11.
+- `rule11-ownership` (run 33763711320): `make check-rule11-ownership` → `from enum import StrEnum` → `ImportError` con `/usr/lib/python3.10`. Misma causa.
+- `backend-tests` / `backend-tests-suite` (run 33763662524): la suite corrió entera en el runner (477 s, bajo el presupuesto de 540 s; `services` Postgres/Redis funcionaron) con **1 failed, 9902 passed**: `tests/properties/test_port_contract.py::test_only_the_known_methods_take_an_operational_state_directly`, `TypeError: 'function' object is not subscriptable` dentro de `annotationlib.get_annotations` de **CPython 3.14.7**. `uv sync` descargó 3.14.7 porque el 3.10 del sistema no cumple `requires-python = ">=3.12"` y nada fija el intérprete; en GitHub-hosted usa el `/usr/bin/python3` 3.12.3 del runner (run 33752586861: «Using CPython 3.12.3 interpreter at: /usr/bin/python3»). La imagen de producción es `python:3.12-slim`.
+
+**Chosen:** declarar por job lo que `ubuntu-latest` regalaba, con los pines que el repo ya usa:
+
+1. `backend/.python-version` = `3.12`. `uv` lo lee en `uv sync`/`uv run`; alinea CI (ambos runners) con la imagen `python:3.12-slim` y convierte en explícito el 3.12 que GitHub-hosted daba por accidente. Cubre `backend-tests` y `api-contract`.
+2. `deploy-dev` / `provenance`: `actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4` con `node-version: "22"` tras el checkout — el mismo pin y versión que `frontend-tests.yml` y `frontend-api-contract.yml`.
+3. `frontend-tests` / `provenance-contract` y `rule11-ownership`: `actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0` (SHA resuelto el 2026-09-03 con `gh api repos/actions/setup-python/git/ref/tags/v7.0.0`; primera vez que el repo usa esta acción), `python-version: "3.12"`, inmediatamente antes del paso `make` que invoca `python3` a pelo. El `Makefile` no cambia: sus targets siguen siendo «host, `python3`, sin Docker» (`specs/rule11-ownership-guard.md`); el paso solo garantiza qué `python3` hay en el `PATH` del job.
+
+**Rejected:** (B) pre-instalar Node 22 y Python 3.12 en `runner-bootstrap.sh` — es exactamente lo que D2 rechaza, y además exige re-ejecutar `RUNBOOK §6` sobre la VM viva, hoy no alcanzable desde este worktree. (C) devolver esos cuatro jobs a `ubuntu-latest` — dejaría 5 de 10 migrados y fuera precisamente la suite del backend, el mayor consumidor de minutos. (D) cambiar los targets del `Makefile` a `uv run --python 3.12 …` — mueve la corrección a la herramienta local para arreglar un síntoma de CI, y `uv` no está instalado en el host de desarrollo (`project.md`).
+
+**Consecuencias.** R2.3 del proposal se enmienda («solo cambia el `runs-on`» → añade también el paso de tooling declarado). El panel de `sdd-review-cicd` debe leer los pasos añadidos como parte de la migración, no como cambio de lógica (R2.4 y «Out of scope» siguen intactos: no cambian qué tests corren ni qué scripts). La verificación R7 se repite para los cuatro workflows tras aplicar D11.
 
 ## Changes by area
 
