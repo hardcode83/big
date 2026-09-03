@@ -164,6 +164,10 @@ jobs:
           # ForceNew con ignore_changes, así que Terraform no puede reescribirlo en la VM viva; una
           # clave nueva ahí no llegaría nunca (change ingress-https-dev, design D3).
           OCI_VAULT_ID: ${{ vars.OCI_VAULT_ID }}
+          # Hostname público (variable de repo, no secreto): base del link de recuperación de
+          # contraseña. Sin esto el backend usa su default http://localhost:3000 y el PRIMER
+          # correo real que salió (smtp-delivery-adapter, 2026-09-03) llegó con un link inservible.
+          PUBLIC_HOSTNAME: ${{ vars.PUBLIC_HOSTNAME }}
         run: |
           set -euo pipefail
           source /etc/autohostai-deploy.env   # OCIDs de los secrets + POSTGRES_DB/USER (sin secretos)
@@ -222,6 +226,7 @@ jobs:
             echo "JWT_SECRET_KEY=${JWT_KEY}"
             echo "ENCRYPTION_KEY=${ENC_KEY}"
             echo "BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL:-http://backend:8000}"
+            echo "FRONTEND_BASE_URL=https://${PUBLIC_HOSTNAME:?falta la variable de repo PUBLIC_HOSTNAME}"
             echo "TUNNEL_TOKEN=${TUNNEL_TOKEN}"
             echo "S3_BUCKET=${MEDIA_BUCKET}"
             echo "S3_REGION=${MEDIA_REGION}"

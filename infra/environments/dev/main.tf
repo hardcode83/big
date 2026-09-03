@@ -177,7 +177,18 @@ resource "oci_core_instance" "dev" {
     # recrearía la instancia (ruleta de capacidad + pérdida de datos). El cloud-init de aquí
     # define el arranque de una VM NUEVA (rebuild desde 0 correcto); sobre la instancia viva,
     # altas/rotaciones de clave y remediaciones se hacen out-of-band por SSH (ver RUNBOOK).
-    ignore_changes = [metadata]
+    #
+    # `source_details[0].source_id` se ignora desde el INCIDENTE del 2026-09-03: el data source
+    # de la imagen resuelve "la Ubuntu 22.04 arm64 más reciente" en cada plan, y cuando Oracle
+    # publica una build nueva el diff aparenta ser un update inofensivo (`~`, sin "forces
+    # replacement") — pero el apply REEMPLAZÓ el boot volume entero de la instancia viva:
+    # disco re-imaged, cloud-init desde cero (con el user_data CONGELADO por el ignore de
+    # `metadata`, que era una versión antigua y rota), host keys nuevas, runner desregistrado
+    # y la base de datos de dev perdida (postgres_data es un volumen Docker en el boot volume;
+    # no hay block volume separado). El data source sigue existiendo para la PRIMERA creación;
+    # actualizar el SO de la VM viva es una decisión deliberada con
+    # `terraform apply -replace='oci_core_instance.dev'`, nunca un efecto lateral de otro apply.
+    ignore_changes = [metadata, source_details[0].source_id]
   }
 }
 

@@ -189,6 +189,14 @@ services:
       APP_PROVENANCE_PULL_REQUEST_NUMBER: ${APP_PROVENANCE_PULL_REQUEST_NUMBER:-}
       APP_PROVENANCE_COMMIT_SHA: ${APP_PROVENANCE_COMMIT_SHA:-}
       APP_PROVENANCE_ACTIONS_RUN_ID: ${APP_PROVENANCE_ACTIONS_RUN_ID:-}
+      # Base del link de recuperación de contraseña (fix post smtp-delivery-adapter, 2026-09-03):
+      # sin esto el backend usa su default http://localhost:3000 y el correo real llega con un
+      # link inservible. Solo `backend` — el link lo construye la petición de forgot-password,
+      # que corre aquí; `worker`/`beat` no envían correos de recuperación. El fallback repite el
+      # default de la app (NO cadena vacía: pydantic acepta "" para un `str` y el link quedaría
+      # sin host, peor que localhost) — misma forma que BACKEND_INTERNAL_URL arriba, y misma
+      # ventana merge→primer-render que las cinco de medios de abajo.
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
       # Almacén de objetos (change `object-storage-provisioning`). Las cinco **solo aquí**, como el
       # volumen de abajo y por el mismo motivo: `backend` es el único servicio que escribe y sirve
       # ficheros — `worker` y `beat` comparten imagen pero no tocan almacenamiento.
