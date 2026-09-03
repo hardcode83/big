@@ -2,11 +2,12 @@
 
 ## Purpose
 
-Da al dashboard del propietario/manager (PRD §9, §10) su backend: cinco endpoints de
+Da al dashboard del propietario/manager (PRD §9, §10) su backend: seis endpoints de
 **lectura pura**, tenant-scoped y autenticados, que responden «¿qué pasa y quién tiene la
 próxima acción?» sin obligar al cliente a componer siete dominios. Son la colección de cards,
-el agregado de detalle de una propiedad, su estado operacional, su timeline filtrable y los
-tres contadores operacionales a nivel de tenant.
+el agregado de detalle de una propiedad, su estado operacional, su timeline filtrable, los
+tres contadores operacionales a nivel de tenant y la serie semanal de ocupación a nivel de
+tenant.
 
 No crea ninguna tabla, ninguna columna y ninguna vía de escritura: compone lo que otras
 capacidades ya persisten. El *cómo se opera* está en
@@ -24,12 +25,13 @@ de estados en un hub que importa a los otros siete.
 
 ### Reparto de rutas
 
-- THE SYSTEM SHALL servir exactamente estas cinco rutas de lectura, y ninguna de escritura:
+- THE SYSTEM SHALL servir exactamente estas seis rutas de lectura, y ninguna de escritura:
 
   | Ruta | Router | Por qué ahí |
   |---|---|---|
   | `GET /api/v1/dashboard/properties` | `app/dashboard/api/router.py` | agregado multidominio, prefijo propio |
   | `GET /api/v1/dashboard/operational-kpis` | `app/dashboard/api/router.py` | contadores multidominio a nivel de tenant, mismo prefijo |
+  | `GET /api/v1/dashboard/occupancy-series` | `app/dashboard/api/router.py` | serie multidominio a nivel de tenant, mismo prefijo |
   | `GET /api/v1/properties/{property_id}/dashboard` | `app/dashboard/api/router.py` | agregado multidominio, con la ruta que fija PRD §23:1943 |
   | `GET /api/v1/properties/{property_id}/state` | `app/properties/api/router.py` | lectura de un solo dominio, del módulo que posee la columna |
   | `GET /api/v1/timeline/{property_id}` | `app/timeline/api/router.py` | dominio propio, con la capa `api/` que estrena |
@@ -37,10 +39,10 @@ de estados en un hub que importa a los otros siete.
 - THE SYSTEM SHALL servir la colección bajo su propio prefijo `/dashboard` y no bajo
   `/properties`. `/properties/dashboard` y `/properties/{id}` compiten en FastAPI, que resuelve
   por orden de registro: `dashboard` se parsearía como `{id}` y la ruta respondería `422` en vez
-  de existir. Junto con `/dashboard/operational-kpis` —que tampoco existe en el PRD, al no
-  agregar ningún dato sobre una propiedad concreta— son las **únicas** dos rutas que el PRD no
-  nombra, así que son las únicas dos que pueden moverse; las dos de §23:1942-1943 se quedan
-  literales.
+  de existir. Junto con `/dashboard/operational-kpis` y `/dashboard/occupancy-series` —que
+  tampoco existen en el PRD, al no agregar ningún dato sobre una propiedad concreta— son las
+  **únicas** rutas que el PRD no nombra, así que son las únicas que pueden moverse; las dos de
+  §23:1942-1943 se quedan literales.
 - THE SYSTEM SHALL NOT exponer el timeline global `GET /api/v1/timeline` de PRD §23:1951: esta
   capacidad acota a la variante por propiedad, que es la que consume el detalle.
 - **La pantalla no se alimenta sólo de aquí, y estas cinco rutas siguen siendo de lectura**: desde
@@ -131,6 +133,80 @@ no una vía de contarlo para todo el tenant de una vez.
   `tenant_id` sola**, sin enumerar las propiedades del tenant primero: a diferencia de la
   colección de cards, este endpoint no desglosa por propiedad, así que no hay nada que
   agrupar por lotes y el coste de la consulta no depende del tamaño de la cartera.
+
+### Serie semanal de ocupación (`GET /api/v1/dashboard/occupancy-series`)
+
+Siete puntos, uno por día de la semana ISO en curso (lunes a domingo, UTC), a nivel de
+**tenant**: qué porcentaje de las viviendas activas estuvo ocupada cada día. A diferencia de
+los otros cinco endpoints, no es una lectura directa de un dominio existente — compone una
+definición propia de "noche ocupada" que no existía en el sistema (`app/dashboard/domain/occupancy.py`).
+
+- WHEN se solicita el endpoint, THE SYSTEM SHALL devolver exactamente siete puntos, uno por
+  día calendario de la semana ISO en curso del tenant (lunes a domingo, ambos inclusive,
+  UTC), ordenados de lunes a domingo. **No** es una ventana móvil de 7 días terminando hoy, y
+  no es configurable (`ASSUMPTION`: lectura literal de la maqueta rediseñada, que rotula siete
+  barras `L M X J V S D` de una semana calendario).
+- THE SYSTEM SHALL incluir en cada punto `date` (fecha ISO-8601), `occupied_properties`
+  (número de viviendas activas del tenant ocupadas ese día), `total_properties` (total de
+  viviendas activas del tenant) y `occupancy_pct` (`occupied_properties / total_properties *
+  100`, `Decimal` a un decimal, `ROUND_HALF_UP`). IF `total_properties` es cero, THEN THE
+  SYSTEM SHALL devolver `occupancy_pct: null` los siete días, nunca una división por cero.
+- THE SYSTEM SHALL NOT calcular ningún color ni etiqueta de día de la semana: el frontend
+  deriva ambos de `date`, la misma línea que ya sostiene `operational_state` en la colección
+  de cards.
+- THE SYSTEM SHALL contar una vivienda como ocupada en un día calendario `D` si se cumple
+  **cualquiera** de estas tres condiciones, unidas en un `set` por vivienda de modo que la
+  unión nunca cuente dos veces la misma vivienda el mismo día:
+  - tiene una `Reservation` cuyo rango `[check_in_date, check_out_date)` cubre `D` y cuyo
+    `status` no está en `FREE_STATUSES` (`{CANCELLED, NO_SHOW}`), el mismo frozenset que
+    `app/pricing/domain/occupancy.py` declara para "noche ocupada" por reserva — **importado**,
+    no redeclarado;
+  - estuvo en `PropertyOperationalState.BLOCKED_BY_OWNER` en algún instante de `D`;
+  - estuvo en `PropertyOperationalState.OUT_OF_SERVICE` en algún instante de `D`.
+
+  `OCCUPIED_ESTIMATED` y el resto de estados operacionales **no** cuentan por sí mismos: es un
+  estado que la máquina de estados *deriva* del mismo calendario que esta función ya lee, así
+  que contarlo también duplicaría el voto del calendario.
+- THE SYSTEM SHALL resolver el estado ocupado/bloqueado/fuera de servicio de una vivienda en
+  un día pasado o en curso reconstruyéndolo desde su historial de
+  `PropertyStateTransitionModel` — el `to_state` de la transición vigente al **final** de ese
+  día (medianoche UTC del día siguiente, exclusiva) — nunca desde el `operational_state`
+  actual de la fila `properties`, que solo describe el instante presente. Un bloqueo abierto y
+  cerrado dentro del mismo día calendario **no** cuenta como ocupado ese día: la transición que
+  libera el bloqueo, si ocurre antes del final del día, es la vigente en el último instante de
+  `D` (comportamiento fijado por test, no accidental).
+- WHERE una vivienda no tiene ninguna transición registrada antes de o durante `D`, THE SYSTEM
+  SHALL tratarla como no bloqueada ni fuera de servicio ese día — el alta no es una transición,
+  mismo criterio que `GET /properties/{id}/state`.
+- THE SYSTEM SHALL contar los tres orígenes sobre el mismo día calendario **UTC** con el que se
+  agrega la serie, sin mezclar husos horarios entre el criterio de reservas (por fecha) y el
+  de transiciones (por instante).
+- THE SYSTEM SHALL añadir a `PropertyStateTransitionRepository` un método de lectura,
+  `history_for_properties(tenant_id, property_ids, start, end)`, que devuelva — por vivienda,
+  disperso, sin mapear una vivienda sin historial a `()` — la última transición anterior a
+  `start` (si existe, el estado con el que la vivienda "entra" a la ventana) seguida de toda
+  transición dentro de `[start, end]`. Un `property_ids` vacío devuelve un mapa vacío sin
+  consultar. THE SYSTEM SHALL NOT modificar `PropertyStateTransitionRepository.add` ni dar a
+  este método ninguna vía de escritura: la tabla es un registro de auditoría (regla 9 de
+  `steering/security.md`) que ningún lector reescribe.
+- THE SYSTEM SHALL resolver la serie completa con un **número fijo de consultas**, independiente
+  del número de viviendas del tenant — reutilizando `ReservationRepository.list_for_properties`
+  para las reservas y el nuevo `history_for_properties` para las transiciones — y un test SHALL
+  demostrarlo contando las sentencias emitidas, siguiendo la misma regla que «Composición por
+  lotes, sin N+1» de este documento.
+- THE SYSTEM SHALL declarar `require(Permission.READ_PROPERTIES)` en la ruta, igual que las
+  otras cinco. WHERE el rol que llama carece de `Permission.READ_RESERVATIONS`, THE SYSTEM
+  SHALL devolver la serie completa (`data`) como `null` en vez de una serie parcial que sólo
+  cuente bloqueos y fuera de servicio: el componente de reservas es el origen mayoritario de
+  "noche ocupada", así que una serie sin él no es una lectura estrecha de la misma serie, es un
+  número distinto con la misma forma — **una proyección puede estrechar, nunca unir** (ver
+  «Permisos: agregar no concede»). Esta redacción es de todo el bloque, no cuesta ninguna
+  consulta cuando el rol carece del permiso.
+- THE SYSTEM SHALL derivar el `tenant_id` del `RequestContext` autenticado, nunca de un
+  parámetro de la petición, y SHALL incluirlo en toda consulta contra `reservations`,
+  `properties` y `property_state_transitions`. THE SYSTEM SHALL demostrar con un test de
+  aislamiento, sembrando reservas y transiciones de un tenant vecino, que la serie de un
+  tenant no cuenta viviendas ni noches del otro.
 
 ### Agregado de detalle (`GET /api/v1/properties/{property_id}/dashboard`)
 
@@ -267,7 +343,7 @@ no una vía de contarlo para todo el tenant de una vez.
 
 ### Permisos: agregar no concede
 
-- THE SYSTEM SHALL declarar `require(Permission.READ_PROPERTIES)` en las cinco rutas, de modo
+- THE SYSTEM SHALL declarar `require(Permission.READ_PROPERTIES)` en las seis rutas, de modo
   que `tests/test_route_authorization.py` las recorra.
 - WHERE el rol que llama carece del permiso que protege el **origen** de un bloque, THE SYSTEM
   SHALL devolver ese bloque como `null` en vez de entregarlo, aunque la ruta se haya superado:
@@ -288,16 +364,19 @@ no una vía de contarlo para todo el tenant de una vez.
 - THE SYSTEM SHALL decidir la autorización **antes** de consultar el recurso, de modo que un rol
   sin permiso reciba la misma respuesta para un `id` real y para uno inventado.
 
-**Los contadores operacionales redactan igual, pero un paso antes.** Las otras cuatro rutas
-consultan el bloque y lo anulan después si el permiso de origen falta; `GET
-/api/v1/dashboard/operational-kpis` decide antes de consultar, no después: cada uno de sus
-tres conteos comprueba primero `READ_CLEANING_TASKS` / `READ_RESERVATIONS` / `READ_INCIDENTS`
-y **no emite la consulta en absoluto** si el rol carece del permiso — un rol sin ninguno de los
-tres (hoy, `SUPER_ADMIN`) cuesta cero consultas a los tres dominios, no una consulta
-descartada. El resultado observable es el mismo `null` de siempre; el mecanismo que llega a él
-es distinto porque aquí no hay una raíz ya autorizada (la propiedad, vía `READ_PROPERTIES`) de
-la que colgar el bloque — son tres conteos de tenant independientes, cada uno protegido por el
-permiso de su propio dominio de origen.
+**Los contadores operacionales y la serie de ocupación redactan igual, pero un paso antes.**
+Las otras tres rutas por propiedad consultan el bloque y lo anulan después si el permiso de
+origen falta; `GET /api/v1/dashboard/operational-kpis` y `GET
+/api/v1/dashboard/occupancy-series` deciden antes de consultar, no después. `operational-kpis`
+comprueba primero `READ_CLEANING_TASKS` / `READ_RESERVATIONS` / `READ_INCIDENTS` para cada uno
+de sus tres conteos; `occupancy-series` comprueba `READ_RESERVATIONS` una sola vez, porque la
+serie entera es un único bloque. En los dos casos **no se emite ninguna consulta** si el rol
+carece del permiso — un rol sin ninguno de los tres (hoy, `SUPER_ADMIN`) cuesta cero consultas
+a los tres dominios de `operational-kpis`, no una consulta descartada, y el mismo rol cuesta
+cero consultas a `occupancy-series`. El resultado observable es el mismo `null` de siempre; el
+mecanismo que llega a él es distinto porque aquí no hay una raíz ya autorizada (la propiedad,
+vía `READ_PROPERTIES`) de la que colgar el bloque — son conteos y series de tenant
+independientes, cada uno protegido por el permiso de su propio dominio de origen.
 
 **Alcance de esta regla, acotado el 2026-08-19 por `cleaner-task-context`.** Su sujeto es un
 **agregado sobre una raíz que el llamante ya puede leer entera**: `GET /properties/{id}/dashboard`
@@ -373,22 +452,30 @@ allí: pasa por esta sección.
 
 ## Key files
 
-- `backend/app/dashboard/api/` — `router.py` (las tres rutas del agregado), `schemas.py` (los
+- `backend/app/dashboard/api/` — `router.py` (las cuatro rutas del agregado), `schemas.py` (los
   modelos de respuesta y su `from_domain` explícito), `dependencies.py` (el wiring, que compone
   adaptadores ajenos).
 - `backend/app/dashboard/application/use_cases.py` — `GetDashboardCardsUseCase`,
-  `GetPropertyDashboardUseCase` y `GetOperationalKpisUseCase`: la composición por lotes (las
-  dos primeras) o por conteo directo (la tercera), y la redacción por permiso.
-- `backend/app/dashboard/domain/` — `read_models.py` (proyecciones `frozen`, incluida
-  `OperationalKpis`), `labels.py` (los seis catálogos de etiquetas, exhaustivos sobre sus
-  enums), `next_action.py` (la tabla de próxima acción), `financials.py` (la regla de moneda).
+  `GetPropertyDashboardUseCase`, `GetOperationalKpisUseCase` y `GetOccupancySeriesUseCase`: la
+  composición por lotes (la primera y la última), por conteo directo (la tercera), y la
+  redacción por permiso.
+- `backend/app/dashboard/domain/` — `read_models.py` (proyecciones `frozen`, incluidas
+  `OperationalKpis` y `OccupancyPoint`), `labels.py` (los seis catálogos de etiquetas,
+  exhaustivos sobre sus enums), `next_action.py` (la tabla de próxima acción), `financials.py`
+  (la regla de moneda), `occupancy.py` (`week_bounds`, `occupancy_series`: la definición de
+  "noche ocupada", Python puro sin I/O, `dashboard-occupancy-series` R1-R2).
 - `backend/app/cleaning/domain/repositories.py` /
   `backend/app/cleaning/infrastructure/repositories.py` — `count_live_for_day`.
 - `backend/app/reservations/domain/repositories.py` /
-  `backend/app/reservations/infrastructure/repositories.py` — `count_check_ins_in_range`.
+  `backend/app/reservations/infrastructure/repositories.py` — `count_check_ins_in_range`,
+  `list_for_properties` (reutilizado por `occupancy-series`).
 - `backend/app/maintenance/domain/repositories.py` /
   `backend/app/maintenance/domain/value_objects.py` (`OpenIncidentCounts`) /
   `backend/app/maintenance/infrastructure/repositories.py` — `count_open_for_tenant`.
+- `backend/app/properties/domain/repositories.py` /
+  `backend/app/properties/infrastructure/repositories.py` — `PropertyStateTransitionRepository
+  .history_for_properties` (`dashboard-occupancy-series` R3): el historial por lotes que
+  reconstruye el estado de cada vivienda a lo largo de la semana, sin escritura.
 - `backend/app/timeline/api/` — `router.py`, `schemas.py`, `errors.py`, `dependencies.py`: la
   capa `api/` que el módulo estrena.
 - `backend/app/timeline/application/use_cases.py` — `GetPropertyTimelineUseCase`.
@@ -403,4 +490,6 @@ allí: pasa por esta sección.
   aporta a la composición.
 - `backend/tests/dashboard/`, `backend/tests/timeline/`, `backend/tests/test_i18n.py` — el
   conteo de sentencias, el aislamiento, la matriz de roles, la cobertura del enum y la
-  degradación.
+  degradación. `backend/tests/dashboard/test_occupancy_series.py` cubre `occupancy_series` y
+  `week_bounds` en aislamiento (sin base de datos); `test_isolation.py`,
+  `test_no_n_plus_one.py`, `test_api.py` y `test_use_cases.py` cubren la ruta completa.
