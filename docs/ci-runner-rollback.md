@@ -83,6 +83,7 @@ Notas importantes:
 - **Sin cabecera**: el comentario `# Runner self-hosted...` no se retira en este rollback puntual; se retira al hacer el `git revert` global (§3) o al re-migrar.
 - **Mismo camino al re-migrar**: cuando la VM vuelva, `git revert <este-commit>` + push deja el workflow otra vez en `[self-hosted, dev]` con la cabecera intacta.
 - **Límite**: este parche cambia **un workflow**. Si la VM está caída, probablemente hay que parchear varios — sigue siendo preferible un `git revert` global cuando la VM vuelva a estar disponible, porque deshace el cambio de una sola vez y deja el repo consistente.
+- **`deploy-dev.yml` y `demo-reset.yml` NO son candidatos a este `sed`**: el job `deploy` de `deploy-dev.yml` y el job `reset` de `demo-reset.yml` corren `docker compose` directamente contra la VM — necesitan `[self-hosted, dev]` sin importar el estado de esta migración, con o sin runner VM caído no tienen a dónde volver en `ubuntu-latest` (no hay SSH ni Postgres alcanzable desde fuera). Si el `sed` genérico de arriba se aplica sobre estos dos ficheros por error, rompe el deploy real, no lo repara. La fila de `deploy-dev.yml` en la tabla de §2 ya lo nombra ("el job `deploy` ya estaba en `[self-hosted, dev]`") — este aviso es la misma nota, para quien llegue directo a esta sección sin leer la tabla.
 
 ## 5. Validación post-rollback
 
@@ -132,6 +133,8 @@ Si algún workflow sigue apareciendo en `autohostai-dev-vm` tras el revert, abre
 ## 6. Rotación / retirada del runner
 
 Si la VM se recrea (cambio de `source_id` o rebuild completo, ver `oci-source-id-update-replaces-boot-volume`), el runner se vuelve a provisionar al reaplicar `infra/environments/dev/`. El `cloud-init` del módulo Terraform ejecuta `runner-bootstrap.sh` con `--replace`, que es idempotente: el runner se registra de nuevo con el mismo label (`dev`) y los workflows reanudan solos en cuanto Actions detecta el runner online.
+
+**`$HOME/.autohostai-dev-runtime.env` no sobrevive a un rebuild** (vive en el `$HOME` del usuario del runner, fuera de todo lo que Terraform o cloud-init gestionan): tras reaprovisionar, `demo-reset.yml` fallará su precondición hasta que el próximo `deploy-dev.yml` lo re-renderice desde el OCI Vault — es el comportamiento esperado, no un bloqueo (ver `deploy-dev.yml`, paso "Render .env").
 
 ```bash
 # En la VM (post-rebuild), reaprovisionar el runner:

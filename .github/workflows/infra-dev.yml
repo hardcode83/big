@@ -148,9 +148,9 @@ jobs:
       - name: Limpiar ficheros con estado/credenciales del workspace
         # `terraform apply`/`plan` puede volcar `errored.tfstate` (estado completo en claro, si el
         # push del state falla) y `backend.hcl`/`.terraform/` quedan con la private key referenciada
-        # por ruta. El workspace es compartido y persistente entre workflows en el runner
-        # self-hosted (demo-reset.yml corre con `clean: false`), así que estos ficheros no deben
-        # sobrevivir al job (hallazgo del panel de seguridad, cuarta y sexta pasada). `$RUNNER_TEMP`
+        # por ruta. El workspace es compartido y persistente entre los 9 workflows migrados a este
+        # runner self-hosted, así que estos ficheros no deben sobrevivir al job (hallazgo del panel
+        # de seguridad, cuarta y sexta pasada). `$RUNNER_TEMP`
         # se limpia cuando el SIGUIENTE job inicializa, no al terminar este — no "al terminar el job
         # por el propio runner" como decía la versión anterior de esta nota en design.md (corregido).
         if: always()
@@ -240,4 +240,4 @@ jobs:
 
       - name: Limpiar ficheros con estado/credenciales del workspace
         if: always()
-        run: rm -rf errored.tfstate backend.hcl .terraform
+        run: rm -rf errored.tfstate backend.hcl .terraform "$RUNNER_TEMP/oci_private_key.pem"
