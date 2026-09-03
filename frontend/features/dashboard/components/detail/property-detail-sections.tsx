@@ -3,6 +3,7 @@
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 
 import type { IncidentSeverity, PropertyDetail } from "../../data";
 import { formatDate } from "../../lib/format";
@@ -20,10 +21,10 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-2 rounded-lg border bg-surface p-4">
+    <Card className="flex flex-col gap-2 p-4">
       <h2 className="text-sm font-semibold text-foreground">{title}</h2>
       <div className="text-sm text-muted-foreground">{children}</div>
-    </section>
+    </Card>
   );
 }
 

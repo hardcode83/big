@@ -47,7 +47,7 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
 
   return (
     <div className="flex flex-col gap-6 p-4">
-      <h1 className="text-lg font-semibold text-foreground">
+      <h1 className="text-headline-md font-semibold text-foreground">
         {detail.propertyCode}
       </h1>
       <PropertyDetailSections detail={detail} />
