@@ -210,6 +210,24 @@ export interface paths {
      */
     post: operations["report_task_incident_api_v1_cleaning_tasks__task_id__incidents_post"];
   };
+  "/api/v1/cleaning-tasks/{task_id}/messages": {
+    /**
+     * List a cleaning task's staff thread
+     * @description The task's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_CLEANING_TASKS` alone — `CLEANER`, `PROPERTY_MANAGER` and `TENANT_OWNER` already hold it, so reading needs no `or`.
+     *
+     * **Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her; an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` or `TENANT_OWNER` reaches every task of the tenant.
+     */
+    get: operations["list_cleaning_task_messages_api_v1_cleaning_tasks__task_id__messages_get"];
+    /**
+     * Send a message on a cleaning task's staff thread
+     * @description Writes one message to the task's staff-to-manager thread and notifies the other side: a `CLEANER` sending one notifies every active `PROPERTY_MANAGER` of the tenant, and a `PROPERTY_MANAGER` sending one notifies the task's assigned cleaner, if any (R4).
+     *
+     * Gated by `EXECUTE_CLEANING_TASKS` **or** `MANAGE_CLEANING_TASKS` — no new permission is declared; the two that already exist cover the cleaner and the manager respectively.
+     *
+     * **Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her — the same restriction `_load_task` already applies to every other cleaning-task endpoint — so an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` reaches every task of the tenant.
+     */
+    post: operations["send_cleaning_task_message_api_v1_cleaning_tasks__task_id__messages_post"];
+  };
   "/api/v1/cleaning-tasks/{task_id}/photo-requirements": {
     /**
      * Which photo categories this cleaning task asks for
@@ -505,6 +523,24 @@ export interface paths {
      * The body is **optional** and takes the same `eta_at` as `accept`, under the same rules: a timezone is required and the past is refused with `422`.
      */
     post: operations["en_route_incident_api_v1_incidents__incident_id__en_route_post"];
+  };
+  "/api/v1/incidents/{incident_id}/messages": {
+    /**
+     * List an incident's staff thread
+     * @description The incident's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_INCIDENTS` alone — `TECHNICIAN`, `PROPERTY_MANAGER` and `TENANT_OWNER` already hold it, so reading needs no `or`.
+     *
+     * **Row-level scoping is derived inside the use case, never from a request field.** A `TECHNICIAN` reaches only the incident assigned to them; an unowned incident and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` or `TENANT_OWNER` reaches every incident of the tenant.
+     */
+    get: operations["list_incident_messages_api_v1_incidents__incident_id__messages_get"];
+    /**
+     * Send a message on an incident's staff thread
+     * @description Writes one message to the incident's staff-to-manager thread and notifies the other side: a `TECHNICIAN` sending one notifies every active `PROPERTY_MANAGER` of the tenant, and a `PROPERTY_MANAGER` sending one notifies the incident's assigned technician, if any (R4).
+     *
+     * Gated by `EXECUTE_INCIDENTS` alone — no new permission is declared, and no `or` is needed: `EXECUTE_INCIDENTS` already covers both the technician and the manager (design D3).
+     *
+     * **Row-level scoping is derived inside the use case, never from a request field.** A `TECHNICIAN` reaches only the incident assigned to them — the same restriction `_load_incident_in_scope` already applies to every other incident endpoint — so an unowned incident and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` reaches every incident of the tenant.
+     */
+    post: operations["send_incident_message_api_v1_incidents__incident_id__messages_post"];
   };
   "/api/v1/incidents/{incident_id}/photos": {
     /**
@@ -1458,6 +1494,49 @@ export interface components {
       /** Validated By User Id */
       validated_by_user_id: string | null;
       validation_status: components["schemas"]["CleaningValidationStatus"];
+    };
+    /**
+     * CleaningTaskMessagePageResponse
+     * @description The envelope of PRD §23, the `CleaningTaskPageResponse` pattern.
+     */
+    CleaningTaskMessagePageResponse: {
+      /** Data */
+      data: components["schemas"]["CleaningTaskMessageResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * CleaningTaskMessageResponse
+     * @description One message of a task's staff thread. **An allowlist, never a dump of the entity**
+     * (the rule this module opens with) — even though `CleaningTaskMessage` has no field this
+     * change needs to exclude, `from_domain` is the only way in, the `CleaningPhotoResponse`
+     * discipline and not an accident.
+     */
+    CleaningTaskMessageResponse: {
+      /**
+       * Author Id
+       * Format: uuid
+       */
+      author_id: string;
+      author_role: components["schemas"]["UserRole"];
+      /** Content */
+      content: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
     };
     /** CleaningTaskPageResponse */
     CleaningTaskPageResponse: {
@@ -2432,6 +2511,49 @@ export interface components {
       /** Eta At */
       eta_at?: string | null;
     };
+    /**
+     * IncidentMessagePageResponse
+     * @description The envelope of PRD §23, the `CleaningTaskMessagePageResponse` pattern.
+     */
+    IncidentMessagePageResponse: {
+      /** Data */
+      data: components["schemas"]["IncidentMessageResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * IncidentMessageResponse
+     * @description One message of an incident's staff thread. **An allowlist, never a dump of the entity**
+     * (the rule this module opens with) — even though `IncidentMessage` has no field this change
+     * needs to exclude, `from_domain` is the only way in, the `IncidentPhotoResponse` discipline
+     * and not an accident.
+     */
+    IncidentMessageResponse: {
+      /**
+       * Author Id
+       * Format: uuid
+       */
+      author_id: string;
+      author_role: components["schemas"]["UserRole"];
+      /** Content */
+      content: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+    };
     /** IncidentPageResponse */
     IncidentPageResponse: {
       /** Items */
@@ -2835,7 +2957,7 @@ export interface components {
      * inherits these names.
      * @enum {string}
      */
-    NotificationType: "CLEANING_TASK_ASSIGNED" | "CLEANING_NO_RESPONSE" | "CLEANING_COMPLETED" | "CLEANING_FAILED" | "INCIDENT_CREATED_CRITICAL" | "INCIDENT_CREATED_HIGH" | "OWNER_APPROVAL_REQUIRED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_NO_RESPONSE" | "GUEST_ESCALATION" | "LOCK_ALERT" | "CHECKIN_REMINDER_24H" | "CHECKIN_REMINDER_2H" | "CHECKOUT_REMINDER" | "PRICE_RECOMMENDATION" | "SLA_BREACH" | "REVIEW_RESPONSE_APPROVED" | "PASSWORD_RESET_REQUESTED";
+    NotificationType: "CLEANING_TASK_ASSIGNED" | "CLEANING_NO_RESPONSE" | "CLEANING_COMPLETED" | "CLEANING_FAILED" | "INCIDENT_CREATED_CRITICAL" | "INCIDENT_CREATED_HIGH" | "OWNER_APPROVAL_REQUIRED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_NO_RESPONSE" | "GUEST_ESCALATION" | "LOCK_ALERT" | "CHECKIN_REMINDER_24H" | "CHECKIN_REMINDER_2H" | "CHECKOUT_REMINDER" | "PRICE_RECOMMENDATION" | "SLA_BREACH" | "REVIEW_RESPONSE_APPROVED" | "PASSWORD_RESET_REQUESTED" | "CLEANING_TASK_MESSAGE" | "INCIDENT_MESSAGE";
     /**
      * OccupancyPointResponse
      * @description One day of the weekly occupancy series (`dashboard-occupancy-series` R1.2, R1.4).
@@ -4149,6 +4271,49 @@ export interface components {
       reason: string;
       /** Reference */
       reference?: string | null;
+    };
+    /**
+     * SendCleaningTaskMessageRequest
+     * @description `POST /cleaning-tasks/{task_id}/messages` (R1.1, R5.1, R5.2).
+     *
+     * The exact shape of `CompleteIncidentRequest.materials` (design D5): `storable_text` guards
+     * against a value asyncpg cannot store, `Field(min_length=1, max_length=...)` rejects an
+     * empty or oversized body as a `422` before anything reaches the use case, and
+     * `str_strip_whitespace=True` means the maximum counts characters *after* stripping — so a
+     * whitespace-only message is refused rather than persisted.
+     *
+     * **The bound is imported, never re-derived**: `MAX_CLEANING_TASK_MESSAGE_LENGTH` lives in
+     * `app/cleaning/domain/entities.py`, the module that owns the column — its DDL is next door
+     * in that module's `infrastructure/models.py`.
+     *
+     * `MultiLineText` rather than `SingleLineText`: a staff message can span more than one line,
+     * the same choice `ReportTaskIncidentRequest.description` makes.
+     */
+    SendCleaningTaskMessageRequest: {
+      /** Content */
+      content: string;
+    };
+    /**
+     * SendIncidentMessageRequest
+     * @description `POST /incidents/{incident_id}/messages` (R2, R5.1, R5.2).
+     *
+     * The exact shape of `app.cleaning.api.schemas.SendCleaningTaskMessageRequest`, itself the
+     * shape of `ResolveIncidentRequest.materials` (design D5): `storable_text` guards against a
+     * value asyncpg cannot store, `Field(min_length=1, max_length=...)` rejects an empty or
+     * oversized body as a `422` before anything reaches the use case, and
+     * `str_strip_whitespace=True` means the maximum counts characters *after* stripping — so a
+     * whitespace-only message is refused rather than persisted.
+     *
+     * **The bound is imported, never re-derived**: `MAX_INCIDENT_MESSAGE_LENGTH` lives in
+     * `app/maintenance/domain/entities.py`, the module that owns the column — its DDL is next
+     * door in that module's `infrastructure/models.py`.
+     *
+     * `MultiLineText` rather than `SingleLineText`: a staff message can span more than one line,
+     * the same choice `ResolveIncidentRequest.materials` makes.
+     */
+    SendIncidentMessageRequest: {
+      /** Content */
+      content: string;
     };
     /**
      * SetDocumentRequest
@@ -5792,6 +5957,101 @@ export interface operations {
     };
   };
   /**
+   * List a cleaning task's staff thread
+   * @description The task's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_CLEANING_TASKS` alone — `CLEANER`, `PROPERTY_MANAGER` and `TENANT_OWNER` already hold it, so reading needs no `or`.
+   *
+   * **Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her; an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` or `TENANT_OWNER` reaches every task of the tenant.
+   */
+  list_cleaning_task_messages_api_v1_cleaning_tasks__task_id__messages_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskMessagePageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Send a message on a cleaning task's staff thread
+   * @description Writes one message to the task's staff-to-manager thread and notifies the other side: a `CLEANER` sending one notifies every active `PROPERTY_MANAGER` of the tenant, and a `PROPERTY_MANAGER` sending one notifies the task's assigned cleaner, if any (R4).
+   *
+   * Gated by `EXECUTE_CLEANING_TASKS` **or** `MANAGE_CLEANING_TASKS` — no new permission is declared; the two that already exist cover the cleaner and the manager respectively.
+   *
+   * **Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her — the same restriction `_load_task` already applies to every other cleaning-task endpoint — so an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` reaches every task of the tenant.
+   */
+  send_cleaning_task_message_api_v1_cleaning_tasks__task_id__messages_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SendCleaningTaskMessageRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskMessageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task does not exist for this caller — an unknown id, another tenant's task, and (for a `CLEANER`) another cleaner's task are all answered this way, indistinguishably. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The body is not a single non-empty `content` the database can store within `MAX_CLEANING_TASK_MESSAGE_LENGTH`, or it carries a field this operation does not accept. */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * Which photo categories this cleaning task asks for
    * @description The photo categories the task's checklist template declares, each with the label the template's author wrote, whether the close demands it, and whether one has already been uploaded. It exists so a `CLEANER` can be shown **a button per category** without holding `READ_CLEANING_TEMPLATES`.
    *
@@ -7420,6 +7680,101 @@ export interface operations {
         };
       };
       /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List an incident's staff thread
+   * @description The incident's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_INCIDENTS` alone — `TECHNICIAN`, `PROPERTY_MANAGER` and `TENANT_OWNER` already hold it, so reading needs no `or`.
+   *
+   * **Row-level scoping is derived inside the use case, never from a request field.** A `TECHNICIAN` reaches only the incident assigned to them; an unowned incident and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` or `TENANT_OWNER` reaches every incident of the tenant.
+   */
+  list_incident_messages_api_v1_incidents__incident_id__messages_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentMessagePageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Send a message on an incident's staff thread
+   * @description Writes one message to the incident's staff-to-manager thread and notifies the other side: a `TECHNICIAN` sending one notifies every active `PROPERTY_MANAGER` of the tenant, and a `PROPERTY_MANAGER` sending one notifies the incident's assigned technician, if any (R4).
+   *
+   * Gated by `EXECUTE_INCIDENTS` alone — no new permission is declared, and no `or` is needed: `EXECUTE_INCIDENTS` already covers both the technician and the manager (design D3).
+   *
+   * **Row-level scoping is derived inside the use case, never from a request field.** A `TECHNICIAN` reaches only the incident assigned to them — the same restriction `_load_incident_in_scope` already applies to every other incident endpoint — so an unowned incident and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` reaches every incident of the tenant.
+   */
+  send_incident_message_api_v1_incidents__incident_id__messages_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SendIncidentMessageRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["IncidentMessageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The incident does not exist for this caller — an unknown id, another tenant's incident, and (for a `TECHNICIAN`) another technician's incident are all answered this way, indistinguishably. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The body is not a single non-empty `content` the database can store within `MAX_INCIDENT_MESSAGE_LENGTH`, or it carries a field this operation does not accept. */
       422: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];

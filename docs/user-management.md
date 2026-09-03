@@ -68,7 +68,7 @@ autoservicio (`/forgot-password`) es opcional en PRD §24, y sin esto el MVP no 
 siendo la **asistida** — la que un administrador controla. Para el caso que no cubre —el único
 `TENANT_OWNER` activo de un tenant, que no puede resetearse a sí mismo por aquí— la salida es el
 comando de rescate documentado en
-[`auth-account-recovery.md`](auth-account-recovery.md#rescate-mientras-no-hay-smtp).
+[`auth-account-recovery.md`](auth-account-recovery.md#rescate-sin-relay-configurado).
 
 ## Cambiar un rol, suspender, dar de baja
 
