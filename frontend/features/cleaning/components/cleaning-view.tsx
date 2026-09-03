@@ -112,7 +112,7 @@ export function CleaningView() {
       <>
         <ul
           aria-label={t("list.label")}
-          className="grid grid-cols-1 gap-4 p-4 xl:grid-cols-2"
+          className="grid grid-cols-1 items-stretch gap-4 p-4 xl:grid-cols-2"
         >
           {tasks.map((task) => (
             <CleaningTaskRow
@@ -174,7 +174,11 @@ export function CleaningView() {
     <div className="flex min-w-0 flex-col">
       <CleaningFilters />
       {/* The single live region of design D11. */}
-      <div role="status" aria-live="polite" className="px-4 empty:hidden">
+      <div
+        role="status"
+        aria-live="polite"
+        className="px-4 py-2 text-body-base text-muted-foreground empty:hidden"
+      >
         {announcement()}
       </div>
       {body()}

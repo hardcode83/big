@@ -73,7 +73,7 @@ export function RulesPanel({
       <>
         <ul
           aria-label={t("rules.list.label")}
-          className="grid grid-cols-1 gap-4 p-4 xl:grid-cols-2"
+          className="grid grid-cols-1 items-stretch gap-4 p-4 xl:grid-cols-2"
         >
           {items.map((rule) => (
             <RuleRow key={rule.id} rule={rule} properties={properties} />

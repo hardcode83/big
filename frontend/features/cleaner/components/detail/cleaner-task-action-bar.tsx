@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { ApiError } from "@/lib/api";
 
 import {
@@ -92,24 +93,23 @@ export function CleanerTaskActionBar({
 
   if (actions.length === 0) {
     return (
-      <section
-        aria-labelledby="cleaner-action-bar-heading"
-        className="flex flex-col gap-2 rounded-lg border bg-surface p-4"
-      >
-        <h2
-          id="cleaner-action-bar-heading"
-          className="text-sm font-semibold text-foreground"
-        >
-          {t("cleaner:actions.title")}
-        </h2>
-        {localError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {localError}
+      <section aria-labelledby="cleaner-action-bar-heading">
+        <Card className="flex flex-col gap-2 p-4">
+          <h2
+            id="cleaner-action-bar-heading"
+            className="text-body-lg font-semibold text-foreground"
+          >
+            {t("cleaner:actions.title")}
+          </h2>
+          {localError ? (
+            <p role="alert" className="text-body-base text-destructive">
+              {localError}
+            </p>
+          ) : null}
+          <p className="text-body-base text-muted-foreground">
+            {t(`cleaner:actions.none.${cleanerNoActionReason(task.status)}`)}
           </p>
-        ) : null}
-        <p className="text-sm text-muted-foreground">
-          {t(`cleaner:actions.none.${cleanerNoActionReason(task.status)}`)}
-        </p>
+        </Card>
       </section>
     );
   }
@@ -120,122 +120,125 @@ export function CleanerTaskActionBar({
   void highlightPhotos;
 
   return (
-    <section
-      aria-labelledby="cleaner-action-bar-heading"
-      className="flex flex-col gap-3 rounded-lg border bg-surface p-4"
-    >
-      <h2
-        id="cleaner-action-bar-heading"
-        className="text-sm font-semibold text-foreground"
-      >
-        {t("cleaner:actions.title")}
-      </h2>
+    <section aria-labelledby="cleaner-action-bar-heading">
+      <Card className="flex flex-col gap-3 p-4">
+        <h2
+          id="cleaner-action-bar-heading"
+          className="text-body-lg font-semibold text-foreground"
+        >
+          {t("cleaner:actions.title")}
+        </h2>
 
-      <div className="flex flex-wrap gap-2">
-        {actions.includes("accept") ? (
-          <Button
-            type="button"
-            disabled={accept.isPending}
-            onClick={() => {
-              setLocalError(null);
-              accept.mutate(
-                { taskId: task.id },
-                {
-                  onError: (error) => {
-                    setLocalError(messageFor(error));
+        <div className="flex flex-wrap gap-2">
+          {actions.includes("accept") ? (
+            <Button
+              type="button"
+              className="tap-target"
+              disabled={accept.isPending}
+              onClick={() => {
+                setLocalError(null);
+                accept.mutate(
+                  { taskId: task.id },
+                  {
+                    onError: (error) => {
+                      setLocalError(messageFor(error));
+                    },
                   },
-                },
-              );
-            }}
-          >
-            {t("cleaner:actions.accept")}
-          </Button>
-        ) : null}
-        {actions.includes("reject") ? (
-          <Button
-            type="button"
-            variant="outline"
-            disabled={reject.isPending}
-            onClick={() => {
-              setLocalError(null);
-              reject.mutate(
-                { taskId: task.id },
-                {
-                  onError: (error) => {
-                    setLocalError(messageFor(error));
+                );
+              }}
+            >
+              {t("cleaner:actions.accept")}
+            </Button>
+          ) : null}
+          {actions.includes("reject") ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="tap-target"
+              disabled={reject.isPending}
+              onClick={() => {
+                setLocalError(null);
+                reject.mutate(
+                  { taskId: task.id },
+                  {
+                    onError: (error) => {
+                      setLocalError(messageFor(error));
+                    },
                   },
-                },
-              );
-            }}
-          >
-            {t("cleaner:actions.reject")}
-          </Button>
-        ) : null}
-        {actions.includes("start") ? (
-          <Button
-            type="button"
-            disabled={start.isPending}
-            onClick={() => {
-              setLocalError(null);
-              start.mutate(
-                { taskId: task.id },
-                {
-                  onError: (error) => {
-                    setLocalError(messageFor(error));
+                );
+              }}
+            >
+              {t("cleaner:actions.reject")}
+            </Button>
+          ) : null}
+          {actions.includes("start") ? (
+            <Button
+              type="button"
+              className="tap-target"
+              disabled={start.isPending}
+              onClick={() => {
+                setLocalError(null);
+                start.mutate(
+                  { taskId: task.id },
+                  {
+                    onError: (error) => {
+                      setLocalError(messageFor(error));
+                    },
                   },
-                },
-              );
-            }}
-          >
-            {t("cleaner:actions.start")}
-          </Button>
-        ) : null}
-        {actions.includes("complete") ? (
-          <Button
-            type="button"
-            disabled={complete.isPending}
-            onClick={() => {
-              setLocalError(null);
-              setHighlightItems(false);
-              setHighlightPhotos(false);
-              complete.mutate(
-                { taskId: task.id },
-                {
-                  onError: (error) => {
-                    // The three-clause refusal of the close is read from the
-                    // props' refreshed checklist/requirements (D7, R7.3), not
-                    // from `complete.error` — that hook snapshot is still the
-                    // pre-click render's closure when this callback runs and
-                    // is never the same reference as the error just thrown.
-                    if (error instanceof ApiError && error.status === 409) {
-                      const reason = conflictReason(checklist, requirements);
-                      setHighlightItems(hasMissingRequiredItems(checklist));
-                      setHighlightPhotos(
-                        hasMissingRequiredPhotos(requirements),
-                      );
-                      setLocalError(t(`cleaner:complete.errors.${reason}`));
-                      return;
-                    }
-                    setLocalError(messageFor(error));
+                );
+              }}
+            >
+              {t("cleaner:actions.start")}
+            </Button>
+          ) : null}
+          {actions.includes("complete") ? (
+            <Button
+              type="button"
+              className="tap-target"
+              disabled={complete.isPending}
+              onClick={() => {
+                setLocalError(null);
+                setHighlightItems(false);
+                setHighlightPhotos(false);
+                complete.mutate(
+                  { taskId: task.id },
+                  {
+                    onError: (error) => {
+                      // The three-clause refusal of the close is read from the
+                      // props' refreshed checklist/requirements (D7, R7.3), not
+                      // from `complete.error` — that hook snapshot is still the
+                      // pre-click render's closure when this callback runs and
+                      // is never the same reference as the error just thrown.
+                      if (error instanceof ApiError && error.status === 409) {
+                        const reason = conflictReason(checklist, requirements);
+                        setHighlightItems(hasMissingRequiredItems(checklist));
+                        setHighlightPhotos(
+                          hasMissingRequiredPhotos(requirements),
+                        );
+                        setLocalError(t(`cleaner:complete.errors.${reason}`));
+                        return;
+                      }
+                      setLocalError(messageFor(error));
+                    },
                   },
-                },
-              );
-            }}
-          >
-            {t("cleaner:actions.complete")}
-          </Button>
-        ) : null}
-      </div>
+                );
+              }}
+            >
+              {t("cleaner:actions.complete")}
+            </Button>
+          ) : null}
+        </div>
 
-      {isInProgress ? (
-        <CleanerIncidentReportPanel taskId={task.id} status={task.status} />
-      ) : null}
+        {isInProgress ? (
+          <CleanerIncidentReportPanel taskId={task.id} status={task.status} />
+        ) : null}
 
-      {localError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {localError}
-        </p>
-      ) : null}
+        {localError ? (
+          <p role="alert" className="text-body-base text-destructive">
+            {localError}
+          </p>
+        ) : null}
+      </Card>
     </section>
   );
 }

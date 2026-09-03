@@ -3,6 +3,7 @@
 import { useTranslation } from "react-i18next";
 
 import { EmptyState } from "@/components/states";
+import { Card } from "@/components/ui/card";
 
 import type { CleaningChecklist } from "../../data";
 
@@ -40,68 +41,65 @@ export function CleanerTaskChecklist({
 
   if (checklist.data.length === 0) {
     return (
-      <section
-        aria-labelledby="cleaner-checklist-heading"
-        className="flex flex-col gap-3 rounded-lg border bg-surface p-4"
-      >
-        <h2
-          id="cleaner-checklist-heading"
-          className="text-sm font-semibold text-foreground"
-        >
-          {t("cleaner:checklist.title")}
-        </h2>
-        <EmptyState
-          title={t("cleaner:checklist.empty.title")}
-          description={t("cleaner:checklist.empty.description")}
-        />
+      <section aria-labelledby="cleaner-checklist-heading">
+        <Card className="flex flex-col gap-3 p-4">
+          <h2
+            id="cleaner-checklist-heading"
+            className="text-body-lg font-semibold text-foreground"
+          >
+            {t("cleaner:checklist.title")}
+          </h2>
+          <EmptyState
+            title={t("cleaner:checklist.empty.title")}
+            description={t("cleaner:checklist.empty.description")}
+          />
+        </Card>
       </section>
     );
   }
 
   return (
-    <section
-      aria-labelledby="cleaner-checklist-heading"
-      className="flex flex-col gap-3 rounded-lg border bg-surface p-4"
-    >
-      <h2
-        id="cleaner-checklist-heading"
-        className="text-sm font-semibold text-foreground"
-      >
-        {t("cleaner:checklist.title")}
-      </h2>
-      <ul aria-label={t("cleaner:checklist.title")} className="flex flex-col gap-2">
-        {checklist.data.map((item) => {
-          const completed = item.completed;
-          return (
-            <li
-              key={item.itemId}
-              className="flex min-w-0 items-start justify-between gap-3 rounded-md border bg-background p-3"
-            >
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-sm font-medium text-foreground">
-                  {item.label}
-                  {item.required ? (
-                    <span className="ml-2 text-xs font-medium text-destructive">
-                      {t("cleaner:checklist.required")}
+    <section aria-labelledby="cleaner-checklist-heading">
+      <Card className="flex flex-col gap-3 p-4">
+        <h2
+          id="cleaner-checklist-heading"
+          className="text-body-lg font-semibold text-foreground"
+        >
+          {t("cleaner:checklist.title")}
+        </h2>
+        <ul aria-label={t("cleaner:checklist.title")} className="flex flex-col gap-2">
+          {checklist.data.map((item) => {
+            const completed = item.completed;
+            return (
+              <li key={item.itemId} className="list-none">
+                <Card className="flex min-w-0 items-start justify-between gap-3 bg-background p-3 shadow-none">
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <span className="text-body-medium font-medium text-foreground">
+                      {item.label}
+                      {item.required ? (
+                        <span className="ml-2 text-xs font-medium text-destructive">
+                          {t("cleaner:checklist.required")}
+                        </span>
+                      ) : null}
                     </span>
-                  ) : null}
-                </span>
-                {completed && item.completedAt ? (
-                  <span className="text-xs text-muted-foreground">
-                    {t("cleaner:checklist.completed")}{" "}
-                    {t("cleaner:checklist.completedBy")} {item.completedBy ?? "—"}
-                  </span>
-                ) : (
-                  <span className="text-xs text-muted-foreground">
-                    {t("cleaner:checklist.pending")}
-                  </span>
-                )}
-              </div>
-              {interactive && renderItemAction ? renderItemAction(item) : null}
-            </li>
-          );
-        })}
-      </ul>
+                    {completed && item.completedAt ? (
+                      <span className="text-xs text-muted-foreground">
+                        {t("cleaner:checklist.completed")}{" "}
+                        {t("cleaner:checklist.completedBy")} {item.completedBy ?? "—"}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        {t("cleaner:checklist.pending")}
+                      </span>
+                    )}
+                  </div>
+                  {interactive && renderItemAction ? renderItemAction(item) : null}
+                </Card>
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
     </section>
   );
 }

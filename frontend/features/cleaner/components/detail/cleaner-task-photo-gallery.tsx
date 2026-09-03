@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { EmptyState } from "@/components/states";
+import { Card } from "@/components/ui/card";
 import { useQueryClient } from "@tanstack/react-query";
 
 import type { CleaningPhoto } from "../../data";
@@ -51,55 +52,53 @@ export function CleanerTaskPhotoGallery({
 
   if (photos.length === 0) {
     return (
-      <section
-        aria-labelledby="cleaner-gallery-heading"
-        className="flex flex-col gap-3 rounded-lg border bg-surface p-4"
-      >
-        <h2
-          id="cleaner-gallery-heading"
-          className="text-sm font-semibold text-foreground"
-        >
-          {t("cleaner:gallery.title")}
-        </h2>
-        <EmptyState
-          title={t("cleaner:gallery.empty.title")}
-          description={t("cleaner:gallery.empty.description")}
-        />
+      <section aria-labelledby="cleaner-gallery-heading">
+        <Card className="flex flex-col gap-3 p-4">
+          <h2
+            id="cleaner-gallery-heading"
+            className="text-body-lg font-semibold text-foreground"
+          >
+            {t("cleaner:gallery.title")}
+          </h2>
+          <EmptyState
+            title={t("cleaner:gallery.empty.title")}
+            description={t("cleaner:gallery.empty.description")}
+          />
+        </Card>
       </section>
     );
   }
 
   return (
-    <section
-      aria-labelledby="cleaner-gallery-heading"
-      className="flex flex-col gap-3 rounded-lg border bg-surface p-4"
-    >
-      <h2
-        id="cleaner-gallery-heading"
-        className="text-sm font-semibold text-foreground"
-      >
-        {t("cleaner:gallery.title")}
-      </h2>
-      <ul
-        aria-label={t("cleaner:gallery.title")}
-        className="grid grid-cols-2 gap-3 sm:grid-cols-3"
-      >
-        {photos.map((photo) => (
-          <li
-            key={photo.id}
-            className="overflow-hidden rounded-md border bg-background"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={photo.url}
-              alt={t("cleaner:gallery.alt")}
-              loading="lazy"
-              onError={() => handlePhotoError(photo.id)}
-              className="h-32 w-full object-cover"
-            />
-          </li>
-        ))}
-      </ul>
+    <section aria-labelledby="cleaner-gallery-heading">
+      <Card className="flex flex-col gap-3 p-4">
+        <h2
+          id="cleaner-gallery-heading"
+          className="text-body-lg font-semibold text-foreground"
+        >
+          {t("cleaner:gallery.title")}
+        </h2>
+        <ul
+          aria-label={t("cleaner:gallery.title")}
+          className="grid grid-cols-2 gap-3 sm:grid-cols-3"
+        >
+          {photos.map((photo) => (
+            <li
+              key={photo.id}
+              className="overflow-hidden rounded-md border border-border bg-background"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={photo.url}
+                alt={t("cleaner:gallery.alt")}
+                loading="lazy"
+                onError={() => handlePhotoError(photo.id)}
+                className="h-32 w-full object-cover"
+              />
+            </li>
+          ))}
+        </ul>
+      </Card>
     </section>
   );
 }

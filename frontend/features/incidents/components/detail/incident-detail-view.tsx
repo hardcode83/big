@@ -25,29 +25,32 @@ export function IncidentDetailView({ incidentId }: { incidentId: string }) {
   const state = mapIncidentsError(query);
 
   if (state.kind === "loading") {
-    return <p>{t("states:loading.label", { ns: "states" })}</p>;
+    return <p className="p-4 text-body-base text-muted-foreground">{t("states:loading.label", { ns: "states" })}</p>;
   }
   if (state.kind === "forbidden") {
-    return <p>{t("incidents:fields.forbidden")}</p>;
+    return <p className="p-4 text-body-base text-muted-foreground">{t("incidents:fields.forbidden")}</p>;
   }
   if (state.kind === "not-found") {
     return (
-      <section>
-        <p>{t("incidents:fields.notFound")}</p>
-        <Link href="/incidents">{t("incidents:fields.backToList")}</Link>
+      <section className="flex flex-col gap-2 p-4">
+        <p className="text-body-base text-muted-foreground">{t("incidents:fields.notFound")}</p>
+        <Link href="/incidents" className="text-primary underline-offset-4 hover:underline">
+          {t("incidents:fields.backToList")}
+        </Link>
       </section>
     );
   }
   if (state.kind === "validation") {
-    return <p>{t("incidents:fields.validation")}</p>;
+    return <p className="p-4 text-body-base text-muted-foreground">{t("incidents:fields.validation")}</p>;
   }
   if (state.kind === "error") {
     return (
-      <div>
-        <p>{t("states:error.title", { ns: "states" })}</p>
-        <p>{t("states:error.description", { ns: "states" })}</p>
+      <div className="flex flex-col gap-2 p-4">
+        <p className="text-body-lg font-semibold text-foreground">{t("states:error.title", { ns: "states" })}</p>
+        <p className="text-body-base text-muted-foreground">{t("states:error.description", { ns: "states" })}</p>
         <button
           type="button"
+          className="tap-target self-start rounded-md border bg-background px-3 py-1 text-body-base transition-colors hover:bg-accent hover:text-accent-foreground"
           onClick={() => {
             void query.refetch();
           }}
@@ -60,11 +63,15 @@ export function IncidentDetailView({ incidentId }: { incidentId: string }) {
 
   const d = state.data;
   return (
-    <article aria-labelledby="incident-heading">
-      <h1 id="incident-heading">
-        {t("navigation:routes.incident-detail.title", { ns: "navigation" })}
-      </h1>
-      <Link href="/incidents">{t("incidents:fields.backToList")}</Link>
+    <article aria-labelledby="incident-heading" className="flex flex-col gap-4 p-4">
+      <div className="flex items-center gap-3">
+        <h1 id="incident-heading" className="text-xl font-semibold text-foreground">
+          {t("navigation:routes.incident-detail.title", { ns: "navigation" })}
+        </h1>
+        <Link href="/incidents" className="text-body-base text-primary underline-offset-4 hover:underline">
+          {t("incidents:fields.backToList")}
+        </Link>
+      </div>
       <DetailHeader
         title={d.title}
         severity={d.severity}
