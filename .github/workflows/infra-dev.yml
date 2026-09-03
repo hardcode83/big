@@ -80,7 +80,11 @@ jobs:
           OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
           OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
           PRIVATE_KEY_PATH: ${{ runner.temp }}/oci_private_key.pem
+        # umask 077 por consistencia con el paso anterior (panel de seguridad, segunda pasada):
+        # bucket/namespace/región/OCIDs/fingerprint no autentican por sí solos, pero no hay razón
+        # para dejar el fichero en el modo por defecto del runner persistente.
         run: |
+          umask 077
           cat > backend.hcl <<EOF
           bucket           = "${TFSTATE_BUCKET}"
           namespace        = "${TFSTATE_NAMESPACE}"
@@ -176,7 +180,11 @@ jobs:
           OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
           OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
           PRIVATE_KEY_PATH: ${{ runner.temp }}/oci_private_key.pem
+        # umask 077 por consistencia con el paso anterior (panel de seguridad, segunda pasada):
+        # bucket/namespace/región/OCIDs/fingerprint no autentican por sí solos, pero no hay razón
+        # para dejar el fichero en el modo por defecto del runner persistente.
         run: |
+          umask 077
           cat > backend.hcl <<EOF
           bucket           = "${TFSTATE_BUCKET}"
           namespace        = "${TFSTATE_NAMESPACE}"

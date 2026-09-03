@@ -32,7 +32,7 @@ Acceptance criteria:
 
 1. WHEN un workflow migra, THE SYSTEM SHALL preservar sus `concurrency.group` y `concurrency.cancel-in-progress` exactos.
 2. WHEN un workflow migra, THE SYSTEM SHALL preservar sus `on.push.branches`, `on.push.paths`, `on.pull_request.branches` y `on.pull_request.paths` exactos.
-3. WHEN un workflow migra, THE SYSTEM SHALL preservar sus `permissions`, `timeout-minutes`, `env` y `concurrency` exactos a nivel de job. Solo cambia el `runs-on` y, WHERE el job usaba tooling que `ubuntu-latest` preinstala sin declararlo (`node`, un `python3` ≥ 3.12), THE SYSTEM SHALL añadir el paso que lo declara con el mismo pin que ya usa el repo (design D11, enmienda del 2026-09-03 tras la verificación R7). Ese paso no altera qué tests corren ni qué scripts se ejecutan.
+3. WHEN un workflow migra, THE SYSTEM SHALL preservar sus `permissions`, `timeout-minutes`, `env` y `concurrency` exactos a nivel de job. Solo cambia el `runs-on` y, WHERE el job usaba tooling que `ubuntu-latest` preinstala sin declararlo (`node`, un `python3` ≥ 3.12), THE SYSTEM SHALL añadir el paso que lo declara con el mismo pin que ya usa el repo (design D11, enmienda del 2026-09-03 tras la verificación R7). WHERE el job escribe una credencial a fichero en el runner (`infra-dev.yml`: `OCI_PRIVATE_KEY`), THE SYSTEM SHALL preceder la escritura con `umask 077` (enmienda del 2026-09-03 tras el panel de seguridad de `/sdd:review`, ver `design.md` Risks & mitigations — el `printf` original no restringía el modo del fichero en el runner persistente). Ninguno de los dos pasos altera qué tests corren ni qué scripts se ejecutan.
 4. THE SYSTEM SHALL NOT añadir `paths` filtros que hoy no existan para "saltarse" jobs en migrar.
 
 ### R3 — Builds de imágenes en `deploy-dev.yml` migran al runner
@@ -82,9 +82,9 @@ Acceptance criteria:
 
 Acceptance criteria:
 
-1. WHEN el PR de la migración se abre, THE SYSTEM SHALL incluir un run verde por cada uno de los workflows migrados en el runner (adjunto del PR o `gh run list --workflow=<name>` en la descripción). `workflow_dispatch` se usa cuando el workflow no se dispara solo en push.
+1. WHEN el PR de la migración se abre, THE SYSTEM SHALL incluir un run verde por cada uno de los workflows migrados en el runner (adjunto del PR o `gh run list --workflow=<name>` en la descripción). `workflow_dispatch` se usa cuando el workflow no se dispara solo en push. WHERE un job lleva `if: github.ref == 'refs/heads/main'` (`deploy-dev`: `build-backend`, `build-frontend`, `deploy`; `infra-dev`: `plan`, `apply`), THE SYSTEM SHALL NOT poder cumplir este criterio antes de mergear — ni un `workflow_dispatch` sobre la rama del PR los alcanza (enmienda del 2026-09-03 tras el panel de seguridad/qa de `/sdd:review`, ver `design.md` Risks & mitigations). Para esos 5 jobs, la primera evidencia runner-side real es el primer run sobre `main` tras el merge, y `/sdd:ship` lo trata como gate vigilado explícito (rollback inmediato si fallan por algo que `ubuntu-latest` no habría revelado).
 2. WHEN el runner VM está caído durante la verificación, THE SYSTEM SHALL abortar la apertura del PR y notificarlo en `STATE.md` `BLOCKED.md` — no se abre con runs parciales.
-3. THE SYSTEM SHALL NOT abrir el PR basándose solo en checks de GH-hosted; cada check debe ser su contraparte runner-side.
+3. THE SYSTEM SHALL NOT abrir el PR basándose solo en checks de GH-hosted; cada check debe ser su contraparte runner-side, salvo los 5 jobs gateados a `main` de R7.1.
 
 ## Out of scope
 
