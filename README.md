@@ -219,10 +219,11 @@ Autoservicio de contraseña: `POST /api/v1/auth/change-password` (con sesión),
 `POST /api/v1/auth/forgot-password` y `POST /api/v1/auth/reset-password` (anónimos). Quien
 recibe una contraseña temporal —del bootstrap, de `POST /api/v1/users` o del rescate de abajo—
 queda con `must_change_password`, y hasta que la cambie toda petición autenticada responde
-`403 PASSWORD_CHANGE_REQUIRED` salvo `me`, `logout` y `change-password`. **El aviso de
-recuperación no llega todavía a nadie**: el canal de correo es el adapter de consola, al que se
-le prohíbe registrar el enlace, así que el SMTP real llega con `hardening-release` y hasta
-entonces la vía que recupera una cuenta es el comando de rescate. Política de contraseña, los
+`403 PASSWORD_CHANGE_REQUIRED` salvo `me`, `logout` y `change-password`. **El correo de
+recuperación llega de verdad cuando hay relay configurado** (`SMTP_HOST` en el `.env` — dev lo
+tiene, vía OCI Email Delivery): es el change `smtp-delivery-adapter`. Sin relay, el canal de
+correo sigue siendo el adapter de consola, al que se le prohíbe registrar el enlace, y la vía
+que recupera una cuenta es el comando de rescate. Política de contraseña, los
 tres endpoints y ese procedimiento:
 [`docs/auth-account-recovery.md`](docs/auth-account-recovery.md).
 

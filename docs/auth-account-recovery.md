@@ -1,16 +1,16 @@
 # Autoservicio de contraseña y recuperación
 
 Cómo se opera el cambio de contraseña por el propio usuario, la recuperación por enlace y la
-vía de rescate mientras no hay SMTP. Change `auth-account-recovery`; la especificación viva
+vía de rescate para un entorno sin relay. Change `auth-account-recovery`; la especificación viva
 está en `sdd/specs/auth-account-recovery.md`.
 
-> **EXTERNAL_DEPENDENCY — el aviso de recuperación no llega a nadie todavía.**
-> El canal `EMAIL` resuelve a `ConsoleEmailAdapter`, y `sdd/specs/access-notifications.md` le
-> prohíbe registrar el contenido y el destinatario: solo anota el canal y las **longitudes** de
-> asunto y cuerpo. Así que el enlace no se puede leer del log ni en desarrollo. El adapter SMTP
-> real llega con `hardening-release`; hasta entonces el flujo de los dos endpoints anónimos
-> **está probado pero no entrega**, y la vía que sí recupera una cuenta es el comando de
-> rescate de más abajo.
+> **El correo de recuperación llega de verdad cuando hay relay configurado.** Desde el change
+> `smtp-delivery-adapter` (2026-09-03), con `SMTP_HOST` puesto el canal `EMAIL` entrega por un
+> relay SMTP real — dev lo tiene (OCI Email Delivery), y el primer reset real llegó a una bandeja
+> real. Sin relay configurado el canal resuelve a `ConsoleEmailAdapter`, y
+> `sdd/specs/access-notifications.md` le prohíbe registrar el contenido y el destinatario: solo
+> anota el canal y las **longitudes** de asunto y cuerpo, así que el enlace no se puede leer del
+> log — ahí la vía que sí recupera una cuenta es el comando de rescate de más abajo.
 
 ## Los tres endpoints
 
@@ -93,16 +93,18 @@ sería un bloqueo permanente sin endpoint de vuelta, sin `me` el cliente solo po
 estado provocando un `403` en otra llamada, y sin `logout` alguien que no puede cambiarla ahora
 no podría cerrar limpiamente.
 
-## Rescate mientras no hay SMTP
+## Rescate sin relay configurado
 
 ```
 docker compose exec backend python -m app.cli.reset_password --email <dirección>
 ```
 
 Genera una temporal, la imprime **una sola vez** por salida estándar y deja la cuenta obligada a
-cambiarla. Es lo que sustituye al SQL improvisado, y es la única vía real para el único
-`TENANT_OWNER` activo de un tenant: solo `TENANT_OWNER` tiene `MANAGE_USERS`, así que nadie más
-puede resetearlo, y él tendría que autenticarse para resetearse a sí mismo.
+cambiarla. Es lo que sustituye al SQL improvisado, y sigue siendo la única vía real en dos casos:
+un entorno **sin** `SMTP_HOST` configurado (donde el enlace no llega ni puede leerse del log), y
+el único `TENANT_OWNER` activo de un tenant que además no pueda usar el flujo anónimo: solo
+`TENANT_OWNER` tiene `MANAGE_USERS`, así que nadie más puede resetearlo, y él tendría que
+autenticarse para resetearse a sí mismo.
 
 No abre superficie nueva: quien puede ejecutarlo ya tiene shell en el host y por tanto acceso a
 la base de datos. Lo que aporta sobre un `UPDATE` a mano son cuatro cosas que este hace y aquel
@@ -156,16 +158,20 @@ Ninguna es un secreto, así que todas llevan valor por defecto. `PASSWORD_RESET_
 gracia igual o mayor nada sería nunca retirable y la cota volvería a ser un descarte permanente.
 El mínimo coherente de vida del token es por tanto 2 minutos.
 
-Los seis nombres `SMTP_*` están **reservados sin valor** en `.env.example` y no existen en
-`Settings`: la regla 8 de `sdd/steering/security.md` exige que un secreto *en uso* falle rápido
-si falta, y ninguno lo está todavía.
+Los seis nombres `SMTP_*` siguen **sin valor** en `.env.example`, pero desde
+`smtp-delivery-adapter` sí existen en `Settings` (con defaults vacíos, para que un entorno sin
+relay arranque igual). El fail-fast de la regla 8 de `sdd/steering/security.md` vive en la
+construcción del registro de adapters: `SMTP_HOST` puesto con cualquier otro campo vacío —o con
+`SMTP_USE_TLS` en falso— rompe alto y claro en cada petición hasta que se arregla. El detalle
+está en `sdd/specs/access-notifications.md`.
 
 ## Lo que este change no hace
 
 - **Frontend**: la página `/forgot-password` y la pantalla de cambio llegan con
   `dashboard-web`/`hardening-release`. El enlace que se compone ya es válido; la página que abre
   todavía no existe.
-- **Adapter SMTP real**: `hardening-release`. Aquí solo se reservan los nombres.
+- **Adapter SMTP real**: llegó después, con `smtp-delivery-adapter` (2026-09-03). Aquí solo se
+  reservaron los nombres.
 - **Segundo factor, magic links, caducidad periódica de contraseñas**: nada en el PRD los pide.
 - **Cambiar el propio email**: es identidad de login y sigue siendo administrado
   (`PATCH /api/v1/users/{id}`).
@@ -176,11 +182,12 @@ si falta, y ninguno lo está todavía.
 Registrados aquí porque son decisiones, no descuidos; el razonamiento completo está en el
 `design.md` del change.
 
-- **Oráculo de latencia en `forgot-password`.** Con cuenta hay una inserción y una llamada al
-  adapter; sin cuenta, nada. Hoy la diferencia es una escritura; con SMTP real serían segundos, y
-  el endpoint distinguiría por tiempo lo que iguala en código y cuerpo. **Obligación explícita
-  para `hardening-release`**: el change que conecte SMTP tiene que sacar el envío del camino de
-  la petición.
+- **Oráculo de latencia en `forgot-password` — vivo desde que hay SMTP real.** Con cuenta hay una
+  inserción y una llamada al adapter; sin cuenta, nada. Con `smtp-delivery-adapter` el envío sigue
+  **dentro de la petición** (ese change declaró fuera de alcance reescribir el mecanismo de
+  entrega), así que el endpoint distingue hoy por tiempo —hasta 10 s de timeout del relay— lo que
+  iguala en código y cuerpo. Sacar el envío del camino de la petición sigue pendiente y sin change
+  dueño; la deuda está registrada en `sdd/specs/auth-account-recovery.md`.
 - **La cota por cuenta no es a prueba de carreras.** Es «comprobar y actuar» sin bloqueo, así
   que peticiones concurrentes pueden dejar más enlaces vivos que la cota. Se acepta: el
   presupuesto por IP es lo que acota el volumen, tener más enlaces no ayuda a adivinar ninguno
