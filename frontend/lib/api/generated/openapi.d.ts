@@ -213,9 +213,9 @@ export interface paths {
   "/api/v1/cleaning-tasks/{task_id}/messages": {
     /**
      * List a cleaning task's staff thread
-     * @description The task's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_CLEANING_TASKS` alone — both `CLEANER` and `PROPERTY_MANAGER` already hold it, so reading needs no `or`.
+     * @description The task's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_CLEANING_TASKS` alone — `CLEANER`, `PROPERTY_MANAGER` and `TENANT_OWNER` already hold it, so reading needs no `or`.
      *
-     * **Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her; an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` reaches every task of the tenant.
+     * **Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her; an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` or `TENANT_OWNER` reaches every task of the tenant.
      */
     get: operations["list_cleaning_task_messages_api_v1_cleaning_tasks__task_id__messages_get"];
     /**
@@ -5917,9 +5917,9 @@ export interface operations {
   };
   /**
    * List a cleaning task's staff thread
-   * @description The task's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_CLEANING_TASKS` alone — both `CLEANER` and `PROPERTY_MANAGER` already hold it, so reading needs no `or`.
+   * @description The task's messages, chronologically ascending, paginated with `page`/`per_page` (PRD §23). Gated by `READ_CLEANING_TASKS` alone — `CLEANER`, `PROPERTY_MANAGER` and `TENANT_OWNER` already hold it, so reading needs no `or`.
    *
-   * **Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her; an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` reaches every task of the tenant.
+   * **Row-level scoping is derived inside the use case, never from a request field.** A `CLEANER` reaches only the task assigned to her; an unowned task and an unknown one are one indistinguishable `404`. A `PROPERTY_MANAGER` or `TENANT_OWNER` reaches every task of the tenant.
    */
   list_cleaning_task_messages_api_v1_cleaning_tasks__task_id__messages_get: {
     parameters: {

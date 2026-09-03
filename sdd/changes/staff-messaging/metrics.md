@@ -6,3 +6,4 @@
 | 2026-09-02 | design | claude-fable-5-1 claude-sonnet-5 | 782 | 33645 | 7679786 | 2.3398 |  |
 | 2026-09-02 | run | claude-fable-5-1 claude-sonnet-5 | 252930 | 662099 | 261938935 | 72.7474 | incl. subagents |
 | 2026-09-03 | review | claude-fable-5 claude-haiku-4-5-20251001 claude-opus-5[1m] claude-sonnet-5 | 100280 | 212350 | 43579791 | 16.0434 | incl. subagents |
+| 2026-09-03 | ship | MiniMax-M3[1m] claude-sonnet-5 | 86607 | 37241 | 5553909 | 2.2100 | incl. subagents |
