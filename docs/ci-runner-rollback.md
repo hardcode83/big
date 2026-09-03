@@ -1,6 +1,6 @@
 # Runbook — rollback del runner self-hosted
 
-Procedimiento para revertir los workflows migrados al runner self-hosted de la VM dev (`[self-hosted, dev]`) y volver a `ubuntu-latest` cuando haga falta. Complementa a `infra/environments/dev/RUNBOOK.md` (operación del runner) y a `sdd/changes/ci-runner-oci/{proposal,design}.md` (decisiones del change). Cada archive posterior que toque `runs-on:` debe mantener este runbook sincronizado (R6.3).
+Procedimiento para revertir los workflows migrados al runner self-hosted de la VM dev (`[self-hosted, dev]`) y volver a `ubuntu-latest` cuando haga falta. Complementa a `infra/environments/dev/RUNBOOK.md` (operación del runner), a `sdd/specs/ci-runner-self-hosted.md` (contrato vigente del runner) y a `sdd/changes/archive/2026-09-04-ci-runner-oci/{proposal,design}.md` (decisiones del change). Cada archive posterior que toque `runs-on:` debe mantener este runbook sincronizado (R6.3).
 
 Referencias rápidas: PR de migración `<n>` · SHA del commit `<migration_sha>` · runner label `dev` · usuario de la VM `ubuntu` · clave local `~/.ssh/autohostai_dev_vm` · el runner corre en `/opt/actions-runner` sobre la VM `dev` (AD-3).
 
