@@ -173,6 +173,22 @@ class Permission(str, enum.Enum):
     IGNORE_REVIEW = "IGNORE_REVIEW"
     MARK_REVIEW_POSTED = "MARK_REVIEW_POSTED"
 
+    # Added by `platform-admin-api` (R5.1, R5.2, design D3, D6). The counterpart of
+    # `_GUEST_ACCESS_TOKEN_MANAGE` for the platform surface: `POST /api/v1/platform/tenants`
+    # and the operator console that follows. **One permission, not a read/manage pair**, and
+    # not a read at all: the cross-tenant listing of D6 is `SUPER_ADMIN`-only, and the only
+    # reason to read what the platform owns is to be the one who manages it. A read
+    # permission would be granted to nobody, which is what this catalogue calls "speculative
+    # vocabulary" in its own docstring.
+    #
+    # Held by `SUPER_ADMIN` alone for the reason every other operational permission inside
+    # a tenant is NOT: its powers in PRD §6 are global — tenants, global configuration,
+    # integrations — not the operation of one tenant, and cross-tenant visibility is
+    # explicitly deferred to the `saas-cross-tenant` roadmap entry. Granting it to anyone
+    # else would pre-empt that decision, which the design gate of 2026-08-16 already
+    # resolved the same way for the same surface in `_GUEST_ACCESS_TOKEN_MANAGE`.
+    MANAGE_PLATFORM = "MANAGE_PLATFORM"
+
 
 _SELF_SERVICE = frozenset(
     {
@@ -289,6 +305,14 @@ _REVIEW_MANAGE = frozenset(
         Permission.MARK_REVIEW_POSTED,
     }
 )
+# `platform-admin-api` (R5.1, R5.2, D3, D6). The single permission that gates every route
+# under `/api/v1/platform/`; held by `SUPER_ADMIN` and by nobody else, exactly as every
+# other operational permission held by `SUPER_ADMIN` is the only one in its bundle. A
+# frozenset and not a one-element literal, so the bundle line below mirrors every other
+# bundle in this file — and so a future second permission (`VIEW_PLATFORM_BILLING`,
+# `ROTATE_PLATFORM_INTEGRATION_SECRET`, …) does not have to be threaded through the
+# declaration of `ROLE_PERMISSIONS[SUPER_ADMIN]` separately.
+_PLATFORM = frozenset({Permission.MANAGE_PLATFORM})
 
 # Every role that can authenticate may read its own profile and end its own
 # session (PRD §6). Role-differentiated permissions belong to the modules that
@@ -315,7 +339,7 @@ _REVIEW_MANAGE = frozenset(
 # product intuition ("she owns the homes") and PRD §6 ("ver sus propiedades") diverge, resolved
 # in favour of the PRD and of symmetry with reservations.
 ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
-    UserRole.SUPER_ADMIN: _SELF_SERVICE,
+    UserRole.SUPER_ADMIN: _SELF_SERVICE | _PLATFORM,
     UserRole.TENANT_OWNER: (
         _SELF_SERVICE
         | _RESERVATION_READ

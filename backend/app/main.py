@@ -12,13 +12,17 @@ from app.access.api.router import router as access_router
 from app.auth.api.errors import register_auth_error_handlers
 from app.auth.api.router import router as auth_router
 from app.auth.api.users_router import router as users_router
+from app.platform.api.errors import register_platform_error_handlers
+from app.platform.api.router import router as platform_router
 from app.cleaning.api.errors import register_cleaning_error_handlers
 from app.maintenance.api.approvals_router import router as owner_approvals_router
 from app.maintenance.api.errors import register_maintenance_error_handlers
 from app.maintenance.api.incidents_router import router as incidents_router
+from app.maintenance.api.messages_router import router as incident_messages_router
 from app.messaging.api.errors import register_messaging_error_handlers
 from app.notifications.api.errors import register_notification_error_handlers
 from app.messaging.api.router import router as conversations_router
+from app.cleaning.api.messages_router import router as cleaning_task_messages_router
 from app.cleaning.api.photos_router import router as cleaning_photos_router
 from app.maintenance.api.photos_router import router as incident_photos_router
 from app.cleaning.api.tasks_router import router as cleaning_tasks_router
@@ -100,6 +104,7 @@ def create_app() -> FastAPI:
     register_statements_error_handlers(app)
     register_notification_error_handlers(app)
     register_reviews_error_handlers(app)
+    register_platform_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -129,6 +134,10 @@ def create_app() -> FastAPI:
     # its own than buried among the task routes (proposal R1, `ASSUMPTION`).
     app.include_router(cleaning_templates_router, prefix=API_V1_PREFIX)
     app.include_router(cleaning_tasks_router, prefix=API_V1_PREFIX)
+    # `staff-messaging`: the cleaning task's staff-to-manager thread, its own router the
+    # `cleaning_photos_router` precedent (a sub-resource of the task, split out rather than
+    # grown onto `cleaning_tasks_router`'s twelve routes).
+    app.include_router(cleaning_task_messages_router, prefix=API_V1_PREFIX)
     # `cleaning-photos-storage`: the **first of the two anonymous routes that serve tenant
     # data** (design D7); `incident-photos` mounted the second below, and its D5 moved the
     # machinery both share into `app/integrations/`. Its own router because sharing
@@ -145,6 +154,10 @@ def create_app() -> FastAPI:
     # its R4.6; nothing here opens one, and the one surface that creates an incident
     # anonymously is the guest portal's, mounted further down.
     app.include_router(incidents_router, prefix=API_V1_PREFIX)
+    # `staff-messaging`: the incident's staff-to-manager thread, its own router the
+    # `incident_photos_router`/`cleaning_task_messages_router` precedent (a sub-resource of
+    # the incident, split out rather than grown onto `incidents_router`'s existing routes).
+    app.include_router(incident_messages_router, prefix=API_V1_PREFIX)
     # Its own router and NOT part of `incidents_router` (R4.6): that one's every path carries
     # a `require(...)`, and this is the module's only anonymous door. The second route in the
     # application that serves object bytes against an HMAC signature, after
@@ -210,6 +223,12 @@ def create_app() -> FastAPI:
     # in the code.
     app.include_router(reviews_router, prefix=API_V1_PREFIX)
     app.include_router(reviews_summary_router, prefix=API_V1_PREFIX)
+    # `platform-admin-api` (R6.1, D5): the cross-tenant surface, mounted LAST so a load
+    # failure here does not break the routers that already registered. The order of the
+    # error-handler registrations above follows the same rule: auth first, then platform,
+    # so a `TenantAlreadyExistsError` raised inside the platform router reaches the
+    # platform-specific handler rather than any generic 500.
+    app.include_router(platform_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late.

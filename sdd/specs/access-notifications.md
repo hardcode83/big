@@ -171,9 +171,10 @@ El adapter cableado es una sola línea de DI, señalada como tal.
   razón que el anterior, y SHALL contratar que **no lance nunca** por un fallo de entrega: el
   fallo vuelve como resultado, y las excepciones quedan para errores de programación.
 - THE SYSTEM SHALL resolver el adapter por canal desde un registro explícito construido con
-  antelación: `EMAIL` y `CONSOLE` → `ConsoleEmailAdapter`, `WHATSAPP` → `MockWhatsAppAdapter`,
-  `IN_APP` → `InAppNotificationAdapter`. `PUSH` **no tiene entrada** a propósito — un marcador que
-  informase de éxito marcaría `SENT` filas que nadie recibió.
+  antelación: `EMAIL` y `CONSOLE` → `SMTPEmailAdapter` cuando `SMTP_HOST` está configurado, y
+  `ConsoleEmailAdapter` si no (ver «El adapter SMTP real» abajo), `WHATSAPP` →
+  `MockWhatsAppAdapter`, `IN_APP` → `InAppNotificationAdapter`. `PUSH` **no tiene entrada** a
+  propósito — un marcador que informase de éxito marcaría `SENT` filas que nadie recibió.
 - THE SYSTEM SHALL hacer que `InAppNotificationAdapter` no llame a nada y devuelva éxito: en el
   canal in-app **la fila es la entrega**, y lo que la hace legible es el endpoint de lectura. Si
   ese endpoint desapareciera, este adapter sería una mentira y tendría que irse con él.
@@ -232,14 +233,61 @@ escala a nadie — el mismo razonamiento que `owner_approval_notification`.
 y la escritura del resultado puede reenviar esa fila en el siguiente tick, pero `attempts` ya
 está persistido, así que el tope de reintentos **acota** los duplicados en vez de dejarlos sin
 límite; el lock es lo que sostiene esa cota, porque dos ejecuciones solapadas quemarían cada una
-su propio intento sobre la misma fila. Con adapters de consola y mock el daño es una línea de log
-repetida; se revisará antes de conectar un SMTP real. **Sin backoff exponencial**: no hay columna
-donde guardar el próximo intento y añadirla para un logger de consola sería esquema inventado por
-adelantado.
+su propio intento sobre la misma fila. Con adapters de consola y mock el daño era una línea de log
+repetida; desde `smtp-delivery-adapter` un duplicado en `EMAIL` es un correo duplicado en un buzón
+real, acotado por el mismo tope de intentos. **Sin backoff exponencial, y ya no por accidente**:
+`smtp-delivery-adapter` lo dejó explícitamente fuera de alcance — sigue siendo reintento en cada
+tick hasta el techo, sin columna donde guardar el próximo intento — y el comentario de `config.py`
+sobre `notification_max_attempts` apunta ahora a ese change como el que tomó la decisión.
 
 La captura de excepciones existe aunque el puerto las prohíba porque sin ella coexistían dos
 fallos: la traza llegaba al `logger.exception` del runner llevándose el texto del proveedor, y la
 fila nunca alcanzaba `FAILED`, con lo que «at-least-once **acotado**» dejaba de estar acotado.
+
+### El adapter SMTP real de `EMAIL`/`CONSOLE`
+
+Desde `smtp-delivery-adapter` (PR #154), `EMAIL`/`CONSOLE` entregan por un relay real cuando el
+despliegue lo configura. `ConsoleEmailAdapter` no se borró: es el comportamiento de un entorno sin
+relay, no un placeholder.
+
+- THE SYSTEM SHALL registrar `SMTPEmailAdapter` para `EMAIL` y `CONSOLE` cuando `SMTP_HOST` es no
+  vacío, y `ConsoleEmailAdapter` en caso contrario — un despliegue sin relay sigue arrancando sin
+  exigir credenciales que no usa.
+- IF `SMTP_HOST` está definido y cualquiera de `SMTP_PORT`, `SMTP_FROM_EMAIL`, `SMTP_USERNAME`,
+  `SMTP_PASSWORD` está vacío, THEN THE SYSTEM SHALL lanzar `SMTPConfigurationError` nombrando el
+  primer campo ausente **al construir `adapter_registry()`** — nunca al importar. Los dos call
+  sites (`auth/api/dependencies.py`, `scheduler/tasks.py`) la dejan propagar: una configuración
+  parcial es un error no manejado en cada petición de reset y cada tick del scheduler hasta que se
+  arregla, deliberadamente alto. El manejador de `NotificationDomainError` ya registrado en
+  `main.py` responde el 500 genérico sin filtrar detalle de configuración ni traza al llamante.
+- IF `SMTP_HOST` está definido con `SMTP_USE_TLS` en falso, THEN THE SYSTEM SHALL rechazarlo con el
+  mismo error: `login` está condicionado a que haya username, no a TLS, así que credenciales sin
+  STARTTLS pondrían `SMTP_PASSWORD` y el correo de cada destinatario en claro por el cable. El
+  estado queda irrepresentable en vez de confiar en que ningún operador desactive TLS en un relay
+  con auth (hallazgo del panel de seguridad durante el run).
+- THE SYSTEM SHALL enviar con `smtplib` de la stdlib en un hilo (`asyncio.to_thread`) — ningún
+  cliente SMTP de terceros — con timeout acotado (10 s), STARTTLS con el contexto TLS por defecto y
+  login solo si hay username.
+- THE SYSTEM SHALL traducir toda excepción del cliente dentro de `send`, nunca re-lanzarla ni pasar
+  su texto: `SMTPRecipientsRefused`/`SMTPSenderRefused` → `INVALID_RECIPIENT`, `TimeoutError` →
+  `TIMEOUT`, cualquier otra (auth, conexión, protocolo, cabecera malformada) → `ADAPTER_ERROR`.
+  El enum no ganó ningún miembro.
+- THE SYSTEM SHALL rechazar `recipient_contact` en blanco con `INVALID_RECIPIENT` sin contactar el
+  relay, y SHALL NOT loguear `recipient_contact`, `subject` ni `body` — las mismas precondición y
+  regla que el resto de adapters.
+- WHEN el relay acepta el mensaje (2xx en `RCPT`/`DATA`), THE SYSTEM SHALL devolver `ok()`.
+  **`SENT` significa «el relay lo aceptó», no «llegó a un buzón»**: THE SYSTEM SHALL NOT modelar
+  rebotes, quejas de spam ni confirmaciones de lectura — ni columna ni estado nuevos, fuera de
+  alcance declarado; si algún día hacen falta serán otro mecanismo, no más estado en este adapter.
+
+El relay de dev es **OCI Email Delivery** (`eu-frankfurt-1`,
+`smtp.email.eu-frankfurt-1.oci.oraclecloud.com:587`, STARTTLS), remitente
+`noreply@mail.autohostai.digitalsec.work`, con SPF y DKIM publicados por Terraform — el
+aprovisionamiento del proveedor, el DNS y los secretos se especifican en
+[`infra-dev-terraform.md`](infra-dev-terraform.md) y [`app-deploy-dev.md`](app-deploy-dev.md).
+Verificado de punta a punta el 2026-09-03: un reset de contraseña real llegó a una bandeja real,
+fila `SENT | attempts=1 | last_error NULL`. Techo del free tier: 100 correos/día, 3000/mes — de
+sobra para dev, sin modelar aquí.
 
 ### `last_error` estructurado por construcción
 
@@ -394,11 +442,17 @@ escritos aunque desapareciesen sus builders. Y sin la segunda, `SLA_BREACH` y
 `test_free_text_sink_contract.py` documenta sobre el suyo: un guardián que lee texto se sortea
 escribiendo el nombre en un comentario.
 
-**Los catorce con escritor y los cuatro sin él** viven en la tabla de la regla 11 de
-`steering/security.md` — este módulo no los enumera aquí para no duplicar el censo; la única
+**Los dieciséis con escritor y los cuatro sin él** viven en `WITH_WRITER`/`WITHOUT_WRITER` de
+`test_writer_census.py` — este módulo no los enumera aquí para no duplicar el censo; la única
 excepción nominal a PRD §14 que añade `revenue-reviews` es `REVIEW_RESPONSE_APPROVED`, con
-escritor declarado en `reviews/domain/notifications.py`. Los dos tipos de texto libre que **no**
-son miembros del enum —`INCIDENT_REJECTED` y `LEGAL_REGISTRATION_FAILED`, sobre la columna
+escritor declarado en `reviews/domain/notifications.py`. `staff-messaging` añade los dos últimos
+—`CLEANING_TASK_MESSAGE` (`cleaning/domain/notifications.py`) e `INCIDENT_MESSAGE`
+(`maintenance/domain/notifications.py`), cada una construida por un `staff_message_notification`
+gemelo cuyo `body` lleva solo `message_id` y `task_id`/`incident_id` más un texto constante,
+**nunca** el `content` del mensaje (regla 11 de `steering/security.md`, misma disciplina que
+`assignment_notification`)—, subiendo el total de catorce a dieciséis sin ampliar el catálogo de
+PRD §14 más allá de esa excepción ya declarada. Los dos tipos de texto libre que **no** son
+miembros del enum —`INCIDENT_REJECTED` y `LEGAL_REGISTRATION_FAILED`, sobre la columna
 `String(100)`— quedan fuera del censo por construcción: no hay `NotificationType.<X>` que casar.
 
 ### La bandeja in-app
@@ -669,8 +723,12 @@ tres—, pero la separación existe para cuando alguno la necesite.
 - THE SYSTEM SHALL leer `NOTIFICATION_MAX_ATTEMPTS` (defecto 3) y `NOTIFICATION_BATCH_SIZE`
   (defecto 100) de la configuración, declarados en `.env.example`, y SHALL usar el segundo también
   como tamaño de lote del barrido de accesos.
-- THE SYSTEM SHALL no añadir ningún secreto: los adapters son consola y mocks, y las variables de
-  un WhatsApp o un SMTP reales quedan reservadas por la regla 8 de `steering/security.md`.
+- THE SYSTEM SHALL declarar las seis variables `SMTP_*` (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`,
+  `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS`) en `Settings` con defaults vacíos/permisivos,
+  de modo que el import nunca falle y un entorno sin relay arranque sin exigir credenciales que no
+  usa; la exigencia de configuración completa la hace cumplir `adapter_registry()` al construirse
+  (ver «El adapter SMTP real»). Las variables de un WhatsApp real siguen reservadas por la regla 8
+  de `steering/security.md`; `.env.example` conserva los seis nombres SMTP sin valor.
 - THE SYSTEM SHALL registrar en la tabla única de cadencias `dispatch_notifications` cada minuto y
   `provision_access_records` cada 5 minutos, de modo que `beat_schedule` y el TTL del lock sigan
   derivándose de la misma fuente.
@@ -685,13 +743,14 @@ y no una contradicción. Los nombres de los cuatro originales no se tocan.
 
 ## Estado y deuda conocida
 
-- **No hay adapters reales de envío.** `ConsoleEmailAdapter` registra en el log y
-  `MockWhatsAppAdapter` es un mock marcado `EXTERNAL_DEPENDENCY`; SMTP y WhatsApp reales llegan con
-  `hardening-release`. **Desde `auth-account-recovery` esto ya no solo retrasa avisos operativos:
-  deja sin entregar una credencial.** Los enlaces de recuperación salen por el canal `EMAIL`, que
-  resuelve a `ConsoleEmailAdapter`, y la regla de arriba le prohíbe registrar contenido y
-  destinatario — así que el enlace no puede leerse del log **ni siquiera en desarrollo**. Hasta
-  que llegue el adapter SMTP real, la vía que de verdad recupera una cuenta es el comando
+- **`EMAIL` es real desde `smtp-delivery-adapter`; WhatsApp sigue siendo mock.** `SMTPEmailAdapter`
+  entrega por el relay de OCI Email Delivery cuando `SMTP_HOST` está configurado — dev lo está, y
+  el primer recorrido real (reset de contraseña, 2026-09-03) llegó a una bandeja real.
+  `MockWhatsAppAdapter` sigue marcado `EXTERNAL_DEPENDENCY`; el real es `whatsapp-cloud-adapter`,
+  entrada de roadmap aparte. La deuda que esto cerraba era una credencial sin entregar: los enlaces
+  de recuperación salen por `EMAIL` y ya llegan de verdad. En un entorno **sin** relay configurado
+  el enlace sigue sin poder leerse del log (la regla de arriba se lo prohíbe a
+  `ConsoleEmailAdapter`), así que ahí la vía que de verdad recupera una cuenta sigue siendo
   `python -m app.cli.reset_password`.
 - **`sent_at` es la marca de tiempo de la ejecución**, no el instante exacto del envío: el job toma
   un único `now` para todo el recorrido del tenant.
@@ -747,7 +806,8 @@ y no una contradicción. Los nombres de los cuatro originales no se tocan.
 - `backend/app/auth/domain/recipients.py` — `Recipients` y `RoleRecipients`, el único resolvedor
   de destinatarios de un aviso operativo
 - `backend/tests/notifications/test_writer_census.py` — el guardián del censo por AST
-- `backend/app/notifications/infrastructure/adapters.py` — registro de canales
+- `backend/app/notifications/infrastructure/adapters.py` — registro de canales,
+  `ConsoleEmailAdapter`/`SMTPEmailAdapter` y la selección por `SMTP_HOST`
 - `backend/app/notifications/application/use_cases.py` — `DispatchPendingNotificationsUseCase` y la
   lectura in-app
 - `backend/app/notifications/api/router.py` — `GET /api/v1/notifications`

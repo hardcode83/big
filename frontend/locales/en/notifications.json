@@ -18,6 +18,8 @@
     "SLA_BREACH": "A notice has passed its deadline",
     "PASSWORD_RESET_REQUESTED": "A password reset was requested",
     "REVIEW_RESPONSE_APPROVED": "A response to a review has been approved",
+    "CLEANING_TASK_MESSAGE": "New message on a cleaning task",
+    "INCIDENT_MESSAGE": "New message on an incident",
     "unknown": "System notice"
   },
   "bell": {
