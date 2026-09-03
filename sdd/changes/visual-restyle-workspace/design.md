@@ -207,6 +207,17 @@ per screen:
   its "restyle" is a first styling pass, not a repaint. It follows the same section-block
   pattern as the guest portal's `<dl>` sections rather than inventing new detail-page
   chrome.
+- **`/properties/[id]` (`property-detail-sections.tsx`, `property-detail-view.tsx`)** also
+  has no export mockup and was missed by the initial screen inventory above (found by the
+  review panel, fixed in a later commit). Unlike the `<dl>`-flowing detail views, its
+  existing structure is already a grid of discrete boxed sections (`PropertyDetailSections`'
+  `Section` wrapper, one per data group), so it derives from D2's `Card` directly — the
+  ad-hoc `rounded-lg border bg-surface p-4` box becomes `Card`, `role="region"` /
+  `aria-labelledby` preserve the semantics the swap would otherwise drop (mirroring R3's
+  `properties-view.tsx` mobile-row fix, `role="article"` on its own `Card`) — and the page
+  `<h1>` takes the same `text-headline-md` role used by every other restyled page heading,
+  not the D4 `text-glow` treatment (out of scope: D4 narrows glow to the reservations/
+  dashboard reference screens only, and this is neither).
 
 ### D10 — Rollout order: primitives first, screens second
 
@@ -232,7 +243,7 @@ in Tier 1.
 | R1 reference | `features/reservations/components/list/{reservations-view,reservations-filters}.tsx`, `features/shell/components/{shell-footer,version-badge}.tsx` | Table recipe (D5), filter bar glass panel, badge status pill, footer/build-badge restyle |
 | R2 remaining screens | `features/{timeline,incidents,cleaning,pricing,conversations,approvals}/components/**`, `app/(workspace)/{settings,statements,reviews}/**` | Container/typography pass onto Tier-1 primitives; `incidents-view.tsx`/`conversations-view.tsx` adopt the D5 table recipe |
 | R3 properties | `features/properties/components/list/{properties-view,properties-filters}.tsx` | Table recipe + mobile `Card` row with label/mono-value pattern |
-| R4 dashboard | `features/dashboard/components/{dashboard-view,property-card}.tsx` | `Card`, stat-box pattern, `card-hover-gradient`; `BlockedTransitionsSection` slot preserved as-is |
+| R4 dashboard | `features/dashboard/components/{dashboard-view,property-card}.tsx`, `features/dashboard/components/detail/{property-detail-sections,property-detail-view}.tsx` | `Card`, stat-box pattern, `card-hover-gradient`; `BlockedTransitionsSection` slot preserved as-is; property-detail's boxed `Section`s derive from `Card` per D9 |
 | R5 effects | `app/globals.css`, `components/ui/{card,button}.tsx` | Central definition consumed everywhere else (already covered above) |
 | R6 field/guest | `features/{cleaner,tech,guest-portal}/components/**` | Derived composition per D9; forms reuse reservations-filters control styling |
 | Sidebar/shell composition | `features/shell/components/sidebar.tsx`, `locales/{es,en}/navigation.json` | Brand block "Panel de Control" subtitle, emphasized primary CTA, help entry anchored at bottom (roadmap D2's kept subset) — navigation structure itself untouched |

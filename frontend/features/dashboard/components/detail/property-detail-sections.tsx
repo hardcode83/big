@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
@@ -20,9 +21,16 @@ function Section({
   title: string;
   children: React.ReactNode;
 }) {
+  const headingId = useId();
   return (
-    <Card className="flex flex-col gap-2 p-4">
-      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+    <Card
+      role="region"
+      aria-labelledby={headingId}
+      className="flex flex-col gap-2 p-4"
+    >
+      <h2 id={headingId} className="text-sm font-semibold text-foreground">
+        {title}
+      </h2>
       <div className="text-sm text-muted-foreground">{children}</div>
     </Card>
   );

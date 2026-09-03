@@ -105,22 +105,22 @@ export function ReservationsView() {
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
                   <tr className="border-b border-border">
-                    <th className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
+                    <th scope="col" className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
                       {t("fields.guest")}
                     </th>
-                    <th className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
+                    <th scope="col" className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
                       {t("fields.property")}
                     </th>
-                    <th className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
+                    <th scope="col" className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
                       {t("fields.stay")}
                     </th>
-                    <th className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
+                    <th scope="col" className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
                       {t("fields.status")}
                     </th>
-                    <th className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
+                    <th scope="col" className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
                       {t("fields.channel")}
                     </th>
-                    <th className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
+                    <th scope="col" className="py-3 px-4 text-body-medium text-muted-foreground whitespace-nowrap">
                       {t("fields.amount")}
                     </th>
                   </tr>
