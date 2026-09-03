@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/ci-runner-oci
 implementation_sha: f192b7f82453be9510b3b29b698e6878e24a39f8
 pr_number:
 pr_url:
