@@ -242,10 +242,10 @@ def get_request_password_reset_use_case(
 ) -> RequestPasswordResetUseCase:
     """`auth-account-recovery` R2. Anonymous, so it takes the per-IP budget (R2.4).
 
-    The adapter registry is the shared one: `EMAIL` resolves to `ConsoleEmailAdapter` today,
-    which means the notice reaches nobody until SMTP arrives with `hardening-release`
-    (R6.4, EXTERNAL_DEPENDENCY). The flow is exercised by the suite, where the adapter is a
-    double that captures what was sent.
+    The adapter registry is the shared one: `EMAIL` resolves to `SMTPEmailAdapter` when a
+    relay is configured (`smtp-delivery-adapter`), or `ConsoleEmailAdapter` otherwise, in
+    which case the notice reaches nobody (R6.4, EXTERNAL_DEPENDENCY). The flow is exercised
+    by the suite, where the adapter is a double that captures what was sent.
     """
     return RequestPasswordResetUseCase(
         users=SqlAlchemyUserRepository(session),

@@ -20,6 +20,25 @@ class NotificationLogNotFoundError(NotificationDomainError):
         self.log_id = log_id
 
 
+class SMTPConfigurationError(NotificationDomainError):
+    """`SMTP_HOST` is set but the relay config is partial (`smtp-delivery-adapter` R2.2, D2).
+
+    Raised by `adapter_registry()`, not at import: `Settings` accepts every `SMTP_*` field
+    empty (R2.1, a deployment with no relay must still start), so this is the one place that
+    can tell "not configured" from "half configured" apart — and the second one must be loud,
+    never a silent fall-through to `ConsoleEmailAdapter`. Same shape as
+    `ConfiguredFileStorageFactory.storage_for()` raising `StorageWriteError`: refuse at the
+    point something is actually asked to use the broken config.
+    """
+
+    def __init__(self, missing_field: str) -> None:
+        super().__init__(
+            f"SMTP_HOST is configured but {missing_field} is missing; "
+            "set it or clear SMTP_HOST to fall back to ConsoleEmailAdapter"
+        )
+        self.missing_field = missing_field
+
+
 class NotificationNotFoundError(NotificationDomainError):
     """A reader addressed a notification that is not theirs to address (R1.4).
 

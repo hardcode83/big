@@ -240,8 +240,11 @@ resource "oci_identity_policy" "dev_runner_read_secrets" {
   # como hace el del túnel — así que le vale igual esta condición por OCID, por la razón escrita
   # arriba: `GetSecretBundleByName` exige el mismo permiso y OCI resuelve nombre→OCID antes de
   # autorizar.
+  #
+  # Los seis `smtp_*` (change `smtp-delivery-adapter`) entran por lo mismo y en el mismo apply
+  # que los crea — mirror en `iam-policy.md`'s bloque de la policy del runner.
   statements = [
-    "Allow dynamic-group ${oci_identity_dynamic_group.dev_runner.name} to read secret-bundles in compartment id ${var.compartment_ocid} where any {target.secret.id = '${oci_vault_secret.github_app_key.id}', target.secret.id = '${oci_vault_secret.postgres_password.id}', target.secret.id = '${oci_vault_secret.jwt_secret_key.id}', target.secret.id = '${oci_vault_secret.encryption_key.id}', target.secret.id = '${oci_vault_secret.cloudflare_tunnel_token.id}', target.secret.id = '${oci_vault_secret.media_access_key_id.id}', target.secret.id = '${oci_vault_secret.media_secret_access_key.id}', target.secret.id = '${oci_vault_secret.media_s3_endpoint.id}', target.secret.id = '${oci_vault_secret.media_region.id}', target.secret.id = '${oci_vault_secret.demo_account_password.id}'}",
+    "Allow dynamic-group ${oci_identity_dynamic_group.dev_runner.name} to read secret-bundles in compartment id ${var.compartment_ocid} where any {target.secret.id = '${oci_vault_secret.github_app_key.id}', target.secret.id = '${oci_vault_secret.postgres_password.id}', target.secret.id = '${oci_vault_secret.jwt_secret_key.id}', target.secret.id = '${oci_vault_secret.encryption_key.id}', target.secret.id = '${oci_vault_secret.cloudflare_tunnel_token.id}', target.secret.id = '${oci_vault_secret.media_access_key_id.id}', target.secret.id = '${oci_vault_secret.media_secret_access_key.id}', target.secret.id = '${oci_vault_secret.media_s3_endpoint.id}', target.secret.id = '${oci_vault_secret.media_region.id}', target.secret.id = '${oci_vault_secret.demo_account_password.id}', target.secret.id = '${oci_vault_secret.smtp_host.id}', target.secret.id = '${oci_vault_secret.smtp_port.id}', target.secret.id = '${oci_vault_secret.smtp_username.id}', target.secret.id = '${oci_vault_secret.smtp_password.id}', target.secret.id = '${oci_vault_secret.smtp_from_email.id}', target.secret.id = '${oci_vault_secret.smtp_use_tls.id}'}",
   ]
 }
 
@@ -686,5 +689,181 @@ resource "oci_vault_secret" "github_app_key" {
   secret_content {
     content_type = "BASE64"
     content      = base64encode(var.github_app_private_key)
+  }
+}
+
+# --- Relay SMTP: OCI Email Delivery (change `smtp-delivery-adapter`, design D6/D7) ---
+#
+# Usuario propio, NO `oci_identity_user.media`: una credencial SMTP filtrada no debe conceder
+# también escritura en el bucket de fotos, y viceversa — decisión de tasks.md 5.3 (design D6
+# deja el usuario "decidido en tasks.md, no design implication either way"). Mismo requisito de
+# email primario que `media` — esta tenancy usa Identity Domains (IDCS), que rechaza un usuario
+# sin él aunque sea de servicio y no vaya a iniciar sesión nunca.
+resource "oci_identity_user" "smtp" {
+  compartment_id = var.tenancy_ocid
+  name           = "autohostai-${var.env}-smtp"
+  description    = "Usuario de servicio que el backend de ${var.env} usa exclusivamente para autenticar contra el relay SMTP de OCI Email Delivery. Sin login de consola; su única credencial es el SMTP credential de abajo."
+  email          = var.smtp_user_email
+}
+
+resource "oci_identity_group" "smtp" {
+  compartment_id = var.tenancy_ocid
+  name           = "autohostai-${var.env}-smtp"
+  description    = "Grupo del usuario del relay SMTP de ${var.env}. Existe porque las policies de OCI se dirigen a grupos, no a usuarios."
+}
+
+resource "oci_identity_user_group_membership" "smtp" {
+  user_id  = oci_identity_user.smtp.id
+  group_id = oci_identity_group.smtp.id
+}
+
+# Mínimo privilegio real para ENVIAR correo (operación `SmtpSend`), no para gestionar approved
+# senders ni dominios — eso lo concede la ampliación de `iam-policy.md` a `svc-terraform-dev`
+# (R5.1, la aplica un admin de la tenancy fuera de este apply). `use approved-senders` es
+# exactamente el permiso `APPROVED_SENDER_USE` que cubre `SmtpSend` en la referencia de policies
+# del servicio Email — ni domain-create ni sender-create, que quedan fuera de lo que este usuario
+# puede hacer.
+resource "oci_identity_policy" "smtp_send_access" {
+  compartment_id = var.compartment_ocid
+  name           = "autohostai-${var.env}-smtp-send-access"
+  description    = "Permite al usuario del relay SMTP de ${var.env} SOLO enviar correo (SmtpSend) — ni gestionar approved senders ni dominios."
+  statements = [
+    "Allow group ${oci_identity_group.smtp.name} to use approved-senders in compartment id ${var.compartment_ocid}",
+  ]
+}
+
+# La credencial SMTP se genera DENTRO del apply, igual que la Customer Secret Key de medios
+# (`oci_identity_customer_secret_key.media`): Terraform la captura, nunca un humano la copia de
+# una consola. Se rota con `terraform apply -replace` (mismo procedimiento que la de medios).
+resource "oci_identity_smtp_credential" "smtp" {
+  user_id     = oci_identity_user.smtp.id
+  description = "autohostai-${var.env}-smtp-credential"
+}
+
+# --- Dominio de envío, DKIM y approved sender (D6) ---
+# Subdominio dedicado a correo, no el apex ni `public_hostname`: acota DKIM/SPF al tráfico de
+# mail y no a lo que sirve el túnel (D6 del design).
+resource "oci_email_email_domain" "smtp" {
+  compartment_id = var.compartment_ocid
+  name           = "mail.${var.public_hostname}"
+  description    = "Dominio de envío del relay SMTP de ${var.env} (change smtp-delivery-adapter)."
+}
+
+# La clave DKIM se genera DENTRO del apply: `cname_record_value`/`dns_subdomain_name` son
+# atributos de este recurso, no un valor que un humano copia de un dashboard (D6, R5.2). Los
+# registros Cloudflare de abajo los referencian directamente.
+resource "oci_email_dkim" "smtp" {
+  email_domain_id = oci_email_email_domain.smtp.id
+  name            = "smtp-${var.env}"
+  description     = "Clave DKIM del dominio de envío de ${var.env}."
+}
+
+# El "approved sender", self-service y gestionado por Terraform — sin espera de aprobación
+# manual comparable a la de SES, que es precisamente por lo que D6 rechazó SES/Brevo/Resend.
+# `email_address` deriva del propio recurso de dominio (no de un string copiado), así que un
+# dominio recreado se reconcilia en el mismo apply.
+resource "oci_email_sender" "smtp" {
+  compartment_id = var.compartment_ocid
+  email_address  = "noreply@${oci_email_email_domain.smtp.name}"
+}
+
+# SPF y DKIM del dominio de envío (D7, cierra R5.2). Ninguno de los dos se proxea: no son
+# tráfico HTTP y Cloudflare no permite proxy sobre TXT en cualquier caso.
+resource "cloudflare_dns_record" "smtp_spf" {
+  zone_id = var.cloudflare_zone_id
+  name    = oci_email_email_domain.smtp.name
+  type    = "TXT"
+  # Variante `eu.` — región eu-frankfurt-1 (docs.oracle.com/en-us/iaas/Content/Email/Tasks/configurespf.htm),
+  # confirmada en el gate de diseño (D6): la base `rp.oracleemaildelivery.com` sin el prefijo de
+  # región es la variante US y no autorizaría el relay real de este entorno.
+  content = "v=spf1 include:eu.rp.oracleemaildelivery.com ~all"
+  ttl     = 3600
+  proxied = false
+}
+
+# `name`/`content` son atributos del recurso OCI, no un valor copiado de un dashboard (D7): si la
+# clave DKIM se rotara (`terraform apply -replace`), este registro se reconcilia en el mismo
+# apply en vez de quedar apuntando a una clave muerta.
+resource "cloudflare_dns_record" "smtp_dkim" {
+  zone_id = var.cloudflare_zone_id
+  name    = oci_email_dkim.smtp.dns_subdomain_name
+  type    = "CNAME"
+  content = oci_email_dkim.smtp.cname_record_value
+  ttl     = 3600
+  proxied = false
+}
+
+# --- Los seis valores que la VM necesita, por el Vault (D7) ---
+# Mismo canal que medios/túnel/demo-account, y por el mismo motivo: /etc/autohostai-deploy.env es
+# ForceNew (cloud-init ya corrió), así que Terraform no puede reescribirlo en la máquina viva —
+# todo lo añadido después se resuelve por nombre, nunca por el OCID que ese fichero tendría que
+# llevar.
+#
+# `smtp_host`/`smtp_port`/`smtp_use_tls` son literales del endpoint SMTP documentado de OCI para
+# esta región (D6) — no hay recurso Terraform del que leerlos, a diferencia de usuario/contraseña
+# y remitente, que sí son atributos de recursos de este mismo apply.
+resource "oci_vault_secret" "smtp_host" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-smtp-host"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode("smtp.email.${var.region}.oci.oraclecloud.com")
+  }
+}
+
+resource "oci_vault_secret" "smtp_port" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-smtp-port"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode("587")
+  }
+}
+
+resource "oci_vault_secret" "smtp_username" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-smtp-username"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(oci_identity_smtp_credential.smtp.username)
+  }
+}
+
+resource "oci_vault_secret" "smtp_password" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-smtp-password"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(oci_identity_smtp_credential.smtp.password)
+  }
+}
+
+resource "oci_vault_secret" "smtp_from_email" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-smtp-from-email"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(oci_email_sender.smtp.email_address)
+  }
+}
+
+resource "oci_vault_secret" "smtp_use_tls" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-smtp-use-tls"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode("true")
   }
 }

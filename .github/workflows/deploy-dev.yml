@@ -203,6 +203,15 @@ jobs:
           MEDIA_S3_ENDPOINT="$(read_secret_by_name "autohostai-${ENV}-media-s3-endpoint" S3_ENDPOINT_URL)"
           MEDIA_REGION="$(read_secret_by_name "autohostai-${ENV}-media-region" S3_REGION)"
           MEDIA_BUCKET="autohostai-${ENV}-media"
+          # Relay SMTP (change smtp-delivery-adapter). Mismo motivo que el token del túnel y los
+          # cuatro de medios: los nombres son deterministas a partir de ENV, así que no hace falta
+          # ninguna variable de repo nueva ni un TF_VAR_* en infra-dev.yml (D7 del design).
+          SMTP_HOST="$(read_secret_by_name "autohostai-${ENV}-smtp-host" SMTP_HOST)"
+          SMTP_PORT="$(read_secret_by_name "autohostai-${ENV}-smtp-port" SMTP_PORT)"
+          SMTP_USERNAME="$(read_secret_by_name "autohostai-${ENV}-smtp-username" SMTP_USERNAME)"
+          SMTP_PASSWORD="$(read_secret_by_name "autohostai-${ENV}-smtp-password" SMTP_PASSWORD)"
+          SMTP_FROM_EMAIL="$(read_secret_by_name "autohostai-${ENV}-smtp-from-email" SMTP_FROM_EMAIL)"
+          SMTP_USE_TLS="$(read_secret_by_name "autohostai-${ENV}-smtp-use-tls" SMTP_USE_TLS)"
           umask 077
           {
             echo "IMAGE_TAG=sha-${GITHUB_SHA}"
@@ -219,6 +228,12 @@ jobs:
             echo "S3_ENDPOINT_URL=${MEDIA_S3_ENDPOINT}"
             echo "AWS_ACCESS_KEY_ID=${MEDIA_ACCESS_KEY_ID}"
             echo "AWS_SECRET_ACCESS_KEY=${MEDIA_SECRET_ACCESS_KEY}"
+            echo "SMTP_HOST=${SMTP_HOST}"
+            echo "SMTP_PORT=${SMTP_PORT}"
+            echo "SMTP_USERNAME=${SMTP_USERNAME}"
+            echo "SMTP_PASSWORD=${SMTP_PASSWORD}"
+            echo "SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL}"
+            echo "SMTP_USE_TLS=${SMTP_USE_TLS}"
             echo "APP_VERSION=${{ needs.provenance.outputs.version }}"
             echo "APP_PROVENANCE_REPOSITORY_URL=${{ needs.provenance.outputs.repository_url }}"
             echo "APP_PROVENANCE_PULL_REQUEST_NUMBER=${{ needs.provenance.outputs.pull_request_number }}"
