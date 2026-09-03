@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: hardcode83/staff-messaging
 implementation_sha: 2bfcff39e6deef7e539557cfc95b096d8717cc5c
 pr_number:
 pr_url:
