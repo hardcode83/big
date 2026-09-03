@@ -15,7 +15,7 @@
 - [x] 2.3 `.github/workflows/frontend-api-contract.yml`: idem. [R1] [R2]
 - [x] 2.4 `.github/workflows/rule11-ownership.yml`: idem. [R1] [R2]
 
-## 3. Migrate backend-tests.yml
+## 3. Migrate backend-tests.yml <!-- panel: PASS 2026-09-03 -->
 
 - [x] 3.1 `.github/workflows/backend-tests.yml` (3 jobs: `backend-tests-detect`, `backend-tests-suite`, `backend-tests`): `runs-on` de los 3 jobs a `[self-hosted, dev]`. Mantener el `concurrency` por ref con `cancel-in-progress: true`. Cabecera de comentario. El cambio se queda byte a byte fuera del `runs-on` y la cabecera. [R1] [R2] [R7]
 
