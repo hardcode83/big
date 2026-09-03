@@ -281,6 +281,12 @@ jobs:
     # adaptador de Redis a propósito SIN skip (es la única implementación de
     # producción de R5.1-R5.4), así que sin este servicio esos tests van a rojo en vez
     # de desaparecer en el contador de skips.
+    # Puertos a loopback (127.0.0.1:<puerto>:<puerto>): en ubuntu-latest publicar a 0.0.0.0 no
+    # importaba (VM efímera, sin IP alcanzable). En el runner self-hosted persistente, con IP
+    # pública real (solo el security list de la VM lo protege, no el aislamiento del runner), un
+    # 0.0.0.0 innecesario amplía la superficie sin necesidad — nada fuera del propio job necesita
+    # alcanzar Postgres/Redis (enmienda del 2026-09-03 tras el panel de seguridad de `/sdd:review`,
+    # ver `design.md` Risks & mitigations y `steering/security.md` regla 8).
     services:
       postgres:
         image: postgres:16
@@ -289,7 +295,7 @@ jobs:
           POSTGRES_USER: autohostai
           POSTGRES_PASSWORD: ci-local-only
         ports:
-          - 5432:5432
+          - 127.0.0.1:5432:5432
         options: >-
           --health-cmd "pg_isready -U autohostai"
           --health-interval 5s
@@ -298,7 +304,7 @@ jobs:
       redis:
         image: redis:7
         ports:
-          - 6379:6379
+          - 127.0.0.1:6379:6379
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s
