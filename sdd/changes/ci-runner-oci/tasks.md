@@ -8,12 +8,12 @@
 - [x] 1.1 Crear `docs/ci-runner-rollback.md` con las 6 secciones del design D8 (resumen / tabla / `git revert` / rollback manual / validación / rotación-retirada). La tabla de la §2 queda como placeholder "se completa en §7" hasta migrar todos los workflows. Enlazar desde `README.md` raíz, sección "Infra / CI / runner self-hosted" (R6.1, R6.2).
 - [x] 1.2 Probar QEMU en la VM viva: desde SSH, ejecutar `docker run --privileged --rm tonistiigi/binfmt --install all` y `docker buildx create --use --driver docker-container --bootstrap && docker buildx build --platform linux/amd64 - < <(echo 'FROM alpine:3.19')` para verificar que la emulación amd64 sobre arm64 funciona end-to-end. Documentar el resultado en `sdd/changes/ci-runner-oci/STATE.md` (campo `qemu_verification`). Si falla, marcar en el runbook que `multiarch-build-check.yml` se queda en `ubuntu-latest` desde el inicio (D5 fallback explícito, R4). **Resolución 2026-09-03**: probe no ejecutado (sin IP reachable, OCI CLI expirada, sin tfstate en este worktree). Adoptado el fallback explícito R4.2 / D5: `multiarch-build-check.yml` queda en `runs-on: ubuntu-latest` desde el inicio, runbook §2 declara "9 de 10 migrados, 1 excepción deliberada — QEMU no verificado". `STATE.md.qemu_verification: fallback — …`. El operador puede verificar QEMU en un follow-up change si quiere cerrar la salvedad.
 
-## 2. Migrate lightweight contract & guard workflows
+## 2. Migrate lightweight contract & guard workflows <!-- panel: PASS 2026-09-03 -->
 
-- [ ] 2.1 `.github/workflows/api-contract.yml`: `runs-on: ubuntu-latest` → `runs-on: [self-hosted, dev]`. Añadir cabecera de comentario con puntero al runbook (D3, D7). El resto del workflow byte a byte: `permissions`, `concurrency`, `timeout-minutes`, actions pineadas por SHA. [R1] [R2]
-- [ ] 2.2 `.github/workflows/compose-ports.yml`: idem. [R1] [R2]
-- [ ] 2.3 `.github/workflows/frontend-api-contract.yml`: idem. [R1] [R2]
-- [ ] 2.4 `.github/workflows/rule11-ownership.yml`: idem. [R1] [R2]
+- [x] 2.1 `.github/workflows/api-contract.yml`: `runs-on: ubuntu-latest` → `runs-on: [self-hosted, dev]`. Añadir cabecera de comentario con puntero al runbook (D3, D7). El resto del workflow byte a byte: `permissions`, `concurrency`, `timeout-minutes`, actions pineadas por SHA. [R1] [R2]
+- [x] 2.2 `.github/workflows/compose-ports.yml`: idem. [R1] [R2]
+- [x] 2.3 `.github/workflows/frontend-api-contract.yml`: idem. [R1] [R2]
+- [x] 2.4 `.github/workflows/rule11-ownership.yml`: idem. [R1] [R2]
 
 ## 3. Migrate backend-tests.yml
 
@@ -49,3 +49,7 @@
 - **README raíz**: sección «CI / runner self-hosted» insertada después de «Despliegue a dev (CD)» (línea 319-323). Enlace al runbook (`docs/ci-runner-rollback.md`) y al `RUNBOOK.md §6` (operación del runner). 3 líneas de prosa, sin tabla.
 - **Cabecera D7 de los workflows**: la forma literal está en `design.md` D7; el §2 implementador la pega tal cual, con `<n>` = PR del migration. Comentario precede a `name:`, igual que `compose-ports.yml:1-28`, `rule11-ownership.yml:1-40`, `backend-tests.yml:1-48`.
 - **Resolución 2026-09-03 (decisión del orquestador, con el usuario)**: probe QEMU no ejecutado. Adoptado fallback R4.2 / D5: `multiarch-build-check.yml` queda en `ubuntu-latest`, runbook §2 ya rellena esa fila como excepción. **`STATE.md.qemu_verification: fallback — …`**. El §6 implementador **no** debe migrar `multiarch-build-check.yml` (ya está en su estado final, no se toca). El §7 implementador NO debe reescribir la fila de multiarch; ya está cerrada.
+- **§2 (2026-09-03) — `api-contract.yml`**: cabecera D7 pegada (3 líneas, `<migration-pr>` literal), `runs-on: ubuntu-latest` → `runs-on: [self-hosted, dev]` en el único job `api-contract`. Diff scope: header + runs-on, todo lo demás (`concurrency`, `permissions`, `timeout-minutes`, `on:`, actions pineadas por SHA, `env`, steps) byte a byte. SHA del commit lo añadirá el orchestrator al cerrar §2.
+- **§2 (2026-09-03) — `compose-ports.yml`**: cabecera D7 pegada (3 líneas, `<migration-pr>` literal), `runs-on: ubuntu-latest` → `runs-on: [self-hosted, dev]` en el único job `compose-ports`. Diff scope: header + runs-on, byte a byte en lo demás. SHA del commit lo añadirá el orchestrator al cerrar §2.
+- **§2 (2026-09-03) — `frontend-api-contract.yml`**: cabecera D7 pegada (3 líneas, `<migration-pr>` literal), `runs-on: ubuntu-latest` → `runs-on: [self-hosted, dev]` en el único job `frontend-api-contract`. Diff scope: header + runs-on, byte a byte en lo demás. SHA del commit lo añadirá el orchestrator al cerrar §2.
+- **§2 (2026-09-03) — `rule11-ownership.yml`**: cabecera D7 pegada (3 líneas, `<migration-pr>` literal) **encima** de la prosa existente que ya vivía antes de `name:`; `runs-on: ubuntu-latest` → `runs-on: [self-hosted, dev]` en el único job `rule11-ownership`. Diff scope: header + runs-on, la prosa larga original entre `name:` y `on:` queda intacta, todo lo demás byte a byte. SHA del commit lo añadirá el orchestrator al cerrar §2.

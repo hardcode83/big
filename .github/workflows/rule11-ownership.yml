@@ -1,3 +1,6 @@
+# Runner self-hosted en la VM dev (label `[self-hosted, dev]`). Rollback: ver
+# docs/ci-runner-rollback.md (procedimiento + SHA del commit de migración).
+# Cambio: ci-runner-oci (PR <migration-pr>).
 name: rule11-ownership
 
 # La propiedad de un sumidero de la regla 11 se declara en la tabla de `sdd/steering/security.md`
@@ -48,7 +51,7 @@ permissions:
 
 jobs:
   rule11-ownership:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 10
 
     steps:
