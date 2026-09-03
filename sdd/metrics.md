@@ -95,3 +95,4 @@
 | smtp-delivery-adapter | new, design, tasks, run, review, ship, archive | 395682 | 761863 | 316877001 | 174.2510 | 2026-08-31 | 2026-09-03 |
 | staff-messaging | new, design, run, review, ship, archive | 607829 | 1326230 | 450441958 | 134.6256 | 2026-09-02 | 2026-09-03 |
 | dashboard-occupancy-series | new, design, tasks, run, review, ship, archive | 258320 | 726628 | 176527278 | 67.5233 | 2026-09-02 | 2026-09-03 |
+| platform-admin-api | new, design, tasks, run, review, ship, archive | 17025653 | 861740 | 200581612 | 212.4330 | 2026-09-02 | 2026-09-03 |
