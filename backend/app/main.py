@@ -16,9 +16,11 @@ from app.cleaning.api.errors import register_cleaning_error_handlers
 from app.maintenance.api.approvals_router import router as owner_approvals_router
 from app.maintenance.api.errors import register_maintenance_error_handlers
 from app.maintenance.api.incidents_router import router as incidents_router
+from app.maintenance.api.messages_router import router as incident_messages_router
 from app.messaging.api.errors import register_messaging_error_handlers
 from app.notifications.api.errors import register_notification_error_handlers
 from app.messaging.api.router import router as conversations_router
+from app.cleaning.api.messages_router import router as cleaning_task_messages_router
 from app.cleaning.api.photos_router import router as cleaning_photos_router
 from app.maintenance.api.photos_router import router as incident_photos_router
 from app.cleaning.api.tasks_router import router as cleaning_tasks_router
@@ -129,6 +131,10 @@ def create_app() -> FastAPI:
     # its own than buried among the task routes (proposal R1, `ASSUMPTION`).
     app.include_router(cleaning_templates_router, prefix=API_V1_PREFIX)
     app.include_router(cleaning_tasks_router, prefix=API_V1_PREFIX)
+    # `staff-messaging`: the cleaning task's staff-to-manager thread, its own router the
+    # `cleaning_photos_router` precedent (a sub-resource of the task, split out rather than
+    # grown onto `cleaning_tasks_router`'s twelve routes).
+    app.include_router(cleaning_task_messages_router, prefix=API_V1_PREFIX)
     # `cleaning-photos-storage`: the **first of the two anonymous routes that serve tenant
     # data** (design D7); `incident-photos` mounted the second below, and its D5 moved the
     # machinery both share into `app/integrations/`. Its own router because sharing
@@ -145,6 +151,10 @@ def create_app() -> FastAPI:
     # its R4.6; nothing here opens one, and the one surface that creates an incident
     # anonymously is the guest portal's, mounted further down.
     app.include_router(incidents_router, prefix=API_V1_PREFIX)
+    # `staff-messaging`: the incident's staff-to-manager thread, its own router the
+    # `incident_photos_router`/`cleaning_task_messages_router` precedent (a sub-resource of
+    # the incident, split out rather than grown onto `incidents_router`'s existing routes).
+    app.include_router(incident_messages_router, prefix=API_V1_PREFIX)
     # Its own router and NOT part of `incidents_router` (R4.6): that one's every path carries
     # a `require(...)`, and this is the module's only anonymous door. The second route in the
     # application that serves object bytes against an HMAC signature, after

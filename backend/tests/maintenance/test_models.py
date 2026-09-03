@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import UniqueConstraint, select, text
 from sqlalchemy.exc import IntegrityError
 
+from app.auth.domain.enums import UserRole
 from app.auth.infrastructure.models import UserModel
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.cleaning.infrastructure.models import (
@@ -19,6 +20,7 @@ from app.maintenance.domain.enums import (
     OwnerApprovalRelatedType,
 )
 from app.maintenance.infrastructure.models import (
+    IncidentMessageModel,
     IncidentModel,
     IncidentPhotoModel,
     OwnerApprovalModel,
@@ -646,3 +648,65 @@ def test_incident_photos_is_inside_the_global_tenant_filter() -> None:
     from app.core.db import tenant_scoped_classes
 
     assert IncidentPhotoModel in tenant_scoped_classes()
+
+
+@pytest.mark.asyncio
+async def test_incident_message_roundtrip(db_session) -> None:
+    """`staff-messaging` R2 — the columns persist and read back with their declared types."""
+    tenant, _, incident = await _tenant_property_incident(db_session)
+    author = await _uploader(db_session, tenant)
+
+    message = IncidentMessageModel(
+        tenant_id=tenant.id,
+        incident_id=incident.id,
+        author_id=author.id,
+        author_role=UserRole.TECHNICIAN,
+        content="The part arrived, starting the repair now.",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(message)
+    await db_session.commit()
+
+    fetched = (
+        await db_session.execute(
+            select(IncidentMessageModel).where(IncidentMessageModel.id == message.id)
+        )
+    ).scalar_one()
+
+    assert fetched.tenant_id == tenant.id
+    assert fetched.incident_id == incident.id
+    assert fetched.author_id == author.id
+    assert fetched.author_role == UserRole.TECHNICIAN
+    assert fetched.content == "The part arrived, starting the repair now."
+    assert fetched.created_at is not None
+
+
+@pytest.mark.asyncio
+async def test_a_message_cannot_be_attached_to_an_incident_of_another_tenant(db_session) -> None:
+    """`staff-messaging` R2/R3.2 — **the database refuses the cross-tenant row**, not the
+    repository.
+
+    The same case `test_a_photo_cannot_be_attached_to_an_incident_of_another_tenant` drives
+    for `incident_photos`: with two independent single-column foreign keys this row would be
+    perfectly legal, since both targets exist and just belong to different tenants.
+    """
+    tenant_a, _, _ = await _tenant_property_incident(db_session)
+    tenant_b, _, incident_b = await _tenant_property_incident(
+        db_session, name="Owner B", email="ownerb2@example.com"
+    )
+    author_a = await _uploader(db_session, tenant_a)
+
+    # Tenant A's message pointing at tenant B's incident.
+    db_session.add(
+        IncidentMessageModel(
+            tenant_id=tenant_a.id,
+            incident_id=incident_b.id,
+            author_id=author_a.id,
+            author_role=UserRole.TECHNICIAN,
+            content="Cross-tenant message attempt.",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
