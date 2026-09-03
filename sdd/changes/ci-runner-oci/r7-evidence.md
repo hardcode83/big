@@ -35,3 +35,4 @@ Generated: 2026-09-03T14:36:30Z. Source: `GET /repos/autohostai-labs/AutoHostAI/
 
 - run 33731083627 · event=schedule · completed/success · 2026-09-03T08:01:01Z
   - job `reset`: success on runner `autohostai-dev-vm` (labels: self-hosted,dev)
+  - **Esta evidencia es de ANTES del arreglo del `.env` compartido (`tasks.md` §9.20, sexta pasada de `sdd-security`).** `demo-reset.yml` cambió su checkout (`clean: false` → por defecto) y su `.env` de referencia (`$HOME/.autohostai-dev-runtime.env` en vez del workspace) después de este run — no re-verificado en el runner tras ese cambio, sin acceso a la VM desde este worktree. Primera verificación real: el primer `demo-reset` que corra tras el merge.

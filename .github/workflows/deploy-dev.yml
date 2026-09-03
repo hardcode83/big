@@ -177,6 +177,15 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Render .env leyendo los secrets del OCI Vault (validación previa) [R4]
+        # Fuera del workspace del checkout a propósito, en `$HOME` (no en `_work/`, ni siquiera en
+        # `$RUNNER_TEMP`): desde ci-runner-oci el workspace es compartido con 7 workflows más
+        # `pull_request`-triggered, y el `git clean -ffdx` del checkout POR DEFECTO de cualquiera de
+        # ellos borraría un `.env` que viviera ahí — de hecho lo borra, sin necesidad de que nadie lo
+        # intente: el primer PR normal que corra tras un deploy real ya lo hace (hallazgo del panel
+        # de seguridad, sexta pasada). `$RUNNER_TEMP` tampoco vale: se limpia al inicializar el
+        # SIGUIENTE job, así que para cuando `demo-reset` lo necesitara ya habría desaparecido.
+        # `demo-reset.yml` lee este mismo fichero (ver su paso de precondición) — cualquier cambio
+        # de ruta aquí tiene que reflejarse allí.
         env:
           # OCID del Vault: lo necesita la resolución POR NOMBRE del token del túnel. No puede salir
           # de /etc/autohostai-deploy.env porque ese fichero lo escribe cloud-init y `metadata` es
@@ -263,8 +272,8 @@ jobs:
             echo "APP_PROVENANCE_PULL_REQUEST_NUMBER=${{ needs.provenance.outputs.pull_request_number }}"
             echo "APP_PROVENANCE_COMMIT_SHA=${{ needs.provenance.outputs.commit_sha }}"
             echo "APP_PROVENANCE_ACTIONS_RUN_ID=${{ needs.provenance.outputs.actions_run_id }}"
-          } > .env
-          chmod 600 .env
+          } > "$HOME/.autohostai-dev-runtime.env"
+          chmod 600 "$HOME/.autohostai-dev-runtime.env"
 
       - name: Login GHCR (GITHUB_TOKEN del job, read-only) [R3]
         # El job corre en un workflow del repo → su GITHUB_TOKEN (packages: read) está cubierto por
@@ -278,7 +287,7 @@ jobs:
       - name: Deploy — pull + preflight + up --wait [R3, R5]
         run: |
           set -euo pipefail
-          docker compose -f docker-compose.deploy.yml pull
+          docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml pull
           # Preflight: una sola cabeza en el grafo de Alembic ANTES de tocar contenedores.
           # `up -d --wait` recrea backend/worker/beat/frontend y solo después espera a que
           # `migrate` termine; si `migrate` sale 255 con "Multiple head revisions" (2026-09-02,
@@ -288,16 +297,16 @@ jobs:
           # va a desplegar, no sobre el checkout, porque es esa imagen la que corre `migrate`.
           # `alembic heads` solo lee el directorio de scripts —no toca la base de datos—,
           # `--no-deps` evita arrancar `postgres` desde aquí y `--rm` no deja contenedor.
-          heads="$(docker compose -f docker-compose.deploy.yml run --rm --no-deps -T migrate alembic heads)"
+          heads="$(docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml run --rm --no-deps -T migrate alembic heads)"
           count="$(printf '%s\n' "$heads" | grep -c '(head)' || true)"
           if [ "$count" -ne 1 ]; then
             echo "::error::el grafo de Alembic de la imagen tiene ${count} cabezas; no se ha tocado ningún contenedor y la versión anterior sigue sirviendo"
             printf '%s\n' "$heads"
             exit 1
           fi
-          if ! docker compose -f docker-compose.deploy.yml up -d --wait --wait-timeout 180; then
+          if ! docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml up -d --wait --wait-timeout 180; then
             echo "::error::deploy falló — servicios no healthy dentro del timeout"
-            docker compose -f docker-compose.deploy.yml logs --tail=200
+            docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml logs --tail=200
             exit 1
           fi
 
@@ -326,7 +335,7 @@ jobs:
         timeout-minutes: 2
         run: |
           set -euo pipefail
-          CID="$(docker compose -f docker-compose.deploy.yml ps -q cloudflared)"
+          CID="$(docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml ps -q cloudflared)"
           if [ -z "${CID:-}" ]; then
             echo "::error::no hay contenedor de cloudflared en marcha: no se puede comprobar el origen"
             exit 1
@@ -403,7 +412,7 @@ jobs:
           docker rm -f "$PROBE" >/dev/null 2>&1 || true
           if [ "$CODE" != "0" ]; then
             echo "::error::el origen no es alcanzable desde la red de ingress ($NET) — el túnel serviría 502. ¿Está 'frontend' en esa red?"
-            docker compose -f docker-compose.deploy.yml logs --tail=100 frontend cloudflared
+            docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml logs --tail=100 frontend cloudflared
             exit 1
           fi
 
