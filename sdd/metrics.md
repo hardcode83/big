@@ -92,3 +92,4 @@
 | cleaner-app | new, tasks, run, review, ship, archive | 1913125 | 420916 | 113055583 | 70.1061 | 2026-08-18 | 2026-08-31 |
 | revenue-statements | design, new, run, tasks, review, archive | 6370569 | 987638 | 228543231 | 170.2758 | 2026-08-26 | 2026-09-02 |
 | revenue-reviews | new, design, tasks, run, review, ship, archive | 13772896 | 653169 | 267912705 | 222.0495 | 2026-09-01 | 2026-09-02 |
+| smtp-delivery-adapter | new, design, tasks, run, review, ship, archive | 395682 | 761863 | 316877001 | 174.2510 | 2026-08-31 | 2026-09-03 |

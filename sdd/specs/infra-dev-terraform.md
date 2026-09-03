@@ -13,6 +13,7 @@ Terraform real y pipeline de CI/CD para el entorno `dev` de AutoHostAI en Oracle
 - THE SYSTEM SHALL aprovisionar una única instancia `VM.Standard.A1.Flex` (4 OCPU/24 GB, boot volume 200 GB, dentro del grant Always Free que la tenancy PAYG conserva a $0), fijada en AD-3 vía `var.ad_number` (default 3), con imagen Ubuntu 22.04 ARM64 resuelta vía `data.oci_core_images` — nunca un OCID hardcodeado.
 - THE SYSTEM SHALL inyectar por `cloud-init` las claves de `var.ssh_authorized_keys` (`list(string)`) al usuario `ubuntu`, e instalar Docker + Compose vía el **repositorio APT oficial de Docker** (`docker-ce`, `docker-compose-plugin`, arm64) — nunca `docker-compose-plugin` de los repos por defecto de Ubuntu (no existe ahí).
 - THE SYSTEM SHALL declarar `lifecycle { ignore_changes = [metadata] }` en la instancia: el `metadata` (user_data/claves) es ForceNew en el provider `oci`, así que cambiarlo recrearía la VM; la lista de claves y el cloud-init definen el arranque de una VM nueva, y las altas/rotaciones de clave sobre la VM viva se hacen out-of-band por SSH (ver `RUNBOOK.md`).
+- THE SYSTEM SHALL declarar también `ignore_changes` sobre `source_details[0].source_id`: el data source resuelve «el Ubuntu 22.04 arm64 más nuevo» en cada plan, y cuando Oracle publica un build el diff parece un update in-place inofensivo — pero el apply **reemplaza el boot volume de la VM viva**: re-imagen desde cero con el `user_data` congelado por el `ignore_changes` de `metadata` (un cloud-init antiguo y roto), host keys nuevas, runner desregistrado y la base de datos de dev perdida (`postgres_data` es un volumen Docker sobre ese disco). Incidente real del 2026-09-03, destapado por el apply de `smtp-delivery-adapter` (fix `ca00fdd`); actualizar el SO de la VM viva es desde entonces un `terraform apply -replace` deliberado, nunca un efecto lateral de un plan rutinario.
 - THE SYSTEM SHALL asociar una IP pública reservada (no efímera) a la instancia.
 - El `cloud-init` (movido a `cloud-init.yaml.tftpl` vía `templatefile()`) provisiona además el **runner self-hosted de GitHub Actions** del CD y declara el **instance principal** (`oci_identity_dynamic_group` + `oci_identity_policy` de mínimo privilegio) que lo autoriza a leer del Vault; el comportamiento del CD se especifica en `app-deploy-dev`.
 - WHEN algún elemento de `var.allowed_ssh_cidrs` no es un CIDR IPv4 con prefijo ≥ /24, o `var.ssh_authorized_keys` está vacía / con formato inválido, THE SYSTEM SHALL rechazar el `plan`/`apply` en la validación de variables.
@@ -67,6 +68,36 @@ Aprovisionado por `object-storage-provisioning`. Su comportamiento de aplicació
 - El comportamiento de los recursos de Cloudflare (túnel, routing, CNAME, ajuste de zona) y sus variables se especifica en `ingress-https-dev`.
 - El **API token de Cloudflare** es bootstrap irreducible (se acuña en el dashboard) y **no** se copia al Vault, a diferencia de la clave de la GitHub App: su radio abarca toda la zona y es re-emitible en segundos.
 
+### Relay SMTP: OCI Email Delivery (desde `smtp-delivery-adapter`)
+
+- THE SYSTEM SHALL aprovisionar el relay transaccional con recursos del propio provider `oci` —
+  `oci_email_email_domain.smtp` sobre `mail.<public_hostname>`, `oci_email_dkim.smtp` y
+  `oci_email_sender.smtp` (`noreply@mail.<public_hostname>`) — sin proveedor externo nuevo
+  (Brevo/Resend/SES rechazados en el design D6 del change: nueva cuenta, nuevo vendor o espera de
+  aprobación manual, para el mismo SMTP estándar).
+- THE SYSTEM SHALL crear un usuario de servicio SMTP **dedicado** (`oci_identity_user.smtp`, con
+  `email` porque IDCS lo exige, igual que el de medios) con su grupo, membresía y
+  `oci_identity_smtp_credential` — no reutilizar el usuario `media`, para que una clave S3 filtrada
+  nunca conceda además capacidad de envío de correo ni viceversa. Su policy
+  (`oci_identity_policy.smtp_send_access`) es `use approved-senders`: solo enviar, nunca gestionar
+  dominio ni senders; la letra pequeña de su alcance (compartment raíz de la tenancy, sin condición
+  por sender) está dicha con honestidad en `iam-policy.md`.
+- THE SYSTEM SHALL publicar SPF (`TXT`, `v=spf1 include:eu.rp.oracleemaildelivery.com ~all`) y DKIM
+  (`CNAME` cuyo nombre y valor referencian `oci_email_dkim.smtp` **directamente**, sin valor copiado
+  de ningún dashboard) como `cloudflare_dns_record` en el mismo apply: OCI genera la clave DKIM
+  dentro del apply y la expone como atributos, así que no queda ningún paso de bootstrap manual.
+- THE SYSTEM SHALL escribir al Vault los seis secretos
+  `autohostai-<env>-smtp-{host,port,username,password,from-email,use-tls}` — username/password de
+  los atributos de la credencial; host/puerto/TLS literales del endpoint documentado de OCI
+  (`smtp.email.<region>.oci.oraclecloud.com:587`, STARTTLS); from-email del sender — y añadir sus
+  seis OCID a la enumeración de la policy del runner **en el mismo apply**, la misma mitigación que
+  los cuatro de medios.
+- La policy del grupo de `svc-terraform-dev` necesitó **dos sentencias de tenancy nuevas**,
+  aplicadas por un admin fuera de Terraform: `manage email-family` (anticipada en diseño) y `manage
+  credentials` (descubierta en el primer apply real, 2026-09-03: las credenciales SMTP de un usuario
+  son un resource-type propio, distinto del genérico `users` que ya cubría las Customer Secret
+  Keys). Ambas documentadas en `iam-policy.md` con su justificación.
+
 ### Build multi-arch (`.github/workflows/multiarch-build-check.yml`)
 
 - WHEN se modifica `backend/devops/Dockerfile`, `frontend/devops/Dockerfile` o sus lockfiles, THE SYSTEM SHALL construir ambas imágenes (`target: prod`) para `linux/amd64` y `linux/arm64` sin publicar a registry — verifica que corren en la arquitectura ARM64 de la instancia.
@@ -81,6 +112,6 @@ Aprovisionado por `object-storage-provisioning`. Su comportamiento de aplicació
 
 ## Estado y pendientes
 
-- Infra **desplegada y operativa** (aplicada por el pipeline como `svc-terraform-dev`): instancia 4 OCPU/24 GB/200 GB en AD-3 (PAYG, $0), Docker+Compose vía repo oficial, budget €1 con alertas ACTUAL+FORECAST, Vault + key + secret SSH recuperable, versioning del state activo. Añadido por `app-deploy-dev`: runner self-hosted (cloud-init) + instance principal + secrets de runtime y clave de la App en el Vault. Añadido por `ingress-https-dev`: provider `cloudflare` con el túnel/DNS/ajuste de zona, el secreto del túnel en el Vault, y el security list reducido a **solo el 22**. Añadido por `demo-user`: el secreto de la contraseña de demostración y su OCID en la enumeración de la policy del runner — **sin tocar red, security list ni cómputo**.
+- Infra **desplegada y operativa** (aplicada por el pipeline como `svc-terraform-dev`): instancia 4 OCPU/24 GB/200 GB en AD-3 (PAYG, $0), Docker+Compose vía repo oficial, budget €1 con alertas ACTUAL+FORECAST, Vault + key + secret SSH recuperable, versioning del state activo. Añadido por `app-deploy-dev`: runner self-hosted (cloud-init) + instance principal + secrets de runtime y clave de la App en el Vault. Añadido por `ingress-https-dev`: provider `cloudflare` con el túnel/DNS/ajuste de zona, el secreto del túnel en el Vault, y el security list reducido a **solo el 22**. Añadido por `demo-user`: el secreto de la contraseña de demostración y su OCID en la enumeración de la policy del runner — **sin tocar red, security list ni cómputo**. Añadido por `smtp-delivery-adapter` (2026-09-03): OCI Email Delivery (dominio + DKIM + sender), usuario/credencial SMTP de servicio, SPF/DKIM en Cloudflare y seis secretos SMTP en el Vault con sus OCID en la policy del runner — también sin tocar red ni cómputo; el mismo día se fijó el pin del boot volume (`source_id`) tras el incidente que su apply destapó.
 - El **despliegue de la aplicación** ya está resuelto por el change **`app-deploy-dev`** (build → GHCR → deploy local en el runner self-hosted) y su **acceso público** por **`ingress-https-dev`** (Cloudflare Tunnel); ver sus specs. El repo vive en la org **`autohostai-labs`**.
 - **Cerrado por `ingress-https-hardening`** (2026-08-04): la policy del runner queda con **un solo statement** (`read secret-bundles` condicionado por la enumeración de OCID). El `read secrets` sin condición no se acotó sino que se **eliminó**, porque nunca fue necesario: `GetSecretBundleByName` exige solo `SECRET_BUNDLE_READ`. Aplicado in situ (`0 added, 1 changed, 0 destroyed`) y verificado con un deploy real cuyo paso de lectura del Vault pasó.
