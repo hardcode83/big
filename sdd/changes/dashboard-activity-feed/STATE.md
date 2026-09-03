@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/dashboard-activity-feed
 implementation_sha: d312b075f1e8da06796d84f1b4bcbbb14ce51ba0
 pr_number:
 pr_url:
