@@ -1,6 +1,6 @@
 # Runner self-hosted en la VM dev (label `[self-hosted, dev]`). Rollback: ver
 # docs/ci-runner-rollback.md (procedimiento + SHA del commit de migración).
-# Cambio: ci-runner-oci (PR <migration-pr>).
+# Cambio: ci-runner-oci (PR <n>).
 name: compose-ports
 
 # La postura de red del compose local, comprobada en cada Pull Request: ningún servicio publica

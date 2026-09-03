@@ -1,6 +1,6 @@
 # Runner self-hosted en la VM dev (label `[self-hosted, dev]`). Rollback: ver
 # docs/ci-runner-rollback.md (procedimiento + SHA del commit de migración).
-# Cambio: ci-runner-oci (PR <migration-pr>).
+# Cambio: ci-runner-oci (PR <n>).
 name: deploy-dev
 
 # CD del entorno dev: construye las imágenes `prod` arm64 de backend/frontend, las publica

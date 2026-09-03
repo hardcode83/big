@@ -1,6 +1,6 @@
 # Runner self-hosted en la VM dev (label `[self-hosted, dev]`). Rollback: ver
 # docs/ci-runner-rollback.md (procedimiento + SHA del commit de migración).
-# Cambio: ci-runner-oci (PR <migration-pr>).
+# Cambio: ci-runner-oci (PR <n>).
 name: backend-tests
 
 # Merge gate reproducible para el backend, pedido en la revisión del PR #25: hasta

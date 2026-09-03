@@ -1,6 +1,6 @@
 # Runner self-hosted en la VM dev (label `[self-hosted, dev]`). Rollback: ver
 # docs/ci-runner-rollback.md (procedimiento + SHA del commit de migración).
-# Cambio: ci-runner-oci (PR <migration-pr>).
+# Cambio: ci-runner-oci (PR <n>).
 name: frontend-tests
 
 # Gate reproducible para la calidad del frontend. Se ejecuta sin filtros de paths para que el

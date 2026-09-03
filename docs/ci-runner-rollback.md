@@ -38,7 +38,7 @@ La tabla refleja los ficheros `.yml` migrados bajo `.github/workflows/` a fecha 
 
 ## 3. Rollback por `git revert`
 
-El rollback global preferido. Una sola operación revierte los 10 workflows a `ubuntu-latest`.
+El rollback global preferido. Una sola operación revierte los 9 workflows migrados a `ubuntu-latest` (`multiarch-build-check.yml` ya está en `ubuntu-latest`, no participa del revert).
 
 ```bash
 # PR mergeado por merge commit (lo habitual con /sdd:ship):
