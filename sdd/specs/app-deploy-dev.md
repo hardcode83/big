@@ -8,7 +8,7 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 
 ### Build y publicación de imágenes (`.github/workflows/deploy-dev.yml`)
 
-- WHEN se hace push a `main` y el diff toca `backend/**`, `frontend/**`, sus Dockerfiles/lockfiles, `VERSION`, `docker-compose.deploy.yml` o el propio workflow (o en `workflow_dispatch`), THE SYSTEM SHALL construir las imágenes `target: prod` de backend y frontend para `linux/arm64` y publicarlas en GHCR bajo el namespace del owner del repo (`ghcr.io/<owner>/autohostai-{backend,frontend}`), autenticando con el `GITHUB_TOKEN` (`packages: write`).
+- WHEN se hace push a `main` y el diff toca `backend/**`, `frontend/**`, sus Dockerfiles/lockfiles, `VERSION`, `docker-compose.deploy.yml` o el propio workflow (o en `workflow_dispatch`), THE SYSTEM SHALL construir las imágenes `target: prod` de backend y frontend para `linux/arm64` y publicarlas en GHCR bajo el namespace del owner del repo (`ghcr.io/<owner>/autohostai-{backend,frontend}`), autenticando con el `GITHUB_TOKEN` (`packages: write`) y hacer `docker logout ghcr.io` (`if: always()`) al terminar — igual que el job `deploy` (línea 57), la credencial no debe sobrevivir al job en el runner persistente (`ci-runner-oci`).
 - THE SYSTEM SHALL etiquetar cada imagen con el **SHA de commit** (`sha-<commit>`, inmutable — el que consume el deploy) y con el tag móvil `dev`.
 - THE SYSTEM SHALL pasar las `NEXT_PUBLIC_*` como **build-args** (horneadas en el bundle de Next standalone), nunca como config de runtime.
 - THE SYSTEM SHALL componer la identidad de build en un **único job previo** (`provenance`), del que dependen los dos builds, de modo que ambas imágenes reciban idénticos valores por construcción y no por disciplina. Ese job lee la base de `VERSION`, la valida y falla el build si no tiene forma `X.Y.Z`. Comportamiento completo en `app-version-visibility`.
@@ -87,10 +87,15 @@ el comportamiento del reset se especifica en [`demo-tenant`](demo-tenant.md).
   publicar la base de datos, requerir SSH ni tocar el security list. Es la razón por la que el runner
   local es el único mecanismo posible: el `metadata` de la instancia es ForceNew con
   `ignore_changes`, así que un cron por cloud-init no llegaría nunca a la VM viva.
-- THE SYSTEM SHALL hacer `checkout` con `clean: false`. El `.env` del despliegue **no está
-  versionado** y vive en el workspace compartido del runner: un checkout limpio lo borraría y dejaría
-  al deploy siguiente sin `.env` hasta re-renderizarlo. La deuda que esto nombra —extraer el paso
-  «Render .env» a un script versionado compartido por los dos workflows— queda declarada y no pagada.
+- THE SYSTEM SHALL hacer `checkout` con su comportamiento **por defecto** (`clean: true`).
+  **Corregido por `ci-runner-oci`** (2026-09-04): el `.env` del despliegue **no está versionado**
+  y ya no vive en el workspace del checkout, sino en `$HOME/.autohostai-dev-runtime.env` — fuera
+  de `$GITHUB_WORKSPACE` y de `$RUNNER_TEMP`. Con `clean: false` el `.env` sobrevivía mientras el
+  workspace fuera solo del deploy y el reset; desde que 7 workflows `pull_request`-triggered más
+  comparten ese mismo disco físico, el `git clean -ffdx` del checkout por defecto de *cualquiera*
+  de ellos lo habría borrado igual, así que `clean: false` dejó de proteger nada y se retiró. La
+  deuda que esto nombraba —extraer el paso «Render .env» a un script versionado compartido por
+  los dos workflows— sigue declarada y sin pagar.
 - THE SYSTEM SHALL comprobar como precondición, antes de tocar nada, que ese `.env` existe y que
   `postgres` está corriendo, fallando en rojo si no.
 - THE SYSTEM SHALL leer del Vault **por nombre** y con instance principal el único secreto que

@@ -1,6 +1,6 @@
 ---
 schema: 1
-state: PR_OPEN
+state: ARCHIVED
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
@@ -8,9 +8,9 @@ head_branch: sdd/ci-runner-oci
 implementation_sha: f192b7f82453be9510b3b29b698e6878e24a39f8
 pr_number: 158
 pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/158
-pr_state: OPEN
-merge_evidence:
-merge_sha:
+pr_state: MERGED
+merge_evidence: pr
+merge_sha: 8b614f95aa0a435d6aa50ea90c8afa5ff64e46ca
 ---
 
 # Change lifecycle
