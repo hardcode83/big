@@ -5,6 +5,7 @@ import {
   getSessionTokens,
   setSessionTokens,
 } from "@/lib/auth/session-store";
+import { purgeSessionCache } from "@/lib/auth/session-cache-purge";
 import { refreshSession } from "@/lib/auth/refresh-coordinator";
 import { SESSION_PRESENT_COOKIE } from "@/lib/config/constants";
 
@@ -93,6 +94,7 @@ describe("refresh coordinator", () => {
     );
 
     const pending = refreshSession(refresh);
+    purgeSessionCache();
     clearSessionTokens();
     resolveRefresh({ accessToken: "late-access", refreshToken: "late-refresh" });
 

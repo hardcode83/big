@@ -53,6 +53,14 @@ export function refreshSession(refreshTokens: RefreshTokens): Promise<SessionTok
       markSessionPresent();
       return next;
     })
+    /**
+     * On failure, the guard fires only when the session generation captured
+     * before the refresh still matches: if it did not move under this
+     * promise, the tokens still belong to the session that initiated the
+     * refresh and clearing them is safe; otherwise the current tokens
+     * belong to another session (a `login()` that won the race) and are
+     * left untouched.
+     */
     .catch((error: unknown) => {
       if (getSessionGeneration() === generation) {
         clearSessionTokens();
