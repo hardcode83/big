@@ -56,9 +56,11 @@ gh api repos/autohostai-labs/AutoHostAI/actions/runs/<id>/jobs \
 
 If 5.4 fails (some jobs share a runner), the diagnosis is in the sleep duration — increase it from 60s to the suite runtime + buffer.
 
-## Why this is not a BLOCK on ship
+## Actual constraint: the lifecycle tooling enforces this, not just convention
 
-`/sdd:ship` opens the PR (publishes the branch and creates the PR URL). The user said "resolveremos blocked en el ultimo paso antes de shipearlo" — meaning the gate is the final manual step before merging the PR, not before publishing it. The PR can be reviewed with the live gate still pending; the merge happens after 5.3 + 5.4 pass.
+Tried `sdd_lifecycle.py mark-local-verified` on 2026-09-04 after the full review panel (architect, security, qa, cicd, documentation) reached unanimous PASS across 4 fix rounds — it refused: `ERROR: Change has 2 incomplete task(s) at tasks.md line(s) 39, 40`. The SDD toolkit hard-requires every `tasks.md` checkbox before `mark-local-verified` → `mark-ready` → `/sdd:ship` can run. So this is not a soft "resolve before merge" convention — the automated path to opening the PR is itself gated on 5.3/5.4, not just the merge.
+
+The user's instruction ("resolveremos blocked en el ultimo paso antes de shipearlo") is honored as: everything that can be done without live VM access is done and reviewed; the very next action, before `/sdd:ship` can run at all, is checking off 5.3/5.4 with real evidence from the live VM.
 
 ## Resume later
 
