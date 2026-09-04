@@ -2,8 +2,8 @@
 
 ## 1. Backend — `TenantRepository.list_page` port <!-- panel: PASS 2026-09-04 -->
 
-- [x] 1.1 Add `list_page(page: int, per_page: int) -> tuple[Sequence[TenantSettings], int]` to
-  the `TenantRepository` protocol (`backend/app/tenants/domain/repositories.py`) and its
+- [x] 1.1 Add `list_page(page: int, per_page: int) -> tuple[Sequence[tuple[Tenant, TenantConfig]], int]`
+  to the `TenantRepository` protocol (`backend/app/tenants/domain/repositories.py`) and its
   SQLAlchemy implementation (`backend/app/tenants/infrastructure/repositories.py`): a single
   query joining `TenantModel`/`TenantConfigModel` on `tenant_id`, ordered `created_at DESC`,
   plus a `SELECT count(*)` for `total` — same two-query shape as
@@ -11,13 +11,11 @@
   `backend/tests/tenants/test_repositories.py`: empty table → `([], 0)`; several tenants →
   `created_at DESC` order and correct `total`; `page`/`per_page` slicing. [R2.2, R2.3, R2.4]
 
-  Note: design D2 states the port's return type as `tuple[Sequence[Tenant], int]`. This task
-  returns `Sequence[TenantSettings]` (tenant + its config paired) instead — `TenantSettings`
-  is the existing dataclass `TenantResponse.from_settings` already maps from
-  (`app/tenants/application/use_cases.py`), and the design's own reasoning ("no
-  `get_or_create` defaulting needed — a tenant without a config row cannot exist") only
-  holds if the query fetches both rows per tenant in the same pass. Flagged for the
-  approval gate, not silently deviated.
+  Note: matches design D2's corrected return type, `tuple[Sequence[tuple[Tenant,
+  TenantConfig]], int]` (corrected 2026-09-04, section-1 review panel — a domain port cannot
+  return the application layer's `TenantSettings`, so the pairing is a plain tuple;
+  `ListTenantsUseCase` wraps each pair into one). The pairing itself is what makes "no
+  `get_or_create` defaulting needed — a tenant without a config row cannot exist" true.
 
 ## 2. Backend — `GET /api/v1/platform/tenants` <!-- panel: PASS 2026-09-04 -->
 
