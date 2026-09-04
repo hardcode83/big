@@ -15,7 +15,7 @@ from app.messaging.domain.exceptions import (
     InvalidConversationTransitionError,
     MessagingValidationError,
 )
-from app.messaging.domain.value_objects import MessageMetadata
+from app.messaging.domain.value_objects import InboundWhatsAppMessage, MessageMetadata
 from app.tenants.domain.value_objects import SUPPORTED_LANGUAGES
 
 #: The longest message body this system accepts (R7.6, design D21).
@@ -47,6 +47,23 @@ class Conversation:
     last_message_at: datetime | None = None
     ai_enabled: bool = True
     escalation_status: ConversationEscalationStatus = ConversationEscalationStatus.NONE
+
+    #: The tenant's own WhatsApp number the guest wrote **to** — Meta's `phone_number_id`,
+    #: never the display number (`whatsapp-cloud-adapter` D4 addendum, 2026-09-02).
+    #:
+    #: Set once, by `ConversationRepository.ensure_whatsapp` at creation time, and never
+    #: rewritten: a reply always leaves from the number the thread was opened on, even after
+    #: the tenant's configured number changes. That "never rewritten" is structural rather
+    #: than documented — no method of this entity touches it, and the field has no setter, so
+    #: the only writer is the `INSERT` (`steering/backend-architecture.md`: entities mutate
+    #: only through their own methods). Retargeting a live thread to a new number is out of
+    #: scope, a follow-up if it ever matters.
+    #:
+    #: `None` for every other channel, refused in `__post_init__`: the topology is one shared
+    #: Meta App with one dedicated number per tenant (D1 addendum), so this column means
+    #: nothing on a `PORTAL`, `EMAIL`, `MANUAL` or `PHONE_TRANSCRIPT` row and a value there
+    #: would be a number nobody can reply from.
+    business_phone_number: str | None = None
 
     #: The legal moves of the **escalation** axis, as `operation -> (origins, destination)`
     #: (R5.3, design D4).
@@ -125,6 +142,23 @@ class Conversation:
             raise MessagingValidationError(
                 "A conversation must belong to a property: without one it can produce none "
                 "of the timeline events R4.1, R4.4, R4.5 and R5.2 require (design D19)"
+            )
+        if (
+            self.business_phone_number is not None
+            and self.channel is not ConversationChannel.WHATSAPP
+        ):
+            # The field is the WhatsApp number the thread was opened on; on any other channel
+            # there is no such number, so a value here describes a reply route that does not
+            # exist. Refused at construction rather than only at the one writer, which is what
+            # makes it true for `_to_conversation`'s read-back too.
+            raise MessagingValidationError(
+                "business_phone_number belongs to a WHATSAPP conversation and to no other "
+                "channel (whatsapp-cloud-adapter D4)"
+            )
+        if self.business_phone_number is not None and not self.business_phone_number.strip():
+            raise MessagingValidationError(
+                "business_phone_number is the Meta phone_number_id the thread was opened "
+                "on, never blank"
             )
         if self.language not in SUPPORTED_LANGUAGES:
             # R4.8 makes this field the fallback when detection cannot decide, so an
@@ -332,3 +366,88 @@ def _closed_intent(intent: object) -> str | None:
         return MessageIntent(intent).value
     except (ValueError, TypeError):
         return MessageIntent.UNKNOWN.value
+
+
+@dataclass(frozen=True)
+class WhatsAppPhoneNumberAssociation:
+    """One tenant's `phone_number_id` under the platform's single shared Meta App (section 6).
+
+    `whatsapp-cloud-adapter` R6.1-R6.3, design D3/D8 (mid-run rewrite: Meta admits one
+    App/WABA for the whole platform, so this holds an association, not minted material —
+    unlike `WebhookEndpoint`, its structural sibling in `app/integrations/domain/entities.py`,
+    it carries no secret and no `EncryptedSecret` field at all).
+
+    Frozen, like `WebhookEndpoint`: `AssociateWhatsAppPhoneNumberUseCase` replaces the row
+    wholesale rather than mutating it in place, so there is no partially-associated state for
+    anything to observe.
+
+    `phone_number_id` is always operator-supplied (R6.1) — never generated here, unlike
+    `WebhookEndpoint.token_hash`. `default_property_id` is required rather than
+    `uuid.UUID | None`: `ConversationRepository.ensure_whatsapp` (section 5) needs it for the
+    branch where a sender resolves to no stay, because `Conversation.property_id` can never be
+    `None` (`guest-portal-messaging` D19).
+    """
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    phone_number_id: str
+    display_phone_number: str | None
+    default_property_id: uuid.UUID
+
+
+@dataclass(frozen=True)
+class InboundWhatsAppEvent:
+    """One authenticated inbound WhatsApp delivery, persisted so a worker can pick it up.
+
+    `whatsapp-cloud-adapter` R3.3, R3.4, R3.5; design D7. The row that survives the queue
+    boundary: the receiving route commits it and dispatches `process_inbound_whatsapp_message
+    .delay(event_id)`, and the worker reads it back to learn both *who* the message is for and
+    *what* it said. Its structural sibling is `app/integrations/domain/entities.py`'s
+    `WebhookEvent` — same job, one provider over.
+
+    **Why the row exists at all**, since R3.4 could in principle be satisfied by putting the
+    message in the task's arguments: `provider_message_id` has to be persisted anyway for
+    R3.5's deduplication, and once the row exists, carrying the message on it instead of
+    through the broker keeps the guest's words out of Redis and gives the operator something
+    to look at when a delivery goes wrong. `tenant_id` and `default_property_id` ride along so
+    the worker never re-reads `whatsapp_phone_numbers` (task 7.2's own instruction).
+
+    **`tenant_id` and `default_property_id` are both `None` or both set, never one of each**,
+    and the pair is the schema's record of the R3.3-amended case: a validly signed delivery
+    for a `phone_number_id` no tenant has provisioned. That is not an attack and not a
+    signature failure — it is an operator's unfinished setup — so the delivery is recorded
+    rather than discarded (the same criterion as R4.3) and simply never dispatched. The
+    nullable `tenant_id` is deliberate and has exactly one precedent, `webhook_events`, for
+    exactly this reason; see `WhatsAppInboundEventModel` for what that costs.
+
+    `processed_at` is what keeps Celery's at-least-once delivery from posting the guest's
+    message into the conversation twice. R3.5 is written about the *provider* retrying, and
+    the unique index on `provider_message_id` answers that; a redelivered *task* is the same
+    outcome by another route, so it is closed here rather than left to be discovered.
+    """
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID | None
+    default_property_id: uuid.UUID | None
+    message: InboundWhatsAppMessage
+    processed_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if (self.tenant_id is None) != (self.default_property_id is None):
+            # Refused rather than coerced: a row naming a tenant but no property would reach
+            # `PostWhatsAppInboundMessageUseCase`, which cannot build a `Conversation` without
+            # one (`guest-portal-messaging` D19), and the failure would surface as a worker
+            # traceback about a property instead of about this row.
+            raise MessagingValidationError(
+                "an inbound WhatsApp event names both its tenant and that tenant's default "
+                "property, or neither"
+            )
+
+    @property
+    def is_resolved(self) -> bool:
+        """Whether this delivery resolved to a tenant, and is therefore dispatchable.
+
+        A property rather than a second field: the pair above is the fact, and a stored flag
+        would be a third thing to keep in step with it.
+        """
+        return self.tenant_id is not None

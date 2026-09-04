@@ -1,11 +1,17 @@
-"""The three ports `messaging` owns beyond persistence (R2.1, R4.6, R6.1; design D6, D12, D14).
+"""The four ports `messaging` owns beyond persistence (R2.1, R4.6, R6.1, `whatsapp-cloud-adapter`
+R3.2; design D6, D12, D14, D9).
 
-All three are small and split by consumer, which is what `steering/backend-architecture.md`
+All four are small and split by consumer, which is what `steering/backend-architecture.md`
 asks for: "puertos pequeños y por rol, no un `StorageAdapter` gigante con 15 métodos si un
 caso de uso solo necesita `get_signed_url`. Divide por consumidor real."
+
+`WhatsAppInboundProviderAdapter` is the fourth and the newest: `OutboundMessagePort` already
+kept the provider out of the sending side, and `whatsapp-cloud-adapter` design D9 records that
+"the receiving side needs the same isolation D1 gives the sending side".
 """
 
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Protocol
 
@@ -15,6 +21,7 @@ from app.messaging.domain.value_objects import (
     ConversationContext,
     GeneratedResponse,
     InboundMessageActor,
+    InboundWhatsAppMessage,
     MessageClassification,
 )
 
@@ -108,6 +115,10 @@ class OutboundMessagePort(Protocol):
         recipient_contact: str | None,
         content: str,
         language: str,
+        tenant_id: uuid.UUID,
+        last_inbound_at: datetime | None = None,
+        template_id: str | None = None,
+        phone_number_id: str | None = None,
     ) -> ChannelSendResult:
         """Attempt delivery. **Returns the outcome; never raises for a delivery failure.**
 
@@ -125,6 +136,23 @@ class OutboundMessagePort(Protocol):
         `pms-provider-resolution` fixed. The registry of `infrastructure/channels.py` has no
         entry for them and the use case raises `PMSChannelUnavailableError` — there is no key
         with which to fall back to a console adapter in silence.
+
+        `tenant_id`, `last_inbound_at` and `template_id` are `whatsapp-cloud-adapter` R2.4,
+        design D2 — widened onto every implementer of this port the same way `channel` and
+        `language` already are, so `PanelOutboundAdapter`, `PortalOutboundAdapter` and
+        `InboundOnlyAdapter` accept and ignore all three, and only `DelegatingOutboundAdapter`
+        does anything with them. `tenant_id` has **no default**, unlike the other two: it is
+        not optional information about the send, it is the scope `DelegatingOutboundAdapter`
+        needs to resolve `last_inbound_at` itself via `MessageRepository.last_guest_message_at`
+        for the `WHATSAPP` channel — a query this port cannot answer without knowing which
+        tenant's conversation it is.
+
+        `phone_number_id` is `whatsapp-cloud-adapter` task 2.6, design D1 — the same widening
+        pattern, and again ignored by every implementer except `DelegatingOutboundAdapter`.
+        Unlike `last_inbound_at`, this port cannot resolve it itself: it is
+        `Conversation.business_phone_number` (design D4), and this port only ever sees
+        `conversation_id`, never the entity. The caller — the use case that already has the
+        `Conversation` in scope — supplies it, the same division of labour `tenant_id` uses.
         """
         ...
 
@@ -197,5 +225,103 @@ class IncidentReportingPort(Protocol):
         interpolation, no summary, and no value of rule 3 rendered into it. A future caller
         that wants to write a *derived* description is not covered by any of this and falls
         under the structured form by default.
+        """
+        ...
+
+
+class WhatsAppInboundProviderAdapter(Protocol):
+    """The provider-shaped half of *receiving* a WhatsApp message (R3.2, R4.1; design D9).
+
+    `OutboundMessagePort` above already keeps Meta's Graph API out of `application/` on the
+    sending side. This is the mirror for the receiving side, and design D9 states the reason
+    in those terms: Meta's inbound webhook is a nested JSON body — `entry[].changes[].value.
+    messages[]`, `X-Hub-Signature-256` over the raw bytes — and "none of that may leak into
+    `messaging/application/` or `messaging/domain/`". So the shape of the payload, the name of
+    the signature header and the algorithm behind it all live behind these two methods; the
+    receiving use case sees only a `bool` and an `InboundWhatsAppMessage`.
+
+    **Exactly two methods, and the split between them is the design rather than tidiness.**
+    Authentication must be answerable *without* interpreting the body — the same property
+    `ReceiveWebhookUseCase.authenticate` is split out for in `integrations` — because the raw
+    bytes are what the signature covers: parsing first and re-serialising would change them,
+    and a body that fails authentication must be rejected before anything trusts its contents.
+    `verify_signature` therefore takes `raw_body: bytes` and never a parsed `dict`.
+
+    **Both are synchronous.** Neither does I/O: one is an HMAC over bytes already in memory,
+    the other a `json.loads`. Declaring them `async` would buy nothing and would force every
+    future implementer into a coroutine it has no await inside.
+
+    **Neither method raises to signal "not authentic".** `verify_signature` answers `False`
+    for every unauthenticated shape — no header, a malformed header, a header signed with
+    another key — which is what makes design D4's indistinguishable answer expressible by the
+    caller. `parse` is the one that may raise, and only with `NoInboundMessageError` (see
+    `domain/exceptions.py`): Meta posts delivery/read receipts to the very same URL, and a
+    body carrying `statuses` instead of `messages` is a routine, foreseen outcome rather than
+    a bug — see that error's docstring for what the caller owes it.
+
+    `MetaInboundAdapter` (`messaging/infrastructure/whatsapp_providers.py`) is the only
+    implementer this change ships. D9 records what a second one costs: "a `TwilioInboundAdapter`
+    … is the entire cost of a future Twilio addition, not built in this change."
+    """
+
+    def verify_signature(
+        self, *, raw_body: bytes, headers: Mapping[str, str], secret: str, url: str
+    ) -> bool:
+        """Whether this request really came from the provider, decided in constant time (R3.2).
+
+        `raw_body` is the **exact bytes** that arrived. Not a `dict`, not a re-serialised
+        string: the signature covers the byte sequence, and `json.dumps(json.loads(body))`
+        is not it — key order, whitespace and unicode escaping all differ, so a re-serialised
+        body would fail a signature that is perfectly valid.
+
+        `secret` is passed in already usable — decrypted if it was stored encrypted — rather
+        than read from `settings` inside the adapter. That is what keeps the port implementable
+        by a per-tenant credential later without changing this signature, and it keeps the one
+        place that decrypts a stored secret in the layer entitled to (`app/core/crypto.py`'s
+        call sites, obligation 4 of ADR 0006).
+
+        `url` and the rest of `headers` are here for **provider generality, not for Meta**:
+        Twilio's `X-Twilio-Signature` is computed over the full callback URL plus the sorted
+        POST parameters, so a port that omitted the URL could never host that adapter without
+        being rewritten. `MetaInboundAdapter` reads neither — `X-Hub-Signature-256` is an HMAC
+        over `raw_body` alone — and ignores them by contract, not by accident.
+
+        **Returns `False` rather than raising, for every failure.** A missing header, a header
+        that is not `sha256=<hex>`, a digest of the wrong length, a signature from another
+        key: all of them are "no". Rule 12(a) of `steering/security.md` makes a missing
+        credential exactly as unauthenticated as a wrong one, and an exception on one of those
+        paths and a `False` on the others is precisely how a caller ends up answering two
+        distinguishable statuses and handing an anonymous prober an oracle (design D4).
+
+        Constant time is not a preference: rule 12(a) requires `hmac.compare_digest` in those
+        words, and a short-circuiting `==` leaks the length of the matching prefix byte by byte.
+        """
+        ...
+
+    def parse(
+        self, *, raw_body: bytes, headers: Mapping[str, str]
+    ) -> InboundWhatsAppMessage:
+        """The one inbound message this body carries, or `NoInboundMessageError` (R3.5, R4.1).
+
+        **Only ever called on a body that already passed `verify_signature`.** Nothing here
+        authenticates anything, and the returned value is provider-supplied data in every
+        field — which is why `InboundWhatsAppMessage.business_phone_number` is informational
+        only and R4.1 forbids resolving the tenant from it directly: `business_phone_number`
+        is looked up against the `phone_number_id`-to-tenant provisioning table (R6, design D3,
+        superseded 2026-09-02 — there is no per-tenant route token, Meta allows one fixed
+        webhook route per App), never trusted as a tenant identifier on its own, and never any
+        other field the sender controls ("no SHALL … desde ningún dato que el cuerpo del
+        webhook aporte").
+
+        `headers` is accepted because a provider may carry part of the message's shape there
+        (a content type, a webhook version). Meta does not, and `MetaInboundAdapter` ignores it.
+
+        Raises `NoInboundMessageError` when the body is well-formed but carries no inbound
+        message — the `statuses` webhook Meta posts to this same URL for a delivery or read
+        receipt, an empty `entry`/`changes`/`messages`, or a message with no text body — and
+        for a body that is not the JSON object shape at all. It never raises a bare `KeyError`
+        or `IndexError`: the caller has to distinguish "nothing to do, acknowledge it" from
+        "a bug of ours", and it cannot do that against whichever built-in the traversal
+        happened to hit first.
         """
         ...
