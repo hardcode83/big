@@ -253,6 +253,44 @@ Notas que importan:
 - `run --rm --no-deps` en vez de `exec`: el contenedor vive solo para este comando y se lleva las variables con él, en vez de inyectarlas en el proceso del `backend` que está sirviendo.
 - Comprueba que funciona con un login: ver `docs/auth-tenancy.md`.
 
+### 6.5.1 Verificar (o completar) el `SUPER_ADMIN` en un entorno ya bootstrapped
+
+Comprobado en `dev` el 2026-09-04, tras mergear `super-admin-console` (PR #162): la cuenta ya
+existía — se sembró junto al owner/manager la primera vez que se corrió §6.5 para
+`super-admin-identity`, y no hizo falta volver a tocar nada.
+
+```
+josegascon+superadmin@gmail.com | SUPER_ADMIN | tenant_id: (vacío)
+```
+
+Verificarlo sin escribir nada:
+
+```bash
+ssh -i ~/.ssh/autohostai_dev_vm ubuntu@<ip>
+cd /opt/actions-runner/_work/AutoHostAI/AutoHostAI
+docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml exec -T postgres \
+  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+    SELECT email, role, tenant_id FROM users WHERE role = '\''SUPER_ADMIN'\'';"'
+```
+
+**Si la fila no aparece** — un entorno que nunca corrió §6.5 con las tres variables
+`BOOTSTRAP_SUPER_ADMIN_*` rellenas, o uno bootstrapeado antes de `super-admin-identity` — el
+procedimiento es exactamente §6.5, sin variante: es la misma llamada convergente, así que
+repetirla con el `BOOTSTRAP_TENANT_NAME`/`OWNER_EMAIL`/`MANAGER_EMAIL` reales que ya existen
+(localizables con la consulta de §8.1) más las tres `BOOTSTRAP_SUPER_ADMIN_*` nuevas **no** toca
+ni recrea las cuentas que ya están: `apply_plan` (`backend/app/cli/bootstrap.py`) resuelve cada
+seed por email y salta en silencio la que ya existe — solo escribe la fila que falta.
+
+La contraseña de esta cuenta **no se documenta aquí**, mismo criterio que el resto de
+contraseñas reales del entorno (§6.5, §7.1). Si se pierde, el rescate es §8 (`reset_password`),
+no relanzar el bootstrap: `apply_plan` nunca actualiza una fila que ya existe, así que una
+contraseña nueva en `BOOTSTRAP_SUPER_ADMIN_PASSWORD` no llegaría a la cuenta.
+
+Una vez dentro, la consola vive en `/platform` (gated por `MANAGE_PLATFORM`, permiso exclusivo
+de `SUPER_ADMIN`) — `GET /api/v1/platform/tenants` lista todos los tenants de la instalación,
+sin la excepción de aislamiento que aplica al resto de roles (change `super-admin-console`,
+PR #162).
+
 ## 7. Ingress HTTPS — Cloudflare Tunnel (change `ingress-https-dev`)
 
 La app se sirve en **https://autohostai.digitalsec.work** a través de un Cloudflare Tunnel: el contenedor `cloudflared` abre una conexión **saliente** al edge, que termina TLS y entrega a `frontend:3000` por la red interna del compose. **No hay ningún puerto entrante abierto** — el security list solo permite el 22. Decisión y alternativas descartadas en [`docs/adr/0003-https-ingress-dev.md`](../../../docs/adr/0003-https-ingress-dev.md).
