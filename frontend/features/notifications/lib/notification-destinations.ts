@@ -37,10 +37,13 @@ export const NOTIFICATION_DESTINATIONS: NotificationDestinations = {
   cleaner: {},
   // Empty until `tech-app` delivers `/tech/incidents/[id]`. Same reason.
   technician: {},
-  // The three shells below never mount the bell (R3.1), so they can have no destinations.
+  // The four shells below never mount the bell (R3.1), so they can have no destinations.
   public: {},
   guest: {},
   authenticated: {},
+  // `SUPER_ADMIN`'s console (`super-admin-console` R1) uses the same bare topbar
+  // composition `authenticated` does for `/welcome` — `Brand` + `UserMenu`, no bell.
+  platform: {},
 };
 
 /**

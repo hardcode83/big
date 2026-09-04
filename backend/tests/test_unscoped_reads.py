@@ -78,6 +78,15 @@ DECLARED_UNSCOPED_READS = frozenset(
         # nullable (R3.3 as amended — a validly signed delivery for an unprovisioned number is
         # recorded with no tenant), and a marked session hides those rows without erroring.
         ("messaging/infrastructure/repositories.py", "locate_without_tenant_scoping"),
+        # The ninth, and a different reason from the eight above (`super-admin-console` R2):
+        # nothing here resolves a tenant out of an anonymous credential — the caller is
+        # `SUPER_ADMIN`, already authenticated, whose session is unmarked by design
+        # (`super-admin-identity`). The guard fires for a narrower risk specific to this
+        # query: it JOINs `tenant_configs`, which DOES carry a `tenant_id` column (unlike
+        # `tenants` itself), so a marked session would silently narrow that side of the join
+        # to one tenant instead of erroring — the same silent-wrong-answer shape the other
+        # eight exist to convert into a raise, reached by a different route.
+        ("tenants/infrastructure/repositories.py", "list_page"),
     }
 )
 
@@ -251,6 +260,7 @@ def test_what_this_census_does_not_catch() -> None:
         "locate_without_tenant_scoping",
         "find_by_token_hash",
         "find_by_phone_number_id",
+        "list_page",
     }
 
     # The reads named above are pinned, not just described. A docstring that lists them

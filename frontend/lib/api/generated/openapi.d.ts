@@ -726,6 +726,11 @@ export interface paths {
   };
   "/api/v1/platform/tenants": {
     /**
+     * List tenants (SUPER_ADMIN only)
+     * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
+     */
+    get: operations["list_tenants_api_v1_platform_tenants_get"];
+    /**
      * Create a tenant (SUPER_ADMIN only)
      * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
      */
@@ -4692,6 +4697,28 @@ export interface components {
       /** Sla Medium Minutes */
       sla_medium_minutes: number;
       storage_type: components["schemas"]["StorageType"];
+    };
+    /**
+     * TenantPageResponse
+     * @description `GET /api/v1/platform/tenants` (`super-admin-console` R2.1, R2.4, design D2).
+     *
+     * `items` reuses `TenantResponse` verbatim (R2.4) — no parallel type. The envelope shape
+     * (`items`/`total`/`page`/`per_page`/`total_pages`) is the majority convention across
+     * modules shipped after `user-management` (`CleaningTaskPageResponse`,
+     * `IncidentPageResponse`'s siblings that added `total_pages`), not the older `{data, ...}`
+     * shape `GET /api/v1/users` uses.
+     */
+    TenantPageResponse: {
+      /** Items */
+      items: components["schemas"]["TenantResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
     };
     /**
      * TenantResponse
@@ -8808,6 +8835,44 @@ export interface operations {
       201: {
         content: {
           "application/json": components["schemas"]["OwnerStatementGenerationReportResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List tenants (SUPER_ADMIN only)
+   * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
+   */
+  list_tenants_api_v1_platform_tenants_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantPageResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

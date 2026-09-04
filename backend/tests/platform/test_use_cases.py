@@ -7,6 +7,7 @@ the `TenantAlreadyExistsError` mapping is observed at the seam (R-2).
 """
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -88,6 +89,11 @@ class _FakeTenantRepository:
     async def get(self, tenant_id: uuid.UUID) -> Tenant | None:
         self.get_calls.append(tenant_id)
         return self.get_return
+
+    async def list_page(
+        self, page: int, per_page: int
+    ) -> tuple[Sequence[tuple[Tenant, TenantConfig]], int]:
+        raise AssertionError("list_page must not be called by this use case (super-admin-console)")
 
 
 @dataclass

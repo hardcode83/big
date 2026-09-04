@@ -30,6 +30,8 @@ import esTech from "@/locales/es/tech.json";
 import enTech from "@/locales/en/tech.json";
 import esCleaner from "@/locales/es/cleaner.json";
 import enCleaner from "@/locales/en/cleaner.json";
+import esPlatform from "@/locales/es/platform.json";
+import enPlatform from "@/locales/en/platform.json";
 
 /** i18next namespaces (design D13). */
 export const NAMESPACES = [
@@ -49,6 +51,7 @@ export const NAMESPACES = [
   "notifications",
   "tech",
   "cleaner",
+  "platform",
 ] as const;
 export const DEFAULT_NS = "common";
 
@@ -71,6 +74,7 @@ export const resources = {
     notifications: esNotifications,
     tech: esTech,
     cleaner: esCleaner,
+    platform: esPlatform,
   },
   en: {
     common: enCommon,
@@ -89,5 +93,6 @@ export const resources = {
     notifications: enNotifications,
     tech: enTech,
     cleaner: enCleaner,
+    platform: enPlatform,
   },
 } as const;

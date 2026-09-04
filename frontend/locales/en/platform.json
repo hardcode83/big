@@ -1,0 +1,79 @@
+{
+  "list": {
+    "heading": "Tenants",
+    "label": "Tenant list",
+    "columns": {
+      "name": "Name",
+      "status": "Status",
+      "createdAt": "Created"
+    },
+    "empty": {
+      "title": "No tenants",
+      "description": "No tenant has been created yet."
+    },
+    "error": {
+      "title": "Could not load the tenant list",
+      "description": "Try again in a few seconds."
+    },
+    "addStaff": "Add staff",
+    "newTenant": "New tenant"
+  },
+  "status": {
+    "ACTIVE": "Active",
+    "SUSPENDED": "Suspended",
+    "CANCELLED": "Cancelled"
+  },
+  "pagination": {
+    "label": "Tenant pagination",
+    "previous": "Previous page",
+    "next": "Next page",
+    "pageOfTotal": "Page {{page}} of {{totalPages}}",
+    "totalItems": "{{total}} tenants in total"
+  },
+  "sheet": {
+    "close": "Close",
+    "createTenantTitle": "New tenant",
+    "createUserTitle": "Add staff"
+  },
+  "createTenant": {
+    "fields": {
+      "name": "Name",
+      "billingEmail": "Billing email",
+      "country": "Country (2-letter ISO code)",
+      "timezone": "Timezone",
+      "defaultLanguage": "Default language",
+      "languageOptions": {
+        "es": "Español",
+        "en": "English"
+      }
+    },
+    "submit": "Create tenant",
+    "submitting": "Creating…",
+    "success": "Tenant \"{{name}}\" created.",
+    "addStaff": "Add staff",
+    "genericError": "Could not create the tenant. Try again."
+  },
+  "createUser": {
+    "fields": {
+      "fullName": "Full name",
+      "email": "Email",
+      "phone": "Phone",
+      "role": "Role"
+    },
+    "roles": {
+      "TENANT_OWNER": "Owner",
+      "PROPERTY_MANAGER": "Manager",
+      "CLEANER": "Cleaner",
+      "TECHNICIAN": "Technician"
+    },
+    "submit": "Create account",
+    "submitting": "Creating…",
+    "genericError": "Could not create the account. Try again."
+  },
+  "temporaryPassword": {
+    "created": "{{name}}'s account created.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "warning": "This temporary password will not be shown again. Copy it now."
+  }
+}
