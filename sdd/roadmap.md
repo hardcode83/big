@@ -61,6 +61,8 @@ Categorías:
 - [ ] tunnel-host-surface-hardening — [INFRA] **mitigar el residual de radio del túnel que `ingress-https-hardening` documentó y midió pero no cerró** (2026-08-04).
 - [x] ci-runner-oci — [INFRA] **migrar los 10 workflows a `[self-hosted, dev]`** (incluidos los `provenance`/`build-backend`/`build-frontend` de `deploy-dev.yml`; `multiarch-build-check` sujeto a la salvedad QEMU de R4) y dejar un runbook versionado (`docs/ci-runner-rollback.md` + `git revert`) para volver a `ubuntu-latest`. Motivación: minutos de GitHub Actions y exceso de gates — el adelgazamiento de gates queda fuera de alcance. No está en el plan original, añadido tras `tunnel-host-surface-hardening` (2026-09-03). → changes/archive/2026-09-04-ci-runner-oci/
   size: M · kind: infra
+- [x] ci-runner-pool-oci — [INFRA] escalar el runner único de `ci-runner-oci` a un pool de N agentes en la misma VM (`runner_count`, default 4), para que dos jobs `pull_request`-triggered coincidentes se repartan entre agentes en vez de serializarse en la cola. No está en el plan original, añadido tras `ci-runner-oci` (2026-09-04). → changes/archive/2026-09-04-ci-runner-pool-oci/
+  size: S · kind: infra
 - [x] app-version-visibility — [FE] **versión de build visible al abrir la app**, para saber qué está desplegado sin entrar en la VM. → changes/archive/2026-07-31-app-version-visibility/
 - [x] app-version-badge-date — [FE] el badge muestra la cadena **canónica completa** (`0.1.0+2026-07-31.5872022`) en vez de recortar la fecha de build. → changes/archive/2026-07-31-app-version-badge-date/
 - [x] frontend-ci — [INFRA] **gate de CI para la suite del frontend** (vitest + `eslint` + `tsc --noEmit`), espejo de `backend-tests.yml`. → changes/archive/2026-08-02-frontend-ci/
