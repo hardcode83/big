@@ -32,12 +32,12 @@
 
 - [x] 4.1 `sdd/specs/ci-runner-self-hosted.md` — reescribir el Purpose (líneas 5–10) para hablar de **pool de N agentes** con label `dev` en lugar de runner único; añadir al final de cada sección de Requirements los SHALL que cubren R1 (N agentes), R2 (un usuario por agente), R3 (idempotencia y baja con guardia), R4 (toolchain compartido), R5 (runbook subir/bajar N) y R6 (rango y nota de medición). Cubre R1 (canonical), R5.
 
-## 5. Verification
+## 5. Verification <!-- panel: PASS 2026-09-04 (5.1, 5.2) | BLOCKED 2026-09-04 (5.3, 5.4) -->
 
-- [ ] 5.1 `terraform -chdir=infra/environments/dev fmt -check -recursive && terraform -chdir=infra/environments/dev validate` — formato y validación estática sin estado remoto.
-- [ ] 5.2 `git diff origin/main -- .github/workflows/` — confirmar que los 10 workflows siguen declarando `runs-on: [self-hosted, dev]` y que ningún `runs-on:` ha cambiado. Cubre R1 (workflows intactos).
-- [ ] 5.3 **(BLOCKED)** `terraform -chdir=infra/environments/dev apply` sobre la VM viva + reaplicar bootstrap + `gh api ... /actions/runners` muestra N entradas `autohostai-dev-vm-<i>` online + sin legado. Sin acceso a la VM desde el worktree de implementación — aplazar al gate final.
-- [ ] 5.4 **(BLOCKED)** matriz de verificación (D7): `workflow_dispatch` secuencial con `sleep 60` entre cada uno de `api-contract.yml` desde la rama del PR; para cada `actions_run_id`, `gh api ... /actions/runs/<id>` devuelve un `runner.name` distinto; los N jobs acaban en `success`. Sin runners reales — aplazar al gate final.
+- [x] 5.1 `terraform -chdir=infra/environments/dev fmt -check -recursive && terraform -chdir=infra/environments/dev validate` — formato y validación estática sin estado remoto. **PASS 2026-09-04**: `FMT_EXIT=0`, `VAL_EXIT=0`.
+- [x] 5.2 `git diff origin/main -- .github/workflows/` — confirmar que los 10 workflows siguen declarando `runs-on: [self-hosted, dev]` y que ningún `runs-on:` ha cambiado. Cubre R1 (workflows intactos). **PASS 2026-09-04**: diff vacío (10 workflows × `runs-on:` intactos).
+- [ ] 5.3 **(BLOCKED)** `terraform -chdir=infra/environments/dev apply` sobre la VM viva + reaplicar bootstrap + `gh api ... /actions/runners` muestra N entradas `autohostai-dev-vm-<i>` (i ∈ [1..4]) online + sin legado `autohostai-${ENV}-vm`. **Reason**: el worktree de implementación no tiene acceso a la VM OCI (`oci-cli` con instance-principal no resuelve desde aquí). **Resume command**: `ssh ubuntu@<dev-vm> 'sudo /opt/bootstrap-runner.sh "$RUNNER_COUNT"' && gh api repos/autohostai-labs/AutoHostAI/actions/runners?per_page=100`. **Gate**: antes de mergear, ejecutar este gate y adjuntar el output al PR.
+- [ ] 5.4 **(BLOCKED)** matriz de verificación (D7): `workflow_dispatch` secuencial con `sleep 60` entre cada uno de `api-contract.yml` desde la rama del PR; para cada `actions_run_id`, `gh api ... /actions/runs/<id>` devuelve un `runner.name` distinto (`autohostai-${ENV}-vm-1` … `autohostai-${ENV}-vm-N`); los N jobs acaban en `success`. **Reason**: requiere runners reales ya registrados por 5.3. **Resume command**: ver `sdd/changes/ci-runner-pool-oci/BLOCKED.md`. **Gate**: la matriz de N jobs × N runners debe coincidir (cada runner corre al menos un job, ningún job se queda en cola).
 
 ## Implementation Notes
 
