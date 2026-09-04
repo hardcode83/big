@@ -12,6 +12,7 @@ import pytest
 
 from app.core.tenancy import CrossTenantWriteError
 from app.guests.domain.enums import LegalRegistrationStatus
+from app.guests.infrastructure.models import GuestModel
 from app.properties.infrastructure.models import PropertyModel
 from app.reservations.domain.entities import Reservation
 from app.reservations.domain.enums import (
@@ -20,7 +21,7 @@ from app.reservations.domain.enums import (
     ReservationStatus,
 )
 from app.reservations.domain.exceptions import DuplicateExternalReservationError
-from app.reservations.domain.repositories import ReservationFilters
+from app.reservations.domain.repositories import RESERVATION_MATCH_GRACE_DAYS, ReservationFilters
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
 from app.tenants.infrastructure.models import TenantModel
 
@@ -46,6 +47,7 @@ def _reservation(
     nights: int = 3,
     external_pms_id: str | None = None,
     status: ReservationStatus = ReservationStatus.CONFIRMED,
+    guest_id: uuid.UUID | None = None,
 ) -> Reservation:
     return Reservation.create(
         id=uuid.uuid4(),
@@ -58,7 +60,15 @@ def _reservation(
         adults=2,
         external_pms_id=external_pms_id,
         status=status,
+        guest_id=guest_id,
     )
+
+
+async def _guest(db_session, tenant: TenantModel, *, full_name: str = "Guest") -> GuestModel:
+    model = GuestModel(tenant_id=tenant.id, full_name=full_name)
+    db_session.add(model)
+    await db_session.flush()
+    return model
 
 
 class TestGetAndScoping:
@@ -434,6 +444,173 @@ class TestListForProperties:
         assert await repository.list_for_properties(
             tenant.id, [], date(2026, 7, 30), date(2026, 8, 10)
         ) == []
+
+
+class TestFindActiveForGuest:
+    """`whatsapp-cloud-adapter` R4.2/R4.4, design D5: which stay a message is about.
+
+    `RESERVATION_MATCH_GRACE_DAYS` is 2 in production; these tests use its actual value
+    rather than hard-coding `2`, so a later retune of the constant cannot silently
+    desynchronise the tests from the behaviour they assert.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_stay_containing_the_date_matches(self, db_session) -> None:
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        guest = await _guest(db_session, tenant)
+        repository = SqlAlchemyReservationRepository(db_session)
+        stay = _reservation(tenant, prop, check_in=date(2026, 8, 1), nights=3, guest_id=guest.id)
+        await repository.add(tenant.id, stay)
+
+        found = await repository.find_active_for_guest(
+            tenant.id, guest.id, on_date=date(2026, 8, 2)
+        )
+
+        assert [r.id for r in found] == [stay.id]
+
+    @pytest.mark.asyncio
+    async def test_the_grace_window_is_inclusive_on_the_check_in_side(self, db_session) -> None:
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        guest = await _guest(db_session, tenant)
+        repository = SqlAlchemyReservationRepository(db_session)
+        stay = _reservation(tenant, prop, check_in=date(2026, 8, 10), nights=3, guest_id=guest.id)
+        await repository.add(tenant.id, stay)
+        on_date = date(2026, 8, 10) - timedelta(days=RESERVATION_MATCH_GRACE_DAYS)
+
+        found = await repository.find_active_for_guest(tenant.id, guest.id, on_date=on_date)
+
+        assert [r.id for r in found] == [stay.id]
+
+    @pytest.mark.asyncio
+    async def test_the_grace_window_is_inclusive_on_the_check_out_side(self, db_session) -> None:
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        guest = await _guest(db_session, tenant)
+        repository = SqlAlchemyReservationRepository(db_session)
+        stay = _reservation(tenant, prop, check_in=date(2026, 8, 10), nights=3, guest_id=guest.id)
+        await repository.add(tenant.id, stay)
+        check_out = date(2026, 8, 13)
+        on_date = check_out + timedelta(days=RESERVATION_MATCH_GRACE_DAYS)
+
+        found = await repository.find_active_for_guest(tenant.id, guest.id, on_date=on_date)
+
+        assert [r.id for r in found] == [stay.id]
+
+    @pytest.mark.asyncio
+    async def test_one_day_past_the_grace_window_does_not_match(self, db_session) -> None:
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        guest = await _guest(db_session, tenant)
+        repository = SqlAlchemyReservationRepository(db_session)
+        stay = _reservation(tenant, prop, check_in=date(2026, 8, 10), nights=3, guest_id=guest.id)
+        await repository.add(tenant.id, stay)
+        check_out = date(2026, 8, 13)
+        on_date = check_out + timedelta(days=RESERVATION_MATCH_GRACE_DAYS + 1)
+
+        found = await repository.find_active_for_guest(tenant.id, guest.id, on_date=on_date)
+
+        assert found == []
+
+    @pytest.mark.asyncio
+    async def test_one_day_before_the_grace_window_does_not_match(self, db_session) -> None:
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        guest = await _guest(db_session, tenant)
+        repository = SqlAlchemyReservationRepository(db_session)
+        stay = _reservation(tenant, prop, check_in=date(2026, 8, 10), nights=3, guest_id=guest.id)
+        await repository.add(tenant.id, stay)
+        check_in = date(2026, 8, 10)
+        on_date = check_in - timedelta(days=RESERVATION_MATCH_GRACE_DAYS + 1)
+
+        found = await repository.find_active_for_guest(tenant.id, guest.id, on_date=on_date)
+
+        assert found == []
+
+    @pytest.mark.asyncio
+    async def test_a_stay_well_outside_the_window_does_not_match(self, db_session) -> None:
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        guest = await _guest(db_session, tenant)
+        repository = SqlAlchemyReservationRepository(db_session)
+        await repository.add(
+            tenant.id,
+            _reservation(tenant, prop, check_in=date(2026, 1, 1), nights=3, guest_id=guest.id),
+        )
+
+        found = await repository.find_active_for_guest(
+            tenant.id, guest.id, on_date=date(2026, 8, 2)
+        )
+
+        assert found == []
+
+    @pytest.mark.asyncio
+    async def test_with_no_reservations_it_returns_empty(self, db_session) -> None:
+        tenant, _prop = await _tenant_with_property(db_session, "TenantA")
+        guest = await _guest(db_session, tenant)
+        repository = SqlAlchemyReservationRepository(db_session)
+
+        found = await repository.find_active_for_guest(
+            tenant.id, guest.id, on_date=date(2026, 8, 2)
+        )
+
+        assert found == []
+
+    @pytest.mark.asyncio
+    async def test_several_overlapping_stays_are_all_returned(self, db_session) -> None:
+        """R4.4's escalation signal: more than one active stay is not collapsed here."""
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        guest = await _guest(db_session, tenant)
+        repository = SqlAlchemyReservationRepository(db_session)
+        first = _reservation(tenant, prop, check_in=date(2026, 8, 1), nights=3, guest_id=guest.id)
+        second = _reservation(
+            tenant, prop, check_in=date(2026, 8, 2), nights=5, guest_id=guest.id
+        )
+        await repository.add(tenant.id, first)
+        await repository.add(tenant.id, second)
+
+        found = await repository.find_active_for_guest(
+            tenant.id, guest.id, on_date=date(2026, 8, 2)
+        )
+
+        assert {r.id for r in found} == {first.id, second.id}
+
+    @pytest.mark.asyncio
+    async def test_another_guests_stay_is_not_returned(self, db_session) -> None:
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        guest = await _guest(db_session, tenant, full_name="Mine")
+        other_guest = await _guest(db_session, tenant, full_name="Not mine")
+        repository = SqlAlchemyReservationRepository(db_session)
+        await repository.add(
+            tenant.id,
+            _reservation(
+                tenant, prop, check_in=date(2026, 8, 1), nights=3, guest_id=other_guest.id
+            ),
+        )
+
+        found = await repository.find_active_for_guest(
+            tenant.id, guest.id, on_date=date(2026, 8, 2)
+        )
+
+        assert found == []
+
+    @pytest.mark.asyncio
+    async def test_it_does_not_reach_another_tenant(self, db_session) -> None:
+        tenant_a, _prop_a = await _tenant_with_property(db_session, "TenantA")
+        tenant_b, prop_b = await _tenant_with_property(db_session, "TenantB")
+        guest_a = await _guest(db_session, tenant_a)
+        guest_b = await _guest(db_session, tenant_b)
+        repository = SqlAlchemyReservationRepository(db_session)
+        await repository.add(
+            tenant_b.id,
+            _reservation(tenant_b, prop_b, check_in=date(2026, 8, 1), nights=3, guest_id=guest_b.id),
+        )
+
+        # Even a guest_id that happens to collide is scoped away by tenant_id.
+        found = await repository.find_active_for_guest(
+            tenant_a.id, guest_b.id, on_date=date(2026, 8, 2)
+        )
+        assert found == []
+
+        found = await repository.find_active_for_guest(
+            tenant_a.id, guest_a.id, on_date=date(2026, 8, 2)
+        )
+        assert found == []
 
 
 class TestCountCheckInsInRange:

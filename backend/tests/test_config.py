@@ -1,4 +1,5 @@
 import base64
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -630,3 +631,189 @@ def test_the_object_store_credentials_are_not_settings() -> None:
     assert "aws_secret_access_key" not in Settings.model_fields
     assert "s3_access_key_id" not in Settings.model_fields
     assert "s3_secret_access_key" not in Settings.model_fields
+
+
+# --- WhatsApp Cloud API (`whatsapp-cloud-adapter` design D1/D2, R1.3) -------------------------
+
+
+def test_settings_default_whatsapp_provider_to_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Defaults to `mock` (design D1): an unset value preserves today's boot behavior for a
+    deployment that never configured WhatsApp, instead of failing the whole app's boot.
+    """
+    monkeypatch.delenv("WHATSAPP_PROVIDER", raising=False)
+
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.whatsapp_provider == "mock"
+
+
+@pytest.mark.parametrize("bad_value", ["twilio", "TWILIO", "Mock", "META", "sms"])
+def test_settings_reject_any_whatsapp_provider_other_than_mock_or_meta(
+    bad_value: str,
+) -> None:
+    """`twilio` named an earlier design draft this change superseded — not accepted here.
+
+    `""` is deliberately NOT in this list: a blank value is normalized to the `mock` default
+    (see the tests below) rather than rejected — see the `mode="before"` validator.
+    """
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, whatsapp_provider=bad_value, **_REQUIRED)
+
+
+def test_settings_treat_a_blank_whatsapp_provider_env_var_as_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reproduces `.env.example`'s literal `WHATSAPP_PROVIDER=` — present in the environment,
+    with an EMPTY value, not an absent key.
+
+    This is NOT the same thing `test_settings_default_whatsapp_provider_to_mock` proves:
+    pydantic-settings only falls through to a field's Python default when the key is genuinely
+    absent; a present-but-empty value is handed to validation as `""`, which
+    `_reject_unknown_whatsapp_provider` alone would reject. `monkeypatch.delenv` cannot catch
+    this — only `monkeypatch.setenv(..., "")` goes through the same present-but-blank path
+    pydantic-settings sees when `docker-compose.yml`'s `env_file: .env` loads a fresh
+    `.env.example` copy, which is exactly the boot failure this test pins closed.
+    """
+    monkeypatch.setenv("WHATSAPP_PROVIDER", "")
+
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.whatsapp_provider == "mock"
+
+
+def test_settings_treat_a_blank_whatsapp_provider_in_an_env_file_as_absent(
+    tmp_path: Path,
+) -> None:
+    """The real `.env.example` -> `make up` -> `.env` -> `env_file=` path end to end: a temp
+    file containing the exact literal blank assignment `.env.example` ships, loaded through
+    pydantic-settings' `env_file` mechanism exactly as `Settings.model_config` and
+    `docker-compose.yml`'s `env_file: .env` load it — not simulated via a bare env var or a
+    constructor kwarg.
+    """
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "WHATSAPP_PROVIDER=\n"
+        f"JWT_SECRET_KEY={_REQUIRED['jwt_secret_key']}\n"
+        f"ENCRYPTION_KEY={_REQUIRED['encryption_key']}\n"
+    )
+
+    settings = Settings(_env_file=env_file)
+
+    assert settings.whatsapp_provider == "mock"
+
+
+def test_settings_accept_mock_with_no_meta_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The compose stack's `.env` sets the three Meta names to the EMPTY STRING (rule 8's
+    # "names only, never values" — see `.env.example`), which is a present-but-blank value,
+    # not an absent one, so it has to be simulated explicitly here, exactly like
+    # `test_settings_require_a_jwt_signing_key` does for `JWT_SECRET_KEY`.
+    monkeypatch.delenv("WHATSAPP_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("WHATSAPP_PHONE_NUMBER_ID", raising=False)
+
+    settings = Settings(_env_file=None, whatsapp_provider="mock", **_REQUIRED)
+    assert settings.whatsapp_provider == "mock"
+    assert settings.whatsapp_access_token is None
+    assert settings.whatsapp_phone_number_id is None
+
+
+def test_settings_reject_meta_provider_with_no_access_token() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        Settings(
+            _env_file=None,
+            whatsapp_provider="meta",
+            whatsapp_phone_number_id="1234567890",
+            **_REQUIRED,
+        )
+    assert "whatsapp_access_token" in str(excinfo.value)
+
+
+def test_settings_reject_meta_provider_with_no_phone_number_id() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        Settings(
+            _env_file=None,
+            whatsapp_provider="meta",
+            whatsapp_access_token="test-token",
+            **_REQUIRED,
+        )
+    assert "whatsapp_phone_number_id" in str(excinfo.value)
+
+
+def test_settings_reject_meta_provider_with_blank_credentials() -> None:
+    """An empty string is present-but-blank, not absent — must fail the same way (rule 8)."""
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            whatsapp_provider="meta",
+            whatsapp_access_token="  ",
+            whatsapp_phone_number_id="1234567890",
+            **_REQUIRED,
+        )
+
+
+#: What `whatsapp_provider="meta"` needs to boot, as of section 7.
+#:
+#: Grew from two to four there, and that is the change rather than a detail: section 1 declared
+#: `whatsapp_app_secret` without demanding it ("nothing in section 1 reads it yet") and section
+#: 7's inbound webhook is what reads it, alongside the handshake token Meta needs before it will
+#: save a webhook subscription at all.
+_META_CREDENTIALS = {
+    "whatsapp_access_token": "test-token",
+    "whatsapp_phone_number_id": "1234567890",
+    "whatsapp_app_secret": "an-app-secret",
+    "whatsapp_webhook_verify_token": "a-verify-token",
+}
+
+
+def test_settings_accept_meta_provider_with_both_credentials() -> None:
+    settings = Settings(_env_file=None, whatsapp_provider="meta", **_META_CREDENTIALS, **_REQUIRED)
+
+    assert settings.whatsapp_provider == "meta"
+    assert settings.whatsapp_access_token == "test-token"
+    assert settings.whatsapp_phone_number_id == "1234567890"
+    assert settings.whatsapp_app_secret == "an-app-secret"
+    assert settings.whatsapp_webhook_verify_token == "a-verify-token"
+
+
+@pytest.mark.parametrize(
+    "missing", ["whatsapp_app_secret", "whatsapp_webhook_verify_token"]
+)
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_the_two_webhook_secrets_are_required_under_meta(
+    monkeypatch: pytest.MonkeyPatch, missing: str, value: str | None
+) -> None:
+    """Section 7 (rule 8): both are read for real now, so both fail the boot when absent.
+
+    `whatsapp_app_secret` unset would leave `verify_signature` checking an HMAC under an empty
+    key — one anybody can compute — and `whatsapp_webhook_verify_token` unset means Meta
+    refuses to save the subscription, so no inbound message ever arrives. Section 1's test
+    asserted the opposite of the first of these on purpose ("only declares it"); it was
+    replaced here rather than left to contradict the validator.
+    """
+    monkeypatch.delenv(missing.upper(), raising=False)
+    credentials = {**_META_CREDENTIALS, missing: value}
+
+    with pytest.raises(ValidationError) as raised:
+        Settings(_env_file=None, whatsapp_provider="meta", **credentials, **_REQUIRED)
+
+    assert missing in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "name", ["whatsapp_app_secret", "whatsapp_webhook_verify_token"]
+)
+def test_the_two_webhook_secrets_have_no_default_and_are_unset_under_mock(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """Rule 8: no value in the tree, and `mock` mode still boots without either.
+
+    A default here would be a secret published in this repository — for the verify token,
+    literally one anybody could echo back to pass Meta's handshake.
+    """
+    monkeypatch.delenv(name.upper(), raising=False)
+
+    settings = Settings(_env_file=None, whatsapp_provider="mock", **_REQUIRED)
+
+    assert getattr(settings, name) is None
+    assert name in Settings.model_fields

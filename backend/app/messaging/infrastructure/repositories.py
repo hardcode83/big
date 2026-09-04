@@ -20,12 +20,19 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Select, func, select, update
+from sqlalchemy import Select, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db import require_unmarked_session
 from app.core.tenancy import CrossTenantWriteError
-from app.messaging.domain.entities import Conversation, Message
+from app.messaging.domain.entities import (
+    Conversation,
+    InboundWhatsAppEvent,
+    Message,
+    WhatsAppPhoneNumberAssociation,
+)
 from app.messaging.domain.enums import (
     ConversationChannel,
     ConversationEscalationStatus,
@@ -37,14 +44,29 @@ from app.messaging.domain.enums import (
 from app.messaging.domain.exceptions import (
     ConversationNotFoundError,
     MessagingValidationError,
+    WhatsAppPhoneNumberAlreadyAssociatedError,
 )
 from app.messaging.domain.repositories import (
     ConversationFilters,
     ConversationPage,
     MessagePage,
 )
-from app.messaging.domain.value_objects import ChannelErrorCode, MessageMetadata
-from app.messaging.infrastructure.models import ConversationModel, MessageModel
+from app.messaging.domain.value_objects import (
+    ChannelErrorCode,
+    InboundWhatsAppMessage,
+    MessageMetadata,
+)
+from app.messaging.infrastructure.models import (
+    ConversationModel,
+    MessageModel,
+    WhatsAppInboundEventModel,
+    WhatsAppPhoneNumberModel,
+)
+
+#: The name of `WhatsAppPhoneNumberModel.phone_number_id`'s unique index, matched against
+#: `IntegrityError.orig` — the same `str(error.orig)` substring match
+#: `SqlAlchemyWebhookEndpointRepository.upsert` uses for `WEBHOOK_ENDPOINT_CONSTRAINT`.
+WHATSAPP_PHONE_NUMBER_ID_CONSTRAINT = "ix_whatsapp_phone_numbers_phone_number_id"
 
 #: The columns `Conversation`'s own methods may change. Named rather than writing the whole
 #: row, for the reason `maintenance` gives its `_MUTABLE_INCIDENT_COLUMNS`: an UPDATE that also
@@ -122,6 +144,7 @@ def _to_conversation(model: ConversationModel) -> Conversation:
         last_message_at=model.last_message_at,
         ai_enabled=model.ai_enabled,
         escalation_status=model.escalation_status,
+        business_phone_number=model.business_phone_number,
     )
 
 
@@ -192,6 +215,7 @@ class SqlAlchemyConversationRepository:
                 last_message_at=conversation.last_message_at,
                 ai_enabled=conversation.ai_enabled,
                 escalation_status=conversation.escalation_status,
+                business_phone_number=conversation.business_phone_number,
                 created_at=conversation.created_at,
                 updated_at=conversation.updated_at,
             )
@@ -322,6 +346,104 @@ class SqlAlchemyConversationRepository:
         )
         model = result.scalar_one_or_none()
         return _to_conversation(model) if model is not None else None
+
+    async def ensure_whatsapp(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        guest_id: uuid.UUID | None,
+        property_id: uuid.UUID,
+        reservation_id: uuid.UUID | None,
+        language: str,
+        business_phone_number: str,
+        now: datetime,
+    ) -> Conversation:
+        """`INSERT … ON CONFLICT DO NOTHING`, then read back what landed (D4).
+
+        Structurally `ensure_portal`, with two differences that are both forced by the keys
+        rather than chosen:
+
+        **The index inferred is `uq_conversations_whatsapp_guest_property`** —
+        `(tenant_id, guest_id, property_id) WHERE channel = 'WHATSAPP'` — so the column list
+        *plus* the predicate is what makes the inference match this index and not the portal's
+        over other columns of the same table.
+
+        **The read-back goes through `RETURNING` and not through a second lookup by the key.**
+        `ensure_portal` can look its row up by `(tenant_id, reservation_id)` because that key
+        is `NOT NULL` by signature; here `guest_id` is nullable for R4.3's sake (`property_id`
+        is always resolved — the matched stay's property or the tenant's
+        `default_property_id` fallback, per the design's amended D4/D5), a `NULL` never
+        conflicts with another `NULL`, and an unresolved sender therefore has *several* rows
+        matching `guest_id IS NULL AND property_id = :property_id`. A key lookup would be
+        ambiguous exactly where the requirement is weakest, so the `INSERT` names the row it
+        wrote: `RETURNING id` yields the id on the winning path and nothing at all on the
+        conflicting one, which is also how this method knows which path it took without
+        reading `rowcount`.
+
+        On the conflicting path the keys cannot contain a `NULL` — a `NULL` key never
+        conflicts — so the fallback lookup below is over three real values, and it reads the
+        winner's row rather than the entity we tried to insert. That is the property D4 needs:
+        the loser of the race keeps the thread's original `language` and its original
+        `business_phone_number`, so a reply leaves from the number the thread was opened on.
+        """
+        inserted = await self._session.execute(
+            pg_insert(ConversationModel)
+            .values(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                property_id=property_id,
+                reservation_id=reservation_id,
+                guest_id=guest_id,
+                channel=ConversationChannel.WHATSAPP,
+                status=ConversationStatus.OPEN,
+                language=language,
+                last_message_at=None,
+                ai_enabled=True,
+                escalation_status=ConversationEscalationStatus.NONE,
+                business_phone_number=business_phone_number,
+                created_at=now,
+                updated_at=now,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    ConversationModel.tenant_id,
+                    ConversationModel.guest_id,
+                    ConversationModel.property_id,
+                ],
+                index_where=ConversationModel.channel == ConversationChannel.WHATSAPP,
+            )
+            .returning(ConversationModel.id)
+        )
+        await self._session.flush()
+        inserted_id = inserted.scalar_one_or_none()
+
+        criteria = (
+            (ConversationModel.id == inserted_id,)
+            if inserted_id is not None
+            else (
+                ConversationModel.guest_id == guest_id,
+                ConversationModel.property_id == property_id,
+                ConversationModel.channel == ConversationChannel.WHATSAPP,
+            )
+        )
+        result = await self._session.execute(
+            select(ConversationModel).where(
+                # The tenant filter is on both branches, including the one that already has a
+                # primary key: `app/core/db.py`'s global filter does not cover this read, and
+                # an id resolved from an `INSERT` of this tenant is still worth constraining
+                # rather than trusting.
+                ConversationModel.tenant_id == tenant_id,
+                *criteria,
+            )
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            # Unreachable while the index exists: the INSERT either wrote the row (and named
+            # it) or found one to conflict with. `raise` rather than `assert` for the same
+            # reason `ensure_portal` gives — a silent `None` would surface as a `500` two
+            # frames away with nothing naming the cause.
+            raise ConversationNotFoundError()
+        return _to_conversation(model)
 
     async def list(
         self,
@@ -500,3 +622,244 @@ class SqlAlchemyMessageRepository:
             )
         )
         return int(total or 0)
+
+    async def last_guest_message_at(
+        self, tenant_id: uuid.UUID, conversation_id: uuid.UUID
+    ) -> datetime | None:
+        """The `created_at` of the guest's most recent message, `None` if they never wrote.
+
+        Same `sender_type == MessageSenderType.GUEST` filter as `count_guest_messages` just
+        above, `func.max(created_at)` instead of a count — one row either way, no `LIMIT`
+        needed.
+        """
+        return await self._session.scalar(
+            self._joined(select(func.max(MessageModel.created_at))).where(
+                *self._scoped(tenant_id, conversation_id),
+                MessageModel.sender_type == MessageSenderType.GUEST,
+            )
+        )
+
+
+def _to_association(model: WhatsAppPhoneNumberModel) -> WhatsAppPhoneNumberAssociation:
+    return WhatsAppPhoneNumberAssociation(
+        id=model.id,
+        tenant_id=model.tenant_id,
+        phone_number_id=model.phone_number_id,
+        display_phone_number=model.display_phone_number,
+        default_property_id=model.default_property_id,
+    )
+
+
+class SqlAlchemyWhatsAppPhoneNumberRepository:
+    """`WhatsAppPhoneNumberRepository` (section 6, `whatsapp-cloud-adapter` R6.1-R6.3, D3/D8).
+
+    `WhatsAppPhoneNumberModel` carries `TenantScopedMixin`, so `tenant_scoped_classes()`
+    selects it and the global `with_loader_criteria` of `app/core/db.py` covers `find_for_tenant`
+    on a marked session — the explicit `tenant_id` in every statement here is the mechanism and
+    that listener is the net, same as `ConversationModel` above. `find_by_phone_number_id` is
+    the one method that must run unmarked; see its own docstring.
+
+    Never commits. The use case owns the transaction.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def upsert(
+        self, tenant_id: uuid.UUID, association: WhatsAppPhoneNumberAssociation
+    ) -> None:
+        """`INSERT ... ON CONFLICT (tenant_id) DO UPDATE`, a real upsert (design D8).
+
+        The `tenant_id` race is resolved by the database in one statement rather than by a
+        prior `SELECT` deciding insert-vs-update — the same "let the database decide" the
+        port's docstring asks for, applied to the constraint this method is itself keyed on.
+        That leaves exactly one constraint this call can still violate:
+        `ix_whatsapp_phone_numbers_phone_number_id`, the one `ON CONFLICT` does not name — a
+        second tenant's row (or this tenant's own row, colliding with a number someone else
+        already holds) claiming a `phone_number_id` already in use elsewhere. That failure
+        surfaces as a plain `IntegrityError`, translated below into
+        `WhatsAppPhoneNumberAlreadyAssociatedError` rather than silently overwriting the
+        tenant that legitimately holds the number (R6.2).
+        """
+        if association.tenant_id != tenant_id:
+            raise CrossTenantWriteError(
+                entity="WhatsApp phone number association",
+                entity_tenant_id=association.tenant_id,
+                acting_tenant_id=tenant_id,
+            )
+
+        stmt = (
+            pg_insert(WhatsAppPhoneNumberModel)
+            .values(
+                id=association.id,
+                tenant_id=tenant_id,
+                phone_number_id=association.phone_number_id,
+                display_phone_number=association.display_phone_number,
+                default_property_id=association.default_property_id,
+            )
+            .on_conflict_do_update(
+                index_elements=[WhatsAppPhoneNumberModel.tenant_id],
+                set_={
+                    "phone_number_id": association.phone_number_id,
+                    "display_phone_number": association.display_phone_number,
+                    "default_property_id": association.default_property_id,
+                },
+            )
+        )
+        try:
+            await self._session.execute(stmt)
+        except IntegrityError as error:
+            if WHATSAPP_PHONE_NUMBER_ID_CONSTRAINT in str(error.orig):
+                raise WhatsAppPhoneNumberAlreadyAssociatedError(
+                    "that phone_number_id is already associated with another tenant; "
+                    "release it there before associating it here"
+                ) from error
+            # Anything else is re-raised untranslated: a 409 blamed on a constraint the
+            # client cannot see would be a lie it has no way to act on.
+            raise
+
+    async def find_for_tenant(
+        self, tenant_id: uuid.UUID
+    ) -> WhatsAppPhoneNumberAssociation | None:
+        result = await self._session.execute(
+            select(WhatsAppPhoneNumberModel).where(
+                WhatsAppPhoneNumberModel.tenant_id == tenant_id
+            )
+        )
+        model = result.scalar_one_or_none()
+        return None if model is None else _to_association(model)
+
+    async def delete_for_tenant(self, tenant_id: uuid.UUID) -> bool:
+        result = await self._session.execute(
+            delete(WhatsAppPhoneNumberModel).where(
+                WhatsAppPhoneNumberModel.tenant_id == tenant_id
+            )
+        )
+        return result.rowcount > 0
+
+    async def find_by_phone_number_id(
+        self, phone_number_id: str
+    ) -> WhatsAppPhoneNumberAssociation | None:
+        """Section 7's tenant resolution. Runs on an unmarked session, and that is enforced.
+
+        Mirrors `SqlAlchemyWebhookEndpointRepository.find_by_token_hash` exactly: an incoming
+        WhatsApp webhook carries no JWT, so there is no tenant to scope this read by until it
+        answers. `require_unmarked_session` refuses a marked session outright rather than
+        letting the global filter silently narrow it — `tests/test_unscoped_reads.py` holds
+        the census this call is declared in.
+        """
+        require_unmarked_session(self._session, read="find_by_phone_number_id")
+        result = await self._session.execute(
+            select(WhatsAppPhoneNumberModel).where(
+                WhatsAppPhoneNumberModel.phone_number_id == phone_number_id
+            )
+        )
+        model = result.scalar_one_or_none()
+        return None if model is None else _to_association(model)
+
+
+def _to_inbound_event(model: WhatsAppInboundEventModel) -> InboundWhatsAppEvent:
+    """The row as the entity, message value object rebuilt from its five columns.
+
+    `InboundWhatsAppMessage.__post_init__` revalidates every field on the way back, which is
+    the point of storing the parts rather than a blob: a row that somehow lost its text or
+    grew a naive `received_at` is refused here instead of reaching the pipeline.
+    """
+    return InboundWhatsAppEvent(
+        id=model.id,
+        tenant_id=model.tenant_id,
+        default_property_id=model.default_property_id,
+        message=InboundWhatsAppMessage(
+            sender_phone=model.sender_phone,
+            provider_message_id=model.provider_message_id,
+            text=model.message_text,
+            received_at=model.received_at,
+            business_phone_number=model.phone_number_id,
+        ),
+        processed_at=model.processed_at,
+    )
+
+
+class SqlAlchemyWhatsAppInboundEventRepository:
+    """`WhatsAppInboundEventRepository` (section 7, R3.3-R3.5, design D7).
+
+    The session requirement is **per method**, and the port's docstring is where it is stated;
+    what is worth repeating here is only the one thing this class does differently from its
+    sibling `SqlAlchemyWhatsAppPhoneNumberRepository`: it never takes `tenant_id` on the write
+    path, because the tenant is what the row itself records and may legitimately be `NULL`.
+
+    Never commits. The use case owns the transaction.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, event: InboundWhatsAppEvent) -> bool:
+        """`INSERT ... ON CONFLICT (provider_message_id) DO NOTHING`, and `RETURNING id`.
+
+        R3.5 decided by the database rather than by a prior read (design D8's rule, applied
+        one table over): `provider_message_id` is globally unique, so a read-then-write leaves
+        a TOCTOU race that two concurrent redeliveries of the same message both win — and the
+        loser's row is a second message in the guest's thread.
+
+        `RETURNING` is what tells the two paths apart: it yields the id on the inserting call
+        and nothing on the conflicting one. `rowcount` would answer the same question less
+        clearly and is the shape `ensure_whatsapp` deliberately avoided for the same reason.
+        """
+        stmt = (
+            pg_insert(WhatsAppInboundEventModel)
+            .values(
+                id=event.id,
+                tenant_id=event.tenant_id,
+                default_property_id=event.default_property_id,
+                phone_number_id=event.message.business_phone_number,
+                provider_message_id=event.message.provider_message_id,
+                sender_phone=event.message.sender_phone,
+                message_text=event.message.text,
+                received_at=event.message.received_at,
+                processed_at=event.processed_at,
+            )
+            .on_conflict_do_nothing(index_elements=["provider_message_id"])
+            .returning(WhatsAppInboundEventModel.id)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
+    async def locate_without_tenant_scoping(
+        self, event_id: uuid.UUID
+    ) -> InboundWhatsAppEvent | None:
+        """The dispatched task's one read. Runs on an unmarked session, and that is enforced.
+
+        Mirrors `find_by_phone_number_id` above: the task carries an id and no tenant, so the
+        row is what resolves the tenant. `require_unmarked_session` refuses a marked session
+        outright rather than letting the global filter narrow the query to a tenant the task
+        has not learned yet — and, for the rows whose `tenant_id` is `NULL`, narrow it to
+        nothing at all without erroring. `tests/test_unscoped_reads.py` holds the census this
+        call is declared in.
+        """
+        require_unmarked_session(self._session, read="locate_without_tenant_scoping")
+        result = await self._session.execute(
+            select(WhatsAppInboundEventModel).where(WhatsAppInboundEventModel.id == event_id)
+        )
+        model = result.scalar_one_or_none()
+        return None if model is None else _to_inbound_event(model)
+
+    async def mark_processed(
+        self, tenant_id: uuid.UUID, event_id: uuid.UUID, *, now: datetime
+    ) -> bool:
+        """One conditional UPDATE, so exactly one run of the task can proceed.
+
+        `WHERE processed_at IS NULL` is the claim; `tenant_id` is the ordinary scoping every
+        other write in this module carries. `rowcount` is what the two outcomes differ by, and
+        the pattern is the one `SqlAlchemyPropertyRepository.update_details` already uses.
+        """
+        result = await self._session.execute(
+            update(WhatsAppInboundEventModel)
+            .where(
+                WhatsAppInboundEventModel.id == event_id,
+                WhatsAppInboundEventModel.tenant_id == tenant_id,
+                WhatsAppInboundEventModel.processed_at.is_(None),
+            )
+            .values(processed_at=now)
+        )
+        return result.rowcount == 1

@@ -1,8 +1,11 @@
-"""Request/response DTOs of the platform endpoints (`platform-admin-api` R1, R3, design D5).
+"""Request/response DTOs of the platform endpoints (`platform-admin-api` R1, R3, design D5;
+`super-admin-console` R2, design D2).
 
-Two routes, four types. The bodies are short because the contracts of PRD §23 are: a tenant
-gets a single nested resource, and a user-creation response carries the one-time secret
-exactly once (the same shape `auth-account-recovery` already publishes via `CreatedUserResponse`).
+Three routes, five types. The bodies are short because the contracts of PRD §23 are: a
+tenant gets a single nested resource, a listing gets the `items`/`total`/`page`/`per_page`/
+`total_pages` envelope the majority of newer modules use, and a user-creation response
+carries the one-time secret exactly once (the same shape `auth-account-recovery` already
+publishes via `CreatedUserResponse`).
 
 `model_config = ConfigDict(from_attributes=True, extra="forbid")` on every type, because:
 
@@ -21,6 +24,7 @@ where the stricter check earns its dependency.
 """
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal
 
@@ -31,6 +35,12 @@ from app.auth.domain.entities import User
 from app.auth.domain.enums import UserRole, UserStatus
 
 MAX_NAME = 200
+#: `page` needs a ceiling too, not just `per_page`: an unbounded page number becomes a SQL
+#: OFFSET large enough to overflow, producing a driver error instead of a 422 in the PRD §23
+#: envelope. Same bound and reason `messaging`, `maintenance`, `cleaning` and `reservations`
+#: each redeclare locally — there is no shared constant to import (design D2).
+MAX_PER_PAGE = 100
+MAX_PAGE = 100_000
 MAX_COUNTRY = 2
 MAX_TIMEZONE = 50
 
@@ -60,6 +70,38 @@ class CreateTenantRequest(BaseModel):
 # and the configuration row travels nested (PRD §23, `app.tenants.api.schemas`). Re-declaring
 # would fork the type, which is the trap `_AuditWriter` was created to close for audit rows.
 from app.tenants.api.schemas import TenantConfigResponse, TenantResponse  # noqa: E402
+from app.tenants.application.use_cases import TenantSettings  # noqa: E402
+
+
+class TenantPageResponse(BaseModel):
+    """`GET /api/v1/platform/tenants` (`super-admin-console` R2.1, R2.4, design D2).
+
+    `items` reuses `TenantResponse` verbatim (R2.4) — no parallel type. The envelope shape
+    (`items`/`total`/`page`/`per_page`/`total_pages`) is the majority convention across
+    modules shipped after `user-management` (`CleaningTaskPageResponse`,
+    `IncidentPageResponse`'s siblings that added `total_pages`), not the older `{data, ...}`
+    shape `GET /api/v1/users` uses.
+    """
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    items: list[TenantResponse]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
+
+    @classmethod
+    def build(
+        cls, rows: Sequence[TenantSettings], *, total: int, page: int, per_page: int
+    ) -> "TenantPageResponse":
+        return cls(
+            items=[TenantResponse.from_settings(row) for row in rows],
+            total=total,
+            page=page,
+            per_page=per_page,
+            total_pages=(total + per_page - 1) // per_page if per_page else 0,
+        )
 
 
 def _reject_super_admin(value: UserRole) -> UserRole:
@@ -171,5 +213,6 @@ __all__ = [
     "CreatedPlatformUserResponse",
     "PlatformUserResponse",
     "TenantConfigResponse",
+    "TenantPageResponse",
     "TenantResponse",
 ]

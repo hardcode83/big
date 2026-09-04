@@ -69,6 +69,24 @@ ANONYMOUS_ENDPOINTS = {
     # use case, where `tests/integrations/test_webhook_receipt.py` asserts that an unknown token,
     # an unknown provider, a missing header and a wrong one are indistinguishable.
     ("POST", "/api/v1/webhooks/{provider}/{webhook_token}"),
+    # `whatsapp-cloud-adapter` section 7 (R3.1 as amended, design D3/D3a). Anonymous for a
+    # reason one step removed from the entry above: Meta admits a **single** webhook
+    # subscription per App, so there is no per-tenant route token to be the credential — and
+    # rule 12(b)'s literal mechanism therefore does not bind it. What does authenticate is
+    # Meta's real `X-Hub-Signature-256` over the raw body, verified in constant time against
+    # the platform's one `WHATSAPP_APP_SECRET`; rule 12 scopes itself to "webhooks entrantes
+    # **sin firma**", which this is not.
+    #
+    # Exempt from declaring a permission, NOT from authenticating. The check is
+    # `ReceiveWhatsAppWebhookUseCase.authenticate`, and
+    # `tests/messaging/test_whatsapp_webhook_receipt.py` asserts that a missing signature, a
+    # malformed one, a wrong key and a body altered after signing are indistinguishable.
+    ("POST", "/api/v1/webhooks/whatsapp"),
+    # The same path's `GET` (design D3a): Meta's one-time verification handshake, called by
+    # Meta itself when an operator saves the webhook URL. There is no operator session behind
+    # that call, so `WHATSAPP_WEBHOOK_VERIFY_TOKEN` is the shared secret that authorises it,
+    # compared with `secrets_match` and answering one empty `403` for every refusal.
+    ("GET", "/api/v1/webhooks/whatsapp"),
     # `guest-portal-api`: the guest portal of PRD §23. Anonymous for the same structural
     # reason as the webhook receiver above — the token in the path IS the credential — with
     # one difference that makes them stricter rather than looser: a webhook endpoint has a
@@ -597,6 +615,10 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         # `tests/properties/test_blocked_transitions_api.py`.
         "/api/v1/blocked-transitions",
         "/api/v1/timeline/{property_id}",
+        # `dashboard-activity-feed` R4.1: the tenant-wide feed, same `READ_PROPERTIES` gate,
+        # a structurally distinct path from the one above it. Per-role matrix asserted in
+        # `tests/timeline/test_tenant_feed_api.py`.
+        "/api/v1/timeline",
         "/api/v1/dashboard/properties",
         "/api/v1/properties/{property_id}/dashboard",
         # `revenue-reviews` R5: the seven routes of PRD §18 over five paths. Every one is
@@ -643,6 +665,14 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/conversations/{conversation_id}/messages",
         "/api/v1/conversations/{conversation_id}/escalate",
         "/api/v1/conversations/{conversation_id}/resolve",
+        # `whatsapp-cloud-adapter` section 6 (R6.1-R6.3): a second router of `messaging`, under
+        # `/messaging` rather than `/conversations`, gated on `MANAGE_TENANT_SETTINGS` like
+        # `integrations`'s webhook-endpoint routes rather than on this module's own
+        # `MANAGE_CONVERSATIONS` — provisioning a tenant's WhatsApp number is tenant
+        # configuration, not a conversation endpoint. Asserted per role in
+        # `tests/messaging/test_whatsapp_provisioning_api.py`.
+        "/api/v1/messaging/whatsapp-phone-number",
+        "/api/v1/messaging/whatsapp-phone-number/release",
         # `revenue-statements`: the seven authenticated paths for owner statements and
         # tenant expenses (PRD §23), asserted per role in `tests/statements/test_api.py`.
         "/api/v1/owner-statements",

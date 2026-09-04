@@ -255,6 +255,42 @@
         "title": "AssignIncidentRequest",
         "type": "object"
       },
+      "AssociateWhatsAppPhoneNumberRequest": {
+        "additionalProperties": false,
+        "description": "`POST /messaging/whatsapp-phone-number` (R6.1).\n\n`phone_number_id` is always operator-supplied — never generated (task 6.3's own words) —\nso it is a plain required string, not a value this schema invents a shape for. Meta's own\nidentifiers are digit strings of about 15 characters; `min_length=1` is the only guard\nworth encoding here, because the real validation (does it authenticate real traffic) can\nonly happen against Meta itself, out of this change's scope.\n\n`default_property_id` is required, not optional (design D8 addendum): `ensure_whatsapp`\nhas nowhere to anchor an unresolved sender's thread without it.",
+        "properties": {
+          "default_property_id": {
+            "format": "uuid",
+            "title": "Default Property Id",
+            "type": "string"
+          },
+          "display_phone_number": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Phone Number"
+          },
+          "phone_number_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Phone Number Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phone_number_id",
+          "default_property_id"
+        ],
+        "title": "AssociateWhatsAppPhoneNumberRequest",
+        "type": "object"
+      },
       "BlockedTransitionPageResponse": {
         "description": "The pagination envelope of PRD §23, over the stalls rather than over the flats.\n\n`total` is how many stalls the tenant has, not how many properties were examined — see\n`ListBlockedTransitionsUseCase`, which pages the result precisely so a stalled flat cannot\nhide on page 3 of the source.",
         "properties": {
@@ -7938,6 +7974,44 @@
         "title": "TenantConfigResponse",
         "type": "object"
       },
+      "TenantPageResponse": {
+        "additionalProperties": false,
+        "description": "`GET /api/v1/platform/tenants` (`super-admin-console` R2.1, R2.4, design D2).\n\n`items` reuses `TenantResponse` verbatim (R2.4) — no parallel type. The envelope shape\n(`items`/`total`/`page`/`per_page`/`total_pages`) is the majority convention across\nmodules shipped after `user-management` (`CleaningTaskPageResponse`,\n`IncidentPageResponse`'s siblings that added `total_pages`), not the older `{data, ...}`\nshape `GET /api/v1/users` uses.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TenantResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "TenantPageResponse",
+        "type": "object"
+      },
       "TenantResponse": {
         "description": "The tenant with its configuration nested. Fields enumerated, never dumped.",
         "properties": {
@@ -8006,6 +8080,123 @@
         ],
         "title": "TenantStatus",
         "type": "string"
+      },
+      "TenantTimelineEntryResponse": {
+        "description": "One entry of the tenant-wide feed (`GET /api/v1/timeline`,\n`dashboard-activity-feed` R3.1, R3.3): the same seven fields as\n`TimelineEntryResponse`, plus the identity of the property the entry belongs to.\n\n`property_name`/`property_internal_code` are `None` when the event's\n`property_id` does not resolve within the tenant (design D6) — a valid, expected\nshape, never an error state and never a reason to drop the entry.",
+        "properties": {
+          "actor_type": {
+            "$ref": "#/components/schemas/TimelineActorType"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "event_type": {
+            "$ref": "#/components/schemas/TimelineEventType"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "property_internal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Internal Code"
+          },
+          "property_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Name"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/TimelineSeverity"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "occurred_at",
+          "actor_type",
+          "event_type",
+          "severity",
+          "title",
+          "description",
+          "property_id",
+          "property_name",
+          "property_internal_code"
+        ],
+        "title": "TenantTimelineEntryResponse",
+        "type": "object"
+      },
+      "TenantTimelinePageResponse": {
+        "description": "The pagination envelope of PRD §23, for the tenant-wide feed.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TenantTimelineEntryResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "TenantTimelinePageResponse",
+        "type": "object"
       },
       "TimelineActorType": {
         "enum": [
@@ -9254,6 +9445,44 @@
           "header_secret"
         ],
         "title": "WebhookEndpointMaterialResponse",
+        "type": "object"
+      },
+      "WhatsAppPhoneNumberResponse": {
+        "description": "What an authenticated operator may see about their tenant's association.\n\nNo secret to withhold (D3/D8's whole point), so unlike `WebhookEndpointMaterialResponse`\nthis carries nothing that is returnable \"only once\" — a `GET` of the tenant's own settings\ncould show this back safely, the same point design D8 makes.",
+        "properties": {
+          "default_property_id": {
+            "format": "uuid",
+            "title": "Default Property Id",
+            "type": "string"
+          },
+          "display_phone_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Phone Number"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "phone_number_id": {
+            "title": "Phone Number Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "phone_number_id",
+          "display_phone_number",
+          "default_property_id"
+        ],
+        "title": "WhatsAppPhoneNumberResponse",
         "type": "object"
       },
       "app__cleaning__api__schemas__CleaningPhotoResponse": {
@@ -15441,6 +15670,113 @@
         ]
       }
     },
+    "/api/v1/messaging/whatsapp-phone-number": {
+      "post": {
+        "description": "Create-or-replace (R6.1, R6.3): a tenant with no number yet gets one, a tenant that already has one gets it replaced. `phone_number_id` is always supplied by the operator, never generated here — it is Meta's own identifier for a number already provisioned in the platform's single Meta App. `default_property_id` must be one of this tenant's own properties, and it is what an inbound message anchors to when it cannot be resolved to a specific stay (design D8). Refuses with `409` if that `phone_number_id` is already associated with a different tenant — it is never silently reassigned (R6.2).",
+        "operationId": "associate_whatsapp_phone_number_api_v1_messaging_whatsapp_phone_number_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssociateWhatsAppPhoneNumberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsAppPhoneNumberResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Associate a Meta Cloud API phone_number_id with this tenant",
+        "tags": [
+          "messaging"
+        ]
+      }
+    },
+    "/api/v1/messaging/whatsapp-phone-number/release": {
+      "post": {
+        "description": "The equivalent of a webhook endpoint's rotation in this model (R6.3): after this, the number resolves to no tenant until somebody — this one or another — associates it again. Conversations already opened under it are untouched. `404` if this tenant has no association to release.",
+        "operationId": "release_whatsapp_phone_number_api_v1_messaging_whatsapp_phone_number_release_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retire this tenant's WhatsApp phone_number_id association",
+        "tags": [
+          "messaging"
+        ]
+      }
+    },
     "/api/v1/notifications": {
       "get": {
         "description": "The in-app channel of PRD §14. Returns only the notifications addressed to the authenticated user — the restriction is derived from the token and there is no parameter that widens it. Newest first, paginated with `page`/`per_page` (PRD §23).",
@@ -16277,6 +16613,87 @@
       }
     },
     "/api/v1/platform/tenants": {
+      "get": {
+        "description": "Requires SUPER_ADMIN — issues MANAGE_PLATFORM.",
+        "operationId": "list_tenants_api_v1_platform_tenants_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List tenants (SUPER_ADMIN only)",
+        "tags": [
+          "platform"
+        ]
+      },
       "post": {
         "description": "Requires SUPER_ADMIN — issues MANAGE_PLATFORM.",
         "operationId": "create_tenant_api_v1_platform_tenants_post",
@@ -18978,6 +19395,171 @@
         ]
       }
     },
+    "/api/v1/timeline": {
+      "get": {
+        "description": "The tenant-wide feed of `dashboard-activity-feed`: every property's events merged into one page (PRD §23:1951), paginated with `page`/`per_page` and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. Each entry additionally carries `property_id`, `property_name` and `property_internal_code` — the latter two are `null` on the rare event whose `property_id` does not resolve within the tenant, which is a valid shape and never a reason to drop the entry or fail the request. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A tenant with no properties, or with properties that have no events, answers `200` with an empty page — never `404`.",
+        "operationId": "list_tenant_activity_api_v1_timeline_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TimelineEventType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TimelineSeverity"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TimelineActorType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantTimelinePageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The tenant's activity across every property",
+        "tags": [
+          "timeline"
+        ]
+      }
+    },
     "/api/v1/timeline/{property_id}": {
       "get": {
         "description": "Paginated with `page`/`per_page` (PRD §23) and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text, such as the reason a property was blocked, and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A property of another tenant answers `404`, with a body indistinguishable from one that does not exist.",
@@ -19605,6 +20187,142 @@
         "summary": "Issue a new temporary password for a user",
         "tags": [
           "users"
+        ]
+      }
+    },
+    "/api/v1/webhooks/whatsapp": {
+      "get": {
+        "description": "Meta calls this once, when an operator saves the webhook URL in the App dashboard, and refuses to save the subscription unless the `hub.challenge` comes back in plain text. Anonymous by necessity — there is no operator session behind Meta's call — with `WHATSAPP_WEBHOOK_VERIFY_TOKEN` as the shared secret that authorises it.",
+        "operationId": "verify_whatsapp_webhook_api_v1_webhooks_whatsapp_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hub.mode",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hub.Mode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hub.verify_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hub.Verify Token"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hub.challenge",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hub.Challenge"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The `hub.challenge` value, echoed verbatim as plain text. Meta accepts the subscription only on this exact body."
+          },
+          "403": {
+            "description": "The verify token did not match, or was absent. Empty body, and identical for both — including a request missing `hub.challenge` altogether."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer Meta's webhook verification handshake",
+        "tags": [
+          "webhooks"
+        ]
+      },
+      "post": {
+        "description": "Anonymous by design: Meta's `X-Hub-Signature-256` over the raw body is the credential (design D3a), verified in constant time against the platform's single `WHATSAPP_APP_SECRET`. Answers `202` with no body once the delivery is recorded, and an indistinguishable `403` for a missing, malformed, mis-keyed or stale signature alike. The message is processed on a queued task, never inside this response.",
+        "operationId": "receive_whatsapp_webhook_api_v1_webhooks_whatsapp_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not authenticated. Returned identically for a missing `X-Hub-Signature-256`, a malformed one, a digest computed under another key and a body altered after signing — the endpoint never reveals which (R3.3). Nothing is written."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request body exceeded the ceiling applied to all of /api/v1/."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Rate limited: either the subscription's per-minute delivery budget, or the stricter per-IP budget that only failed authentications consume."
+          }
+        },
+        "summary": "Receive an inbound WhatsApp message",
+        "tags": [
+          "webhooks"
         ]
       }
     },

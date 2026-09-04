@@ -6,12 +6,21 @@ infrastructure repositories just to host its builders.
 
 The repositories take the session from `get_db_session` — the same session every other
 authenticated request gets. The platform routes are reached only by `SUPER_ADMIN` (`R5.3`),
-so the session is unmarked: `tenant_scoped_classes()` from `app/core/db.py` does not cover
-the tables the platform endpoints touch (`tenants`, `tenant_configs`, `users`,
-`audit_logs`), and `TenantRepository.add` / `CreateUserUseCase` are not tenant-scoped
-either. Design D5's whole point is that the **audit row's `tenant_id`** comes from the
-entity being audited (the path's tenant id, never the actor's), and that holds because the
-session carries no marker to inherit.
+so the session is unmarked — but NOT because `tenant_scoped_classes()` (`app/core/db.py`)
+fails to cover the tables the platform endpoints touch. It does cover three of the four:
+`tenant_configs`, `users` and `audit_logs` each carry a `tenant_id` column, so all three are
+tenant-scoped classes (`tenants` itself is the one exception — it IS the tenant, so it has
+no such column to be scoped by). What actually leaves the session unmarked is the caller,
+not the schema: `get_authenticated_request` only calls `bind_session_to_tenant` when
+`context.tenant_id` is not `None`, and `SUPER_ADMIN` always authenticates with
+`context.tenant_id is None` (`super-admin-identity` R1). A marked session over these same
+tables would silently narrow every tenant-scoped join or query to one tenant instead of
+raising — `super-admin-console`'s `ListTenantsUseCase` guards exactly this failure mode at
+the repository (`TenantRepository.list_page` calls `require_unmarked_session`) precisely
+because the join it runs touches `tenant_configs`, one of the three scoped tables here.
+Design D5's whole point is that the **audit row's `tenant_id`** comes from the entity being
+audited (the path's tenant id, never the actor's), and that holds because the session
+carries no marker to inherit.
 
 `CreateUserInTenantUseCase` does NOT take a `UnitOfWork` (note 4.3, design D3): the wrapped
 `CreateUserUseCase` owns its own `commit()`, and the inner `UnitOfWork` and the outer one
@@ -34,7 +43,11 @@ from app.auth.infrastructure.password_hasher import BcryptPasswordHasher
 from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
 from app.core.db import get_db_session
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
-from app.platform.application.use_cases import CreateTenantUseCase, CreateUserInTenantUseCase
+from app.platform.application.use_cases import (
+    CreateTenantUseCase,
+    CreateUserInTenantUseCase,
+    ListTenantsUseCase,
+)
 from app.tenants.infrastructure.repositories import (
     SqlAlchemyTenantConfigRepository,
     SqlAlchemyTenantRepository,
@@ -78,7 +91,12 @@ def get_create_user_in_tenant_use_case(
     )
 
 
+def get_list_tenants_use_case(session: SessionDep) -> ListTenantsUseCase:
+    return ListTenantsUseCase(tenants=SqlAlchemyTenantRepository(session))
+
+
 __all__ = [
     "get_create_tenant_use_case",
     "get_create_user_in_tenant_use_case",
+    "get_list_tenants_use_case",
 ]

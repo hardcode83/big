@@ -48,6 +48,7 @@ const REAL_PAGE_ROUTE_IDS: Record<string, string> = {
   "(field)/cleaner/page.tsx": "cleaner",
   "(field)/cleaner/tasks/[id]/page.tsx": "cleaner-task",
   "(authenticated)/welcome/page.tsx": "welcome",
+  "(platform)/platform/page.tsx": "platform",
   "page.tsx": "landing",
 };
 

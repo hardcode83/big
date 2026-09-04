@@ -31,8 +31,10 @@ IP = "203.0.113.10"
 #: portal link, named by the digest and never by the token. A real SHA-256 shape, because
 #: `AuditLogFactory` refuses anything else.
 TOKEN_DIGEST = "b" * 64
+PHONE = "+34600111222"
 USER_ACTOR = InboundMessageActor(user_id=ACTOR, ip=IP)
 GUEST_ACTOR = InboundMessageActor(token_hash=TOKEN_DIGEST, ip=IP)
+PHONE_ACTOR = InboundMessageActor(resolved_phone=PHONE, ip=IP)
 
 #: What the guest typed, carrying the rule-3 values the census worries about — so the
 #: propagation tests below assert the absence of a real value rather than of an empty string.
@@ -289,6 +291,21 @@ async def test_the_incident_names_the_token_bearer_as_its_reporter() -> None:
     assert incident.reported_by_guest_token == TOKEN_DIGEST
     assert incident.reported_by_user_id is None
 
+
+@pytest.mark.asyncio
+async def test_the_incident_names_no_reporter_for_a_resolved_phone_actor() -> None:
+    """`resolved_phone` is `InboundMessageActor`'s third identity (`whatsapp-cloud-adapter`
+    D6), and `incidents` has no column for it: neither `reported_by_user_id` nor
+    `reported_by_guest_token` can name a phone number, so an incident opened from a WhatsApp
+    conversation leaves both `NULL` rather than raising — `IncidentSource.GUEST` plus the
+    conversation's own row is what names the reporter on this path."""
+    harness = Harness()
+
+    await harness.run(actor=PHONE_ACTOR)
+
+    incident = harness.incidents.rows[0]
+    assert incident.reported_by_user_id is None
+    assert incident.reported_by_guest_token is None
 
 @pytest.mark.asyncio
 async def test_the_audit_row_names_the_token_bearer_by_its_digest() -> None:

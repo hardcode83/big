@@ -357,9 +357,15 @@ class ReportIncidentFromConversationUseCase:
             created_at=now,
             updated_at=now,
             reservation_id=reservation_id,
-            # Exactly one of the two is set, because `InboundMessageActor` refuses to exist
-            # any other way. Not an `if`: passing both fields straight through keeps the
+            # At most one of the two is set, because `InboundMessageActor` refuses to name
+            # two identities. Not an `if`: passing both fields straight through keeps the
             # "exactly one" a property of the type rather than of this branch.
+            #
+            # **At most, not exactly**, since `whatsapp-cloud-adapter` D6 gave the actor a
+            # third identity (`resolved_phone`) which has no column here: an incident opened
+            # from a WhatsApp conversation leaves both `NULL`, and `IncidentSource.GUEST`
+            # plus the conversation's own row is what names the reporter. Recording the phone
+            # on `incidents` would be a new column and a rule-11 decision, not a rename.
             reported_by_user_id=actor.user_id,
             reported_by_guest_token=actor.token_hash,
         )

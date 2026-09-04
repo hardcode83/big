@@ -5,12 +5,15 @@ row and which columns the adapters refuse to write.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db import bind_session_to_tenant
+from app.core.tenancy import TenantMarkedSessionError
 from app.tenants.domain.entities import Tenant, TenantConfig
 from app.tenants.domain.enums import StorageType, TenantStatus
 from app.tenants.domain.exceptions import TenantAlreadyExistsError
@@ -326,3 +329,107 @@ async def test_add_does_not_translate_unrelated_integrity_errors(db_session) -> 
 
     with pytest.raises(IntegrityError):
         await repo.add(tenant, bad_config)
+
+
+# --- list_page (super-admin-console R2.1-R2.3) --------------------------------------
+
+async def _seed_tenant_at(
+    db_session: AsyncSession, *, name: str, created_at: datetime
+) -> TenantModel:
+    """A tenant + its config, `created_at` pinned so ordering assertions do not race `now()`.
+
+    `TenantModel.created_at` is `server_default=func.now()`: two tenants inserted in the
+    same transaction — the common case with this suite's shared `db_session` — would
+    otherwise get the SAME timestamp (Postgres' `now()` is transaction-time, not
+    statement-time), leaving `created_at DESC` undefined between them. Passing
+    `created_at` explicitly overrides the server default the same way any mapped column
+    can be set at construction time.
+    """
+    tenant = TenantModel(
+        id=uuid.uuid4(),
+        name=name,
+        billing_email=f"{name.lower()}@example.com",
+        status=TenantStatus.ACTIVE,
+        created_at=created_at,
+    )
+    db_session.add(tenant)
+    await db_session.flush()
+    db_session.add(TenantConfigModel(tenant_id=tenant.id))
+    await db_session.flush()
+    return tenant
+
+
+@pytest.mark.asyncio
+async def test_list_page_on_an_empty_table_returns_no_rows_and_zero_total(
+    db_session,
+) -> None:
+    repo = SqlAlchemyTenantRepository(db_session)
+
+    rows, total = await repo.list_page(page=1, per_page=20)
+
+    assert rows == ()
+    assert total == 0
+
+
+@pytest.mark.asyncio
+async def test_list_page_orders_by_created_at_descending_with_the_right_total(
+    db_session,
+) -> None:
+    base = utc_now()
+    oldest = await _seed_tenant_at(db_session, name="Oldest", created_at=base)
+    middle = await _seed_tenant_at(
+        db_session, name="Middle", created_at=base + timedelta(minutes=1)
+    )
+    newest = await _seed_tenant_at(
+        db_session, name="Newest", created_at=base + timedelta(minutes=2)
+    )
+    repo = SqlAlchemyTenantRepository(db_session)
+
+    rows, total = await repo.list_page(page=1, per_page=20)
+
+    assert total == 3
+    assert [tenant.id for tenant, _config in rows] == [
+        newest.id,
+        middle.id,
+        oldest.id,
+    ]
+    # Each row is paired with its own configuration, not a placeholder.
+    assert all(config.tenant_id == tenant.id for tenant, config in rows)
+
+
+@pytest.mark.asyncio
+async def test_list_page_slices_by_page_and_per_page(db_session) -> None:
+    base = utc_now()
+    seeded = [
+        await _seed_tenant_at(
+            db_session, name=f"Tenant{i}", created_at=base + timedelta(minutes=i)
+        )
+        for i in range(5)
+    ]
+    expected_order = [tenant.id for tenant in reversed(seeded)]
+    repo = SqlAlchemyTenantRepository(db_session)
+
+    first_page, total = await repo.list_page(page=1, per_page=2)
+    second_page, _ = await repo.list_page(page=2, per_page=2)
+    third_page, _ = await repo.list_page(page=3, per_page=2)
+
+    assert total == 5
+    assert [tenant.id for tenant, _config in first_page] == expected_order[0:2]
+    assert [tenant.id for tenant, _config in second_page] == expected_order[2:4]
+    assert [tenant.id for tenant, _config in third_page] == expected_order[4:5]
+
+
+@pytest.mark.asyncio
+async def test_list_page_refuses_a_marked_session(db_session, tenant_a) -> None:
+    """`list_page` joins `tenant_configs`, which DOES carry a `tenant_id` column (unlike
+    `tenants` itself) — on a marked session the global filter would silently narrow that
+    side of the join to one tenant instead of raising, which is indistinguishable from a
+    legitimately short page. Asserting the raise, not the rows, for the same reason
+    `test_find_by_email_globally_refuses_a_marked_session` does.
+    """
+    await _seed_tenant_at(db_session, name="Seeded", created_at=utc_now())
+    bind_session_to_tenant(db_session, tenant_a.id)
+    repo = SqlAlchemyTenantRepository(db_session)
+
+    with pytest.raises(TenantMarkedSessionError, match="list_page"):
+        await repo.list_page(page=1, per_page=20)

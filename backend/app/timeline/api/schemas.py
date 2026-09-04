@@ -13,7 +13,9 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.timeline.application.use_cases import RenderedTenantPage
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType, TimelineSeverity
+from app.timeline.domain.read_models import TenantActivityEntry
 from app.timeline.domain.rendering import RenderedEntry
 
 MAX_PER_PAGE = 100
@@ -74,4 +76,56 @@ class TimelinePageResponse(BaseModel):
             page=page,
             per_page=per_page,
             total_pages=(total + per_page - 1) // per_page if per_page else 0,
+        )
+
+
+class TenantTimelineEntryResponse(TimelineEntryResponse):
+    """One entry of the tenant-wide feed (`GET /api/v1/timeline`,
+    `dashboard-activity-feed` R3.1, R3.3): the same seven fields as
+    `TimelineEntryResponse`, plus the identity of the property the entry belongs to.
+
+    `property_name`/`property_internal_code` are `None` when the event's
+    `property_id` does not resolve within the tenant (design D6) — a valid, expected
+    shape, never an error state and never a reason to drop the entry.
+    """
+
+    property_id: uuid.UUID
+    property_name: str | None
+    property_internal_code: str | None
+
+    @classmethod
+    def from_rendered(cls, entry: TenantActivityEntry) -> "TenantTimelineEntryResponse":  # type: ignore[override]
+        return cls(
+            id=entry.id,
+            occurred_at=entry.occurred_at,
+            actor_type=entry.actor_type,
+            event_type=entry.event_type,
+            severity=entry.severity,
+            title=entry.title,
+            description=entry.description,
+            property_id=entry.property_id,
+            property_name=entry.property_name,
+            property_internal_code=entry.property_internal_code,
+        )
+
+
+class TenantTimelinePageResponse(BaseModel):
+    """The pagination envelope of PRD §23, for the tenant-wide feed."""
+
+    data: list[TenantTimelineEntryResponse]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
+
+    @classmethod
+    def build(
+        cls, result: RenderedTenantPage, *, page: int, per_page: int
+    ) -> "TenantTimelinePageResponse":
+        return cls(
+            data=[TenantTimelineEntryResponse.from_rendered(entry) for entry in result.entries],
+            total=result.total,
+            page=page,
+            per_page=per_page,
+            total_pages=(result.total + per_page - 1) // per_page if per_page else 0,
         )

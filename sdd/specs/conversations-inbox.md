@@ -11,7 +11,8 @@ manualmente. Es una capa de presentación pura sobre los siete endpoints de
 de acceso**: el backend sigue siendo la única autoridad sobre `Conversation` y `Message`, sus
 transiciones, su aislamiento por tenant y la persistencia del mensaje. Las conversaciones que
 la bandeja pinta las crea otro productor (pipeline de `messaging-ai` R4 desde un `Incident`
-con intent `MAINTENANCE_ISSUE`/`ACCESS_PROBLEM`, portal del huésped, transcripción manual);
+con intent `MAINTENANCE_ISSUE`/`ACCESS_PROBLEM`, portal del huésped, transcripción manual,
+webhook entrante de WhatsApp — [`whatsapp-cloud-adapter.md`](whatsapp-cloud-adapter.md));
 `make seed-demo` deja la bandeja legítimamente vacía y es el estado vacío localizado de R2.4.
 
 ## Requirements

@@ -150,10 +150,11 @@ solo el primer mensaje del huésped (R1, R6, R7).
   detectar su idioma, clasificar el intent con `AIAdapter`, persistir el mensaje con ambos y
   emitir `TimelineEvent(GUEST_MESSAGE_RECEIVED)`. La clasificación precede a la persistencia
   porque `Message` es `frozen` y necesita `intent` e idioma en construcción. Este pipeline es
-  **el mismo, entero y sin una segunda copia**, tanto si el mensaje lo transcribe un manager
-  autenticado en `POST /conversations/{id}/messages` como si lo escribe directamente el
-  portador de un token en `POST /api/v1/guest/messages/{token}` — lo único que cambia entre
-  los dos caminos es el actor que lo dispara (ver más abajo).
+  **el mismo, entero y sin una segunda copia**, sea cual sea el camino de entrada: un manager
+  autenticado lo transcribe en `POST /conversations/{id}/messages`, el portador de un token de
+  portal lo escribe directamente en `POST /api/v1/guest/messages/{token}`, o llega tras la
+  resolución de identidad del webhook entrante de WhatsApp (`whatsapp-cloud-adapter.md`) — lo
+  único que cambia entre los tres caminos es el actor que lo dispara (ver más abajo).
 - THE SYSTEM SHALL identificar a quien dispara el pipeline con `InboundMessageActor` —value
   object `frozen` de `messaging/domain/value_objects.py`, con `user_id: uuid.UUID | None`,
   `token_hash: str | None` e `ip: str | None`—, y SHALL exigir en su construcción
@@ -260,8 +261,10 @@ solo el primer mensaje del huésped (R1, R6, R7).
   depender de él y nunca de un adapter concreto.
 - THE SYSTEM SHALL registrar los adapters en un `dict` construido con antelación y visible,
   no por despacho dinámico: `MANUAL` → `PanelOutboundAdapter`, `PORTAL` →
-  `PortalOutboundAdapter`, `WHATSAPP` → `MockWhatsAppAdapter`, `EMAIL` → `ConsoleEmailAdapter`
-  (el que ya gobierna `access-notifications`), `PHONE_TRANSCRIPT` → `InboundOnlyAdapter`.
+  `PortalOutboundAdapter`, `WHATSAPP` → `WhatsAppCloudAdapter` (real, vía la Cloud API de Meta —
+  `MockWhatsAppAdapter` con `WHATSAPP_PROVIDER=mock`, ver `whatsapp-cloud-adapter.md`),
+  `EMAIL` → `ConsoleEmailAdapter` (el que ya gobierna `access-notifications`),
+  `PHONE_TRANSCRIPT` → `InboundOnlyAdapter`.
 - THE SYSTEM SHALL tratar `PORTAL` como `MANUAL`: la entrega **es** la fila que ya se persistió,
   así que `PortalOutboundAdapter.send` es un no-op que devuelve éxito — verdadero porque
   `GET /api/v1/guest/messages/{token}` existe y es lo que el huésped lee (`guest-portal-api.md`),

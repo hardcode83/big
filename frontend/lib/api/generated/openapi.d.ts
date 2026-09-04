@@ -615,6 +615,20 @@ export interface paths {
      */
     post: operations["rotate_webhook_endpoint_api_v1_integrations_webhook_endpoints__endpoint_id__rotate_post"];
   };
+  "/api/v1/messaging/whatsapp-phone-number": {
+    /**
+     * Associate a Meta Cloud API phone_number_id with this tenant
+     * @description Create-or-replace (R6.1, R6.3): a tenant with no number yet gets one, a tenant that already has one gets it replaced. `phone_number_id` is always supplied by the operator, never generated here — it is Meta's own identifier for a number already provisioned in the platform's single Meta App. `default_property_id` must be one of this tenant's own properties, and it is what an inbound message anchors to when it cannot be resolved to a specific stay (design D8). Refuses with `409` if that `phone_number_id` is already associated with a different tenant — it is never silently reassigned (R6.2).
+     */
+    post: operations["associate_whatsapp_phone_number_api_v1_messaging_whatsapp_phone_number_post"];
+  };
+  "/api/v1/messaging/whatsapp-phone-number/release": {
+    /**
+     * Retire this tenant's WhatsApp phone_number_id association
+     * @description The equivalent of a webhook endpoint's rotation in this model (R6.3): after this, the number resolves to no tenant until somebody — this one or another — associates it again. Conversations already opened under it are untouched. `404` if this tenant has no association to release.
+     */
+    post: operations["release_whatsapp_phone_number_api_v1_messaging_whatsapp_phone_number_release_post"];
+  };
   "/api/v1/notifications": {
     /**
      * List the caller's own notifications
@@ -711,6 +725,11 @@ export interface paths {
     post: operations["generate_owner_statement_api_v1_owner_statements_generate_post"];
   };
   "/api/v1/platform/tenants": {
+    /**
+     * List tenants (SUPER_ADMIN only)
+     * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
+     */
+    get: operations["list_tenants_api_v1_platform_tenants_get"];
     /**
      * Create a tenant (SUPER_ADMIN only)
      * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
@@ -929,6 +948,13 @@ export interface paths {
      */
     patch: operations["update_tenant_api_v1_tenants__tenant_id__patch"];
   };
+  "/api/v1/timeline": {
+    /**
+     * The tenant's activity across every property
+     * @description The tenant-wide feed of `dashboard-activity-feed`: every property's events merged into one page (PRD §23:1951), paginated with `page`/`per_page` and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. Each entry additionally carries `property_id`, `property_name` and `property_internal_code` — the latter two are `null` on the rare event whose `property_id` does not resolve within the tenant, which is a valid shape and never a reason to drop the entry or fail the request. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A tenant with no properties, or with properties that have no events, answers `200` with an empty page — never `404`.
+     */
+    get: operations["list_tenant_activity_api_v1_timeline_get"];
+  };
   "/api/v1/timeline/{property_id}": {
     /**
      * A property's timeline
@@ -978,6 +1004,18 @@ export interface paths {
      * @description Anonymous by design: the route token is the credential (rule 12(b)), paired with the provider's static header (rule 12(a)). Answers `202` with no body once the notice is queued, and an indistinguishable `404` for an unknown provider, an unknown token, a missing header and a wrong one alike. Nothing is re-read from the provider here — that is the job's work, coalesced across a batch.
      */
     post: operations["receive_webhook_api_v1_webhooks__provider___webhook_token__post"];
+  };
+  "/api/v1/webhooks/whatsapp": {
+    /**
+     * Answer Meta's webhook verification handshake
+     * @description Meta calls this once, when an operator saves the webhook URL in the App dashboard, and refuses to save the subscription unless the `hub.challenge` comes back in plain text. Anonymous by necessity — there is no operator session behind Meta's call — with `WHATSAPP_WEBHOOK_VERIFY_TOKEN` as the shared secret that authorises it.
+     */
+    get: operations["verify_whatsapp_webhook_api_v1_webhooks_whatsapp_get"];
+    /**
+     * Receive an inbound WhatsApp message
+     * @description Anonymous by design: Meta's `X-Hub-Signature-256` over the raw body is the credential (design D3a), verified in constant time against the platform's single `WHATSAPP_APP_SECRET`. Answers `202` with no body once the delivery is recorded, and an indistinguishable `403` for a missing, malformed, mis-keyed or stale signature alike. The message is processed on a queued task, never inside this response.
+     */
+    post: operations["receive_whatsapp_webhook_api_v1_webhooks_whatsapp_post"];
   };
   "/health": {
     /** Health */
@@ -1169,6 +1207,30 @@ export interface components {
        * Format: uuid
        */
       technician_id: string;
+    };
+    /**
+     * AssociateWhatsAppPhoneNumberRequest
+     * @description `POST /messaging/whatsapp-phone-number` (R6.1).
+     *
+     * `phone_number_id` is always operator-supplied — never generated (task 6.3's own words) —
+     * so it is a plain required string, not a value this schema invents a shape for. Meta's own
+     * identifiers are digit strings of about 15 characters; `min_length=1` is the only guard
+     * worth encoding here, because the real validation (does it authenticate real traffic) can
+     * only happen against Meta itself, out of this change's scope.
+     *
+     * `default_property_id` is required, not optional (design D8 addendum): `ensure_whatsapp`
+     * has nowhere to anchor an unresolved sender's thread without it.
+     */
+    AssociateWhatsAppPhoneNumberRequest: {
+      /**
+       * Default Property Id
+       * Format: uuid
+       */
+      default_property_id: string;
+      /** Display Phone Number */
+      display_phone_number?: string | null;
+      /** Phone Number Id */
+      phone_number_id: string;
     };
     /**
      * BlockedTransitionPageResponse
@@ -4644,6 +4706,28 @@ export interface components {
       storage_type: components["schemas"]["StorageType"];
     };
     /**
+     * TenantPageResponse
+     * @description `GET /api/v1/platform/tenants` (`super-admin-console` R2.1, R2.4, design D2).
+     *
+     * `items` reuses `TenantResponse` verbatim (R2.4) — no parallel type. The envelope shape
+     * (`items`/`total`/`page`/`per_page`/`total_pages`) is the majority convention across
+     * modules shipped after `user-management` (`CleaningTaskPageResponse`,
+     * `IncidentPageResponse`'s siblings that added `total_pages`), not the older `{data, ...}`
+     * shape `GET /api/v1/users` uses.
+     */
+    TenantPageResponse: {
+      /** Items */
+      items: components["schemas"]["TenantResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
      * TenantResponse
      * @description The tenant with its configuration nested. Fields enumerated, never dumped.
      */
@@ -4681,6 +4765,60 @@ export interface components {
      * @enum {string}
      */
     TenantStatus: "ACTIVE" | "SUSPENDED" | "CANCELLED";
+    /**
+     * TenantTimelineEntryResponse
+     * @description One entry of the tenant-wide feed (`GET /api/v1/timeline`,
+     * `dashboard-activity-feed` R3.1, R3.3): the same seven fields as
+     * `TimelineEntryResponse`, plus the identity of the property the entry belongs to.
+     *
+     * `property_name`/`property_internal_code` are `None` when the event's
+     * `property_id` does not resolve within the tenant (design D6) — a valid, expected
+     * shape, never an error state and never a reason to drop the entry.
+     */
+    TenantTimelineEntryResponse: {
+      actor_type: components["schemas"]["TimelineActorType"];
+      /** Description */
+      description: string | null;
+      event_type: components["schemas"]["TimelineEventType"];
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Occurred At
+       * Format: date-time
+       */
+      occurred_at: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Property Internal Code */
+      property_internal_code: string | null;
+      /** Property Name */
+      property_name: string | null;
+      severity: components["schemas"]["TimelineSeverity"];
+      /** Title */
+      title: string;
+    };
+    /**
+     * TenantTimelinePageResponse
+     * @description The pagination envelope of PRD §23, for the tenant-wide feed.
+     */
+    TenantTimelinePageResponse: {
+      /** Data */
+      data: components["schemas"]["TenantTimelineEntryResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
     /**
      * TimelineActorType
      * @enum {string}
@@ -5045,6 +5183,30 @@ export interface components {
       provider: components["schemas"]["PMSProvider"];
       /** Webhook Url */
       webhook_url: string;
+    };
+    /**
+     * WhatsAppPhoneNumberResponse
+     * @description What an authenticated operator may see about their tenant's association.
+     *
+     * No secret to withhold (D3/D8's whole point), so unlike `WebhookEndpointMaterialResponse`
+     * this carries nothing that is returnable "only once" — a `GET` of the tenant's own settings
+     * could show this back safely, the same point design D8 makes.
+     */
+    WhatsAppPhoneNumberResponse: {
+      /**
+       * Default Property Id
+       * Format: uuid
+       */
+      default_property_id: string;
+      /** Display Phone Number */
+      display_phone_number: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Phone Number Id */
+      phone_number_id: string;
     };
   };
   responses: never;
@@ -8276,6 +8438,67 @@ export interface operations {
     };
   };
   /**
+   * Associate a Meta Cloud API phone_number_id with this tenant
+   * @description Create-or-replace (R6.1, R6.3): a tenant with no number yet gets one, a tenant that already has one gets it replaced. `phone_number_id` is always supplied by the operator, never generated here — it is Meta's own identifier for a number already provisioned in the platform's single Meta App. `default_property_id` must be one of this tenant's own properties, and it is what an inbound message anchors to when it cannot be resolved to a specific stay (design D8). Refuses with `409` if that `phone_number_id` is already associated with a different tenant — it is never silently reassigned (R6.2).
+   */
+  associate_whatsapp_phone_number_api_v1_messaging_whatsapp_phone_number_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssociateWhatsAppPhoneNumberRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["WhatsAppPhoneNumberResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Retire this tenant's WhatsApp phone_number_id association
+   * @description The equivalent of a webhook endpoint's rotation in this model (R6.3): after this, the number resolves to no tenant until somebody — this one or another — associates it again. Conversations already opened under it are untouched. `404` if this tenant has no association to release.
+   */
+  release_whatsapp_phone_number_api_v1_messaging_whatsapp_phone_number_release_post: {
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List the caller's own notifications
    * @description The in-app channel of PRD §14. Returns only the notifications addressed to the authenticated user — the restriction is derived from the token and there is no parameter that widens it. Newest first, paginated with `page`/`per_page` (PRD §23).
    */
@@ -8673,6 +8896,44 @@ export interface operations {
       201: {
         content: {
           "application/json": components["schemas"]["OwnerStatementGenerationReportResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List tenants (SUPER_ADMIN only)
+   * @description Requires SUPER_ADMIN — issues MANAGE_PLATFORM.
+   */
+  list_tenants_api_v1_platform_tenants_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantPageResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */
@@ -9982,6 +10243,49 @@ export interface operations {
     };
   };
   /**
+   * The tenant's activity across every property
+   * @description The tenant-wide feed of `dashboard-activity-feed`: every property's events merged into one page (PRD §23:1951), paginated with `page`/`per_page` and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. Each entry additionally carries `property_id`, `property_name` and `property_internal_code` — the latter two are `null` on the rare event whose `property_id` does not resolve within the tenant, which is a valid shape and never a reason to drop the entry or fail the request. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A tenant with no properties, or with properties that have no events, answers `200` with an empty page — never `404`.
+   */
+  list_tenant_activity_api_v1_timeline_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        event_type?: components["schemas"]["TimelineEventType"] | null;
+        severity?: components["schemas"]["TimelineSeverity"] | null;
+        actor_type?: components["schemas"]["TimelineActorType"] | null;
+        from?: string | null;
+        to?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantTimelinePageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * A property's timeline
    * @description Paginated with `page`/`per_page` (PRD §23) and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text, such as the reason a property was blocked, and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A property of another tenant answers `404`, with a body indistinguishable from one that does not exist.
    */
@@ -10292,6 +10596,70 @@ export interface operations {
         };
       };
       /** @description Rate limited: either this endpoint's per-minute delivery budget, or the stricter per-IP budget that only failed authentications consume. */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Answer Meta's webhook verification handshake
+   * @description Meta calls this once, when an operator saves the webhook URL in the App dashboard, and refuses to save the subscription unless the `hub.challenge` comes back in plain text. Anonymous by necessity — there is no operator session behind Meta's call — with `WHATSAPP_WEBHOOK_VERIFY_TOKEN` as the shared secret that authorises it.
+   */
+  verify_whatsapp_webhook_api_v1_webhooks_whatsapp_get: {
+    parameters: {
+      query?: {
+        "hub.mode"?: string | null;
+        "hub.verify_token"?: string | null;
+        "hub.challenge"?: string | null;
+      };
+    };
+    responses: {
+      /** @description The `hub.challenge` value, echoed verbatim as plain text. Meta accepts the subscription only on this exact body. */
+      200: {
+        content: {
+          "application/json": unknown;
+          "text/plain": string;
+        };
+      };
+      /** @description The verify token did not match, or was absent. Empty body, and identical for both — including a request missing `hub.challenge` altogether. */
+      403: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Receive an inbound WhatsApp message
+   * @description Anonymous by design: Meta's `X-Hub-Signature-256` over the raw body is the credential (design D3a), verified in constant time against the platform's single `WHATSAPP_APP_SECRET`. Answers `202` with no body once the delivery is recorded, and an indistinguishable `403` for a missing, malformed, mis-keyed or stale signature alike. The message is processed on a queued task, never inside this response.
+   */
+  receive_whatsapp_webhook_api_v1_webhooks_whatsapp_post: {
+    responses: {
+      /** @description Successful Response */
+      202: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not authenticated. Returned identically for a missing `X-Hub-Signature-256`, a malformed one, a digest computed under another key and a body altered after signing — the endpoint never reveals which (R3.3). Nothing is written. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The request body exceeded the ceiling applied to all of /api/v1/. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Rate limited: either the subscription's per-minute delivery budget, or the stricter per-IP budget that only failed authentications consume. */
       429: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
