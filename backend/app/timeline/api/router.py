@@ -1,21 +1,26 @@
-"""The timeline endpoint (PRD §10, §23:1952, `dashboard-api` R4, R5).
+"""The timeline endpoints (PRD §10, §23:1951-1952, `dashboard-api` R4, R5,
+`dashboard-activity-feed` R1-R4).
 
 The `api/` layer `timeline` did not have. Until now the module was a factory and a write
 port, and its events were recorded by *other* domains' use cases — `domain/repositories.py`
 said so in as many words: "reading events back belongs to the change that introduces the
 timeline endpoints".
 
-**One route, and it reads.** `GET /api/v1/timeline` — the global variant of §23:1951 — is
-out of scope (the roadmap entry bounds this to the per-property one, which is what the
-detail page consumes). There is no writer here and there will not be one: events are
-appended by the use case that caused them, which is what keeps the timeline a record.
+**Two routes, both read.** `GET /api/v1/timeline/{property_id}` (`dashboard-api`) is one
+property's history. `GET /api/v1/timeline` (`dashboard-activity-feed`) is the tenant's
+activity across every property, merged and paged the same way — the global variant of
+§23:1951 that the first change's roadmap entry deliberately deferred, not a permanent
+scope boundary (design D1, D11). There is no writer here and there will not be one on
+either route: events are appended by the use case that caused them, which is what keeps
+the timeline a record.
 
 **Query parameter naming.** The frontend contract spells its filters `eventType`,
 `actorType`, `from` and `to` (`dto.ts:111-117`). On the wire they are `event_type`,
 `actor_type`, `from` and `to`: R4.2 names *which* filters must exist, and this API's
 convention for the spelling is snake_case — `per_page`, `current_operational_state`. The
 two range bounds keep the contract's own names because they are single words already;
-`from` is a Python keyword, so it reaches the handler through an alias.
+`from` is a Python keyword, so it reaches the handler through an alias. Both routes share
+this exact set of query parameters.
 """
 
 import uuid
@@ -27,9 +32,20 @@ from fastapi import APIRouter, Depends, Query
 from app.auth.api.dependencies import AuthenticatedRequest, require
 from app.auth.domain.policy import Permission
 from app.core.openapi import AUTHENTICATED_RESPONSES
-from app.timeline.api.dependencies import get_property_timeline_use_case
-from app.timeline.api.schemas import MAX_PAGE, MAX_PER_PAGE, TimelinePageResponse
-from app.timeline.application.use_cases import GetPropertyTimelineUseCase
+from app.timeline.api.dependencies import (
+    get_property_timeline_use_case,
+    get_tenant_activity_use_case,
+)
+from app.timeline.api.schemas import (
+    MAX_PAGE,
+    MAX_PER_PAGE,
+    TenantTimelinePageResponse,
+    TimelinePageResponse,
+)
+from app.timeline.application.use_cases import (
+    GetPropertyTimelineUseCase,
+    ListTenantActivityUseCase,
+)
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType, TimelineSeverity
 from app.timeline.domain.repositories import TimelineFilters
 
@@ -61,6 +77,57 @@ router = APIRouter(prefix="/timeline", tags=["timeline"], responses=AUTHENTICATE
 # worse audit surface than one that is honestly gated. If that test ever fails, the
 # decision is reopened there, before the role ships.
 ReadDep = Annotated[AuthenticatedRequest, Depends(require(Permission.READ_PROPERTIES))]
+
+
+@router.get(
+    "",
+    response_model=TenantTimelinePageResponse,
+    summary="The tenant's activity across every property",
+    description=(
+        "The tenant-wide feed of `dashboard-activity-feed`: every property's events "
+        "merged into one page (PRD §23:1951), paginated with `page`/`per_page` and "
+        "ordered by occurrence descending, with the entry id as tiebreaker so paging "
+        "neither repeats an entry nor skips one when several share an instant. Filters "
+        "combine with AND; `from`/`to` are inclusive on both ends. Each entry additionally "
+        "carries `property_id`, `property_name` and `property_internal_code` — the latter "
+        "two are `null` on the rare event whose `property_id` does not resolve within the "
+        "tenant, which is a valid shape and never a reason to drop the entry or fail the "
+        "request. `title` arrives already composed in the authenticated user's language "
+        "(PRD §10); `description` does not — it carries operator-written text and is "
+        "returned verbatim in whatever language it was typed. The `event_type`, "
+        "`actor_type` and `severity` literals are never translated. The `metadata` "
+        "column is not part of this contract and is never serialised. A tenant with no "
+        "properties, or with properties that have no events, answers `200` with an empty "
+        "page — never `404`."
+    ),
+)
+async def list_tenant_activity(
+    authenticated: ReadDep,
+    use_case: Annotated[
+        ListTenantActivityUseCase, Depends(get_tenant_activity_use_case)
+    ],
+    page: Annotated[int, Query(ge=1, le=MAX_PAGE)] = 1,
+    per_page: Annotated[int, Query(ge=1, le=MAX_PER_PAGE)] = 20,
+    event_type: TimelineEventType | None = None,
+    severity: TimelineSeverity | None = None,
+    actor_type: TimelineActorType | None = None,
+    occurred_from: Annotated[datetime | None, Query(alias="from")] = None,
+    occurred_to: Annotated[datetime | None, Query(alias="to")] = None,
+) -> TenantTimelinePageResponse:
+    result = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        filters=TimelineFilters(
+            event_type=event_type,
+            severity=severity,
+            actor_type=actor_type,
+            occurred_from=occurred_from,
+            occurred_to=occurred_to,
+        ),
+        page=page,
+        per_page=per_page,
+        locale=authenticated.context.preferred_language,
+    )
+    return TenantTimelinePageResponse.build(result, page=page, per_page=per_page)
 
 
 @router.get(

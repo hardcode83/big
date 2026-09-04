@@ -8081,6 +8081,123 @@
         "title": "TenantStatus",
         "type": "string"
       },
+      "TenantTimelineEntryResponse": {
+        "description": "One entry of the tenant-wide feed (`GET /api/v1/timeline`,\n`dashboard-activity-feed` R3.1, R3.3): the same seven fields as\n`TimelineEntryResponse`, plus the identity of the property the entry belongs to.\n\n`property_name`/`property_internal_code` are `None` when the event's\n`property_id` does not resolve within the tenant (design D6) — a valid, expected\nshape, never an error state and never a reason to drop the entry.",
+        "properties": {
+          "actor_type": {
+            "$ref": "#/components/schemas/TimelineActorType"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "event_type": {
+            "$ref": "#/components/schemas/TimelineEventType"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "property_internal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Internal Code"
+          },
+          "property_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Name"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/TimelineSeverity"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "occurred_at",
+          "actor_type",
+          "event_type",
+          "severity",
+          "title",
+          "description",
+          "property_id",
+          "property_name",
+          "property_internal_code"
+        ],
+        "title": "TenantTimelineEntryResponse",
+        "type": "object"
+      },
+      "TenantTimelinePageResponse": {
+        "description": "The pagination envelope of PRD §23, for the tenant-wide feed.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TenantTimelineEntryResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "TenantTimelinePageResponse",
+        "type": "object"
+      },
       "TimelineActorType": {
         "enum": [
           "SYSTEM",
@@ -19275,6 +19392,171 @@
         "summary": "Update the tenant and its configuration",
         "tags": [
           "tenants"
+        ]
+      }
+    },
+    "/api/v1/timeline": {
+      "get": {
+        "description": "The tenant-wide feed of `dashboard-activity-feed`: every property's events merged into one page (PRD §23:1951), paginated with `page`/`per_page` and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. Each entry additionally carries `property_id`, `property_name` and `property_internal_code` — the latter two are `null` on the rare event whose `property_id` does not resolve within the tenant, which is a valid shape and never a reason to drop the entry or fail the request. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A tenant with no properties, or with properties that have no events, answers `200` with an empty page — never `404`.",
+        "operationId": "list_tenant_activity_api_v1_timeline_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TimelineEventType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TimelineSeverity"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TimelineActorType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantTimelinePageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The tenant's activity across every property",
+        "tags": [
+          "timeline"
         ]
       }
     },

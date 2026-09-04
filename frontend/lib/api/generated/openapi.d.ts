@@ -948,6 +948,13 @@ export interface paths {
      */
     patch: operations["update_tenant_api_v1_tenants__tenant_id__patch"];
   };
+  "/api/v1/timeline": {
+    /**
+     * The tenant's activity across every property
+     * @description The tenant-wide feed of `dashboard-activity-feed`: every property's events merged into one page (PRD §23:1951), paginated with `page`/`per_page` and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. Each entry additionally carries `property_id`, `property_name` and `property_internal_code` — the latter two are `null` on the rare event whose `property_id` does not resolve within the tenant, which is a valid shape and never a reason to drop the entry or fail the request. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A tenant with no properties, or with properties that have no events, answers `200` with an empty page — never `404`.
+     */
+    get: operations["list_tenant_activity_api_v1_timeline_get"];
+  };
   "/api/v1/timeline/{property_id}": {
     /**
      * A property's timeline
@@ -4758,6 +4765,60 @@ export interface components {
      * @enum {string}
      */
     TenantStatus: "ACTIVE" | "SUSPENDED" | "CANCELLED";
+    /**
+     * TenantTimelineEntryResponse
+     * @description One entry of the tenant-wide feed (`GET /api/v1/timeline`,
+     * `dashboard-activity-feed` R3.1, R3.3): the same seven fields as
+     * `TimelineEntryResponse`, plus the identity of the property the entry belongs to.
+     *
+     * `property_name`/`property_internal_code` are `None` when the event's
+     * `property_id` does not resolve within the tenant (design D6) — a valid, expected
+     * shape, never an error state and never a reason to drop the entry.
+     */
+    TenantTimelineEntryResponse: {
+      actor_type: components["schemas"]["TimelineActorType"];
+      /** Description */
+      description: string | null;
+      event_type: components["schemas"]["TimelineEventType"];
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Occurred At
+       * Format: date-time
+       */
+      occurred_at: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Property Internal Code */
+      property_internal_code: string | null;
+      /** Property Name */
+      property_name: string | null;
+      severity: components["schemas"]["TimelineSeverity"];
+      /** Title */
+      title: string;
+    };
+    /**
+     * TenantTimelinePageResponse
+     * @description The pagination envelope of PRD §23, for the tenant-wide feed.
+     */
+    TenantTimelinePageResponse: {
+      /** Data */
+      data: components["schemas"]["TenantTimelineEntryResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
     /**
      * TimelineActorType
      * @enum {string}
@@ -10159,6 +10220,49 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["TenantResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * The tenant's activity across every property
+   * @description The tenant-wide feed of `dashboard-activity-feed`: every property's events merged into one page (PRD §23:1951), paginated with `page`/`per_page` and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. Each entry additionally carries `property_id`, `property_name` and `property_internal_code` — the latter two are `null` on the rare event whose `property_id` does not resolve within the tenant, which is a valid shape and never a reason to drop the entry or fail the request. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A tenant with no properties, or with properties that have no events, answers `200` with an empty page — never `404`.
+   */
+  list_tenant_activity_api_v1_timeline_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        event_type?: components["schemas"]["TimelineEventType"] | null;
+        severity?: components["schemas"]["TimelineSeverity"] | null;
+        actor_type?: components["schemas"]["TimelineActorType"] | null;
+        from?: string | null;
+        to?: string | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TenantTimelinePageResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */
