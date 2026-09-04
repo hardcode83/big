@@ -46,6 +46,14 @@ del pool por el resto de la CI (changes `ci-runner-oci` 2026-09-04 y `ci-runner-
 
 ### Aislamiento por usuario Linux y servicio systemd
 
+**Alcance de este "aislamiento": separa workspaces y servicios entre agentes, no es un límite
+de confianza entre ellos.** Los N usuarios comparten grupo `docker` (root-equivalente sobre el
+socket) y, por construcción, el mismo alcance de instance principal que la VM — un agente
+comprometido puede alcanzar lo mismo que cualquier otro. Lo que esta separación evita es que un
+`git clean -ffdx` o un fallo de un agente pisoteen el `_work/` o el servicio de otro (D1); no es
+una defensa contra un agente que actúa con intención hostil dentro de la misma VM. Ver "Riesgo
+aceptado" más abajo, que enumera explícitamente este radio.
+
 - THE SYSTEM SHALL crear un usuario Linux por agente (`actions-runner-1`/`actions-runner-2`/…),
   añadido al grupo `docker` (igual que hoy `ubuntu`), con
   `RUNNER_HOME=/opt/actions-runner-<i>` y `_work/` propio (R2).
@@ -131,8 +139,11 @@ del pool por el resto de la CI (changes `ci-runner-oci` 2026-09-04 y `ci-runner-
   `runner_count = 1` dejaría dos agentes vivos (legado + agente-1) y rompería R5 (R3, R5).
 - THE SYSTEM SHALL fallar el reaprovisionamiento con un mensaje que nombre al agente
   (`agent <i>/<N>: <acción>: <error>`) si GitHub rechaza el registro (credenciales, rate limit,
-  etc.), sin dejar el estado a medias: los agentes `1..k-1` quedan reconciliados y los
-  `k+1..N` sin tocar, y el operador reaplica solo con la fix del error (R3).
+  etc.), sin dejar el estado a medias: un fallo en el agente `k` **no detiene el bucle** — los
+  agentes `1..k-1` quedan reconciliados y `k+1..N` se siguen intentando en sus propias subshells
+  aisladas (corrección 2026-09-04, panel de `/sdd:review`: la redacción anterior decía que
+  `k+1..N` quedaban "sin tocar", contradiciendo el propio código), y el operador ve un informe
+  completo por agente en una sola ejecución antes de reaplicar con la fix del error (R3).
 - THE SYSTEM SHALL NOT introducir nuevos secrets ni nuevas sentencias IAM en el
   reaprovisionamiento: el installation-token de la GitHub App ya minteado por
   `gh-app-install-token.py` sirve para los N `./config.sh`, y el instance principal de la VM
@@ -146,12 +157,21 @@ del pool por el resto de la CI (changes `ci-runner-oci` 2026-09-04 y `ci-runner-
   apply`, el stack desplegado públicamente en `autohostai.digitalsec.work`). Antes de esta
   migración, esos jobs `pull_request` corrían en runners GH-hosted efímeros sin ninguna
   credencial de OCI y sin compartir host con el deploy real.
+- **Extensión cuantitativa por `ci-runner-pool-oci` (2026-09-04, no cualitativa)**: el número de
+  principales locales con acceso al socket de Docker (grupo `docker`) y al instance principal de
+  la VM pasa de **1** (`ubuntu`, un único runner) a **N** (`actions-runner-1..N`, uno por agente
+  del pool). La naturaleza del riesgo no cambia — sigue siendo "un PR no fusionado corre en un
+  host con credenciales de producción de `dev`" — pero el número de cuentas que lo materializan
+  sí, en proporción directa a `runner_count`.
 - THE SYSTEM SHALL considerar este riesgo **aceptado explícitamente** (no mitigado técnicamente
   en este change): el repo es privado, los colaboradores con permiso de abrir PR son de
   confianza, y no se justificó un pool dedicado a `pull_request` o una política IAM/Docker más
   restrictiva solo por esta migración. Se reevalúa si se añade un secreto nuevo a la policy del
-  pool, si el repo acepta colaboradores externos, o si el coste de un pool dedicado a
-  `pull_request` deja de ser desproporcionado.
+  pool, si el repo acepta colaboradores externos, si el coste de un pool dedicado a
+  `pull_request` deja de ser desproporcionado, o **si `runner_count` sube** (cada incremento
+  añade un principal más con el mismo alcance — la nota de medición de R6.3 cubre la contención
+  CPU/memoria, no este radio de confianza, así que subir N por encima del default requiere
+  releer esta sección, no solo la de rendimiento).
 
 ### Verificación antes de mergear y su límite
 

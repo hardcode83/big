@@ -16,8 +16,13 @@
 # Registro vía GitHub App: lee la clave privada de la App del OCI Vault por INSTANCE PRINCIPAL,
 # mintea un installation-token (helper gh-app-install-token.py) y con él pide el registration-token.
 # El installation-token va por --config/stdin (fuera de argv). El registration-token, en cambio,
-# se pasa a `config.sh --token` por argv — inevitable; mitigado: es efímero, de un solo uso y se
-# consume con --replace. Idempotente. Un installation-token sirve para los N registros (D5).
+# se pasa a `config.sh --token`/`config.sh remove --token` por argv — inevitable, y NO es de un
+# solo uso: el mismo token sirve para los N registros/retiradas de esta ejecución (D5), vive ~1h
+# y `/proc/<pid>/cmdline` de cada `config.sh` en curso es legible por cualquier usuario de la VM
+# mientras ese proceso vive. Mitigación real: Fase 2 registra los N agentes (config.sh) ANTES de
+# arrancar ningún servicio, así que ningún agente puede estar aceptando jobs mientras el token de
+# otro registro sigue en argv (corrección del panel de `/sdd:review`, `sdd-security`, 2026-09-04
+# — la versión anterior arrancaba el servicio de cada agente antes de que terminasen los demás).
 #
 # Source of truth de los agentes numerados: `/var/lib/autohostai-runner/agents.list`
 # (un nombre por línea). El agente legado `autohostai-${ENV}-vm` (sin sufijo numérico)
@@ -139,6 +144,11 @@ PY
 
 # === 4) Helper: retirar un agente NUMERADO (`autohostai-${ENV}-vm-<i>`).
 #       Asume `set -e` activo: cualquier paso que falle aborta el script.
+#       Retira también el PRINCIPAL LOCAL (usuario Linux + membresía del grupo docker + home):
+#       sin esto, `actions-runner-<i>` sobrevive a la baja como cuenta root-equivalente sobre
+#       el socket de Docker y con alcance a instance principal (169.254.169.254) sin que ningún
+#       job de GitHub lo justifique — el número de principales solo crecería, nunca bajaría
+#       (hallazgo del panel de `/sdd:review`, `sdd-security`, 2026-09-04).
 retire_named_agent() {
     local name="$1"
     if ! [[ "$name" =~ ^autohostai-${ENV}-vm-([0-9]+)$ ]]; then
@@ -146,33 +156,42 @@ retire_named_agent() {
         return 1
     fi
     local i="${BASH_REMATCH[1]}"
+    local runner_user="actions-runner-${i}"
     local home="/opt/actions-runner-${i}"
     local svc="${SERVICE_PREFIX}-${i}.service"
     if [[ -d "$home" ]]; then
         cd "$home"
-        sudo -u "actions-runner-${i}" ./config.sh remove --token "$REG_TOKEN"
+        sudo -u "$runner_user" ./config.sh remove --token "$REG_TOKEN"
         ./svc.sh uninstall "$svc"
     else
         echo "WARN: home $home ausente, saltando config.sh remove para $name" >&2
     fi
+    cd /
+    if id "$runner_user" >/dev/null 2>&1; then
+        gpasswd -d "$runner_user" docker >/dev/null 2>&1 || true
+        userdel -r "$runner_user" 2>/dev/null || userdel "$runner_user" 2>/dev/null || \
+            echo "WARN: no se pudo borrar el usuario $runner_user (¿procesos vivos del propio usuario?)" >&2
+    fi
+    rm -rf "$home"
 }
 
-# === 5) Helper: instalar/registrar un agente NUMERADO en una subshell con `set -e` aislado.
-#       Devuelve 0 si OK; cualquier fallo imprime "agent <i>/<N>: <step>: failed" y devuelve !=0.
-#       El step concreto lo captura un trap ERR contra la variable `step` (vía función para
-#       que se evalúe al FALLAR, no al instalar el trap — un `'...$step...'` en single-quotes
-#       capturaría el valor vacío de `step` y diría "agent k/N: failed" sin contexto).
-install_named_agent() {
+# === 5) Helpers: registrar y arrancar un agente NUMERADO, en dos fases separadas.
+#       Separados a propósito (D3, corrección de seguridad 2026-09-04): registrar TODOS los
+#       agentes antes de arrancar CUALQUIER servicio, para que ningún agente esté ya aceptando
+#       jobs mientras el REG_TOKEN sigue en el argv de un `config.sh` hermano en curso.
+#       Cada uno corre en su propia subshell con `set -e` aislado. Devuelven 0 si OK; cualquier
+#       fallo imprime "agent <i>/<N>: <step>: failed" y devuelve !=0. El step concreto lo
+#       captura un trap ERR contra la variable `step` (vía función para que se evalúe al FALLAR,
+#       no al instalar el trap — un `'...$step...'` en single-quotes capturaría el valor vacío
+#       de `step` y diría "agent k/N: failed" sin contexto).
+register_named_agent() {
     local i="$1"
     local runner_user="actions-runner-${i}"
     local runner_home="/opt/actions-runner-${i}"
     local agent_name="autohostai-${ENV}-vm-${i}"
-    local svc="${SERVICE_PREFIX}-${i}.service"
     local step=""
     (
         set -euo pipefail
-        # on_err se invoca cuando cualquier comando subsecuente sale !=0: imprime el step
-        # ACTUAL (no el de cuando se instaló el trap — por eso es función y no string).
         on_err() {
             echo "agent ${i}/${RUNNER_COUNT}: ${step} failed" >&2
             exit 1
@@ -204,8 +223,27 @@ install_named_agent() {
             --labels "$ENV" \
             --name "$agent_name" \
             --unattended --replace
+    )
+}
+
+# Arranca el servicio de un agente ya registrado. Se llama SOLO después de que todos los
+# `register_named_agent` de esta pasada hayan terminado (Fase 2, más abajo).
+start_named_agent() {
+    local i="$1"
+    local runner_user="actions-runner-${i}"
+    local runner_home="/opt/actions-runner-${i}"
+    local svc="${SERVICE_PREFIX}-${i}.service"
+    local step=""
+    (
+        set -euo pipefail
+        on_err() {
+            echo "agent ${i}/${RUNNER_COUNT}: ${step} failed" >&2
+            exit 1
+        }
+        trap on_err ERR
 
         step="svc.sh install/start $svc"
+        cd "$runner_home"
         state="$(systemctl is-active "$svc" 2>&1 || true)"
         case "$state" in
             active) ;;  # ya activo: no tocar (un servicio parado pero presente se reinicia abajo)
@@ -225,18 +263,43 @@ install_named_agent() {
 #       Si GitHub lista un agente con nombre `autohostai-${ENV}-vm` (sin sufijo numérico), se
 #       retira. Si no, no-op. El `agents.list` no contiene al legado: la fase de baja mira
 #       GitHub directamente para esta migración (one-shot — el legado nunca reaparece una vez
-#       retirado porque el bucle solo registra nombres numerados).
+#       retirado porque el bucle solo registra nombres numerados). Misma guardia de liveness
+#       que la Fase 1 (systemctl is-active): un legado con un job en vuelo no se retira a medias
+#       (hallazgo del panel de `/sdd:review`, `sdd-security`, 2026-09-04). El usuario `ubuntu`
+#       en sí NO se toca — es la cuenta base de la VM, no un principal de agente; solo se limpia
+#       el directorio `$LEGACY_HOME` del runner legado.
 echo "[bootstrap] RUNNER_COUNT=$RUNNER_COUNT, ENV=$ENV"
 legacy_listed="$(gh_list_runner_names)"
 if printf '%s\n' "$legacy_listed" | grep -Fxq "$LEGACY_NAME"; then
-    echo "[legacy] retirando agente legado $LEGACY_NAME"
-    if [[ -d "$LEGACY_HOME" ]]; then
-        cd "$LEGACY_HOME"
-        sudo -u ubuntu ./config.sh remove --token "$REG_TOKEN"
-        ./svc.sh uninstall "$LEGACY_SERVICE"
-    else
-        echo "WARN: $LEGACY_HOME ausente, saltando config.sh remove del legado" >&2
-    fi
+    legacy_state="$(systemctl is-active "$LEGACY_SERVICE" 2>&1 || true)"
+    case "$legacy_state" in
+        failed|inactive|unknown)
+            echo "[legacy] retirando agente legado $LEGACY_NAME (svc=$legacy_state)"
+            if [[ -d "$LEGACY_HOME" ]]; then
+                cd "$LEGACY_HOME"
+                sudo -u ubuntu ./config.sh remove --token "$REG_TOKEN"
+                ./svc.sh uninstall "$LEGACY_SERVICE"
+                cd /
+                rm -rf "$LEGACY_HOME"
+            else
+                echo "WARN: $LEGACY_HOME ausente, saltando config.sh remove del legado" >&2
+            fi
+            ;;
+        active)
+            url="$(gh_in_progress_url_for_runner "$LEGACY_NAME" || true)"
+            if [[ -n "$url" ]]; then
+                echo "ERROR: agente legado $LEGACY_NAME activo con job en vuelo: $url" >&2
+            else
+                echo "ERROR: agente legado $LEGACY_NAME activo pero sin job en vuelo en la API" >&2
+            fi
+            echo "ERROR: esperar a que termine (o cancelar el PR) antes de reaplicar el bootstrap" >&2
+            exit 1
+            ;;
+        *)
+            echo "ERROR: estado desconocido '$legacy_state' del servicio $LEGACY_SERVICE" >&2
+            exit 1
+            ;;
+    esac
 else
     echo "[legacy] no hay agente legado $LEGACY_NAME en GitHub — nada que migrar"
 fi
@@ -270,6 +333,11 @@ for name in "${declared_names[@]+"${declared_names[@]}"}"; do
     surplus+=("$name")
 done
 
+# Recolecta TODOS los agentes bloqueados antes de abortar — un solo mensaje con la lista
+# completa, no un abort-y-reintenta por cada uno (hallazgo del panel de `/sdd:review`,
+# `sdd-qa`, 2026-09-04: con varios agentes `active` a la vez, abortar en el primero obliga
+# al operador a reaplicar N veces para descubrir los demás uno por uno).
+blocked=()
 for name in "${surplus[@]+"${surplus[@]}"}"; do
     # Defensa en profundidad: si `agents.list` fue editado a mano con un nombre que no encaja,
     # no producir un `...-vm-.service` inválido (y abortar `set -e` por regex fail en `retire_named_agent`).
@@ -287,36 +355,57 @@ for name in "${surplus[@]+"${surplus[@]}"}"; do
         active)
             url="$(gh_in_progress_url_for_runner "$name" || true)"
             if [[ -n "$url" ]]; then
-                echo "ERROR: agente $name activo con job en vuelo: $url" >&2
-                echo "ERROR: cancelar el PR (o esperar a que termine) antes de reaplicar el bootstrap" >&2
+                blocked+=("$name activo con job en vuelo: $url")
             else
-                echo "ERROR: agente $name activo pero sin job en vuelo en la API" >&2
-                echo "ERROR: cancelar el job en GitHub y reaplicar" >&2
+                blocked+=("$name activo pero sin job en vuelo en la API — cancelar el job en GitHub y reaplicar")
             fi
-            exit 1
             ;;
         *)
-            echo "ERROR: estado desconocido '$state' del servicio $svc" >&2
-            exit 1
+            blocked+=("$name en estado desconocido '$state' del servicio $svc")
             ;;
     esac
 done
 
-# === 8) FASE 2 — bucle de registro. Tolerante a fallos por agente (R3.3 — "dejar a los agentes
-#       1..k-1 reconciliados si el agente k falla"). Cada iteración corre en una subshell con su
-#       propio `set -e`; aquí solo se cuenta con `had_failure` y se imprime el resumen.
+if [[ "${#blocked[@]}" -gt 0 ]]; then
+    echo "ERROR: ${#blocked[@]} agente(s) sobrante(s) no se pueden retirar todavía:" >&2
+    for b in "${blocked[@]}"; do
+        echo "ERROR:   - $b" >&2
+    done
+    echo "ERROR: esperar a que terminen (o cancelar el/los PR) antes de reaplicar el bootstrap" >&2
+    exit 1
+fi
+
+# === 8) FASE 2 — dos pasadas: registrar TODOS los agentes primero, arrancar servicios después
+#       (ver comentario de §5 — evita que un agente ya activo comparta VM con un REG_TOKEN aún
+#       en argv de un `config.sh` hermano). Tolerante a fallos por agente (R3.3): el bucle de
+#       registro NO se detiene en el primer fallo — intenta los N agentes siempre, igual que la
+#       Fase 1 recolecta todos los bloqueados antes de abortar (misma filosofía: un informe
+#       completo en una pasada, no un abort-y-reintenta por cada fallo). Un agente k que falla
+#       no afecta a k+1..N: cada uno corre en su propia subshell aislada con su propio `set -e`.
+#       Un agente cuyo `config.sh` tuvo éxito se cuenta como "declarado" (entra en `agents.list`)
+#       AUNQUE el arranque del servicio falle después — de lo contrario quedaría registrado en
+#       GitHub y huérfano en `agents.list`, invisible para la Fase 1 del siguiente
+#       reaprovisionamiento (hallazgo del panel de `/sdd:review`, `sdd-qa`, 2026-09-04).
 agents_temp="$(mktemp "${AGENTS_LIST}.XXXXXX")"
 trap 'rm -f "$agents_temp"' EXIT
 had_failure=0
+registered_idx=()   # índices `i` cuyo config.sh tuvo éxito — pendientes de arrancar servicio
 
 for i in $(seq 1 "$RUNNER_COUNT"); do
-    if install_named_agent "$i"; then
-        # Solo escribimos el nombre al temp si el agente quedó completamente registrado Y
-        # su servicio quedó activo/idempotente. Una iteración que falla NO toca este temp.
+    if register_named_agent "$i"; then
+        registered_idx+=("$i")
         echo "autohostai-${ENV}-vm-${i}" >> "$agents_temp"
     else
         rc=$?
-        echo "ERROR: agent $i/$RUNNER_COUNT failed (rc=$rc); agentes previos reconciliados, restantes sin tocar" >&2
+        echo "ERROR: agent $i/$RUNNER_COUNT config.sh failed (rc=$rc); se sigue intentando con los agentes restantes" >&2
+        had_failure=1
+    fi
+done
+
+for i in "${registered_idx[@]+"${registered_idx[@]}"}"; do
+    if ! start_named_agent "$i"; then
+        rc=$?
+        echo "ERROR: agent $i/$RUNNER_COUNT svc.sh failed (rc=$rc); registrado en GitHub pero el servicio no arrancó — sigue en agents.list para el siguiente reaprovisionamiento" >&2
         had_failure=1
     fi
 done
