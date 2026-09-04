@@ -1,7 +1,9 @@
-"""Platform endpoints (PRD §23 platform surface, R1, R3, R6.1, R6.2, design D5, D6).
+"""Platform endpoints (PRD §23 platform surface, R1, R3, R6.1, R6.2, design D5, D6;
+`super-admin-console` R2, design D2).
 
-Thin by contract: map Pydantic → use case params → Pydantic. Two routes, one router, one
-permission (`MANAGE_PLATFORM`). Both reach only `SUPER_ADMIN` today (`app.auth.domain.policy`).
+Thin by contract: map Pydantic → use case params → Pydantic. Three routes, one router, one
+permission (`MANAGE_PLATFORM`). All three reach only `SUPER_ADMIN` today
+(`app.auth.domain.policy`).
 
 `Cache-Control: no-store` is applied ONLY on the user-creation response (R3.1): the
 temporary password is a one-time secret and design D10 forbids any intermediary from
@@ -22,7 +24,7 @@ what the test pins and what a reviewer reads, and reordering it would invert tha
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.auth.api.dependencies import get_client_ip, now_utc
 from app.auth.api.users_router import NO_STORE
@@ -30,18 +32,23 @@ from app.auth.application.user_admin import CreateUserCommand
 from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.platform.api.dependencies import PlatformDep
 from app.platform.api.schemas import (
+    MAX_PAGE,
+    MAX_PER_PAGE,
     CreatePlatformUserRequest,
     CreateTenantRequest,
     CreatedPlatformUserResponse,
+    TenantPageResponse,
 )
 from app.platform.api.use_case_dependencies import (
     get_create_tenant_use_case,
     get_create_user_in_tenant_use_case,
+    get_list_tenants_use_case,
 )
 from app.platform.application.use_cases import (
     CreateTenantCommand,
     CreateTenantUseCase,
     CreateUserInTenantUseCase,
+    ListTenantsUseCase,
 )
 from app.tenants.api.schemas import TenantResponse
 
@@ -139,6 +146,32 @@ async def create_user_in_tenant(
     response.headers.update(NO_STORE)
     return CreatedPlatformUserResponse.build(
         created.user, created.temporary_password
+    )
+
+
+@router.get(
+    "/tenants",
+    response_model=TenantPageResponse,
+    summary="List tenants (SUPER_ADMIN only)",
+    description="Requires SUPER_ADMIN — issues MANAGE_PLATFORM.",
+)
+async def list_tenants(
+    authenticated: PlatformDep,
+    use_case: Annotated[ListTenantsUseCase, Depends(get_list_tenants_use_case)],
+    page: Annotated[int, Query(ge=1, le=MAX_PAGE)] = 1,
+    per_page: Annotated[int, Query(ge=1, le=MAX_PER_PAGE)] = 20,
+) -> TenantPageResponse:
+    """List every tenant, most recent first (R2.1, R2.2, R2.3, R2.5).
+
+    No filter and no configurable order (R2.2): every tenant is platform-visible to
+    `SUPER_ADMIN`, the only role `PlatformDep` admits — `tenants` has no `tenant_id`
+    column to scope by, and there is no narrower audience than "all of them" for this
+    caller. An empty table answers `200` with `items: []`, `total: 0` (R2.3), never an
+    error — the use case and the repository below it have no error branch to raise.
+    """
+    result = await use_case.execute(page=page, per_page=per_page)
+    return TenantPageResponse.build(
+        result.items, total=result.total, page=page, per_page=per_page
     )
 
 

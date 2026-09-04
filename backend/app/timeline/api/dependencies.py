@@ -16,7 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db_session
 from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
-from app.timeline.application.use_cases import GetPropertyTimelineUseCase
+from app.timeline.application.use_cases import (
+    GetPropertyTimelineUseCase,
+    ListTenantActivityUseCase,
+)
 from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventReader
 
 SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
@@ -24,6 +27,13 @@ SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 
 def get_property_timeline_use_case(session: SessionDep) -> GetPropertyTimelineUseCase:
     return GetPropertyTimelineUseCase(
+        properties=SqlAlchemyPropertyRepository(session),
+        events=SqlAlchemyTimelineEventReader(session),
+    )
+
+
+def get_tenant_activity_use_case(session: SessionDep) -> ListTenantActivityUseCase:
+    return ListTenantActivityUseCase(
         properties=SqlAlchemyPropertyRepository(session),
         events=SqlAlchemyTimelineEventReader(session),
     )

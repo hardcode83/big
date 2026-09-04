@@ -78,7 +78,29 @@ class SqlAlchemyTimelineEventReader:
         page: int,
         per_page: int,
     ) -> Page:
-        conditions = _conditions(tenant_id, property_id, filters)
+        conditions = _conditions(tenant_id, filters, property_id=property_id)
+        total = await self._session.scalar(
+            select(func.count()).select_from(TimelineEventModel).where(*conditions)
+        )
+        rows = await self._session.execute(
+            _ordered(select(TimelineEventModel).where(*conditions))
+            .limit(per_page)
+            .offset((page - 1) * per_page)
+        )
+        return Page(
+            items=tuple(_to_event(model) for model in rows.scalars()),
+            total=int(total or 0),
+        )
+
+    async def list_for_tenant(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        filters: TimelineFilters,
+        page: int,
+        per_page: int,
+    ) -> Page:
+        conditions = _conditions(tenant_id, filters)
         total = await self._session.scalar(
             select(func.count()).select_from(TimelineEventModel).where(*conditions)
         )
@@ -132,12 +154,13 @@ class SqlAlchemyTimelineEventReader:
 
 
 def _conditions(
-    tenant_id: uuid.UUID, property_id: uuid.UUID, filters: TimelineFilters
+    tenant_id: uuid.UUID,
+    filters: TimelineFilters,
+    property_id: uuid.UUID | None = None,
 ) -> list:
-    conditions = [
-        TimelineEventModel.tenant_id == tenant_id,
-        TimelineEventModel.property_id == property_id,
-    ]
+    conditions = [TimelineEventModel.tenant_id == tenant_id]
+    if property_id is not None:
+        conditions.append(TimelineEventModel.property_id == property_id)
     if filters.event_type is not None:
         conditions.append(TimelineEventModel.event_type == filters.event_type)
     if filters.severity is not None:

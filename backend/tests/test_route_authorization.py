@@ -615,6 +615,10 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         # `tests/properties/test_blocked_transitions_api.py`.
         "/api/v1/blocked-transitions",
         "/api/v1/timeline/{property_id}",
+        # `dashboard-activity-feed` R4.1: the tenant-wide feed, same `READ_PROPERTIES` gate,
+        # a structurally distinct path from the one above it. Per-role matrix asserted in
+        # `tests/timeline/test_tenant_feed_api.py`.
+        "/api/v1/timeline",
         "/api/v1/dashboard/properties",
         "/api/v1/properties/{property_id}/dashboard",
         # `revenue-reviews` R5: the seven routes of PRD §18 over five paths. Every one is
