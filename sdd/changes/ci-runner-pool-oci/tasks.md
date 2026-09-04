@@ -21,7 +21,7 @@
 - [x] 2.4 `infra/environments/dev/runner-bootstrap.sh` — escribir `/var/lib/autohostai-runner/agents.list` con los nombres de los agentes numerados tras cada `./config.sh --replace`, atómico (`mv` desde un temporal). Fuente de verdad para la fase de baja (2.3). Cubre R3 (service discovery).
 - [x] 2.5 `infra/environments/dev/runner-bootstrap.sh` — capturar errores por iteración con nombre (`agent <i>/<N>: <acción>: <error>`) y dejar a los agentes 1..k-1 reconciliados si el agente k falla. Cubre R3 (reporte de error por agente).
 
-## 3. Runbooks y README
+## 3. Runbooks y README <!-- panel: PASS 2026-09-04 -->
 
 - [x] 3.1 `docs/ci-runner-rollback.md` — añadir sección "Subir N" (`runner_count++` en `variables.tf` o `dev.tfvars`, `terraform apply`, `sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"`, verificación con `gh api ... /actions/runners`). Cubre R5.
 - [x] 3.2 `docs/ci-runner-rollback.md` — añadir sección "Bajar N" (pasos inversos, con la fase de baja condicionada a `is-active == inactive`; si falla con "agente activo, jobs en vuelo: <url>", esperar a que terminen o cancelar el PR y reaplicar). Cubre R5.
