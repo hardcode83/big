@@ -128,10 +128,13 @@ POSTGRES_USER=autohostai
 EOF
 sudo install -m0755 runner-bootstrap.sh /opt/bootstrap-runner.sh
 sudo install -m0755 gh-app-install-token.py /opt/gh-app-install-token.py
-sudo bash /opt/bootstrap-runner.sh
+export RUNNER_COUNT=4   # el valor de `runner_count` del apply (variables.tf/dev.tfvars) — NO copiar literal
+sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"
 ```
 
-Verificar: **Settings → Actions → Runners** muestra `autohostai-dev-vm` **Idle** con label `dev`. Recuperación: `sudo /opt/actions-runner/svc.sh start`; si se desregistra, re-ejecutar el bootstrap (`--replace`, idempotente).
+`$RUNNER_COUNT` debe coincidir con la variable `runner_count` del apply (`variables.tf` o `dev.tfvars`, validación 1..4; default 4 — change `ci-runner-pool-oci`). **El `export` de arriba es obligatorio**: sin él, `"$RUNNER_COUNT"` se expande vacío en esta misma línea de comando (una asignación-prefijo tipo `VAR=x cmd "$VAR"` no hace visible `VAR` a la expansión de argumentos de ese mismo comando — solo entra en el entorno del proceso ejecutado) y el script cae en silencio al `RUNNER_COUNT=4` interno de `runner-bootstrap.sh`, que puede no coincidir con el valor real del apply (hallazgo del panel de `/sdd:review`, `sdd-qa`/`sdd-review-cicd`, 2026-09-04). El `runcmd` del cloud-init no tiene este problema: pasa el valor de Terraform ya sustituido en tiempo de render, como argumento literal. Subir/bajar N: `docs/ci-runner-rollback.md §7–§8`.
+
+Verificar: **Settings → Actions → Runners** muestra **N entradas `autohostai-dev-vm-<i>`** (i ∈ [1..N]) **Idle** con label `dev`, y ningún principal local sobrante — `getent group docker` no debe listar usuarios `actions-runner-<i>` de agentes ya retirados (`id actions-runner-<i>` debe fallar). Recuperación de un agente puntual: `sudo /opt/actions-runner-<i>/svc.sh start`; si se desregistra, re-ejecutar el bootstrap (`--replace`, idempotente).
 
 ### 6.3 Arranque en frío (primer deploy sobre VM sin app)
 
