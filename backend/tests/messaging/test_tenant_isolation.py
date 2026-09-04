@@ -40,6 +40,7 @@ from app.messaging.infrastructure.repositories import (
 from tests.messaging.conftest import (
     NOW,
     seed_conversation,
+    seed_guest,
     seed_message,
     seed_property,
     seed_reservation,
@@ -127,6 +128,21 @@ async def test_the_message_count_never_crosses_a_tenant(db_session) -> None:
     )
 
     assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_the_guests_last_message_time_never_crosses_a_tenant(db_session) -> None:
+    """The fifth read of the port (`whatsapp-cloud-adapter` R2.4, D2): tenant A must not learn
+    when tenant B's guest last wrote, which would leak into A's own session-window decision.
+    A repository that dropped the tenant condition from `_scoped` would answer tenant B's
+    guest message instead of `None`."""
+    a, b, a_conversation, b_conversation = await two_tenants(db_session)
+
+    result = await SqlAlchemyMessageRepository(db_session).last_guest_message_at(
+        a.id, b_conversation.id
+    )
+
+    assert result is None
 
 
 # --- Path 2: detail (R1.3, R1.5) ---------------------------------------------------------
@@ -394,3 +410,94 @@ async def test_ensure_portal_does_not_verify_the_stay_belongs_to_the_tenant(
 
     assert written.tenant_id == b.id
     assert written.reservation_id == a_stay.id  # A's stay: the anchor nobody checked
+
+
+# --- The WhatsApp thread, both ways (`whatsapp-cloud-adapter` R4.5, D4, rule 1) -----------
+# The new write path of this change, on the unmarked `db_session` for the reason this
+# module's header gives. Its key is `(tenant_id, guest_id, property_id)`, so the question the
+# index itself raises is whether the tenant is really part of it — a partial unique index over
+# `(guest_id, property_id)` alone would have collapsed two tenants' threads into one row, and
+# the two tests below are what tell those apart.
+
+A_NUMBER = "109876543210987"
+B_NUMBER = "555000111222333"
+
+
+async def whatsapp_two_tenants(db_session):
+    """Two tenants, a property and a guest each, and a `WHATSAPP` thread for A only."""
+    a = await seed_tenant(db_session, "TenantA")
+    b = await seed_tenant(db_session, "TenantB")
+    a_property = await seed_property(db_session, a, "REDES11")
+    b_property = await seed_property(db_session, b, "PAJARITOS8")
+    a_guest = await seed_guest(db_session, a, full_name="Ana A")
+    b_guest = await seed_guest(db_session, b, full_name="Bruno B", phone="+34698765432")
+    a_thread = await SqlAlchemyConversationRepository(db_session).ensure_whatsapp(
+        a.id,
+        guest_id=a_guest.id,
+        property_id=a_property.id,
+        reservation_id=None,
+        language="es",
+        business_phone_number=A_NUMBER,
+        now=NOW,
+    )
+    return a, b, a_guest, b_guest, a_property, b_property, a_thread
+
+
+@pytest.mark.asyncio
+async def test_ensure_whatsapp_never_writes_into_another_tenants_thread(db_session) -> None:
+    """The write half. B calls `ensure_whatsapp` naming **A's** guest and **A's** property —
+    the only way it could reach A's thread — and must get a row of its own instead: A's
+    thread keeps its id, its tenant, its language and the number it was opened on.
+
+    Were `tenant_id` missing from the unique index, B's INSERT would conflict with A's row and
+    B would be handed A's conversation — the leak this test exists to make impossible.
+    """
+    a, b, a_guest, _, a_property, _, a_thread = await whatsapp_two_tenants(db_session)
+    repository = SqlAlchemyConversationRepository(db_session)
+
+    result = await repository.ensure_whatsapp(
+        b.id,
+        guest_id=a_guest.id,
+        property_id=a_property.id,
+        reservation_id=None,
+        language="en",
+        business_phone_number=B_NUMBER,
+        now=NOW,
+    )
+
+    assert result.id != a_thread.id
+    assert result.tenant_id == b.id
+
+    unchanged = await repository.get(a.id, a_thread.id)
+    assert unchanged is not None
+    assert unchanged.tenant_id == a.id
+    assert unchanged.language == "es"
+    assert unchanged.business_phone_number == A_NUMBER
+
+
+@pytest.mark.asyncio
+async def test_another_tenant_cannot_read_a_whatsapp_thread(db_session) -> None:
+    """The read half, through the one method the inbound path resolves a thread with. Both
+    directions asserted, so the filter is on the tenant rather than on everything."""
+    a, b, _, _, _, _, a_thread = await whatsapp_two_tenants(db_session)
+    repository = SqlAlchemyConversationRepository(db_session)
+
+    assert await repository.get(b.id, a_thread.id) is None
+    assert (await repository.get(a.id, a_thread.id)).id == a_thread.id
+
+
+@pytest.mark.asyncio
+async def test_the_second_tenants_thread_is_a_row_of_its_own(db_session) -> None:
+    """The same guest id under two tenants yields two rows, not one — the arithmetic behind
+    the test above, stated where a future index change would break it."""
+    a, b, a_guest, _, a_property, _, _ = await whatsapp_two_tenants(db_session)
+    repository = SqlAlchemyConversationRepository(db_session)
+
+    await repository.ensure_whatsapp(
+        b.id, guest_id=a_guest.id, property_id=a_property.id, reservation_id=None,
+        language="en", business_phone_number=B_NUMBER, now=NOW,
+    )
+
+    for tenant in (a, b):
+        page = await repository.list(tenant.id, ALL, page=1, per_page=50)
+        assert [row.tenant_id for row in page.items] == [tenant.id]

@@ -96,14 +96,14 @@ export function TechResolveForm({
     // they still give a numeric keypad and a stepper — but what speaks to the
     // technician is `validateFinalCost` and the `tech` catalog.
     <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-3">
-      <h2 className="text-base font-semibold text-foreground">
+      <h2 className="text-body-lg font-semibold text-foreground">
         {t("resolve.title")}
       </h2>
 
       <div className="flex flex-col gap-1">
         <label
           htmlFor="tech-final-cost"
-          className="text-sm text-muted-foreground"
+          className="mb-1 block text-xs font-medium text-muted-foreground"
         >
           {t("resolve.finalCost")}
         </label>
@@ -114,7 +114,7 @@ export function TechResolveForm({
           min="0"
           max="99999999.99"
           required
-          className="min-h-11 rounded-md border bg-background px-3 py-2 text-sm"
+          className="tap-target rounded-md border bg-background px-3 py-2 text-sm"
           value={finalCost}
           aria-invalid={error ? true : undefined}
           onChange={(event) => setFinalCost(event.target.value)}
@@ -124,7 +124,7 @@ export function TechResolveForm({
       <div className="flex flex-col gap-1">
         <label
           htmlFor="tech-materials"
-          className="text-sm text-muted-foreground"
+          className="mb-1 block text-xs font-medium text-muted-foreground"
         >
           {t("resolve.materials")}
         </label>
@@ -139,12 +139,12 @@ export function TechResolveForm({
       </div>
 
       {error ? (
-        <p role="alert" className="text-sm text-state-error-text">
+        <p role="alert" className="text-body-base text-state-error-text">
           {error}
         </p>
       ) : null}
 
-      <Button type="submit" className="min-h-11" disabled={isPending}>
+      <Button type="submit" className="tap-target" disabled={isPending}>
         {t("resolve.submit")}
       </Button>
     </form>

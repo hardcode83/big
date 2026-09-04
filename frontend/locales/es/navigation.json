@@ -123,6 +123,8 @@
   "closeMenu": "Cerrar menú",
   "expandSidebar": "Expandir barra lateral",
   "collapseSidebar": "Colapsar barra lateral",
+  "brandSubtitle": "Panel de Control",
+  "help": "Ayuda",
   "localeSwitcher": {
     "es": "Español",
     "en": "English",

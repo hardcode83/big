@@ -19,8 +19,8 @@ import { formatDateTime } from "../../lib/format";
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
-      <dt className="text-sm text-muted-foreground">{label}</dt>
-      <dd className="text-sm text-foreground">{children}</dd>
+      <dt className="text-body-base text-muted-foreground">{label}</dt>
+      <dd className="text-body-base text-foreground">{children}</dd>
     </>
   );
 }
@@ -52,7 +52,7 @@ export function TechIncidentFields({
 
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-lg font-semibold text-foreground">
+      <h2 className="text-headline-md font-semibold text-foreground">
         {incident.title}
       </h2>
 
@@ -69,7 +69,7 @@ export function TechIncidentFields({
         </span>
       </div>
 
-      <p className="whitespace-pre-wrap text-sm text-foreground">
+      <p className="whitespace-pre-wrap text-body-base text-foreground">
         {incident.description}
       </p>
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
+import { Card } from "@/components/ui/card";
 import {
   mapIncidentsError,
   useIncident,
@@ -46,7 +47,10 @@ export function TechIncidentDetailView({
   const contextState = mapIncidentsError(contextQuery);
 
   const backLink = (
-    <Link href="/tech" className="text-sm underline">
+    <Link
+      href="/tech"
+      className="tap-target inline-flex items-center text-body-medium text-primary underline-offset-4 hover:underline"
+    >
       {t("detail.back")}
     </Link>
   );
@@ -104,24 +108,28 @@ export function TechIncidentDetailView({
       )}
 
       {incident.status === "AWAITING_OWNER_APPROVAL" ? (
-        <section role="status" className="rounded-lg border bg-surface p-4">
-          <h2 className="text-base font-semibold text-foreground">
-            {t("resolve.awaitingOwner.title")}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {t("resolve.awaitingOwner.description")}
-          </p>
+        <section role="status">
+          <Card className="p-4">
+            <h2 className="text-body-lg font-semibold text-foreground">
+              {t("resolve.awaitingOwner.title")}
+            </h2>
+            <p className="text-body-base text-muted-foreground">
+              {t("resolve.awaitingOwner.description")}
+            </p>
+          </Card>
         </section>
       ) : null}
 
       {incident.status === "RESOLVED" ? (
-        <section role="status" className="rounded-lg border bg-surface p-4">
-          <h2 className="text-base font-semibold text-foreground">
-            {t("resolve.resolved.title")}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {t("resolve.resolved.description")}
-          </p>
+        <section role="status">
+          <Card className="p-4">
+            <h2 className="text-body-lg font-semibold text-foreground">
+              {t("resolve.resolved.title")}
+            </h2>
+            <p className="text-body-base text-muted-foreground">
+              {t("resolve.resolved.description")}
+            </p>
+          </Card>
         </section>
       ) : null}
 

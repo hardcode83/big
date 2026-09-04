@@ -255,6 +255,42 @@
         "title": "AssignIncidentRequest",
         "type": "object"
       },
+      "AssociateWhatsAppPhoneNumberRequest": {
+        "additionalProperties": false,
+        "description": "`POST /messaging/whatsapp-phone-number` (R6.1).\n\n`phone_number_id` is always operator-supplied — never generated (task 6.3's own words) —\nso it is a plain required string, not a value this schema invents a shape for. Meta's own\nidentifiers are digit strings of about 15 characters; `min_length=1` is the only guard\nworth encoding here, because the real validation (does it authenticate real traffic) can\nonly happen against Meta itself, out of this change's scope.\n\n`default_property_id` is required, not optional (design D8 addendum): `ensure_whatsapp`\nhas nowhere to anchor an unresolved sender's thread without it.",
+        "properties": {
+          "default_property_id": {
+            "format": "uuid",
+            "title": "Default Property Id",
+            "type": "string"
+          },
+          "display_phone_number": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Phone Number"
+          },
+          "phone_number_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Phone Number Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phone_number_id",
+          "default_property_id"
+        ],
+        "title": "AssociateWhatsAppPhoneNumberRequest",
+        "type": "object"
+      },
       "BlockedTransitionPageResponse": {
         "description": "The pagination envelope of PRD §23, over the stalls rather than over the flats.\n\n`total` is how many stalls the tenant has, not how many properties were examined — see\n`ListBlockedTransitionsUseCase`, which pages the result precisely so a stalled flat cannot\nhide on page 3 of the source.",
         "properties": {
@@ -9294,6 +9330,44 @@
         "title": "WebhookEndpointMaterialResponse",
         "type": "object"
       },
+      "WhatsAppPhoneNumberResponse": {
+        "description": "What an authenticated operator may see about their tenant's association.\n\nNo secret to withhold (D3/D8's whole point), so unlike `WebhookEndpointMaterialResponse`\nthis carries nothing that is returnable \"only once\" — a `GET` of the tenant's own settings\ncould show this back safely, the same point design D8 makes.",
+        "properties": {
+          "default_property_id": {
+            "format": "uuid",
+            "title": "Default Property Id",
+            "type": "string"
+          },
+          "display_phone_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Phone Number"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "phone_number_id": {
+            "title": "Phone Number Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "phone_number_id",
+          "display_phone_number",
+          "default_property_id"
+        ],
+        "title": "WhatsAppPhoneNumberResponse",
+        "type": "object"
+      },
       "app__cleaning__api__schemas__CleaningPhotoResponse": {
         "description": "One uploaded photo. **An allowlist of fields, never a dump of the entity** (R3.2).\n\n`CleaningPhoto` carries `storage_key` — it has to, the signer needs it — so any\n`model_validate`, `from_attributes` or `asdict` over it publishes the internal storage path\nthe moment somebody reaches for the convenient shape. Enumerating the fields is what makes\n\"the key never appears as a **field** of a response\" a property of this class rather than of\neveryone who ever touches it. `ai_validation_result` is out for a different reason: nothing\nwrites it yet (proposal §Out of scope), and a field that is always `null` is a contract\npromise nobody made.\n\n`url` is the signed URL of design D7, minted per response with a 3600 s expiry. It is what\na client uses instead of a path, and it is not stored anywhere.\n\n**And it is where the one accepted exception lives**, so the sentence above says \"field\" and\nnot \"response\": for an `S3` tenant this URL is minted by the object store and carries the\nbucket and the full key inside its own value, because that is what makes a presigned URL\npresigned. Accepted, with its reasoning and its two rejected alternatives, in\n`docs/adr/0008-object-storage-provider-dev.md`. For `LOCAL` the URL carries only the photo's\nUUID, and the prohibition stays absolute everywhere else — body, headers, and every other\nfield of this class.",
         "properties": {
@@ -15479,6 +15553,113 @@
         ]
       }
     },
+    "/api/v1/messaging/whatsapp-phone-number": {
+      "post": {
+        "description": "Create-or-replace (R6.1, R6.3): a tenant with no number yet gets one, a tenant that already has one gets it replaced. `phone_number_id` is always supplied by the operator, never generated here — it is Meta's own identifier for a number already provisioned in the platform's single Meta App. `default_property_id` must be one of this tenant's own properties, and it is what an inbound message anchors to when it cannot be resolved to a specific stay (design D8). Refuses with `409` if that `phone_number_id` is already associated with a different tenant — it is never silently reassigned (R6.2).",
+        "operationId": "associate_whatsapp_phone_number_api_v1_messaging_whatsapp_phone_number_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssociateWhatsAppPhoneNumberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsAppPhoneNumberResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Associate a Meta Cloud API phone_number_id with this tenant",
+        "tags": [
+          "messaging"
+        ]
+      }
+    },
+    "/api/v1/messaging/whatsapp-phone-number/release": {
+      "post": {
+        "description": "The equivalent of a webhook endpoint's rotation in this model (R6.3): after this, the number resolves to no tenant until somebody — this one or another — associates it again. Conversations already opened under it are untouched. `404` if this tenant has no association to release.",
+        "operationId": "release_whatsapp_phone_number_api_v1_messaging_whatsapp_phone_number_release_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retire this tenant's WhatsApp phone_number_id association",
+        "tags": [
+          "messaging"
+        ]
+      }
+    },
     "/api/v1/notifications": {
       "get": {
         "description": "The in-app channel of PRD §14. Returns only the notifications addressed to the authenticated user — the restriction is derived from the token and there is no parameter that widens it. Newest first, paginated with `page`/`per_page` (PRD §23).",
@@ -19724,6 +19905,142 @@
         "summary": "Issue a new temporary password for a user",
         "tags": [
           "users"
+        ]
+      }
+    },
+    "/api/v1/webhooks/whatsapp": {
+      "get": {
+        "description": "Meta calls this once, when an operator saves the webhook URL in the App dashboard, and refuses to save the subscription unless the `hub.challenge` comes back in plain text. Anonymous by necessity — there is no operator session behind Meta's call — with `WHATSAPP_WEBHOOK_VERIFY_TOKEN` as the shared secret that authorises it.",
+        "operationId": "verify_whatsapp_webhook_api_v1_webhooks_whatsapp_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hub.mode",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hub.Mode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hub.verify_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hub.Verify Token"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hub.challenge",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hub.Challenge"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The `hub.challenge` value, echoed verbatim as plain text. Meta accepts the subscription only on this exact body."
+          },
+          "403": {
+            "description": "The verify token did not match, or was absent. Empty body, and identical for both — including a request missing `hub.challenge` altogether."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer Meta's webhook verification handshake",
+        "tags": [
+          "webhooks"
+        ]
+      },
+      "post": {
+        "description": "Anonymous by design: Meta's `X-Hub-Signature-256` over the raw body is the credential (design D3a), verified in constant time against the platform's single `WHATSAPP_APP_SECRET`. Answers `202` with no body once the delivery is recorded, and an indistinguishable `403` for a missing, malformed, mis-keyed or stale signature alike. The message is processed on a queued task, never inside this response.",
+        "operationId": "receive_whatsapp_webhook_api_v1_webhooks_whatsapp_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not authenticated. Returned identically for a missing `X-Hub-Signature-256`, a malformed one, a digest computed under another key and a body altered after signing — the endpoint never reveals which (R3.3). Nothing is written."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request body exceeded the ceiling applied to all of /api/v1/."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Rate limited: either the subscription's per-minute delivery budget, or the stricter per-IP budget that only failed authentications consume."
+          }
+        },
+        "summary": "Receive an inbound WhatsApp message",
+        "tags": [
+          "webhooks"
         ]
       }
     },

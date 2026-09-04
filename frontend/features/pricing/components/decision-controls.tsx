@@ -73,14 +73,14 @@ export function DecisionControls({
 
   if (isPending) {
     return (
-      <p className="text-sm text-muted-foreground">{t("decide.sending")}</p>
+      <p className="text-body-base text-muted-foreground">{t("decide.sending")}</p>
     );
   }
 
   if (pendingMove !== null) {
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm">
+        <span className="text-body-base text-foreground">
           {t(`decide.confirmQuestion.${pendingMove}`)}
         </span>
         <Button

@@ -615,6 +615,20 @@ export interface paths {
      */
     post: operations["rotate_webhook_endpoint_api_v1_integrations_webhook_endpoints__endpoint_id__rotate_post"];
   };
+  "/api/v1/messaging/whatsapp-phone-number": {
+    /**
+     * Associate a Meta Cloud API phone_number_id with this tenant
+     * @description Create-or-replace (R6.1, R6.3): a tenant with no number yet gets one, a tenant that already has one gets it replaced. `phone_number_id` is always supplied by the operator, never generated here — it is Meta's own identifier for a number already provisioned in the platform's single Meta App. `default_property_id` must be one of this tenant's own properties, and it is what an inbound message anchors to when it cannot be resolved to a specific stay (design D8). Refuses with `409` if that `phone_number_id` is already associated with a different tenant — it is never silently reassigned (R6.2).
+     */
+    post: operations["associate_whatsapp_phone_number_api_v1_messaging_whatsapp_phone_number_post"];
+  };
+  "/api/v1/messaging/whatsapp-phone-number/release": {
+    /**
+     * Retire this tenant's WhatsApp phone_number_id association
+     * @description The equivalent of a webhook endpoint's rotation in this model (R6.3): after this, the number resolves to no tenant until somebody — this one or another — associates it again. Conversations already opened under it are untouched. `404` if this tenant has no association to release.
+     */
+    post: operations["release_whatsapp_phone_number_api_v1_messaging_whatsapp_phone_number_release_post"];
+  };
   "/api/v1/notifications": {
     /**
      * List the caller's own notifications
@@ -984,6 +998,18 @@ export interface paths {
      */
     post: operations["receive_webhook_api_v1_webhooks__provider___webhook_token__post"];
   };
+  "/api/v1/webhooks/whatsapp": {
+    /**
+     * Answer Meta's webhook verification handshake
+     * @description Meta calls this once, when an operator saves the webhook URL in the App dashboard, and refuses to save the subscription unless the `hub.challenge` comes back in plain text. Anonymous by necessity — there is no operator session behind Meta's call — with `WHATSAPP_WEBHOOK_VERIFY_TOKEN` as the shared secret that authorises it.
+     */
+    get: operations["verify_whatsapp_webhook_api_v1_webhooks_whatsapp_get"];
+    /**
+     * Receive an inbound WhatsApp message
+     * @description Anonymous by design: Meta's `X-Hub-Signature-256` over the raw body is the credential (design D3a), verified in constant time against the platform's single `WHATSAPP_APP_SECRET`. Answers `202` with no body once the delivery is recorded, and an indistinguishable `403` for a missing, malformed, mis-keyed or stale signature alike. The message is processed on a queued task, never inside this response.
+     */
+    post: operations["receive_whatsapp_webhook_api_v1_webhooks_whatsapp_post"];
+  };
   "/health": {
     /** Health */
     get: operations["health_health_get"];
@@ -1174,6 +1200,30 @@ export interface components {
        * Format: uuid
        */
       technician_id: string;
+    };
+    /**
+     * AssociateWhatsAppPhoneNumberRequest
+     * @description `POST /messaging/whatsapp-phone-number` (R6.1).
+     *
+     * `phone_number_id` is always operator-supplied — never generated (task 6.3's own words) —
+     * so it is a plain required string, not a value this schema invents a shape for. Meta's own
+     * identifiers are digit strings of about 15 characters; `min_length=1` is the only guard
+     * worth encoding here, because the real validation (does it authenticate real traffic) can
+     * only happen against Meta itself, out of this change's scope.
+     *
+     * `default_property_id` is required, not optional (design D8 addendum): `ensure_whatsapp`
+     * has nowhere to anchor an unresolved sender's thread without it.
+     */
+    AssociateWhatsAppPhoneNumberRequest: {
+      /**
+       * Default Property Id
+       * Format: uuid
+       */
+      default_property_id: string;
+      /** Display Phone Number */
+      display_phone_number?: string | null;
+      /** Phone Number Id */
+      phone_number_id: string;
     };
     /**
      * BlockedTransitionPageResponse
@@ -5073,6 +5123,30 @@ export interface components {
       /** Webhook Url */
       webhook_url: string;
     };
+    /**
+     * WhatsAppPhoneNumberResponse
+     * @description What an authenticated operator may see about their tenant's association.
+     *
+     * No secret to withhold (D3/D8's whole point), so unlike `WebhookEndpointMaterialResponse`
+     * this carries nothing that is returnable "only once" — a `GET` of the tenant's own settings
+     * could show this back safely, the same point design D8 makes.
+     */
+    WhatsAppPhoneNumberResponse: {
+      /**
+       * Default Property Id
+       * Format: uuid
+       */
+      default_property_id: string;
+      /** Display Phone Number */
+      display_phone_number: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Phone Number Id */
+      phone_number_id: string;
+    };
   };
   responses: never;
   parameters: never;
@@ -8303,6 +8377,67 @@ export interface operations {
     };
   };
   /**
+   * Associate a Meta Cloud API phone_number_id with this tenant
+   * @description Create-or-replace (R6.1, R6.3): a tenant with no number yet gets one, a tenant that already has one gets it replaced. `phone_number_id` is always supplied by the operator, never generated here — it is Meta's own identifier for a number already provisioned in the platform's single Meta App. `default_property_id` must be one of this tenant's own properties, and it is what an inbound message anchors to when it cannot be resolved to a specific stay (design D8). Refuses with `409` if that `phone_number_id` is already associated with a different tenant — it is never silently reassigned (R6.2).
+   */
+  associate_whatsapp_phone_number_api_v1_messaging_whatsapp_phone_number_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssociateWhatsAppPhoneNumberRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["WhatsAppPhoneNumberResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Retire this tenant's WhatsApp phone_number_id association
+   * @description The equivalent of a webhook endpoint's rotation in this model (R6.3): after this, the number resolves to no tenant until somebody — this one or another — associates it again. Conversations already opened under it are untouched. `404` if this tenant has no association to release.
+   */
+  release_whatsapp_phone_number_api_v1_messaging_whatsapp_phone_number_release_post: {
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List the caller's own notifications
    * @description The in-app channel of PRD §14. Returns only the notifications addressed to the authenticated user — the restriction is derived from the token and there is no parameter that widens it. Newest first, paginated with `page`/`per_page` (PRD §23).
    */
@@ -10357,6 +10492,70 @@ export interface operations {
         };
       };
       /** @description Rate limited: either this endpoint's per-minute delivery budget, or the stricter per-IP budget that only failed authentications consume. */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Answer Meta's webhook verification handshake
+   * @description Meta calls this once, when an operator saves the webhook URL in the App dashboard, and refuses to save the subscription unless the `hub.challenge` comes back in plain text. Anonymous by necessity — there is no operator session behind Meta's call — with `WHATSAPP_WEBHOOK_VERIFY_TOKEN` as the shared secret that authorises it.
+   */
+  verify_whatsapp_webhook_api_v1_webhooks_whatsapp_get: {
+    parameters: {
+      query?: {
+        "hub.mode"?: string | null;
+        "hub.verify_token"?: string | null;
+        "hub.challenge"?: string | null;
+      };
+    };
+    responses: {
+      /** @description The `hub.challenge` value, echoed verbatim as plain text. Meta accepts the subscription only on this exact body. */
+      200: {
+        content: {
+          "application/json": unknown;
+          "text/plain": string;
+        };
+      };
+      /** @description The verify token did not match, or was absent. Empty body, and identical for both — including a request missing `hub.challenge` altogether. */
+      403: {
+        content: never;
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Receive an inbound WhatsApp message
+   * @description Anonymous by design: Meta's `X-Hub-Signature-256` over the raw body is the credential (design D3a), verified in constant time against the platform's single `WHATSAPP_APP_SECRET`. Answers `202` with no body once the delivery is recorded, and an indistinguishable `403` for a missing, malformed, mis-keyed or stale signature alike. The message is processed on a queued task, never inside this response.
+   */
+  receive_whatsapp_webhook_api_v1_webhooks_whatsapp_post: {
+    responses: {
+      /** @description Successful Response */
+      202: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not authenticated. Returned identically for a missing `X-Hub-Signature-256`, a malformed one, a digest computed under another key and a body altered after signing — the endpoint never reveals which (R3.3). Nothing is written. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The request body exceeded the ceiling applied to all of /api/v1/. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Rate limited: either the subscription's per-minute delivery budget, or the stricter per-IP budget that only failed authentications consume. */
       429: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];

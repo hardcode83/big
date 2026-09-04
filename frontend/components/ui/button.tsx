@@ -33,14 +33,30 @@ export interface ButtonProps
   extends React.ComponentProps<"button">,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean;
+  /**
+   * Layers the `btn-glow` utility (`app/globals.css`, design D4) onto the
+   * `default` variant: ambient box-shadow at rest, a stronger one plus a
+   * subtle lift on hover (design D3, R5 AC1). Not a new `variant` — it
+   * composes with `default`'s colour rules instead of duplicating them, and
+   * it is never wired to `size: "sm"` (`h-9`), which stays under the 44px
+   * `tap-target` floor (R5 AC3).
+   */
+  glow?: boolean;
 }
 
-function Button({ className, variant, size, asChild = false, ...props }: ButtonProps) {
+function Button({
+  className,
+  variant,
+  size,
+  asChild = false,
+  glow = false,
+  ...props
+}: ButtonProps) {
   const Comp = asChild ? Slot : "button";
   return (
     <Comp
       data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={cn(buttonVariants({ variant, size, className }), glow && "btn-glow")}
       {...props}
     />
   );
