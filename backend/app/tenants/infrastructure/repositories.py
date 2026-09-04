@@ -5,13 +5,14 @@ live or die together (R6.4).
 """
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db import require_unmarked_session
 from app.tenants.domain.entities import Tenant, TenantConfig
 from app.tenants.domain.exceptions import TenantAlreadyExistsError
 from app.tenants.infrastructure.models import TenantConfigModel, TenantModel
@@ -128,6 +129,43 @@ class SqlAlchemyTenantRepository:
             )
         )
         await self._session.flush()
+
+    async def list_page(
+        self, page: int, per_page: int
+    ) -> tuple[Sequence[tuple[Tenant, TenantConfig]], int]:
+        """Every tenant, paired with its configuration, ordered `created_at DESC` (R2.1-R2.3).
+
+        Two queries, the same shape `ConversationRepository.list` uses: a `count(*)` for
+        `total`, and one `SELECT` joining `tenants`/`tenant_configs` for the page itself. The
+        tie-break on `id` makes the order total — two tenants created in the same instant
+        (the same transaction, in a test, shares one `now()`) cannot swap between pages on
+        consecutive requests, the same reasoning `ConversationRepository.list`'s own
+        tie-break documents.
+
+        `require_unmarked_session` guards the join for a reason specific to this query:
+        `TenantConfigModel.tenant_id` IS one of `tenant_scoped_classes()`'s columns (unlike
+        `TenantModel`, which has none), so a marked session would have the global filter
+        silently narrow the `tenant_configs` side of the `JOIN` to one tenant while leaving
+        `tenants` unfiltered — an inner join that then drops every other tenant without
+        raising, the exact silent-wrong-answer shape rule 1 of `steering/security.md` exists
+        to convert into a loud failure instead. `SUPER_ADMIN`'s session is unmarked by design
+        (`super-admin-identity`), so this never fires on the one path this method is built
+        for; it exists for whichever future caller runs it on a marked session by mistake.
+        """
+        require_unmarked_session(self._session, read="list_page")
+        total = await self._session.scalar(select(func.count()).select_from(TenantModel))
+        rows = await self._session.execute(
+            select(TenantModel, TenantConfigModel)
+            .join(TenantConfigModel, TenantConfigModel.tenant_id == TenantModel.id)
+            .order_by(TenantModel.created_at.desc(), TenantModel.id)
+            .limit(per_page)
+            .offset((page - 1) * per_page)
+        )
+        pairs = tuple(
+            (_to_tenant(tenant_model), _to_config(config_model))
+            for tenant_model, config_model in rows.all()
+        )
+        return pairs, int(total or 0)
 
 
 class SqlAlchemyTenantConfigRepository:

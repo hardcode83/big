@@ -15,7 +15,8 @@ export type ShellProfile =
   | "technician"
   | "public"
   | "guest"
-  | "authenticated";
+  | "authenticated"
+  | "platform";
 
 export type NavigationGroup =
   | "operation"
@@ -368,6 +369,15 @@ export const routeRegistry: readonly ShellRouteDescriptor[] = [
     breadcrumbKeys: crumbs("welcome"),
     icon: "LogIn",
     profile: "authenticated",
+    match: "exact",
+  },
+  {
+    id: "platform",
+    pattern: "/platform",
+    ...keysFor("platform"),
+    breadcrumbKeys: crumbs("platform"),
+    icon: "Settings",
+    profile: "platform",
     match: "exact",
   },
 ];

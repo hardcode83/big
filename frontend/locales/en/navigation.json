@@ -109,6 +109,10 @@
     "welcome": {
       "title": "Welcome",
       "description": "Intermediate screen between login and the role-specific shell."
+    },
+    "platform": {
+      "title": "Platform console",
+      "description": "Platform-level tenant and staff management."
     }
   },
   "more": "More",

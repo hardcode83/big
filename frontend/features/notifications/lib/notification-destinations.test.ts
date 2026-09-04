@@ -47,6 +47,7 @@ describe("notificationHref (R6.1, R6.2, R6.3, design D15)", () => {
       "authenticated",
       "cleaner",
       "guest",
+      "platform",
       "public",
       "technician",
       "workspace",

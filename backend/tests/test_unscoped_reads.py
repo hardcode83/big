@@ -65,6 +65,15 @@ DECLARED_UNSCOPED_READS = frozenset(
         # Unlike its twin it needs no `JOIN`: `incident_photos` carries its own `tenant_id`
         # (design D2), so one table answers both halves.
         ("maintenance/infrastructure/repositories.py", "locate_without_tenant_scoping"),
+        # The seventh, and a different reason from the six above (`super-admin-console` R2):
+        # nothing here resolves a tenant out of an anonymous credential — the caller is
+        # `SUPER_ADMIN`, already authenticated, whose session is unmarked by design
+        # (`super-admin-identity`). The guard fires for a narrower risk specific to this
+        # query: it JOINs `tenant_configs`, which DOES carry a `tenant_id` column (unlike
+        # `tenants` itself), so a marked session would silently narrow that side of the join
+        # to one tenant instead of erroring — the same silent-wrong-answer shape the other
+        # six exist to convert into a raise, reached by a different route.
+        ("tenants/infrastructure/repositories.py", "list_page"),
     }
 )
 
@@ -237,6 +246,7 @@ def test_what_this_census_does_not_catch() -> None:
         "find_live_by_token_hash",
         "locate_without_tenant_scoping",
         "find_by_token_hash",
+        "list_page",
     }
 
     # The reads named above are pinned, not just described. A docstring that lists them

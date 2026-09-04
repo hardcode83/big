@@ -109,6 +109,10 @@
     "welcome": {
       "title": "Bienvenida",
       "description": "Pantalla intermedia entre el login y el shell del rol."
+    },
+    "platform": {
+      "title": "Consola de plataforma",
+      "description": "Gestión de tenants y personal a nivel de plataforma."
     }
   },
   "more": "Más",

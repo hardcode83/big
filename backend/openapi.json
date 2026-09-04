@@ -7938,6 +7938,44 @@
         "title": "TenantConfigResponse",
         "type": "object"
       },
+      "TenantPageResponse": {
+        "additionalProperties": false,
+        "description": "`GET /api/v1/platform/tenants` (`super-admin-console` R2.1, R2.4, design D2).\n\n`items` reuses `TenantResponse` verbatim (R2.4) — no parallel type. The envelope shape\n(`items`/`total`/`page`/`per_page`/`total_pages`) is the majority convention across\nmodules shipped after `user-management` (`CleaningTaskPageResponse`,\n`IncidentPageResponse`'s siblings that added `total_pages`), not the older `{data, ...}`\nshape `GET /api/v1/users` uses.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TenantResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "TenantPageResponse",
+        "type": "object"
+      },
       "TenantResponse": {
         "description": "The tenant with its configuration nested. Fields enumerated, never dumped.",
         "properties": {
@@ -16277,6 +16315,87 @@
       }
     },
     "/api/v1/platform/tenants": {
+      "get": {
+        "description": "Requires SUPER_ADMIN — issues MANAGE_PLATFORM.",
+        "operationId": "list_tenants_api_v1_platform_tenants_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List tenants (SUPER_ADMIN only)",
+        "tags": [
+          "platform"
+        ]
+      },
       "post": {
         "description": "Requires SUPER_ADMIN — issues MANAGE_PLATFORM.",
         "operationId": "create_tenant_api_v1_platform_tenants_post",
