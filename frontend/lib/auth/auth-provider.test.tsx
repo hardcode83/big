@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider, useAuth } from "@/lib/auth";
@@ -730,14 +730,19 @@ describe("AuthProvider", () => {
     // Capture the hook's callbacks directly so the stale `refresh()` call's own promise
     // can be awaited below — a call-count-based waitFor is unreliable here because
     // login()'s two fetches already bring the total to 3 before the stale refresh's
-    // rejection has propagated through refresh()'s catch.
-    let refreshFn!: () => Promise<boolean>;
-    let loginFn!: (email: string, password: string) => Promise<unknown>;
+    // rejection has propagated through refresh()'s catch. The assignment happens inside
+    // an effect (not during render) so it stays a pure render per the hooks rules.
+    const callbacksRef: {
+      refresh: (() => Promise<boolean>) | null;
+      login: ((email: string, password: string) => Promise<unknown>) | null;
+    } = { refresh: null, login: null };
 
     function Probes() {
       const { login, refresh } = useAuth();
-      refreshFn = refresh;
-      loginFn = login;
+      useEffect(() => {
+        callbacksRef.refresh = refresh;
+        callbacksRef.login = login;
+      });
       return null;
     }
 
@@ -763,7 +768,7 @@ describe("AuthProvider", () => {
     // The old session's refresh() starts; its fetch to /auth/refresh stays pending.
     let stalePending!: Promise<boolean>;
     act(() => {
-      stalePending = refreshFn();
+      stalePending = callbacksRef.refresh!();
     });
     await vi.waitFor(() =>
       expect(fetchImpl).toHaveBeenCalledWith(
@@ -774,7 +779,7 @@ describe("AuthProvider", () => {
 
     // A new login wins the race while the stale refresh is still in flight.
     await act(async () => {
-      await loginFn("user@example.com", "secret");
+      await callbacksRef.login!("user@example.com", "secret");
     });
     expect(screen.getByTestId("status")).toHaveTextContent("authenticated");
     expect(getSessionTokens()).toEqual({ accessToken: "new-access", refreshToken: "new-refresh" });
