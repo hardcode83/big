@@ -102,11 +102,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // The reliable signal for the race described in R3.2 is whether the token store
       // already holds a NEW pair: a `login()` that won against an in-flight refresh has
       // already installed its tokens and pushed `status` to `"authenticated"` (R4.2).
-      // The coordinator's guard at `refresh-coordinator.ts:57` expresses the same intent
-      // from the other side — "if the generation moved, the tokens now belong to another
-      // session" — and this listener honours it instead of overriding it: when tokens
-      // are live, we leave tokens, presence and `status` exactly as the new session
-      // installed them.
+      // The coordinator's guard in `refresh-coordinator.ts` expresses the same intent
+      // from the other side — "if the *token* generation moved, the tokens now belong to
+      // another session" — and this listener honours it instead of overriding it: when
+      // tokens are live, we leave tokens, presence and `status` exactly as the new
+      // session installed them. Note the coordinator compares `getTokenGeneration()`, a
+      // separate counter from the `sessionGeneration` this listener bumps two lines up —
+      // a bare cache purge must not look like an identity change to that guard, or a
+      // legitimate concurrent refresh under a different session can be wrongly discarded
+      // (or a genuinely dead session wrongly kept alive); see `session-store.ts`'s module
+      // doc for why the two counters are split.
       //
       // Two paths still reach this listener with tokens live, and that part of the
       // previous comment is preserved verbatim because it remains true:
@@ -162,11 +167,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // which is still `null` until React re-renders.
         return currentUser;
       } catch (error) {
-        // Bump the generation before clearing: a background refresh started under a
-        // still-valid previous session may be in flight and resolve after this catch
-        // runs. Without the bump, refresh-coordinator's success branch would see the
-        // generation unchanged and call setSessionTokens(), resurrecting a token pair
-        // into a session this catch just tore down.
+        // A background refresh started under a still-valid previous session may be in
+        // flight and resolve after this catch runs. `clearSessionTokens()` bumps
+        // `tokenGeneration` by construction, so refresh-coordinator's success branch
+        // sees the mismatch and rejects instead of calling setSessionTokens(), which
+        // would otherwise resurrect a token pair into a session this catch just tore
+        // down. `purgeSessionCache()` is still called first for cache hygiene (nothing
+        // this session cached should survive), but the resurrection guard no longer
+        // depends on it.
         purgeSessionCache();
         clearSessionTokens();
         clearSessionPresent();

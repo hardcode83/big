@@ -146,39 +146,127 @@ de `notifications-inbox-web` ya documentó. Reescribirlo como advertencia en lug
 contrato positivo — el steering `documentation.md` exige afirmaciones en positivo sobre el
 comportamiento vigente, y el comportamiento vigente es "toda purga bumpea".
 
+### D7 — El alcance se extiende a `frontend/lib/api/authenticated-client.ts` (añadido en la segunda ronda de `/sdd:review`)
+
+**Chosen:** sdd-security detectó dos huecos reales en la primera ronda de fixes (ver también
+la corrección al Riesgo 1 más arriba): (a) `auth-provider.tsx`'s `login()` catch no
+avanzaba la generación, permitiendo que un `refreshSession()` de la sesión anterior todavía
+en vuelo resucitara un par de tokens tras un login fallido; y (b) el `onUnauthorized` de
+`authenticated-client.ts` forzaba `status → "expired"` sin condición justo después de
+`onSessionExpired?.()`, así que en la carrera R4.2 ("login gana") pisaba de vuelta a
+`"expired"` el `status` que el listener acababa de preservar — R3.3 se cumplía en el
+listener aislado (todos los tests lo disparan a mano vía `notifySessionExpired()`) pero no
+en su único camino de producción. (a) se resuelve dentro del alcance ya declarado
+(`auth-provider.tsx` está en `frontend/lib/auth/`). (b) exige tocar
+`frontend/lib/api/authenticated-client.ts`, fuera del alcance original de este change — se
+acepta la extensión puntual porque sin ella R3.3 queda certificada por un test que nunca
+ejercita el camino real. Se añade `authenticated-client.test.ts` (fichero nuevo) con dos
+tests contra el `onUnauthorized` compuesto real, no contra el listener aislado.
+
+**Rejected:** Dejar (b) como deuda conocida y documentarla como tal en la spec — el patrón
+que motivó este change entero es exactamente ese: una garantía que sólo se sostiene en el
+listener aislado y no en su disparador real es la misma clase de contradicción que D2/D5/D6
+existen para cerrar, no para repetir en un fichero vecino. Envolver la lógica en
+`frontend/lib/auth/` en su lugar (p. ej. exportando un wrapper que el cliente llame) — más
+indirección para el mismo resultado, y `authenticated-client.ts` ya importa
+`getSessionTokens` directamente, así que la comprobación in-place es la más simple.
+
+### D8 — `sessionGeneration` se divide en dos contadores: caché e identidad (añadido en la tercera ronda de `/sdd:review`, R6)
+
+**Chosen:** sdd-security encontró que D1 rompió una suposición implícita en la que D5 y la
+guarda del coordinador (R5.1) confiaban: que "la generación se movió" implica "la identidad
+de la sesión cambió". Antes de D1, `sessionGeneration` sólo se movía por escrituras/borrados
+de tokens, así que esa implicación era cierta. Después de D1, `purgeSessionCache()` también
+la mueve, por una razón puramente de caché (R1/R4.4), sin escribir ni borrar tokens. La app
+tiene 11 instancias independientes de `createAuthenticatedClients()` (una por módulo de
+feature — `grep -rl createAuthenticatedClients frontend/features`), todas compartiendo el
+`inFlight` de `refresh-coordinator.ts`, así que dos refrescos genuinamente concurrentes con
+generaciones capturadas distintas son alcanzables en producción, no sólo en un test. Trazado
+concreto: una sesión A tiene un refresco en vuelo; `login()` instala la sesión B y purga
+(mueve el contador compartido); un segundo refresco, genuinamente distinto, arranca bajo B
+capturando la generación post-login; cuando el refresco de A se resuelve, el listener purga
+de nuevo (mueve el contador otra vez, sin que la identidad de B haya cambiado); cuando el
+refresco de B se resuelve — si tiene éxito, el coordinador descarta un par rotado
+legítimamente válido; si falla (sesión B genuinamente revocada), el coordinador y el
+listener (por su propio null-check, D5) se abstienen de limpiar, y la sesión queda
+`"authenticated"` para siempre con tokens muertos. El listener previo a este change era
+fail-closed en este camino (limpiaba sin condición); el actual es fail-open.
+
+Solución: separar el contador único en dos, en `session-store.ts`. `sessionGeneration`
+conserva exactamente su contrato actual (caché: avanza en `setSessionTokens` y en
+`purgeSessionCache`; `use-mark-read.ts`/`use-mark-all-read.ts` siguen leyéndolo sin cambios).
+Se añade `tokenGeneration` (identidad: avanza SÓLO en `setSessionTokens` y en
+`clearSessionTokens`, nunca en una purga sola). `refresh-coordinator.ts` captura y compara
+`getTokenGeneration()` en vez de `getSessionGeneration()` — ésa es la única lógica que
+cambia; el listener de `auth-provider.tsx` no necesita tocarse (su `getSessionTokens() !==
+null` vuelve a ser un proxy fiable en cuanto la señal de la que depende, la del coordinador,
+es sólida). De paso se cierra el hallazgo 3 del mismo informe de seguridad: la guarda del
+`catch` del coordinador ahora llama `purgeSessionCache()` antes de `clearSessionTokens()`,
+así que el único sitio con un `clearSessionTokens()` "desnudo" deja de depender de que un
+llamante futuro purgue por su cuenta después (el mismo patrón de "buena voluntad del
+llamante" que R1 existe para eliminar).
+
+**Rejected:** Un parche puntual en el listener o en el coordinador sin nuevo contador (p.
+ej. comparar `getSessionTokens()` contra un valor capturado en vez de contra `null`) — no
+sirve, porque ninguna comparación de estado *actual* puede distinguir "estos tokens son de
+una sesión nueva que ganó la carrera" de "estos tokens son los de la sesión que expira y
+nadie los ha limpiado todavía"; ambos casos se ven idénticos desde `getSessionTokens()` en
+el momento en que el listener se ejecuta. Añadir un parámetro a `subscribeToSessionExpired`
+para que cada disparador identifique qué generación específica falló — violaría R3.4
+directamente y exigiría rediseñar el canal de notificación, un cambio mucho mayor que
+separar un contador que ya vive en un único módulo.
+
 ## Changes by area
 
 | Area | Files | Change |
 |---|---|---|
 | `frontend/lib/auth` (módulo) | `session-cache-purge.ts` | `getQueryClient().clear()` y `sessionGeneration += 1` (D1); JSDoc reescrito en positivo, cita `use-mark-read.ts` / `use-mark-all-read.ts` (D4). |
-| `frontend/lib/auth` (módulo) | `session-store.ts` | `clearSessionTokens` ya no avanza `sessionGeneration`; JSDoc reformula en positivo y cita `purgeSessionCache` (D3). |
-| `frontend/lib/auth` (provider) | `auth-provider.tsx` | Listener `subscribeToSessionExpired` reescrito (D5): captura, avanza vía `purgeSessionCache`, retorna temprano si `getSessionTokens()` es no-nulo. Bloque JSDoc de la deuda conocido eliminado; comentario nuevo cita `refresh-coordinator.ts:57` y `purgeSessionCache` (D2). |
-| `frontend/lib/auth` (coordinador) | `refresh-coordinator.ts` | Bloque JSDoc de la guarda del catch (líneas 56-60) reformulado en positivo; el código no cambia — el invariante ya estaba bien (D3, segunda mitad). |
-| `frontend/lib/auth` (tests) | `session-store.test.ts` | Sin cambios al código de tests. Los asserts existentes siguen pasando porque ninguno cuenta el contador. |
+| `frontend/lib/auth` (módulo) | `session-store.ts` | `clearSessionTokens` ya no avanza `sessionGeneration`; JSDoc reformula en positivo y cita `purgeSessionCache` (D3). **Tercera ronda, D8/R6:** se añade `tokenGeneration` (contador de identidad, independiente de `sessionGeneration`) y `getTokenGeneration()`; `setSessionTokens`/`clearSessionTokens` lo avanzan, `purgeSessionCache`/`advanceSessionGeneration` no lo tocan. JSDoc del módulo documenta por qué existen dos contadores. |
+| `frontend/lib/auth` (provider) | `auth-provider.tsx` | Listener `subscribeToSessionExpired` reescrito (D5): captura, avanza vía `purgeSessionCache`, retorna temprano si `getSessionTokens()` es no-nulo. Bloque JSDoc de la deuda conocido eliminado; comentario nuevo cita `refresh-coordinator.ts:57` y `purgeSessionCache` (D2). **Segunda ronda, D7:** `login()` catch gana `purgeSessionCache()` antes de `clearSessionTokens()` (cache hygiene; la protección contra resurrección ahora es estructural vía D8). **Tercera ronda, D8:** comentarios del listener y del catch de `login()` actualizados para citar `getTokenGeneration()`; sin cambio de lógica. |
+| `frontend/lib/auth` (coordinador) | `refresh-coordinator.ts` | Bloque JSDoc de la guarda del catch (líneas 56-60) reformulado en positivo; el código no cambia — el invariante ya estaba bien (D3, segunda mitad). **Tercera ronda, D8/R6:** la guarda captura/compara `getTokenGeneration()` en vez de `getSessionGeneration()` (único cambio de lógica de este fichero en todo el change); la guarda del `catch` ahora llama `purgeSessionCache()` antes de `clearSessionTokens()`/`clearSessionPresent()` (hallazgo 3, cierra el "buena voluntad del llamante" en el único sitio de `clearSessionTokens()` desnudo que quedaba). |
+| `frontend/lib/auth` (tests) | `session-store.test.ts` | Sin cambios al código de tests. Los asserts existentes siguen pasando porque ninguno cuenta el contador. **Tercera ronda, D8/R6:** un test nuevo confirma que `tokenGeneration` avanza en escritura/borrado de tokens pero no en una purga sola. |
+| `frontend/lib/auth` (tests) | `refresh-coordinator.test.ts` | **Tercera ronda, D8/R6.** Tres tests nuevos reproducen la interleaving exacta del hallazgo de seguridad: una purga ajena en vuelo no descarta una rotación legítima ni deja viva una sesión genuinamente revocada; un tercero confirma que la guarda del `catch` avanza `sessionGeneration` por sí sola (hallazgo 3). Los tres se verificaron rojos al revertir temporalmente el fix correspondiente. |
 | `frontend/lib/auth` (tests) | `auth-provider.test.tsx` | Actualizar el comentario del test "moves the session generation on every purge" (línea 708) para que diga que el avance vive en `purgeSessionCache`. Añadir dos tests nuevos: R4.2 (interleaving `SessionInvalidatedError`, login gana) y R4.3 ("No refresh token available", tokens ya null al entrar al listener, cleanup completo). |
 | `frontend/lib/auth` (tests, nuevo) | `session-cache-purge.test.ts` | **Nuevo.** Tres tests: `purgeSessionCache()` avanza `getSessionGeneration()` en cada llamada; lo hace aunque el `QueryClient` ya esté vacío (R4.1, R1.3); no toca `getSessionTokens()` (R1.2). |
 | `frontend/features/notifications` (tests) | `use-mark-read.test.tsx` | Añadir un test (R4.4) que reproduzca el escenario del roadmap: una mutación con snapshot en gen N, mientras la mutación está en vuelo `refresh()` entra a su `catch` y purga la caché (sin tocar tokens), el revert consulta la generación y ve que ya no coincide, no escribe nada. Sin D1 el test falla porque el contador no se mueve; con D1 pasa. |
 | Specs | `sdd/specs/frontend-auth-session.md` | Reescribir los dos párrafos "Deuda conocida, latente" y "Contrapartida aceptada a sabiendas" según D6; añadir la frase "que avanza en `setSessionTokens` y en `purgeSessionCache()`" al bullet del contador (D6). |
+| `frontend/lib/api` (cliente) | `authenticated-client.ts` | **Añadido en la segunda ronda de `/sdd:review` (sdd-security), D7.** `onUnauthorized` llamaba `options.onStatusChange?.("expired")` sin condición justo después de `options.onSessionExpired?.()`, así que en la carrera R4.2 ("login gana") el listener preservaba tokens/`status`, y este camino los pisaba de vuelta a `"expired"` un instante después — R3.3 se cumplía en el listener aislado (como lo prueban los tests, que disparan `notifySessionExpired()` a mano) pero no en su único disparador de producción. Se condiciona la llamada a `getSessionTokens() === null`, replicando la comprobación del listener sobre el mismo estado síncrono. |
+| `frontend/lib/api` (tests, nuevo) | `authenticated-client.test.ts` | **Nuevo, añadido en la misma ronda.** Dos tests contra `createAuthenticatedClients` que ejercitan el `onUnauthorized` compuesto real (no `notifySessionExpired()` disparado a mano): uno confirma que `status` no se fuerza a `"expired"` cuando el listener deja tokens vivos, otro confirma que sí lo hace cuando no quedan tokens. |
 
 ## Data & interfaces
 
-**Ninguno.** Sin cambios de esquema, sin migraciones, sin nuevos endpoints, sin cambios en la
+Sin cambios de esquema, sin migraciones, sin nuevos endpoints, sin cambios en la
 firma pública de `subscribeToSessionExpired` (R3.4), sin nuevos `Permissions`. El cambio
-vive dentro de `frontend/lib/auth/` y `frontend/features/auth/`; afecta a tres pruebas
-existentes y a un fichero de test nuevo.
+vive principalmente dentro de `frontend/lib/auth/` y `frontend/features/auth/`, con una
+excepción puntual: la segunda ronda de `/sdd:review` extendió el alcance a
+`frontend/lib/api/authenticated-client.ts` (ver tabla arriba) porque ese fichero —no
+`frontend/lib/auth/`— es donde vive el único disparador de producción que compone
+`onSessionExpired` con `onStatusChange`, y sin tocarlo la garantía de R3.3 no se sostenía
+fuera de los tests que disparan el listener a mano. Afecta a tres pruebas existentes y a
+dos ficheros de test nuevos.
 
 ## Risks & mitigations
 
 - **Riesgo**: que la cobertura de `clearSessionTokens()` sin avanzar deje algún call-site
   contando con el avance y rompa en silencio. **Mitigación**: barrido de todos los call-sites
   de `clearSessionTokens()` con `grep -rn "clearSessionTokens" frontend/` antes de cerrar
-  el change. Los cuatro vivos son `refresh-coordinator.ts:58`,
-  `auth-provider.tsx:124` (listener, se reformula en D5), `auth-provider.tsx:165`
-  (login catch, no le afecta: ningún `purgeSessionCache()` previo en ese path → el contador
-  no avanza, pero el contador tampoco importa en ese path porque no hay mutación optimista
-  pendiente) y `use-logout-mutation.ts:83` (precedido por `purgeSessionCache` en la línea
-  anterior, así que el avance ya ocurrió por D1). El path `auth-provider.tsx:211` (logout
-  deprecated) va seguido de `purgeSessionCache`, mismo razonamiento.
+  el change. Los cuatro vivos son `refresh-coordinator.ts:58` (autoguardado por su propia
+  comparación de generación — sólo limpia cuando la generación capturada sigue vigente, así
+  que no necesita avanzarla), `auth-provider.tsx:124` (listener, se reformula en D5),
+  `auth-provider.tsx:165` (login catch) y `use-logout-mutation.ts:83` (precedido por
+  `purgeSessionCache` en la línea anterior, así que el avance ya ocurrió por D1). El path
+  `auth-provider.tsx:211` (logout deprecated) va seguido de `purgeSessionCache`, mismo
+  razonamiento.
+
+  **Corrección post-panel (segunda ronda de `/sdd:review`)**: el razonamiento original de
+  este bullet asumía que `auth-provider.tsx:165` "no le afecta" porque ese path no tiene
+  mutación optimista pendiente — pero pasa por alto que un `refreshSession()` de la sesión
+  *anterior* puede seguir en vuelo cuando el `login()` nuevo falla. sdd-security detectó el
+  hueco real: sin avanzar la generación ahí, el `.then` de `refresh-coordinator.ts` ve
+  `getSessionGeneration() === generation` capturada, y llama `setSessionTokens(next)`,
+  resucitando un par de tokens válido dentro de una sesión que el `catch` de `login()`
+  acaba de desmontar. Se añadió `purgeSessionCache()` antes de `clearSessionTokens()` en
+  ese `catch`, con test de regresión en `auth-provider.test.tsx` que falla sin el fix.
 
 - **Riesgo**: que el listener D5 confunda el caso "tokens presentes por un login legítimo
   antes de que `notifySessionExpired` se dispare" con el caso "tokens de la sesión vieja que

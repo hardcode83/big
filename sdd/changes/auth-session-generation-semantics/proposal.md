@@ -53,10 +53,17 @@ otro nombre (`setSessionTokens` y `clearSessionTokens`) se replantean alrededor 
 contrato. El listener de expiración deja de limpiar tokens cuando la sesión que está expirando
 ya no es la vigente, restaurando la guarda del coordinador que `frontend-auth-session` diseñó.
 
-Sólo `frontend/lib/auth/` y `frontend/features/auth/`. Sin backend, sin esquema, sin
+Principalmente `frontend/lib/auth/` y `frontend/features/auth/`. Sin backend, sin esquema, sin
 migraciones, sin contrato de API. La verificación es la suite de frontend más tests nuevos que
 reproduzcan los dos interleavings descritos arriba — hoy ninguno de los dos tiene un test que
 falle, y son los que justifican este cambio.
+
+**Actualización post-panel (segunda ronda de `/sdd:review`)**: sdd-security encontró que el
+único disparador de producción que compone `onSessionExpired` con `onStatusChange` vive en
+`frontend/lib/api/authenticated-client.ts`, fuera del alcance declarado arriba — sin tocarlo,
+la garantía de R3.3 sólo se sostenía en los tests que disparan el listener a mano, no en el
+camino real. El alcance se extiende a ese fichero (y a su test nuevo,
+`authenticated-client.test.ts`) por esa razón puntual; ver D7 en `design.md`.
 
 ## Requirements
 
@@ -187,7 +194,37 @@ Acceptance criteria:
    conocida, latente» sobre el `catch` de `refresh()` (lo mismo que R2.3, sin contradicción).
 3. THE SYSTEM SHALL NOT tocar la rotación de tokens, el endpoint `/auth/refresh`, ni la
    coordinación de la promesa en vuelo: este cambio es de **semántica del contador**, no de
-   la mecánica del refresh.
+   la mecánica del refresh. (Nota post-panel: R6 introduce un segundo contador y cambia cuál
+   compara la guarda del coordinador, pero el mecanismo de `inFlight` — dedupe por
+   `refreshToken`, una sola promesa compartida, `.finally` que libera el slot — no cambia.)
+
+### R6 — El contador de identidad de tokens no se confunde con una purga de caché ajena (añadido en la tercera ronda de `/sdd:review`)
+
+**As a** usuario cuya sesión está en medio de un refresco cuando otra pestaña/cliente de la
+misma app dispara una purga de caché no relacionada con mi sesión, **I want** que esa purga
+ajena no haga que mi refresco en vuelo se trate como si mi sesión hubiera sido reemplazada,
+**so that** ni pierdo un par de tokens legítimamente rotado ni mi sesión, si de verdad fue
+revocada por el servidor, se quede pegada en `"authenticated"` para siempre.
+
+Acceptance criteria:
+
+1. THE SYSTEM SHALL exponer un contador de generación de identidad (`getTokenGeneration()`
+   en `session-store.ts`) independiente de `sessionGeneration`, que avanza únicamente en
+   `setSessionTokens()` y en `clearSessionTokens()` — nunca en `purgeSessionCache()` por sí
+   sola.
+2. `refresh-coordinator.ts` SHALL capturar y comparar `getTokenGeneration()` (no
+   `getSessionGeneration()`) para decidir si un refresco en vuelo sigue perteneciendo a la
+   sesión que lo inició.
+3. IF un `refreshSession()` está en vuelo Y una purga de caché no relacionada avanza
+   `sessionGeneration()` mientras tanto, THEN THE SYSTEM SHALL: (a) si el refresco
+   finalmente tiene éxito, instalar el par rotado con normalidad — SHALL NOT descartarlo
+   como si la sesión hubiera cambiado; (b) si el refresco falla, limpiar los tokens y la
+   cookie de presencia con normalidad — SHALL NOT dejarlos vivos por creer que otra sesión
+   los reclama.
+4. La guarda del `catch` del coordinador (R5.1) SHALL purgar la caché (`purgeSessionCache()`)
+   antes de limpiar tokens, para que la invalidación de caché y la limpieza de tokens
+   permanezcan acopladas en ese sitio también, sin depender de que cada futuro llamante de
+   `refreshSession()` purgue por su cuenta después.
 
 ## Out of scope
 

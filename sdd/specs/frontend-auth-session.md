@@ -46,12 +46,22 @@ para UX; el backend conserva la autoridad sobre autorización, RBAC y tenant.
   runtime, THE SYSTEM SHALL perder la sesión y requerir un nuevo login.
 - THE SYSTEM SHALL NOT escribir tokens ni credenciales en localStorage,
   sessionStorage, cookies, IndexedDB, Zustand ni otro almacenamiento persistente.
-- THE SYSTEM SHALL llevar un contador monótono de **generación de sesión**
-  (`lib/auth/session-store.ts`, expuesto como `getSessionGeneration()`), que
-  avanza en `setSessionTokens` y en `purgeSessionCache()`. Es lo que permite
-  a un consumidor saber que la identidad cambió bajo sus pies sin suscribirse
-  al provider — la usa la mutación optimista de `notifications-inbox-web`
-  para no revertir sobre la caché de la sesión entrante.
+- THE SYSTEM SHALL llevar dos contadores monótonos independientes en
+  `lib/auth/session-store.ts`, cada uno con un único dueño: **generación de
+  caché** (`getSessionGeneration()`), que avanza en `setSessionTokens` y en
+  `purgeSessionCache()` y es lo que permite a un consumidor saber que debe
+  descartar un snapshot de caché sin suscribirse al provider — la usa la
+  mutación optimista de `notifications-inbox-web` para no revertir sobre la
+  caché de la sesión entrante—; y **generación de identidad**
+  (`getTokenGeneration()`), que avanza únicamente en `setSessionTokens` y en
+  `clearSessionTokens` — nunca en una purga de caché por sí sola — y es la que
+  usa `refresh-coordinator.ts` para decidir si un refresco en vuelo sigue
+  perteneciendo a la sesión que lo inició. Los dos contadores se movían como
+  uno solo hasta que una purga de caché ajena a la sesión (p. ej. el listener
+  de otro cliente de feature) podía hacer que esa guarda creyera erróneamente
+  que la sesión había cambiado; la separación existe para que una purga sin
+  escritura ni borrado de tokens no se confunda con un cambio de identidad
+  (entrada de roadmap `auth-session-generation-semantics`, tercera ronda).
 - WHEN se declara una sesión expirada, THE SYSTEM SHALL purgar la caché en el
   listener de la notificación y SHALL limpiar también los tokens siempre que,
   tras la purga, no queden tokens vivos de una sesión más nueva
@@ -59,10 +69,10 @@ para UX; el backend conserva la autoridad sobre autorización, RBAC y tenant.
   declarada expirada no debe conservar credenciales en memoria, y por dos
   caminos (`SessionInvalidatedError` y «No refresh token available») las
   conservaba. El listener honra la guarda del coordinador de `refresh`, que
-  limpia tokens solo si la generación no se ha movido — así, la carrera del
-  refresco viejo que resuelve después de un login nuevo se resuelve sin
-  destruir los tokens de la sesión nueva, y la pérdida (un `401` que se
-  recupera solo) se reduce a un caso de uso que ningún consumer actual
+  limpia tokens solo si la generación de identidad no se ha movido — así, la
+  carrera del refresco viejo que resuelve después de un login nuevo se
+  resuelve sin destruir los tokens de la sesión nueva, y la pérdida (un `401`
+  que se recupera solo) se reduce a un caso de uso que ningún consumer actual
   desestructura. La decisión queda registrada en la entrada de roadmap
   `auth-session-generation-semantics`.
 - Toda purga del `QueryClient` singleton —venga de donde venga, incluido el
