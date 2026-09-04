@@ -193,9 +193,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setStatus("authenticated");
       return true;
     } catch {
+      // Same guard as the listener (D5) and authenticated-client.ts's onUnauthorized
+      // (D7): a refresh started under a departing session can settle here after a
+      // newer login has already installed its own tokens. Forcing user/status/presence
+      // to "expired" unconditionally would clobber that winning session even though its
+      // tokens are still live — purge unconditionally for cache hygiene, but only do
+      // the full cleanup when no live tokens remain.
       purgeSessionCache();
-      setUser(null);
-      setStatus("expired");
+      if (getSessionTokens() === null) {
+        setUser(null);
+        clearSessionPresent();
+        setStatus("expired");
+      }
       return false;
     }
   }, [clients.refreshTokens]);

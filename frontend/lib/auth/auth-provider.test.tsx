@@ -679,6 +679,123 @@ describe("AuthProvider", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(getSessionTokens()).toBeNull();
   });
+
+  it("does not clobber a winning login when refresh()'s own catch settles after the race (security review, third round)", async () => {
+    // Same defect class as D5 (the listener) and D7 (authenticated-client.ts's
+    // onUnauthorized) — refresh()'s own catch had no getSessionTokens() === null guard,
+    // so a stale refresh started under the departing session could still force
+    // status/user to "expired" after a newer login had already won.
+    setSessionTokens({ accessToken: "old-access", refreshToken: "old-refresh" });
+
+    let resolveStaleRefresh!: (response: Response) => void;
+    const fetchImpl = vi.fn((url: RequestInfo | URL) => {
+      const path = String(url);
+      if (path.includes("/api/v1/auth/refresh")) {
+        return new Promise<Response>((resolve) => {
+          resolveStaleRefresh = resolve;
+        });
+      }
+      if (path.includes("/api/v1/auth/login")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              access_token: "new-access",
+              refresh_token: "new-refresh",
+              token_type: "bearer",
+              expires_in: 900,
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      if (path.includes("/api/v1/auth/me")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: "user-1",
+              email: "user@example.com",
+              name: "User",
+              preferred_language: "es",
+              role: "TENANT_OWNER",
+              tenant_id: "tenant-1",
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+
+    // Capture the hook's callbacks directly so the stale `refresh()` call's own promise
+    // can be awaited below — a call-count-based waitFor is unreliable here because
+    // login()'s two fetches already bring the total to 3 before the stale refresh's
+    // rejection has propagated through refresh()'s catch.
+    let refreshFn!: () => Promise<boolean>;
+    let loginFn!: (email: string, password: string) => Promise<unknown>;
+
+    function Probes() {
+      const { login, refresh } = useAuth();
+      refreshFn = refresh;
+      loginFn = login;
+      return null;
+    }
+
+    render(
+      <RuntimeConfigProvider
+        config={{
+          apiBaseUrl: "",
+          appEnv: "test",
+          defaultLocale: "es",
+          featureFlags: {},
+          appVersion: "",
+          buildCommitShort: "",
+          appUrl: "",
+        }}
+      >
+        <AuthProvider>
+          <Probes />
+          <Probe />
+        </AuthProvider>
+      </RuntimeConfigProvider>,
+    );
+
+    // The old session's refresh() starts; its fetch to /auth/refresh stays pending.
+    let stalePending!: Promise<boolean>;
+    act(() => {
+      stalePending = refreshFn();
+    });
+    await vi.waitFor(() =>
+      expect(fetchImpl).toHaveBeenCalledWith(
+        expect.stringContaining("/api/v1/auth/refresh"),
+        expect.anything(),
+      ),
+    );
+
+    // A new login wins the race while the stale refresh is still in flight.
+    await act(async () => {
+      await loginFn("user@example.com", "secret");
+    });
+    expect(screen.getByTestId("status")).toHaveTextContent("authenticated");
+    expect(getSessionTokens()).toEqual({ accessToken: "new-access", refreshToken: "new-refresh" });
+
+    // The stale refresh finally settles as a failure (e.g. the old refresh token was
+    // revoked). refresh()'s own catch must not clobber the winning login's session.
+    // Awaiting `stalePending` itself guarantees the catch's state updates have landed.
+    await act(async () => {
+      resolveStaleRefresh(
+        new Response(
+          JSON.stringify({ error: { code: "UNAUTHENTICATED", message: "revoked" } }),
+          { status: 401 },
+        ),
+      );
+      await stalePending;
+    });
+
+    expect(getSessionTokens()).toEqual({ accessToken: "new-access", refreshToken: "new-refresh" });
+    expect(screen.getByTestId("status")).toHaveTextContent("authenticated");
+    expect(screen.getByTestId("user")).toHaveTextContent("user@example.com");
+  });
 });
 
 /**

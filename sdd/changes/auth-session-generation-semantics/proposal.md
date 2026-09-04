@@ -244,6 +244,21 @@ Acceptance criteria:
 - **No migra a TanStack Query el flujo de login/refresh.** Eso vive en
   `frontend-auth-session` y se cerró con `notifications-inbox-web` en su D3/R3; este change
   no re-litiga esa decisión.
+- **No corrige la sobre-invalidación de una rotación de tokens normal.** `setSessionTokens()`
+  avanza `sessionGeneration` en cada rotación silenciosa de `refresh-coordinator.ts`
+  (`.then`), sin purgar la caché — comportamiento preexistente a este change (presente desde
+  `e143fb4b`/`1e9271bd`, antes de `notifications-inbox-web`). El efecto: una mutación
+  optimista cuyo snapshot capturó `sessionGeneration` justo antes de una rotación de fondo
+  puede ver su guarda de revert saltarse el revert (`context.sessionGeneration !==
+  getSessionGeneration()`) aunque la identidad de la sesión no cambió — sólo el par de
+  tokens. Es un defecto de UX para el mismo usuario todavía autenticado (el revert que no
+  ocurre dentro de la sesión que sigue viva), no una fuga entre sesiones ni un problema de
+  seguridad; corregirlo exigiría o bien purgar la caché en cada rotación silenciosa (coste
+  de rendimiento en el camino más frecuente del módulo) o bien dejar de mover
+  `sessionGeneration` desde `setSessionTokens()` (afecta a consumidores fuera del alcance
+  de R6 sin que este change los haya auditado). Hallazgo de sdd-security en la cuarta ronda
+  de `/sdd:review`; deliberadamente diferido — el siguiente consumidor que necesite
+  distinguir "rotación" de "cambio de identidad" en `sessionGeneration` lo volverá a pisar.
 
 ## Affected specs
 

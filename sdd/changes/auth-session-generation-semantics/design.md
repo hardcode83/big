@@ -216,6 +216,35 @@ para que cada disparador identifique qué generación específica falló — vio
 directamente y exigiría rediseñar el canal de notificación, un cambio mucho mayor que
 separar un contador que ya vive en un único módulo.
 
+**Addenda (cuarta ronda de `/sdd:review`, sdd-security):**
+
+1. `frontend/features/dashboard/stalls/data/index.ts` era la única de las 12 factorías
+   `createAuthenticatedClients()` que no pasaba `onSessionExpired`, preexistente desde
+   `blocked-transitions-web` (commit `83f5ae9e`, 2026-08-24 — no introducida por este
+   change). El argumento de alcanzabilidad de D8 ("11 clientes, todos comparten el
+   `inFlight`...") asumía simetría entre clientes que este archivo rompía: un 401 en ese
+   cliente concreto disparaba la guarda del coordinador correctamente, pero nadie notificaba
+   a `AuthProvider`, así que el estado de React se quedaba `"authenticated"` con cero tokens
+   hasta que otra petición de otro cliente 401ase y auto-sanase la UI. Fix de una línea,
+   mismo patrón que los otros once — corregido para consistencia aunque el archivo no forma
+   parte del alcance original de `auth-session-generation-semantics`.
+2. `refresh()` (el método deprecado-pero-exportado de `AuthContextValue`) tenía el mismo
+   defecto que D5 y D7 cerraron en el listener y en `authenticated-client.ts`: su `catch`
+   forzaba `setUser(null)`/`status → "expired"` sin la guarda `getSessionTokens() === null`.
+   Sin consumidor de producción (`useAuth().refresh` sigue sin destructurarse en ningún
+   sitio, igual que documentaba el "Out of scope" original), pero dejar un tercer sitio sin
+   el mismo guard cuando los otros dos ya lo tienen es inconsistente con la propia
+   justificación de D5/D7 — se cierra con el mismo patrón, con test de regresión.
+3. `setSessionTokens()` sigue avanzando `sessionGeneration` en cada rotación silenciosa de
+   `refresh-coordinator.ts`, sin purga — comportamiento preexistente a este change entero
+   (desde antes de `notifications-inbox-web`), que sobre-invalida el guard de revert de una
+   mutación optimista si una rotación de fondo aterriza en medio. Deliberadamente NO
+   corregido aquí — documentado como deuda explícita en el "Out of scope" de `proposal.md`,
+   porque arreglarlo exige o purgar en cada rotación (coste de rendimiento en el camino más
+   frecuente del módulo) o dejar de mover `sessionGeneration` desde `setSessionTokens()`
+   (afecta a consumidores no auditados por R6). Es un defecto de UX para el mismo usuario
+   aún autenticado, no una fuga entre sesiones.
+
 ## Changes by area
 
 | Area | Files | Change |
