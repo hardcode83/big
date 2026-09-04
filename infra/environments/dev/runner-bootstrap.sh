@@ -161,8 +161,13 @@ retire_named_agent() {
     local svc="${SERVICE_PREFIX}-${i}.service"
     if [[ -d "$home" ]]; then
         cd "$home"
-        sudo -u "$runner_user" ./config.sh remove --token "$REG_TOKEN"
+        # ORDEN OBLIGATORIO: `svc.sh uninstall` primero. `config.sh remove` se niega con
+        # "Uninstall service first" mientras el servicio systemd siga instalado, esté
+        # `active` o `inactive` — parar el servicio (systemctl stop) no basta, hay que
+        # desinstalarlo (hallazgo en la VM real, 2026-09-04, durante la verificación
+        # post-merge D7/5.3).
         ./svc.sh uninstall "$svc"
+        sudo -u "$runner_user" ./config.sh remove --token "$REG_TOKEN"
     else
         echo "WARN: home $home ausente, saltando config.sh remove para $name" >&2
     fi
@@ -277,8 +282,10 @@ if printf '%s\n' "$legacy_listed" | grep -Fxq "$LEGACY_NAME"; then
             echo "[legacy] retirando agente legado $LEGACY_NAME (svc=$legacy_state)"
             if [[ -d "$LEGACY_HOME" ]]; then
                 cd "$LEGACY_HOME"
-                sudo -u ubuntu ./config.sh remove --token "$REG_TOKEN"
+                # ORDEN OBLIGATORIO: `svc.sh uninstall` primero — ver nota de
+                # `retire_named_agent` más arriba (mismo hallazgo, misma causa).
                 ./svc.sh uninstall "$LEGACY_SERVICE"
+                sudo -u ubuntu ./config.sh remove --token "$REG_TOKEN"
                 cd /
                 rm -rf "$LEGACY_HOME"
             else
