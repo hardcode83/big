@@ -177,14 +177,15 @@ variable "env" {
 variable "runner_count" {
   description = <<-EOT
     Número de agentes self-hosted registrados en la VM con label = env (change ci-runner-pool-oci).
-    Default 2: dos agentes absorben la coincidencia PR + push a main sin serializar la cola de
-    GitHub Actions (R1, R6.2). Rango 1..4: 1 es el estado de rollback post-ci-runner-oci (R5.2);
-    4 es el techo operativo por encima del cual la contención con la app empieza a degradar
-    el servicio público (R6.1, R6.3). Subir N por encima de 3 exige nota de medición previa
-    documentada en `infra/environments/dev/RUNBOOK.md §6`. Subir N no es auto-escalado (R6.2).
+    Default 4: cuatro agentes absorben la coincidencia de PRs + push a main sin serializar la cola
+    de GitHub Actions (R1, R6.2; decisión de producto 2026-09-04). Rango 1..4: 1 es el estado de
+    rollback post-ci-runner-oci (R5.2); 4 es el techo operativo por encima del cual la contención
+    con la app empieza a degradar el servicio público (R6.1). Subir N por encima del default
+    exige nota de medición previa documentada en `infra/environments/dev/RUNBOOK.md §6`
+    (R6.3, amend 2026-09-04). Subir N no es auto-escalado (R6.2).
   EOT
   type        = number
-  default     = 2
+  default     = 4
 
   validation {
     condition     = var.runner_count >= 1 && var.runner_count <= 4

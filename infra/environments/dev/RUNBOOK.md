@@ -128,10 +128,12 @@ POSTGRES_USER=autohostai
 EOF
 sudo install -m0755 runner-bootstrap.sh /opt/bootstrap-runner.sh
 sudo install -m0755 gh-app-install-token.py /opt/gh-app-install-token.py
-sudo bash /opt/bootstrap-runner.sh
+sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"
 ```
 
-Verificar: **Settings → Actions → Runners** muestra `autohostai-dev-vm` **Idle** con label `dev`. Recuperación: `sudo /opt/actions-runner/svc.sh start`; si se desregistra, re-ejecutar el bootstrap (`--replace`, idempotente).
+`$RUNNER_COUNT` debe coincidir con la variable `runner_count` del apply (`variables.tf` o `dev.tfvars`, validación 1..4; default 4 — change `ci-runner-pool-oci`). Sin argumento, el script cae al `RUNNER_COUNT=4` interno (`runner-bootstrap.sh`; el fallback solo aplica a invocaciones ad-hoc, el `runcmd` del cloud-init siempre pasa el valor del apply). Subir/bajar N: `docs/ci-runner-rollback.md §7–§8`.
+
+Verificar: **Settings → Actions → Runners** muestra **N entradas `autohostai-dev-vm-<i>`** (i ∈ [1..N]) **Idle** con label `dev`. Recuperación de un agente puntual: `sudo /opt/actions-runner-<i>/svc.sh start`; si se desregistra, re-ejecutar el bootstrap (`--replace`, idempotente).
 
 ### 6.3 Arranque en frío (primer deploy sobre VM sin app)
 

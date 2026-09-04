@@ -6,9 +6,11 @@
 # `RUNNER_COUNT` baja (fase previa al bucle) y está condicionada a `systemctl is-active`.
 #
 # Parámetros:
-#   $1 — RUNNER_COUNT (entero 1..4). Default: $RUNNER_COUNT si está exportado, si no 2.
+#   $1 — RUNNER_COUNT (entero 1..4). Default: $RUNNER_COUNT si está exportado, si no 4
+#         (**amend 2026-09-04**: el default era 2; subido a 4 para alinear con
+#         `variables.tf` `runner_count` default).
 #         El cloud-init pasa siempre "$RUNNER_COUNT" (variables.tf `runner_count`, 1..4,
-#         default 2 — change ci-runner-pool-oci, R1/R6); el reaprovisionamiento a mano
+#         default 4 — change ci-runner-pool-oci, R1/R6); el reaprovisionamiento a mano
 #         (RUNBOOK §6.2) también lo pasa o hereda $RUNNER_COUNT del entorno.
 #
 # Registro vía GitHub App: lee la clave privada de la App del OCI Vault por INSTANCE PRINCIPAL,
@@ -30,11 +32,11 @@ umask 077
 source /etc/autohostai-deploy.env # ENV, GITHUB_REPO, GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, APP_KEY_SECRET_OCID, ...
 
 # RUNNER_COUNT: argumento posicional (cloud-init / reaprovisionamiento explícito) > variable
-# de entorno > default 2.
+# de entorno > default 4 (alineado con `variables.tf` `runner_count` default — amend 2026-09-04).
 if [[ -n "${1:-}" ]]; then
     RUNNER_COUNT="$1"
 elif [[ -z "${RUNNER_COUNT:-}" ]]; then
-    RUNNER_COUNT=2
+    RUNNER_COUNT=4
 fi
 if ! [[ "$RUNNER_COUNT" =~ ^[1-4]$ ]]; then
     echo "ERROR: RUNNER_COUNT=$RUNNER_COUNT fuera de rango (1..4)" >&2

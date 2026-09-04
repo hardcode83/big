@@ -6,7 +6,7 @@ El runner self-hosted con label `[self-hosted, dev]` (`infra/environments/dev/ru
 
 ## What changes
 
-`infra/environments/dev/runner-bootstrap.sh` se parametriza por `runner_count` (default 2) y crea N agentes en la misma VM: un usuario Linux por agente, su `actions-runner-N/` propio, su servicio systemd y su registro ante GitHub con label `dev` — el patrón canónico de N runners en un host. Los 10 workflows no cambian (`runs-on: [self-hosted, dev]` ya los matchea a todos); `docs/ci-runner-rollback.md` gana sección "subir/bajar N"; reaprovisionar la VM viva sigue el `RUNBOOK.md §6` que `ci-runner-oci` ya documentó.
+`infra/environments/dev/runner-bootstrap.sh` se parametriza por `runner_count` (default 4, amend 2026-09-04) y crea N agentes en la misma VM: un usuario Linux por agente, su `actions-runner-N/` propio, su servicio systemd y su registro ante GitHub con label `dev` — el patrón canónico de N runners en un host. Los 10 workflows no cambian (`runs-on: [self-hosted, dev]` ya los matchea a todos); `docs/ci-runner-rollback.md` gana sección "subir/bajar N"; reaprovisionar la VM viva sigue el `RUNBOOK.md §6` que `ci-runner-oci` ya documentó.
 
 ## Requirements
 
@@ -65,9 +65,9 @@ Acceptance criteria:
 
 Acceptance criteria:
 
-1. THE SYSTEM SHALL documentar en `infra/environments/dev/README.md` el rango razonable de `runner_count` (1–3) con la métrica observada que lo sostiene: VM `VM.Standard.A1.Flex`, 4 OCPU/24 GB/200 GB, AD-3, PAYG (ADR 0001 addendum 2026-07-21).
-2. THE SYSTEM SHALL fijar `runner_count = 2` como default y SHALL NOT auto-escalar: subir N es decisión del operador, no del runner.
-3. WHERE el operador quiera subir `runner_count > 3`, THE SYSTEM SHALL exigir una nota de medición explícita (tiempo de suite del backend cuando otro agente corre la del frontend en paralelo, latencia p50 del frontend público) que archive en `RUNBOOK.md §6` antes de aceptar el cambio.
+1. THE SYSTEM SHALL documentar en `infra/environments/dev/README.md` el rango razonable de `runner_count` (1–4) con la métrica observada que lo sostiene: VM `VM.Standard.A1.Flex`, 4 OCPU/24 GB/200 GB, AD-3, PAYG (ADR 0001 addendum 2026-07-21). **Amend 2026-09-04**: el rango original era 1-3 con default 2; al subir el default a 4 el rango razonable se alinea con el `validation 1..4` de la variable. La nota de medición (R6.3) opera sobre `> default`, no sobre el rango entero.
+2. THE SYSTEM SHALL fijar `runner_count = 4` como default y SHALL NOT auto-escalar: subir N es decisión del operador, no del runner. **Amend 2026-09-04**: el default original era 2 (cola asumida de dos jobs coincidentes); la observación real tras dos PRs simultáneos + reset nocturno dejó la cola al límite, y la decisión de producto es absorber con cuatro agentes sin nota de medición previa.
+3. WHERE el operador quiera subir `runner_count > 4`, THE SYSTEM SHALL exigir una nota de medición explícita (tiempo de suite del backend cuando otro agente corre la del frontend en paralelo, latencia p50 del frontend público) que archive en `RUNBOOK.md §6` antes de aceptar el cambio. **Amend 2026-09-04**: el umbral original (>3) pasaba a un default de 4 sin nota de medición previa; el cambio lo deja en `> default`, que es la única cota con sentido (la nota se exige al subir sobre el valor que ya asumimos validado).
 
 ## Out of scope
 
