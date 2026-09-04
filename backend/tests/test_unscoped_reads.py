@@ -65,6 +65,19 @@ DECLARED_UNSCOPED_READS = frozenset(
         # Unlike its twin it needs no `JOIN`: `incident_photos` carries its own `tenant_id`
         # (design D2), so one table answers both halves.
         ("maintenance/infrastructure/repositories.py", "locate_without_tenant_scoping"),
+        # The seventh (`whatsapp-cloud-adapter` section 6/7, design D3/D8): section 7's inbound
+        # webhook carries no JWT either, and `phone_number_id` is the column that resolves the
+        # tenant — structurally identical to `find_by_token_hash` above, its literal precedent.
+        ("messaging/infrastructure/repositories.py", "find_by_phone_number_id"),
+        # The eighth (`whatsapp-cloud-adapter` section 7, design D7): the twin of the seventh,
+        # one hop later. The receiving route resolves the tenant from `phone_number_id` and
+        # commits a `whatsapp_inbound_events` row; the Celery task it dispatches is handed
+        # that row's **id** and nothing else, so the row is again what resolves the tenant.
+        #
+        # It has a second reason the others do not: `whatsapp_inbound_events.tenant_id` is
+        # nullable (R3.3 as amended — a validly signed delivery for an unprovisioned number is
+        # recorded with no tenant), and a marked session hides those rows without erroring.
+        ("messaging/infrastructure/repositories.py", "locate_without_tenant_scoping"),
     }
 )
 
@@ -213,7 +226,7 @@ def test_what_this_census_does_not_catch() -> None:
     SECOND guarded read that shares both its module and its method name with a declared one
     (a different class, same method name), which the existing entry absorbs — the census is
     keyed on `(module, function name)`, not on the class. No such collision exists today; the
-    five declared names are distinct.
+    six declared names are distinct.
 
     The naming convention does not close it either, and that is measured rather than assumed:
     `*_globally` is already non-exhaustive, because **most** of the declared reads do not carry
@@ -237,6 +250,7 @@ def test_what_this_census_does_not_catch() -> None:
         "find_live_by_token_hash",
         "locate_without_tenant_scoping",
         "find_by_token_hash",
+        "find_by_phone_number_id",
     }
 
     # The reads named above are pinned, not just described. A docstring that lists them

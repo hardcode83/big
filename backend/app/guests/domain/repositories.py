@@ -60,6 +60,27 @@ class GuestRepository(Protocol):
         """
         ...
 
+    async def find_by_phone(self, tenant_id: uuid.UUID, phone: str) -> list[GuestSummary]:
+        """Every guest of this tenant whose stored phone matches (R4.2, R4.4).
+
+        **Plural, unlike `find_by_email`.** `find_by_email` picks one deterministically
+        because a duplicate address is a dedup hint the caller (guest creation) needs to
+        collapse to a single answer. This method exists for the opposite reason: the
+        WhatsApp webhook handler (`whatsapp-cloud-adapter` R4.4) needs to know *whether*
+        more than one guest shares a number so it can escalate to a human instead of
+        guessing which conversation a message belongs to — collapsing to one row here
+        would destroy the very signal R4.4 asks for.
+
+        `phone` is expected already normalised to the canonical form `guests.phone` is
+        stored in (E.164) — the caller normalises, this method only compares. A blank
+        value never matches anything, the same guard `find_by_email` applies, and for the
+        same reason: without it every guest stored with no phone would collide on `""`.
+
+        Always scoped to `tenant_id` — there is no cross-tenant phone search, by
+        construction, because the parameter is required (design D5).
+        """
+        ...
+
     async def add(self, tenant_id: uuid.UUID, guest: Guest) -> None:
         """Persist a new guest; refuses an entity belonging to another tenant.
 

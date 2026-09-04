@@ -95,7 +95,7 @@ Recordatorio del bug histórico: `docker-compose-plugin` no está en los repos p
 
 ## 6. Despliegue de la app (CD — change `app-deploy-dev`)
 
-La app se despliega con `.github/workflows/deploy-dev.yml`: un **push a `main`** que toque `backend/**`/`frontend/**` (o `workflow_dispatch`) construye las imágenes `prod` arm64, las publica en **GHCR** (tag `sha-<commit>` + `dev`), y un job `deploy` en un **runner self-hosted que corre EN la VM** hace el deploy **localmente** (`docker compose -f docker-compose.deploy.yml pull && up -d --wait`) — sin SSH ni puertos entrantes. El `.env` de runtime lo **lee del OCI Vault** por instance principal en cada deploy (secrets generados por Terraform); el `docker login ghcr.io` usa el **`GITHUB_TOKEN`** del propio job (la GitHub App **solo** registra el runner, no interviene en el pull de GHCR). **Cero secrets de app a mano.**
+La app se despliega con `.github/workflows/deploy-dev.yml`: un **push a `main`** que toque `backend/**`/`frontend/**` (o `workflow_dispatch`) construye las imágenes `prod` arm64, las publica en **GHCR** (tag `sha-<commit>` + `dev`), y un job `deploy` en un **runner self-hosted que corre EN la VM** hace el deploy **localmente** (`docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml pull && up -d --wait`) — sin SSH ni puertos entrantes. El `.env` de runtime lo **lee del OCI Vault** por instance principal en cada deploy (secrets generados por Terraform); el `docker login ghcr.io` usa el **`GITHUB_TOKEN`** del propio job (la GitHub App **solo** registra el runner, no interviene en el pull de GHCR). **Cero secrets de app a mano.**
 
 ### 6.1 GitHub App (único secret-zero) + variables
 
@@ -169,7 +169,7 @@ En un stack recién creado esto no aparece: todos los contenedores nacen a la ve
 
 ```bash
 cd /opt/actions-runner/_work/AutoHostAI/AutoHostAI   # el checkout del runner (§7.4)
-docker compose -f docker-compose.deploy.yml down
+docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml down
 ```
 
    y volver a lanzar el deploy. `down` **no borra los volúmenes con nombre**, así que la base de datos de dev sobrevive.
@@ -205,7 +205,7 @@ no es el deploy — mira la tabla de §7.
 ```bash
 # desde la VM, ver las colisiones (ojo: agrupado SOLO por la dirección, sin tenant_id —
 # dos tenants con el mismo email ya son una colisión)
-docker compose -f docker-compose.deploy.yml exec postgres \
+docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml exec postgres \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
   "SELECT lower(email) AS addr, count(*), array_agg(id), array_agg(tenant_id) FROM users
    GROUP BY lower(email) HAVING count(*) > 1;"
@@ -236,7 +236,7 @@ BOOTSTRAP_SUPER_ADMIN_PASSWORD=...
 EOF
 
 # el heredoc con 'EOF' entre comillas no expande nada, y el fichero nace en 600
-docker compose -f docker-compose.deploy.yml run --rm --no-deps \
+docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml run --rm --no-deps \
   --env-file /tmp/bootstrap.env backend python -m app.cli.bootstrap
 
 shred -u /tmp/bootstrap.env 2>/dev/null || rm -f /tmp/bootstrap.env
@@ -301,10 +301,10 @@ Dos cosas no son codificables y se hacen en el dashboard de Cloudflare:
 
 ```bash
 # ¿El túnel está conectado al edge? (healthcheck del compose usa esto mismo)
-docker compose -f docker-compose.deploy.yml exec cloudflared cloudflared tunnel ready
+docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml exec cloudflared cloudflared tunnel ready
 
 # Logs del túnel (registro de conexiones al edge, errores de origen)
-docker compose -f docker-compose.deploy.yml logs --tail=100 cloudflared
+docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml logs --tail=100 cloudflared
 
 # Estado visto desde Cloudflare: Zero Trust → Networks → Tunnels (healthy / degraded / down)
 ```
@@ -426,7 +426,7 @@ done
 ```bash
 # En la VM: provoca un fallo de login por el hostname público desde tu móvil o tu portátil,
 # y mira con qué IP lo registró el backend
-docker compose -f docker-compose.deploy.yml logs backend --tail 50 | grep -i "ip="
+docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml logs backend --tail 50 | grep -i "ip="
 ```
 
 Debe aparecer **tu IP pública**, no `10.89.0.10` (la del contenedor `frontend`). Si aparece la del contenedor, el `--forwarded-allow-ips` del `command:` de `backend` y el `ipv4_address` del `frontend` se han desincronizado — los dos salen del mismo ancla YAML, así que revisa que nadie haya escrito uno a mano.
@@ -482,7 +482,7 @@ pkill -f 'ssh -fN autohostai-dev'   # para cerrarlo
 ssh ubuntu@<IP pública>
 cd /opt/actions-runner/_work/AutoHostAI/AutoHostAI   # checkout del runner, con el docker-compose.deploy.yml
 # (localizarlo si cambia: sudo find /opt/actions-runner/_work -maxdepth 3 -name docker-compose.deploy.yml)
-C="docker compose -f docker-compose.deploy.yml"
+C="docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml"
 
 $C ps                     # estado y healthy/unhealthy de los 7 servicios
 $C logs --tail=100 backend
@@ -659,7 +659,7 @@ un usuario que ya existe.
 ssh -i ~/.ssh/autohostai_dev_vm ubuntu@<ip>
 cd /opt/actions-runner/_work/AutoHostAI/AutoHostAI
 
-docker compose -f docker-compose.deploy.yml exec backend \
+docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml exec backend \
   python -m app.cli.reset_password --email <dirección>
 ```
 
@@ -680,7 +680,7 @@ en la forma **sin punto** (`RUNBOOK-seed-demo.md` §2). Antes de dar por perdida
 hay:
 
 ```bash
-docker compose -f docker-compose.deploy.yml exec -T postgres \
+docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml exec -T postgres \
   sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
     SELECT u.email, u.role, u.status, u.must_change_password, t.name AS tenant
     FROM users u JOIN tenants t ON t.id = u.tenant_id

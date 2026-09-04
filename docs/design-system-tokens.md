@@ -61,6 +61,20 @@ El conmutador de tema y el selector de idioma comparten el mismo slot `end` de l
 - **No carga fuentes de un tercero en runtime.** Inter y JetBrains Mono entran vía `next/font`, que las descarga en tiempo de build y las sirve desde el propio origen.
 - **No define un valor persistido para «sistema».** Si se ve `autohostai.theme=system` en una cookie, es un cliente o un script fuera de la aplicación.
 
+## Efectos de componente
+
+La capa de tokens no se queda en color y tipografía: tres `@utility` en `app/globals.css` (`btn-glow`, `card-hover-gradient`, `text-glow`) componen los efectos del export sobre los tokens ya declarados, **sin literales hex nuevos** — el color sale siempre de `--color-primary` por `color-mix()`, así que `test/color-tokens.test.ts` nunca ve un color nuevo que rechazar. Los efectos viven en `globals.css` (no son clases generadas por Tailwind desde el `.ts/.tsx`), y por eso el guardián de tokens recorre class-name strings y no parsea estos cuerpos: el límite está escrito en la spec (`sdd/specs/design-system-tokens.md`).
+
+- **`btn-glow`** — `box-shadow` ambiental para acciones primarias, con un realce más intenso y un `translateY(-1px)` al pasar el ratón. Se aplica en el botón primario vía la prop `glow` de `components/ui/button.tsx`: `<Button glow>`. Nunca se une a `size: "sm"` (`h-9`), porque se queda por debajo del suelo de `tap-target` (44 px) y el realce reduciría el área tocable al hacer hover. Un prop booleano, no una `variant` nueva: compone con el color del `default` y un cambio futuro en el color del botón primario se propaga a todos los consumidores de `glow` desde un solo sitio.
+- **`card-hover-gradient`** — una barra superior de 1 px que aparece al pasar el ratón sobre un `Card`, fundiendo opacidad de 0 a 1. El `prefers-reduced-motion: reduce` mata la transición pero deja la regla `:hover` (la barra aparece sin fundido). No comunica estado por sí sola, por la regla de accesibilidad de abajo.
+- **`text-glow`** — sombra de texto ambiental para los `<h1>` de las dos pantallas de referencia (reservas y dashboard). La utility está exportada y disponible, pero el restyle la aplica solo a esos dos `<h1>` y a ningún otro elemento.
+
+El primitivo `Card` (`components/ui/card.tsx`) es el único sitio donde vive la superficie canónica de tarjeta (`bg-surface`, `border`, `rounded-xl`, `shadow-sm`) y el efecto `card-hover-gradient`. Cualquier pantalla que necesite una tarjeta usa `Card`, `CardHeader` y `CardContent` — no un `<div className="rounded-lg border bg-surface p-4 shadow-sm">` repetido. Antes había seis copias literales de ese div en dashboard, properties, cleaning, cleaner y pricing (×2); ahora todas pasan por el primitivo y un futuro ajuste a la superficie de tarjeta se hace en un solo sitio. Cada slot del primitivo lleva `data-slot` (`card`, `card-header`, `card-content`) para poder dirigirse sin acoplarse al layout interno.
+
+### Suelo de accesibilidad para affordances de solo-hover
+
+`prefers-reduced-motion: reduce` mata la transición pero no la regla `:hover` — un usuario que ve la página pero nunca pasa el ratón por encima (touch, teclado, o quien tenga la preferencia activada) se queda sin la pista. Regla: **nada se comunica solo por una transición de hover**. Toda superficie interactiva que dependa de `card-hover-gradient`, un `group-hover:` o un realce al pasar el ratón lleva además una pista no-cinética persistente: un color, un borde, un icono o un texto que sobrevive sin `:hover` y sin transición. Cuando el elemento ya termina en una acción siempre visible —el `Link` «abrir detalle» de la tarjeta de dashboard, la píldora de estado de la fila de reservas— esa acción ya cumple el suelo y no se añade nada. Cuando no (la fila de la tabla de reservas, que solo tiene un `<Link>` superpuesto), se añade un icono `chevron` persistente en la última celda existente —nunca una columna nueva, que el change de reservas prohíbe—.
+
 ## Límites y casos borde
 
 - **Recargar la página con cookie puesta**: el servidor lee la cookie y aplica el tema antes del primer HTML, sin parpadeo.

@@ -1035,11 +1035,15 @@ def _messaging_pipeline_kwargs(session: AsyncSession) -> dict:
     credentials — and it is the same adapter the router injects, so the thread the demo shows is
     the thread the product would have produced.
     """
+    messages = SqlAlchemyMessageRepository(session)
     return {
         "conversations": SqlAlchemyConversationRepository(session),
-        "messages": SqlAlchemyMessageRepository(session),
+        "messages": messages,
         "ai": MockAIAdapter(),
-        "channels": outbound_registry(),
+        # Same `MessageRepository` instance passed to `messages` above, not a second one —
+        # `outbound_registry` needs it to resolve `WHATSAPP`'s session window
+        # (`whatsapp-cloud-adapter` R2.4, D2).
+        "channels": outbound_registry(messages),
         # Exactly as `messaging/api/dependencies.py::incident_reporting_port` builds it, down to
         # the caller-owned boundary: handing it its own unit of work would let an incident land
         # before the pipeline finished, leaving one nobody can trace back to a message.

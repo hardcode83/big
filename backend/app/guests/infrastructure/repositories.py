@@ -87,6 +87,24 @@ class SqlAlchemyGuestRepository:
         model = result.scalar_one_or_none()
         return _to_summary(model) if model is not None else None
 
+    async def find_by_phone(self, tenant_id: uuid.UUID, phone: str) -> list[GuestSummary]:
+        """Every match, unordered pick — R4.4 needs the count, not a winner.
+
+        A blank phone never matches, the same guard `find_by_email` applies to a blank
+        address: without it every guest with `phone IS NULL`... except `NULL` never equals
+        `""` in SQL either way, so this guard is about the Python-side `""` a caller could
+        pass, not about rows with no phone at all.
+        """
+        if not phone:
+            return []
+        result = await self._session.execute(
+            select(GuestModel).where(
+                GuestModel.tenant_id == tenant_id,
+                GuestModel.phone == phone,
+            )
+        )
+        return [_to_summary(model) for model in result.scalars()]
+
     async def add(self, tenant_id: uuid.UUID, guest: Guest) -> None:
         if guest.tenant_id != tenant_id:
             raise CrossTenantWriteError(

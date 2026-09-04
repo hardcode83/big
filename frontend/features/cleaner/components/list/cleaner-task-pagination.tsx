@@ -31,9 +31,9 @@ export function CleanerTaskPagination({
   return (
     <nav
       aria-label={t("pagination.label")}
-      className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3"
+      className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3"
     >
-      <p className="text-sm text-muted-foreground">
+      <p className="text-body-base text-muted-foreground">
         {t("pagination.pageOfTotal", { page, totalPages })}{" "}
         {t("pagination.totalTasks", { total })}
       </p>

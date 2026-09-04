@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import { useHasPermission } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -62,9 +63,9 @@ function Field({
   className?: string;
 }) {
   return (
-    <div className={cn("flex min-w-0 flex-col gap-0.5", className)}>
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="min-w-0 break-words text-sm font-medium text-foreground">
+    <div className={cn("flex min-w-0 flex-col gap-0.5 text-body-base", className)}>
+      <span className="text-muted-foreground">{label}</span>
+      <span className="min-w-0 break-words text-body-medium text-foreground">
         {children}
       </span>
     </div>
@@ -134,14 +135,12 @@ export function CleaningTaskRow({
     );
 
   return (
-    <li
-      aria-labelledby={headingId}
-      className="flex min-w-0 flex-col gap-3 rounded-lg border bg-surface p-4 shadow-sm"
-    >
+    <li aria-labelledby={headingId} className="min-w-0 list-none">
+      <Card className="flex min-w-0 flex-col gap-3 p-4">
       <div className="flex min-w-0 items-start justify-between gap-3">
         <h3
           id={headingId}
-          className="min-w-0 flex-1 break-words text-sm font-semibold text-foreground"
+          className="min-w-0 flex-1 break-words text-body-lg font-semibold text-foreground"
         >
           <span className="sr-only">{t("columns.property")}: </span>
           <IdentityValue
@@ -192,6 +191,7 @@ export function CleaningTaskRow({
           {formatDate(task.createdAt)}
         </Field>
       </div>
+      </Card>
     </li>
   );
 }

@@ -1,3 +1,6 @@
+# Runner self-hosted en la VM dev (label `[self-hosted, dev]`). Rollback: ver
+# docs/ci-runner-rollback.md (procedimiento + SHA del commit de migración).
+# Cambio: ci-runner-oci (PR <n>).
 name: demo-reset
 
 # Devuelve el tenant de demostración a su estado inicial, a diario y sobre el runner
@@ -33,24 +36,24 @@ jobs:
       group: deploy-dev
       cancel-in-progress: false
     steps:
-      # `clean: false` y no el checkout por defecto: el workspace del runner es el mismo directorio
-      # para todos los workflows del repo, y el `.env` que renderiza el deploy NO está versionado.
-      # El `git clean -ffdx` del checkout por defecto lo borraría, y con él la interpolación de
-      # `docker-compose.deploy.yml`, que lleva `${GHCR_NS:?}`.
+      # Checkout por defecto (`clean: true`): desde ci-runner-oci el `.env` que `deploy` renderiza
+      # NO vive en el workspace del checkout — vive en `$HOME/.autohostai-dev-runtime.env`, fuera de
+      # todo lo que `actions/checkout`/`git clean` gestiona (hallazgo del panel de seguridad, sexta
+      # pasada: con 7 workflows `pull_request`-triggered ahora compartiendo este mismo workspace, un
+      # `.env` versionado-como-antes en la raíz del repo se borraría con el primer PR normal que
+      # corriera tras un deploy, no hacía falta ningún ataque). `clean: false` ya no hace falta.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          clean: false
 
       # Precondición explícita ANTES de invocar nada (R5.5). Sin esto, un entorno no desplegado
       # muere dentro de un error de interpolación de Compose, que no nombra ninguna fase.
       - name: Precondición — el entorno está desplegado
         run: |
           set -euo pipefail
-          if [ ! -f .env ]; then
-            echo "::error::precondición: el entorno no está desplegado (no hay .env en el workspace del runner). Lanza deploy-dev primero." >&2
+          if [ ! -f "$HOME/.autohostai-dev-runtime.env" ]; then
+            echo "::error::precondición: el entorno no está desplegado (no hay $HOME/.autohostai-dev-runtime.env). Lanza deploy-dev primero." >&2
             exit 1
           fi
-          if ! docker compose -f docker-compose.deploy.yml ps --status running --quiet postgres | grep -q .; then
+          if ! docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml ps --status running --quiet postgres | grep -q .; then
             echo "::error::precondición: el entorno no está desplegado (el servicio postgres no está corriendo)." >&2
             exit 1
           fi
@@ -98,7 +101,7 @@ jobs:
         id: reset
         run: |
           set -euo pipefail
-          docker compose -f docker-compose.deploy.yml run --rm --no-deps -T \
+          docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml run --rm --no-deps -T \
             -e DEMO_ACCOUNT_PASSWORD \
             -e BOOTSTRAP_STORAGE_TYPE=S3 \
             backend python -m app.cli.demo_reset | tee "$RUNNER_TEMP/demo-reset.out"
@@ -132,9 +135,10 @@ jobs:
       # El token del portal es la excepción única de R2.5 (D19), y su acotamiento se apoya en que
       # el resumen del job sea el ÚNICO canal por el que llega a alguien. El fichero intermedio no
       # puede sobrevivir al job: el workspace del runner self-hosted es compartido y persistente,
-      # así que un `tee` sin borrado deja un token vivo legible en la máquina hasta el reset
-      # siguiente. Va en `RUNNER_TEMP` (que GitHub limpia entre jobs) y además se borra aquí de
-      # forma explícita, con `if: always()` para que un reset en rojo tampoco lo deje atrás.
+      # así que un `tee` sin borrado deja un token vivo legible en la máquina hasta que otro job
+      # inicialice y limpie `RUNNER_TEMP` — que no es al terminar este, así que el borrado de abajo
+      # es lo único que realmente lo cierra, con `if: always()` para que un reset en rojo tampoco lo
+      # deje atrás.
       - name: Borrar la salida intermedia, que lleva el token del portal
         if: always()
         run: rm -f "$RUNNER_TEMP/demo-reset.out"

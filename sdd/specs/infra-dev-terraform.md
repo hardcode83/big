@@ -56,6 +56,11 @@ Aprovisionado por `object-storage-provisioning`. Su comportamiento de aplicació
 
 ### Pipeline de GitHub Actions (`.github/workflows/infra-dev.yml`)
 
+- THE SYSTEM SHALL ejecutar los tres jobs (`check`, `plan`, `apply`) en el runner self-hosted
+  `[self-hosted, dev]` (migrado desde `ubuntu-latest` por `ci-runner-oci`, 2026-09-04; contrato
+  del runner en `ci-runner-self-hosted.md`). `plan`/`apply` mueven `terraform apply` real al mismo
+  host que aloja el deploy de la aplicación desplegada; ese riesgo de contorno de confianza está
+  documentado y aceptado en `ci-runner-self-hosted.md`, no repetido aquí.
 - WHEN se abre/actualiza un PR que toca `infra/environments/dev/**`, THE SYSTEM SHALL ejecutar el job `check` (`terraform fmt -check`, `init -backend=false`, `validate`) sin ningún secret.
 - THE SYSTEM SHALL exponer un único camino a recursos reales: `workflow_dispatch` con input `action` (`plan`|`apply`), en dos jobs — `plan` (init→validate→plan, para revisión por logs) y `apply` (re-planifica y aplica en el mismo job). El `plan` **no** usa `-out` ni sube el `tfplan` como artifact: desde `app-deploy-dev` el plan contiene secrets (clave de la App + secrets generados) y un artifact es descargable por cualquiera con read del repo.
 - THE SYSTEM SHALL ejecutar los jobs `plan` **y** `apply` **solo desde `main`** (`if: github.ref == 'refs/heads/main'`), con `concurrency` (serializa applies sobre el mismo state) y `timeout-minutes`; todas las GitHub Actions fijadas por **SHA de commit**. El gating de `plan` se añadió en `ingress-https-dev`: desde ese change el job recibe un API token con control del DNS y del TLS de toda una zona, y `sensitive = true` no impide desredactarlo desde código de una rama no revisada. Consecuencia operativa: no se puede planificar desde una rama de feature, así que el `plan`/`apply` de un change de infra ocurre tras el merge.

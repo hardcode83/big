@@ -310,6 +310,9 @@ A diferencia de la de firma, la de cifrado **no se regenera sola si ya hay un va
 - `docker-compose.deploy.yml` / `.env.deploy.example` — orquestación del **deploy a dev**: imágenes de GHCR por SHA (sin build), consumido por el CD en la VM.
 - `sdd/` — flujo de Spec-Driven Development: specs, changes en curso, steering, roadmap.
 - `backend/app/statements/` — liquidaciones al propietario y gastos, con las cuatro capas `domain/` → `application/` → `infrastructure/` → `api/`; el módulo ganó `application/`/`api/` con `revenue-statements` (job mensual, generación manual, CRUD de gastos con umbral de aprobación, export CSV/PDF). Operación en [`docs/revenue-statements.md`](docs/revenue-statements.md).
+- `docs/` — documentación extendida por capability y diagramas (`docs/diagrams/`: C4, hexagonal, ER, state machine, secuencias).
+- `infra/` — IaC por entorno (Terraform), no por dominio de negocio; ver `infra/environments/<entorno>/README.md`.
+- `.github/workflows/` — pipelines de CI/CD (GitHub Actions).
 
 Comandos de consola del backend (no hay endpoint para ninguno, a propósito):
 
@@ -322,9 +325,10 @@ Comandos de consola del backend (no hay endpoint para ninguno, a propósito):
 Push a `main` que toque `backend/**`/`frontend/**` → `.github/workflows/deploy-dev.yml` construye las imágenes `prod` arm64, las publica en GHCR y las despliega en la VM dev (Oracle Cloud) mediante un runner self-hosted que corre en la propia VM (deploy local, sin SSH). Detalle de operación en [`infra/environments/dev/RUNBOOK.md`](infra/environments/dev/RUNBOOK.md) §6.
 
 La app desplegada se sirve en **https://autohostai.digitalsec.work**, a través de un Cloudflare Tunnel: `cloudflared` corre en la VM y abre una conexión saliente al edge, que termina TLS y entrega al frontend por una red de compose dedicada al ingress — desde la que **no** se alcanzan `postgres`, `redis` ni `backend`, para que el routing remoto del túnel no pueda publicarlos. **Los puertos 8000 y 3000 ya no están expuestos** — el security list de la VM solo permite SSH (22), y no hay ningún puerto entrante para HTTP/HTTPS. Decisión y alternativas en [`docs/adr/0003-https-ingress-dev.md`](docs/adr/0003-https-ingress-dev.md); operación y diagnóstico en [`RUNBOOK.md`](infra/environments/dev/RUNBOOK.md) §7.
-- `docs/` — documentación extendida por capability y diagramas (`docs/diagrams/`: C4, hexagonal, ER, state machine, secuencias).
-- `infra/` — IaC por entorno (Terraform), no por dominio de negocio; ver `infra/environments/<entorno>/README.md`.
-- `.github/workflows/` — pipelines de CI/CD (GitHub Actions).
+
+## CI / runner self-hosted
+
+9 de los 10 workflows bajo `.github/workflows/` corren en el runner self-hosted de la VM dev (Oracle Cloud) con label `[self-hosted, dev]` — provisión y diagnóstico en [`infra/environments/dev/RUNBOOK.md`](infra/environments/dev/RUNBOOK.md) §6.2. **`EXTERNAL_DEPENDENCY`**: la VM solo trae Docker + el agente de Actions preinstalados (bootstrap §6.2); cada job declara su propio tooling por SHA pineado (`actions/setup-node`, `actions/setup-python`, `hashicorp/setup-terraform`, `backend/.python-version`) en vez de asumir nada del runner — es la corrección de D11 tras descubrir que `ubuntu-latest` regalaba `node`/`python3` 3.12 implícitamente y este runner no. La excepción es `multiarch-build-check.yml`, que se queda en `runs-on: ubuntu-latest` porque QEMU no se verificó en la VM (probe no ejecutado, no un fallo confirmado; excepción deliberada R4.2/D5, documentada en el propio workflow y en el runbook de rollback). Los migrados no consumen minutos de GitHub-hosted; la vuelta a `ubuntu-latest` cuando haga falta (runner VM caída, regresión por incompatibilidad de algún job) es un `git revert` del PR de migración. Procedimiento, comando exacto y validación en [`docs/ci-runner-rollback.md`](docs/ci-runner-rollback.md) (runbook versionado en el repo, R6 del change `ci-runner-oci`).
 
 ## Tests
 
