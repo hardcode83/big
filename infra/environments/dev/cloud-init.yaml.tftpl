@@ -55,4 +55,8 @@ runcmd:
   - systemctl enable --now docker
   - usermod -aG docker ubuntu
   - pip3 install --quiet oci-cli
-  - /opt/bootstrap-runner.sh
+  # `RUNNER_COUNT` se inyecta desde la variable de Terraform `runner_count` (default 2, 1..4 — ver
+  # variables.tf): fuente única para el número de agentes self-hosted con label = ${env} registrados
+  # en la VM (change ci-runner-pool-oci, R1/R3/R6). `sudo bash` corre el script como `ubuntu` para que
+  # herede el grupo docker recién añadido arriba; el script lee `$1` como `RUNNER_COUNT` (D2/D3).
+  - 'RUNNER_COUNT=${runner_count} sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"'

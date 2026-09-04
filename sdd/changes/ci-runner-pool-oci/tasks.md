@@ -3,11 +3,11 @@
 <!-- "hard" on a section heading escalates its implementer to the stronger model;
      "panel: PASS <date>" is written by /sdd:run when a section's review panel passes. -->
 
-## 1. Terraform: variable `runner_count` y cableado al cloud-init
+## 1. Terraform: variable `runner_count` y cableado al cloud-init <!-- panel: PASS 2026-09-04 -->
 
-- [ ] 1.1 `infra/environments/dev/variables.tf` — añadir `variable "runner_count"` (default 2, validation 1..4). Cubre R1 (default), R6 (rango). Sin esto D2 no se puede cablear.
-- [ ] 1.2 `infra/environments/dev/main.tf` — pasar `runner_count` al `templatefile()` que renderiza `cloud-init.yaml.tftpl`. Cubre R1 (cómo llega al bootstrap), R3 (reaprovisionamiento declarativo).
-- [ ] 1.3 `infra/environments/dev/cloud-init.yaml.tftpl` — añadir `runner_count = ${runner_count}` como variable del template y pasarlo al `runcmd` que invoca `bootstrap-runner.sh` (`RUNNER_COUNT=<n> sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"`). Cubre R3.
+- [x] 1.1 `infra/environments/dev/variables.tf` — añadir `variable "runner_count"` (default 2, validation 1..4). Cubre R1 (default), R6 (rango). Sin esto D2 no se puede cablear.
+- [x] 1.2 `infra/environments/dev/main.tf` — pasar `runner_count` al `templatefile()` que renderiza `cloud-init.yaml.tftpl`. Cubre R1 (cómo llega al bootstrap), R3 (reaprovisionamiento declarativo).
+- [x] 1.3 `infra/environments/dev/cloud-init.yaml.tftpl` — añadir `runner_count = ${runner_count}` como variable del template y pasarlo al `runcmd` que invoca `bootstrap-runner.sh` (`RUNNER_COUNT=<n> sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"`). Cubre R3.
 
 ## 2. `runner-bootstrap.sh`: pool parametrizado, migración del legado y baja con guardia de liveness <!-- hard -->
 
@@ -42,3 +42,7 @@
 ## Implementation Notes
 
 <!-- Append-only, written by the implementer of each section for the next one. -->
+
+- `infra/environments/dev/variables.tf`: nueva `variable "runner_count"` (`type = number, default = 2`) con `validation` `1 ≤ runner_count ≤ 4` — fuente única del número de agentes para el resto del change.
+- `infra/environments/dev/main.tf` línea 161: `runner_count = var.runner_count` añadido al mapa de `templatefile()` de `cloud-init.yaml.tftpl` (entre `env` y `github_repo`; los `file()` siguen al final).
+- `infra/environments/dev/cloud-init.yaml.tftpl`: la entrada final de `runcmd` (única con quoting, single-quoted YAML para preservar el `$` y `"$RUNNER_COUNT"` literales) es `'RUNNER_COUNT=${runner_count} sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"'`. `runner-bootstrap.sh` debe leer `$1` como `RUNNER_COUNT` (tarea 2.1).
