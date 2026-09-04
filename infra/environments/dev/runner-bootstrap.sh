@@ -61,6 +61,28 @@ mkdir -p "$AGENTS_DIR"
 # Grupo docker: cloud-init lo crea; reasegurar para el alta out-of-band.
 getent group docker >/dev/null || groupadd docker
 
+# Grupo + sudoers para que los agentes numerados puedan hacer lo que el legado `ubuntu` ya
+# podía (`ubuntu ALL=(ALL) NOPASSWD:ALL`, grant de cloud-init). Sin esto, cualquier paso de
+# job que necesite `sudo` (p. ej. `playwright install --with-deps` de frontend-tests.yml,
+# que instala dependencias del SO) falla con "a password is required" — hallazgo en la VM
+# real, 2026-09-04, primer job real corrido en el pool nuevo tras la migración.
+# Gotcha de migración (una sola vez): un agente que YA estaba `active` cuando esta versión
+# se aplicó por primera vez no recoge la nueva membresía del grupo hasta que se reinicia su
+# servicio (`usermod -aG` no afecta a un proceso ya en marcha) — `start_named_agent` deja un
+# servicio `active` intacto, así que el reinicio, la primera vez, es manual
+# (`systemctl restart <servicio>` por agente). Los agentes creados por esta versión en
+# adelante ya nacen con el grupo, sin este paso.
+getent group ci-agents >/dev/null || groupadd ci-agents
+if [[ ! -f /etc/sudoers.d/91-actions-runner-pool ]]; then
+    echo '%ci-agents ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/91-actions-runner-pool
+    chmod 0440 /etc/sudoers.d/91-actions-runner-pool
+    visudo -c -f /etc/sudoers.d/91-actions-runner-pool || {
+        rm -f /etc/sudoers.d/91-actions-runner-pool
+        echo "ERROR: sudoers drop-in inválido, no se ha aplicado" >&2
+        exit 1
+    }
+fi
+
 # === 1) Installation-token de la GitHub App (clave del Vault → helper). Un token sirve para
 #       los N registros (D5). Vive solo en memoria: umask 077 arriba, `unset` al final.
 #       GITHUB_APP_ID/INSTALLATION_ID se pasan explícitos al helper: `source` sin `export` no
@@ -161,8 +183,13 @@ retire_named_agent() {
     local svc="${SERVICE_PREFIX}-${i}.service"
     if [[ -d "$home" ]]; then
         cd "$home"
-        sudo -u "$runner_user" ./config.sh remove --token "$REG_TOKEN"
+        # ORDEN OBLIGATORIO: `svc.sh uninstall` primero. `config.sh remove` se niega con
+        # "Uninstall service first" mientras el servicio systemd siga instalado, esté
+        # `active` o `inactive` — parar el servicio (systemctl stop) no basta, hay que
+        # desinstalarlo (hallazgo en la VM real, 2026-09-04, durante la verificación
+        # post-merge D7/5.3).
         ./svc.sh uninstall "$svc"
+        sudo -u "$runner_user" ./config.sh remove --token "$REG_TOKEN"
     else
         echo "WARN: home $home ausente, saltando config.sh remove para $name" >&2
     fi
@@ -202,7 +229,7 @@ register_named_agent() {
         if ! id "$runner_user" >/dev/null 2>&1; then
             useradd -m -s /bin/bash "$runner_user"
         fi
-        usermod -aG docker "$runner_user"
+        usermod -aG docker,ci-agents "$runner_user"
 
         step="install runner into $runner_home"
         mkdir -p "$runner_home"
@@ -277,8 +304,10 @@ if printf '%s\n' "$legacy_listed" | grep -Fxq "$LEGACY_NAME"; then
             echo "[legacy] retirando agente legado $LEGACY_NAME (svc=$legacy_state)"
             if [[ -d "$LEGACY_HOME" ]]; then
                 cd "$LEGACY_HOME"
-                sudo -u ubuntu ./config.sh remove --token "$REG_TOKEN"
+                # ORDEN OBLIGATORIO: `svc.sh uninstall` primero — ver nota de
+                # `retire_named_agent` más arriba (mismo hallazgo, misma causa).
                 ./svc.sh uninstall "$LEGACY_SERVICE"
+                sudo -u ubuntu ./config.sh remove --token "$REG_TOKEN"
                 cd /
                 rm -rf "$LEGACY_HOME"
             else
