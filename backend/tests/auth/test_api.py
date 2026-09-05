@@ -223,6 +223,49 @@ async def test_logout_with_no_bearer_revokes_via_the_refresh_cookie(
 
 
 @pytest.mark.asyncio
+async def test_logout_with_no_bearer_only_revokes_the_presenting_tenants_family(
+    api, db_session, tenant_a, tenant_b
+) -> None:
+    """`steering/security.md` rule 1: a tenant's cookie must not revoke another
+    tenant's session (review: sdd-review-tenancy).
+
+    `get_logout_subject`'s cookie-only branch decodes `tenant_id` and `family_id` from
+    the SAME signed refresh token, with no repository lookup — this proves that
+    coupling holds end to end: tenant A's cookie, presented with no Bearer, revokes
+    tenant A's family only, and tenant B's own (distinct, still-live) session survives.
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner-a@example.com")
+    await insert_user(db_session, tenant=tenant_b, email="owner-b@example.com")
+
+    login_a = await _login(api, email="owner-a@example.com")
+    cookie_a = login_a.cookies.get(SESSION_REFRESH_COOKIE)
+    assert cookie_a is not None
+
+    # A separate login for tenant B's session — captured from the response directly
+    # (not the jar, which this second login already overwrote).
+    login_b = await _login(api, email="owner-b@example.com")
+    cookie_b = login_b.cookies.get(SESSION_REFRESH_COOKIE)
+    assert cookie_b is not None
+    assert cookie_b != cookie_a
+
+    # The jar now carries tenant B's cookie from the second login; swap in tenant A's
+    # captured value explicitly so THIS call presents tenant A's credential alone.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie_a)
+    logout = await api.post("/api/v1/auth/logout")
+    assert logout.status_code == 204
+
+    # Tenant A's family is gone.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie_a)
+    reused_a = await api.post("/api/v1/auth/refresh", json={})
+    assert reused_a.status_code == 401
+
+    # Tenant B's family is untouched — proof the revoke never crossed tenants.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie_b)
+    still_valid_b = await api.post("/api/v1/auth/refresh", json={})
+    assert still_valid_b.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_logout_with_no_bearer_and_no_cookie_is_a_no_op(api) -> None:
     """R3.2's idempotency extends to the cookie-only path: nothing to revoke is not
     an error — same 204 as the authenticated "already logged out" case."""
