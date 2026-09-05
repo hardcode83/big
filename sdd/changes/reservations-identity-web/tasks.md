@@ -22,16 +22,16 @@
       `getReservation`). Verificar que un campo ausente en el fixture de respuesta mapea a `null`,
       no a `undefined`. [R1, R6.1]
 
-## 2. Columnas *Property* y *Guest* de la lista
+## 2. Columnas *Property* y *Guest* de la lista <!-- panel: PASS 2026-09-05 -->
 
-- [ ] 2.1 En `frontend/features/reservations/components/list/reservations-view.tsx`
+- [x] 2.1 En `frontend/features/reservations/components/list/reservations-view.tsx`
       (`ReservationRow`), sustituir la celda `{row.propertyId}` (línea 172) por
       `row.propertyInternalCode ?? "—"`, y añadir `title={row.propertyName ?? undefined}` al
       mismo `<td>` (el atributo `title` no se pinta cuando es `undefined`). [R2]
-- [ ] 2.2 En la misma fila, sustituir `{row.guestId ?? "—"}` (dentro del `<Link>` de navegación,
+- [x] 2.2 En la misma fila, sustituir `{row.guestId ?? "—"}` (dentro del `<Link>` de navegación,
       línea 169) por `row.guestFullName ?? "—"`, sin tocar el `href` (que sigue construyéndose
       con `row.id`, no con el guest). [R3]
-- [ ] 2.3 Extender `frontend/features/reservations/components/list/reservations-view.test.tsx`:
+- [x] 2.3 Extender `frontend/features/reservations/components/list/reservations-view.test.tsx`:
       un caso de fila con `propertyInternalCode`/`propertyName`/`guestFullName` presentes (verificar
       que la celda de Property no vuelve a pintar el UUID) y un caso con los tres `null` (verificar
       el em-dash en ambas celdas, sin fallback a `propertyId`/`guestId`). El test existente
@@ -79,3 +79,4 @@
 - Mapper reads `value.property_name ?? null`, `value.property_internal_code ?? null`, `value.guest_full_name ?? null` in `mapReservationSummary`; `mapReservationDetail` composes via `...mapReservationSummary(value)` for all shared fields (fix-round from the panel's architect finding — `ReservationDetailResponse` is structurally assignable into `ReservationResponse`) instead of duplicating the field list.
 - Row shape for section 2/3 consumers: `row.propertyName`, `row.propertyInternalCode`, `row.guestFullName` (camelCase, always `string | null`, never `undefined`).
 - Test command used: `docker compose exec -T frontend npx vitest run features/reservations/data/http/http-reservations-source.test.ts` — 11/11 passed.
+- Section 2 (reservations-view.tsx + its test): the *Guest* cell inside the row `<Link>` now renders `row.guestFullName ?? "—"`; the `href` is unchanged (still `/reservations/{row.id}`). The *Property* cell renders `row.propertyInternalCode ?? "—"` with `title={row.propertyName ?? undefined}` on the same `<td>`. `SAMPLE` in the test file was extended with `propertyName: null, propertyInternalCode: null, guestFullName: null` (matching the real DTO — always present, nullable, never `undefined`); the old "guestId null renders as an em-dash" test was renamed/expanded to assert 2 em-dashes (guest + property cells) and that the raw `propertyId`/`guestId` UUIDs never leak into the DOM; a new test covers all three fields present (asserts the code/name/full-name render, not the UUIDs, and the `title` attribute). Nothing here should matter to section 3 (different files), no new i18n keys were needed. Test command: `docker compose exec -T frontend npx vitest run features/reservations/components/list/reservations-view.test.tsx` — 14/14 passed.
