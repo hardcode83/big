@@ -208,6 +208,41 @@ endpoint in the app, not just logout; doing so would silently open the whole
 authenticated surface to cookie-only access, when the cookie's own `Path` is
 deliberately scoped to `/api/v1/auth` alone.
 
+### D6b — the cookie fallback also fires on a Bearer that fails to authenticate, not only on a missing one (added 2026-09-05, same day, review: `sdd-security`, second re-review of D6a itself)
+
+**Chosen**: `get_logout_subject` now catches `InvalidTokenError` around the
+Bearer branch and falls through to the cookie branch, instead of letting the
+exception propagate as a 401. D6a's first version only fell back to the
+cookie when NO Bearer was presented at all — a Bearer that IS presented but
+fails to authenticate (expired, malformed, an unknown/inactive user or
+tenant) still hit `get_authenticated_request` and raised.
+
+**Why**: the common real case is an access token that expired without ever
+being cleared from the store (the same "stale-but-present token" case
+`client.ts`'s own logout comment already names). That request still reaches
+`get_authenticated_request` with a Bearer, gets a 401, and falls into the
+client's ordinary 401-recovery — which calls `refreshSession()` before
+retrying, rotating and re-extending the refresh cookie by a fresh week
+before any revoke is attempted. If that retry then failed, the browser was
+left holding a freshly-extended, still-valid session: the exact failure
+mode D6a exists to close, just reached through a different door (a stale
+Bearer instead of an empty store). Falling through on a failed Bearer closes
+that door too: whatever the Bearer's fate, revocation is attempted straight
+off the cookie, and `/auth/logout` now effectively never answers 401 for an
+auth reason — every combination of Bearer/cookie state resolves to either a
+revoke-and-204 or a nothing-to-revoke-204 (R3.2). `PasswordChangeRequiredError`
+is deliberately NOT caught alongside `InvalidTokenError`: `/auth/logout` is
+on `PASSWORD_CHANGE_EXEMPT`, so `get_authenticated_request` never raises it
+for this route, and catching it anyway would silently swallow a genuine bug
+if that invariant ever changed.
+
+Rejected: fix this on the frontend instead (retry logout with the
+`Authorization` header dropped instead of refreshed) — leaves the backend
+endpoint itself still capable of leaking a longer-lived session to any OTHER
+caller that does not implement that specific retry shape (a future client, a
+retry that never runs, a user who navigates away mid-recovery). Fixing the
+endpoint closes the gap for every caller at once.
+
 ### D7 — `frontend/lib/auth/session-store.ts` keeps only the access token
 
 **Chosen**: `SessionTokens` becomes `{ accessToken: string }` (no

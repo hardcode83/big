@@ -78,24 +78,52 @@ defina en `saas-cross-tenant`.
   la URL, el guard lo expulsa con `?denied=role` (UX-only, RBAC sigue en el
   backend).
 
-## Sesión efímera y refresh
+## Sesión persistente entre reloads (`auth-session-persistence`)
 
-Los access y refresh JWT viven únicamente en memoria dentro del runtime del
-navegador. Las peticiones autenticadas que reciben `401` pueden ejecutar un
-único refresh coordinado y reintentar una vez la petición original. Login,
-refresh, logout y peticiones sin bearer quedan fuera de ese mecanismo.
+El access JWT vive únicamente en memoria dentro del runtime del navegador —
+eso no cambió. El refresh JWT, en cambio, **ya no vive en memoria ni en
+ningún almacenamiento accesible por JavaScript**: viaja como cookie
+`HttpOnly` (`autohostai.session.refresh`, ver `docs/auth-tenancy.md` para el
+juego completo de atributos), así que un reload completo, el cierre de la
+pestaña o un runtime nuevo **no** elimina la sesión mientras la cookie siga
+viva (`Max-Age` = `JWT_REFRESH_TOKEN_DAYS`).
 
-Un reload completo, el cierre de la pestaña o un nuevo runtime elimina la
-sesión: el usuario debe iniciar sesión de nuevo.
+Cada runtime nuevo (un reload, una pestaña recién abierta) arranca sin
+access token en memoria y lanza un `POST /auth/refresh` silencioso al
+montar `AuthProvider` (R5, design D8) — con `credentials: "include"`, sin
+esperar ninguna interacción del usuario. Si la cookie sigue siendo válida,
+la sesión se restaura sin pasar por el formulario de login; si no, el
+estado resuelve a `anonymous` sin error visible, y el usuario solo ve el
+login si navega a una ruta protegida (R5.3). Este mount-refresh está
+deduplicado a nivel de módulo (D11): dos `AuthProvider` montados en el
+mismo tick (StrictMode, dos árboles) comparten una única petición.
+
+Las peticiones autenticadas que reciben `401` pueden ejecutar, además, un
+único refresh coordinado y reintentar una vez la petición original —
+mecanismo previo a este change, sin cambios. Login, refresh y peticiones
+sin bearer quedan fuera de ese mecanismo; logout ya no queda fuera del
+todo: su propio `401` (un access token expirado) se recupera igual que el
+de cualquier otro endpoint autenticado.
+
+**Aislamiento entre pestañas** (R6): cada pestaña es su propio runtime de
+JavaScript, así que el access token y el estado de refresh son
+por-pestaña — no hay canal que sincronice un logout o una sesión expirada
+entre pestañas salvo el que cada una descubre por su cuenta (su propio
+próximo `401`, o su propio próximo mount-refresh).
 
 ## Límites de seguridad
 
 - Los guards son client-side y sirven para UX; no protegen HTML server-rendered
   ni sustituyen JWT, RBAC o tenant isolation del backend.
-- No se guardan tokens ni credenciales en cookies, `localStorage`,
-  `sessionStorage`, IndexedDB, Zustand ni ningún almacenamiento persistente.
+- El access token vive solo en memoria; no se guarda en `localStorage`,
+  `sessionStorage`, IndexedDB, Zustand ni ningún almacenamiento persistente. El
+  refresh token vive en la cookie `HttpOnly` — el frontend nunca la lee ni la
+  pasa por JavaScript en ningún punto (ni en el cuerpo de una petición, ni en
+  un store); solo el navegador la adjunta automáticamente.
 - El frontend no decide permisos de negocio ni implementa aislamiento de tenant.
 - Los errores del backend no se muestran directamente; los estados visibles se
   resuelven mediante el namespace `auth` en ES y EN.
 - No hay BFF, middleware de autenticación ni sesión server-side en esta
-  capability.
+  capability — el Route Handler de `frontend/app/api/[...path]/route.ts` es un
+  proxy de cabeceras (design `auth-session-persistence` D2), no un punto que
+  retenga o interprete la sesión.

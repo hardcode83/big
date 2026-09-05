@@ -266,6 +266,53 @@ async def test_logout_with_no_bearer_only_revokes_the_presenting_tenants_family(
 
 
 @pytest.mark.asyncio
+async def test_logout_with_a_stale_bearer_still_revokes_via_the_refresh_cookie(
+    api, db_session, tenant_a
+) -> None:
+    """`auth-session-persistence` R3.1 (review: sdd-security, second re-review of
+    `get_logout_subject` itself): a PRESENT-but-invalid Bearer must not stop the
+    cookie fallback from running.
+
+    The common real case is an access token that expired without ever being
+    cleared — the client still sends `Authorization: Bearer <stale>`. Without this,
+    the request 401s, and the client's ordinary 401-recovery calls `refreshSession()`
+    before retrying — rotating and re-extending the cookie by a fresh week before any
+    revoke is attempted, reopening the exact window the cookie-only fallback exists
+    to close (just reached through a stale Bearer instead of an empty store).
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    login_response = await _login(api)
+    cookie = login_response.cookies.get(SESSION_REFRESH_COOKIE)
+    assert cookie is not None
+
+    logout = await api.post(
+        "/api/v1/auth/logout",
+        headers={"Authorization": "Bearer not.a.jwt"},
+    )
+
+    assert logout.status_code == 204
+    assert logout.content == b""
+
+    # Proof the family was actually revoked via the cookie, not silently skipped.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie)
+    reused = await api.post("/api/v1/auth/refresh", json={})
+    assert reused.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_with_a_stale_bearer_and_no_cookie_is_a_no_op(api) -> None:
+    """The stale-Bearer fallback is still idempotent (R3.2): nothing to revoke on
+    either credential answers the same 204, not a 401."""
+    response = await api.post(
+        "/api/v1/auth/logout",
+        headers={"Authorization": "Bearer not.a.jwt"},
+    )
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+@pytest.mark.asyncio
 async def test_logout_with_no_bearer_and_no_cookie_is_a_no_op(api) -> None:
     """R3.2's idempotency extends to the cookie-only path: nothing to revoke is not
     an error — same 204 as the authenticated "already logged out" case."""

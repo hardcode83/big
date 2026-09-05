@@ -501,27 +501,36 @@ async def get_logout_subject(
     codec: CodecDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
 ) -> LogoutSubject | None:
-    """Resolves who `/auth/logout` should revoke (review: `sdd-security`, R6.2).
+    """Resolves who `/auth/logout` should revoke (review: `sdd-security`, R3.1/R6.2).
 
-    A Bearer access token, when presented, is authenticated exactly as every other
-    endpoint does (`get_authenticated_request`) — unchanged behaviour. When none is
-    presented at all, this falls back to the refresh cookie itself as the credential,
-    the same stance `/auth/refresh` already takes ("the token IS the credential"):
-    the family it names is decoded directly from the JWT's `fam`/`tenant_id` claims,
-    with no repository round trip, since revocation does not need to know whether
-    the session row is still live — `revoke_family` is a no-op update either way.
+    A Bearer access token, when presented AND valid, is authenticated exactly as every
+    other endpoint does (`get_authenticated_request`) — unchanged behaviour. In every
+    other case — no Bearer at all, OR a Bearer that fails to authenticate (expired,
+    malformed, an unknown/inactive user or tenant) — this falls back to the refresh
+    cookie itself as the credential, the same stance `/auth/refresh` already takes
+    ("the token IS the credential"): the family it names is decoded directly from the
+    JWT's `fam`/`tenant_id` claims, with no repository round trip, since revocation
+    does not need to know whether the session row is still live — `revoke_family` is
+    a no-op update either way.
 
-    This is what `use-logout-mutation.ts` needs for the empty-store case: without it,
-    the frontend had to call `refreshSession()` first purely to obtain a Bearer to
-    present here, which rotates and re-extends the refresh cookie by a fresh
-    `jwt_refresh_token_days` window — so a `POST /auth/logout` that then failed (5xx,
-    offline, a retry racing another empty-store path) left the browser holding a
-    *freshly extended*, still-fully-valid session, worse than the one the user tried
-    to end. Falling back to the cookie removes the refresh round trip entirely.
+    **A failed Bearer falls through instead of raising — this is the fix for a gap
+    the panel found in the first version of this function (added 2026-09-05, same
+    day, review round 2 of `get_logout_subject` itself)**: that version only
+    fell back when NO Bearer was presented at all. A stale-but-present Bearer (the
+    common case: an access token that expired without ever being cleared) still hit
+    `get_authenticated_request` and raised — reaching the client's ordinary
+    401-recovery, which calls `refreshSession()` before retrying, rotating and
+    re-extending the refresh cookie by a fresh week. If THAT retry then failed, the
+    browser was left holding a freshly-extended, still-valid session — the exact
+    failure mode this dependency exists to close, just reached through a different
+    door (a stale Bearer instead of an empty store). Falling through here means a
+    stale Bearer alone can never trigger that refresh-before-revoke round trip for
+    logout specifically: whatever the Bearer's fate, revocation is attempted straight
+    off the cookie.
 
-    No `bind_session_to_tenant` call, matching `/auth/refresh` and `/auth/login`
-    (also unauthenticated at this point): `revoke_family` takes `tenant_id` as an
-    explicit filter, not via the session-level marker.
+    No `bind_session_to_tenant` call in the cookie branch, matching `/auth/refresh`
+    and `/auth/login` (also unauthenticated at this point): `revoke_family` takes
+    `tenant_id` as an explicit filter, not via the session-level marker.
 
     Tagged with `MANAGE_OWN_SESSION` for `test_route_authorization.py`'s structural
     walk even though the cookie path checks no role: that permission is in
@@ -530,16 +539,24 @@ async def get_logout_subject(
     ever refuse. Authenticating by the cookie alone is therefore equivalent to being
     authorised, unlike every other endpoint `require(...)` guards.
 
-    Returns `None` when there is nothing to revoke — no Bearer, no cookie, or a
-    cookie that fails to decode (expired, tampered, wrong signature) — so the
-    endpoint's existing idempotent-204 behaviour (R3.2) covers this case too rather
-    than turning a missing/invalid cookie into a new, distinguishable error surface.
+    Returns `None` when there is nothing to revoke — no working Bearer AND (no
+    cookie, or a cookie that fails to decode: expired, tampered, wrong signature) —
+    so the endpoint's existing idempotent-204 behaviour (R3.2) covers this case too
+    rather than turning a failed credential into a new, distinguishable error
+    surface. `PasswordChangeRequiredError` is not caught here: `/auth/logout` is on
+    `PASSWORD_CHANGE_EXEMPT`, so `get_authenticated_request` never raises it for this
+    route — an unrelated exception type surfacing here would be a genuine bug, not a
+    failed-credential case to fall through on.
     """
     if credentials is not None:
-        authenticated = await get_authenticated_request(request, session, codec, credentials)
-        return LogoutSubject(
-            tenant_id=authenticated.context.tenant_id, family_id=authenticated.family_id
-        )
+        try:
+            authenticated = await get_authenticated_request(request, session, codec, credentials)
+        except InvalidTokenError:
+            authenticated = None
+        if authenticated is not None:
+            return LogoutSubject(
+                tenant_id=authenticated.context.tenant_id, family_id=authenticated.family_id
+            )
 
     token = request.cookies.get(SESSION_REFRESH_COOKIE)
     if token is None:

@@ -19,11 +19,11 @@ import { notifyLogout } from "@/lib/auth/logout-event";
  * shares the same machinery as every other mutation in the app — retry on
  * transient failures, typed response, cache-key invalidation.
  *
- * **Local purge is unconditional** (mirrors `auth-provider.tsx:127-134` and
- * `frontend-auth-session.md:81-86`): the `try/finally` around the endpoint
- * call runs `purgeSessionCache → clearSessionTokens → clearSessionPresent`
- * regardless of success or 5xx/network error. The endpoint is best-effort;
- * the local cleanup is the contract.
+ * **Local purge is unconditional** (mirrors `auth-provider.tsx:127-134`): the
+ * `try/finally` around the endpoint call runs `purgeSessionCache →
+ * clearSessionTokens → clearSessionPresent` regardless of success or
+ * 5xx/network error. The endpoint is best-effort; the local cleanup is the
+ * contract.
  *
  * **A missing access token does not skip the call.** The store can be empty at
  * logout time — a mount-refresh that never repopulated it, or a
@@ -88,7 +88,7 @@ export function useLogoutMutation() {
   return useMutation({
     mutationFn: async () => {
       // We capture the network error so the local purge still runs
-      // unconditionally per `frontend-auth-session.md:81-86`, and then
+      // unconditionally (see the doc comment above), and then
       // re-throw so TanStack Query's `retry: 1` actually fires on transient
       // 5xx / network errors. Without the re-throw, the empty `catch`
       // would silently swallow the failure and the retry config would be

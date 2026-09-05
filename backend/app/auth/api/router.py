@@ -139,12 +139,13 @@ async def refresh(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="End the session this access token or refresh cookie belongs to",
     description=(
-        "Revokes the refresh family named by the access token when one is presented, "
-        "or by the refresh cookie itself when it is not — the cookie is as much a "
-        "credential here as it already is for /auth/refresh (review: sdd-security, "
-        "R6.2), so a caller with no access token in memory can still end its own "
-        "session without minting a new one first. Idempotent: nothing to revoke "
-        "answers the same 204."
+        "Revokes the refresh family named by a valid access token, or by the refresh "
+        "cookie itself when there is no access token, or the one presented does not "
+        "authenticate — the cookie is as much a credential here as it already is for "
+        "/auth/refresh (review: sdd-security, R3.1/R6.2), so a caller with no valid "
+        "access token can still end its own session without minting a new one first. "
+        "Never answers 401 for an authentication reason: idempotent, nothing to "
+        "revoke answers the same 204."
     ),
     responses=AUTHENTICATED_RESPONSES,
 )
