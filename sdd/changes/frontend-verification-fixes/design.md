@@ -69,11 +69,14 @@ descarta, porque añade el parámetro a las tres rutas y por tanto al contrato g
 `Cache-Control: private, no-store` en la respuesta — mismo patrón que ya usa
 `app/provenance/api/router.py:39`. Su cuerpo depende de una cabecera de petición (`X-Locale`) que
 ninguna caché compartida indexa; sin este encabezado, una respuesta cacheada por URL sola podría
-servir el idioma de un lector a otro. Hoy no hay ruta de explotación real —las tres exigen
-`Authorization` y ninguna caché compartida almacena eso por RFC 9111, y no hay CDN ni proxy
-inverso en este repo— pero la respuesta no debe depender de una topología que vive fuera de este
-fichero. No hace falta `Vary: X-Locale` además: `no-store` ya excluye la respuesta de cualquier
-caché, compartida o privada.
+servir el idioma de un lector a otro. Hoy no hay ruta de explotación real —el entorno dev sí vive
+detrás de un Cloudflare Tunnel (`sdd/specs/ingress-https-dev.md`), pero su nivel de caché estándar
+no cachea rutas de `/api/v1/...` sin extensión cacheable, y las tres exigen `Authorization`, que
+RFC 9111 prohíbe almacenar a cualquier caché compartida— pero la respuesta no debe depender de una
+topología que vive fuera de este fichero, y menos una que ya existe: `no-store` es lo que mantiene
+esta respuesta fuera del edge de Cloudflare, no una precaución sobre un CDN hipotético. No hace
+falta `Vary: X-Locale` además: `no-store` ya excluye la respuesta de cualquier caché, compartida o
+privada.
 
 ### D3 — El locale efectivo **no** entra en `RequestContext`: vive en su propia dependencia
 
@@ -360,9 +363,10 @@ coste de contexto para quien lo abra, sin sustituir ninguna frase.
   valor persistido. `users.preferred_language` se sigue leyendo y **no** se escribe (R1.7 y la
   columna `title` almacenada quedan intactas: este change no toca ningún escritor).
 - **Contrato HTTP**: una cabecera de petición nueva, `X-Locale: es | en`, opcional, no declarada
-  como parámetro de operación (D2). Sin cabeceras de respuesta nuevas: estas rutas no se cachean
-  en HTTP (el proxy es `dynamic = "force-dynamic"` y no emite `Cache-Control`), así que no hace
-  falta `Vary`.
+  como parámetro de operación (D2). Una cabecera de respuesta nueva en las tres rutas afectadas,
+  `Cache-Control: private, no-store` (enmienda D2, ronda 6): el cuerpo varía con `X-Locale`, y
+  `no-store` excluye la respuesta de toda caché —compartida o privada— sin necesitar `Vary`
+  además (RFC 9111 §5.2.2.5).
 - **Config / variables de entorno**: ninguna nueva. El nombre de la cabecera vive dos veces —una
   constante en `dependencies.py` y una en `lib/api`— porque son dos lenguajes; se anota como espejo,
   igual que `MAX_CLIENT_IP_LENGTH` entre el proxy y `dependencies.py`.

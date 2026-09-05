@@ -103,9 +103,9 @@ async def list_dashboard_cards(
     per_page: Annotated[int, Query(ge=1, le=MAX_PER_PAGE)] = 20,
 ) -> PropertyDashboardPageResponse:
     # Composed text varies on the `X-Locale` request header (D3/R1); a shared cache keyed
-    # on the URL alone could serve one reader's language to another. No such cache exists
-    # in this repo's topology today (auth-bearing responses, no CDN/reverse-proxy config),
-    # but the response should not depend on a fact that lives outside this file.
+    # on the URL alone could serve one reader's language to another. `no-store` is what
+    # keeps this response out of the Cloudflare edge in front of dev
+    # (sdd/specs/ingress-https-dev.md), not a precaution against a hypothetical CDN.
     response.headers["Cache-Control"] = "private, no-store"
     result = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
