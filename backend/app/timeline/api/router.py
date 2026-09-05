@@ -24,7 +24,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from app.auth.api.dependencies import AuthenticatedRequest, require
+from app.auth.api.dependencies import AuthenticatedRequest, RequestLocaleDep, require
 from app.auth.domain.policy import Permission
 from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.timeline.api.dependencies import get_property_timeline_use_case
@@ -71,8 +71,9 @@ ReadDep = Annotated[AuthenticatedRequest, Depends(require(Permission.READ_PROPER
         "Paginated with `page`/`per_page` (PRD §23) and ordered by occurrence descending, "
         "with the entry id as tiebreaker so paging neither repeats an entry nor skips one "
         "when several share an instant. Filters combine with AND; `from`/`to` are "
-        "inclusive on both ends. `title` arrives already composed in the authenticated "
-        "user's language (PRD §10); `description` does not — it carries operator-written "
+        "inclusive on both ends. `title` arrives already composed in the language the "
+        "request states in its `X-Locale` header, falling back to the authenticated user's "
+        "stored preference and then to Spanish (PRD §10); `description` does not — it carries operator-written "
         "text, such as the reason a property was blocked, and is returned verbatim in "
         "whatever language it was typed. The `event_type`, `actor_type` and "
         "`severity` literals are never translated. The `metadata` column is not part of "
@@ -83,6 +84,7 @@ ReadDep = Annotated[AuthenticatedRequest, Depends(require(Permission.READ_PROPER
 async def get_property_timeline(
     property_id: uuid.UUID,
     authenticated: ReadDep,
+    locale: RequestLocaleDep,
     use_case: Annotated[
         GetPropertyTimelineUseCase, Depends(get_property_timeline_use_case)
     ],
@@ -106,7 +108,7 @@ async def get_property_timeline(
         ),
         page=page,
         per_page=per_page,
-        locale=authenticated.context.preferred_language,
+        locale=locale,
     )
     return TimelinePageResponse.build(
         result.entries, total=result.total, page=page, per_page=per_page

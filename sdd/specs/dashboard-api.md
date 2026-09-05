@@ -270,9 +270,12 @@ definición propia de "noche ocupada" que no existía en el sistema (`app/dashbo
 ### Textos legibles en el idioma del usuario
 
 - WHEN el sistema compone una entrada de timeline o una etiqueta de card, THE SYSTEM SHALL
-  renderizarla en el idioma de `preferred_language` del usuario autenticado, que viaja ya
-  resuelto en el `RequestContext` (ver [`auth-tenancy.md`](auth-tenancy.md)) y no cuesta
-  ninguna consulta adicional.
+  renderizarla en el idioma que declara la petición vía la cabecera `X-Locale`
+  (`RequestLocaleDep`, `backend/app/auth/api/dependencies.py`), degradando a
+  `preferred_language` del usuario autenticado —que viaja ya resuelto en el `RequestContext`
+  (ver [`auth-tenancy.md`](auth-tenancy.md)) y no cuesta ninguna consulta adicional— si la
+  petición no declara un idioma que `Locale` reconozca, y a `es` si tampoco `preferred_language`
+  lo es (`resolve_locale`, `backend/app/core/i18n.py`).
 - THE SYSTEM SHALL derivar el `title` de cada entrada de su `event_type` y de su `metadata`
   contra un catálogo que cubre **los 47 valores de `TimelineEventType` en ambos idiomas**, y un
   test SHALL fallar si el enum crece sin que el catálogo lo siga.

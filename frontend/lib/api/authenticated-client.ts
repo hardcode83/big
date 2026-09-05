@@ -5,6 +5,7 @@ import {
   getSessionTokens,
   type SessionTokens,
 } from "@/lib/auth/session-store";
+import { getActiveLocale } from "@/lib/i18n/active-locale";
 
 type AuthStatusChange = "refreshing" | "authenticated" | "expired";
 type TokenPairResponse = components["schemas"]["TokenPairResponse"];
@@ -62,7 +63,7 @@ export function createAuthenticatedClients(
     fetchImpl: options.fetchImpl,
     getHeaders: () => {
       const tokens = getSessionTokens();
-      const headers: HeadersInit = {};
+      const headers: HeadersInit = { "X-Locale": getActiveLocale() };
       if (tokens) {
         headers.Authorization = `Bearer ${tokens.accessToken}`;
       }

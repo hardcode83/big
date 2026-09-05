@@ -83,6 +83,14 @@ Acceptance criteria:
    en inglés.
 8. A test SHALL fallar si un endpoint que compone texto sirve un idioma distinto del que la petición
    declaró, cubriendo las cuatro combinaciones idioma-pedido × idioma-de-la-fila (`es`/`en` × `es`/`en`).
+9. THE SYSTEM SHALL corregir la prosa viva que hoy afirma lo contrario de lo que R1 hace, en **las
+   cuatro** casas que el design midió (OQ3 del gate, 2026-09-05): `docs/dashboard.md:43-45` —cuyo
+   epígrafe «El idioma sale del usuario, no de `Accept-Language`» es exactamente lo que R1
+   invierte—, `sdd/roadmap/timeline-web.md:70`, `sdd/specs/dashboard-api.md:487` y
+   `sdd/specs/revenue-statements.md:306`, cuya frase «ni mecanismo de traducción por
+   `Accept-Language` o locale de usuario en el backend de este proyecto» ya es falsa hoy y R1 la
+   deja más falsa. Los `SHALL` de `sdd/specs/` que R1 enmienda los reescribe `/sdd:archive`; esto
+   son las líneas de prosa que quedan fuera de esa reescritura.
 
 ### R2 — El caché no sirve el idioma anterior
 
@@ -137,10 +145,12 @@ Acceptance criteria:
 3. THE SYSTEM SHALL conservar el aviso de las credenciales en la URL — que `login-form.tsx` sin
    hidratar hace un GET con `email` y `password` como parámetros de consulta —, porque es
    consecuencia del síntoma y no del diagnóstico, y sigue siendo cierto.
-4. THE SYSTEM SHALL corregir la redacción vieja en **las tres** casas vivas del hallazgo
-   (`sdd/project.md`, la entrada de `sdd/roadmap.md`, la nota `sdd/roadmap/frontend-verification-fixes.md`),
-   no sólo en la primera. Los `sdd/changes/archive/**` que la citan son registros históricos y
-   SHALL NOT reescribirse.
+4. THE SYSTEM SHALL corregir la redacción vieja en **las tres** casas vivas del hallazgo de
+   hidratación (`sdd/project.md`, la entrada de `sdd/roadmap.md`, la nota
+   `sdd/roadmap/frontend-verification-fixes.md`), no sólo en la primera. Los
+   `sdd/changes/archive/**` que la citan son registros históricos y SHALL NOT reescribirse.
+   Las **otras cuatro** casas que el design encontró son de la redacción del hallazgo 3 y no de
+   éste, así que las gobierna R1.9: entre las dos, el change corrige siete.
 
 ## Out of scope
 

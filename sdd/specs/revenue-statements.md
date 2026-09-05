@@ -302,14 +302,18 @@ de tablas locales, igual que `revenue-pricing`. La pantalla `/statements` queda 
   diferencia de lo que sugiere R7.7 del proposal ("traducir todos los mensajes de error
   al locale de la sesión en ES y EN"), `app/statements/api/errors.py` — igual que
   `app/pricing/api/errors.py`, el precedente que sigue — renderiza `str(exc)` de
-  mensajes constantes en inglés; no existe ningún módulo `backend/app/core/i18n/` ni
-  mecanismo de traducción por `Accept-Language` o locale de usuario en el backend de
-  este proyecto. El patrón real del proyecto (fijado por `revenue-pricing` →
-  `pricing-web`, sección "Errores por status") es que el **frontend** elige la copia
-  ES/EN por status HTTP y nunca expone el cuerpo del backend — pero como
-  `/statements` queda `RoutePlaceholder` en este change, esa capa de traducción no
-  existe todavía para `owner-statements`/`expenses`. La tarea 10.1 de `tasks.md`, que
-  se marcó completa, no encontró ningún módulo i18n backend real que extender.
+  mensajes constantes en inglés. Sí existe un mecanismo de traducción por idioma en el
+  backend de este proyecto (`backend/app/core/i18n.py`: `Locale`, `Catalog` y
+  `resolve_locale`, que resuelve el idioma que declara la petición vía `X-Locale`,
+  degradando a `preferred_language` y luego a `es`), pero está acotado a componer el
+  `title` de timeline y las etiquetas de card del dashboard — no alcanza, ni se ha
+  extendido, a los mensajes de error de ningún módulo, `statements` incluido. El patrón
+  real del proyecto (fijado por `revenue-pricing` → `pricing-web`, sección "Errores por
+  status") es que el **frontend** elige la copia ES/EN por status HTTP y nunca expone
+  el cuerpo del backend — pero como `/statements` queda `RoutePlaceholder` en este
+  change, esa capa de traducción no existe todavía para `owner-statements`/`expenses`.
+  La tarea 10.1 de `tasks.md`, que se marcó completa, no encontró ningún módulo i18n
+  backend real que extender (no existía todavía cuando se ejecutó esa tarea).
 - **El `_MAPPING` de `app/statements/api/errors.py` no está wireado en la guarda de
   `backend/tests/test_openapi_contract.py`.** Es un duodécimo caso del mismo hueco que
   `sdd/specs/api-contract.md` ya documenta para `access`, `guests`, `maintenance`,

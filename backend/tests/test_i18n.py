@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.core.i18n import Catalog, CatalogTemplateError, Locale
+from app.core.i18n import Catalog, CatalogTemplateError, Locale, resolve_locale
 
 CATALOG = Catalog(
     {
@@ -159,3 +159,43 @@ def test_resolve_accepts_english() -> None:
 def test_an_unsupported_preferred_language_degrades_to_spanish(value: str | None) -> None:
     """`users.preferred_language` is String(5) with no constraint (design, Risks)."""
     assert Locale.resolve(value) is Locale.ES
+
+
+# --- resolve_locale: the three-step degradation chain (D4, R1.2/R1.3) -------------------
+#
+# requested wins when `Locale` recognizes it; otherwise the stored preference degrades
+# through `Locale.resolve`, which already falls back to `es`.
+
+
+def test_a_supported_request_wins_over_a_different_stored_preference() -> None:
+    assert resolve_locale("en", "es") is Locale.EN
+
+
+def test_a_supported_request_wins_over_an_unsupported_stored_preference() -> None:
+    assert resolve_locale("en", "fr") is Locale.EN
+
+
+def test_a_regional_request_tag_degrades_to_the_stored_preference() -> None:
+    """`es-ES` is not a value `Locale` recognizes."""
+    assert resolve_locale("es-ES", "en") is Locale.EN
+
+
+def test_a_quality_weighted_accept_language_value_degrades_to_the_stored_preference() -> None:
+    """`Accept-Language`-shaped lists like `es;q=0.9` are not parsed here — they simply
+    are not a value `Locale` recognizes, so the whole string degrades like any other
+    unsupported request."""
+    assert resolve_locale("es;q=0.9", "en") is Locale.EN
+
+
+def test_no_request_degrades_to_the_stored_preference() -> None:
+    assert resolve_locale(None, "en") is Locale.EN
+
+
+def test_an_unsupported_request_and_an_unsupported_stored_preference_both_degrade_to_spanish() -> (
+    None
+):
+    assert resolve_locale("fr", "klingon") is Locale.ES
+
+
+def test_no_request_and_no_stored_preference_degrade_to_spanish() -> None:
+    assert resolve_locale(None, None) is Locale.ES
