@@ -311,12 +311,19 @@ def _stored_locale_reads(tree: ast.Module) -> list[tuple[str | None, int]]:
     * `getattr(<context>, "preferred_language")`, where `<context>` is any of the three
       owner shapes above — a `Call`, not an `Attribute`, so it needs its own check.
 
-    Not caught, and not attempted: a helper parameter named anything other than `context`
-    (e.g. `def _stored(ctx_row): return ctx_row.preferred_language`) still evades this,
-    because closing that requires tracing what a caller actually passed across a function
-    boundary, which this single-file AST walk does not do. Design D5's "sin lista blanca"
-    holds for the shapes above; it is not a claim that no rename can ever evade a per-file
-    check.
+    What this check is, and is not: a syntactic guard against the shapes an ordinary edit
+    reaches for when it wants to read the stored preference. It is not a barrier against
+    deliberate obfuscation. Two rounds of review each found one more rewrite of the same
+    idea that still returns `[]` — a helper parameter named anything other than `context`
+    (needs tracing what a caller passed across a function boundary), and past that,
+    `getattr(getattr(x, "context"), "preferred_language")`, `x.context.__dict__[...]`,
+    `operator.attrgetter(...)`, or any of the other ways Python can obtain an attribute
+    value without writing `.attr` — an open-ended list a per-file AST walk cannot enumerate,
+    because each one just needs one more layer of indirection than the last one closed.
+    Design D5's "sin lista blanca" holds for the four enumerated shapes above, which is what
+    an ordinary future route reaches for; it is not a claim that no rewrite can ever evade a
+    per-file syntactic check, and no further attempt is made to chase that list — the cost
+    of a wrong-language render (D5's own stated failure mode) does not justify one.
     """
     enclosing: dict[int, str | None] = {}
 
