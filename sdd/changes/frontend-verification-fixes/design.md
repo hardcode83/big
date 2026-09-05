@@ -64,6 +64,17 @@ las tres operaciones no ganan ningún parámetro.
 Rejected: `Annotated[str | None, Header()]` — es la forma idiomática y es exactamente la que R1.5
 descarta, porque añade el parámetro a las tres rutas y por tanto al contrato generado.
 
+**Enmienda (review, ronda 6, 2026-09-06):** las tres rutas que leen `RequestLocaleDep`
+(`list_dashboard_cards`, `get_property_dashboard`, `get_property_timeline`) ahora ponen
+`Cache-Control: private, no-store` en la respuesta — mismo patrón que ya usa
+`app/provenance/api/router.py:39`. Su cuerpo depende de una cabecera de petición (`X-Locale`) que
+ninguna caché compartida indexa; sin este encabezado, una respuesta cacheada por URL sola podría
+servir el idioma de un lector a otro. Hoy no hay ruta de explotación real —las tres exigen
+`Authorization` y ninguna caché compartida almacena eso por RFC 9111, y no hay CDN ni proxy
+inverso en este repo— pero la respuesta no debe depender de una topología que vive fuera de este
+fichero. No hace falta `Vary: X-Locale` además: `no-store` ya excluye la respuesta de cualquier
+caché, compartida o privada.
+
 ### D3 — El locale efectivo **no** entra en `RequestContext`: vive en su propia dependencia
 
 **Chosen:** una dependencia nueva `RequestLocaleDep` (en `backend/app/auth/api/dependencies.py`,
@@ -337,6 +348,7 @@ coste de contexto para quien lo abra, sin sustituir ninguna frase.
 | Frontend · API | `frontend/lib/api/authenticated-client.ts` | `getHeaders` añade `X-Locale` (D6). Único punto de edición para R1.4. |
 | Frontend · claves | `frontend/features/dashboard/hooks/query-keys.ts`, `frontend/features/dashboard/hooks/use-dashboard-data.ts` | Locale al final del `scope`; los tres hooks lo aportan (D7). |
 | Frontend · contrato | `frontend/lib/api/generated/openapi.d.ts` | Regenerado (comentarios). |
+| README | `README.md` | Estructura: nueva entrada para `backend/app/core/i18n.py` y ampliación de la de `frontend/lib/i18n/` con el mecanismo de publicación (D6). |
 | Frontend · tests | `frontend/lib/api/client.test.ts` o `authenticated-client` nuevo, `frontend/features/dashboard/hooks/query-keys.test.ts`, `frontend/features/dashboard/hooks/use-dashboard-data.test.tsx` | Cabecera presente y = locale activo; R2.4 (clave sin locale = rojo) y prefijo de invalidación intacto; cambio de idioma → clave nueva → refetch. |
 | Prosa viva · R3/R4 | `sdd/project.md`, `sdd/roadmap.md` (entrada), `sdd/roadmap/frontend-verification-fixes.md` | Párrafo de hidratación reescrito con el veredicto medido y la hipótesis marcada como tal (D9, D10); las tres casas del hallazgo corregidas (R4.4). |
 | Prosa viva · consecuencia de R1 | `docs/dashboard.md:43-45`, `sdd/roadmap/timeline-web.md:70`, `sdd/specs/dashboard-api.md:487`, `sdd/specs/revenue-statements.md:306` | Cuatro casas más de la redacción superada, fuera de las tres que R4.4 nombra — ver OQ3. |

@@ -22,7 +22,7 @@ import uuid
 from datetime import UTC, date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.auth.api.dependencies import (
     AuthenticatedRequest,
@@ -94,6 +94,7 @@ TodayDep = Annotated[date, Depends(_today)]
     ),
 )
 async def list_dashboard_cards(
+    response: Response,
     authenticated: ReadDep,
     locale: RequestLocaleDep,
     today: TodayDep,
@@ -101,6 +102,11 @@ async def list_dashboard_cards(
     page: Annotated[int, Query(ge=1, le=MAX_PAGE)] = 1,
     per_page: Annotated[int, Query(ge=1, le=MAX_PER_PAGE)] = 20,
 ) -> PropertyDashboardPageResponse:
+    # Composed text varies on the `X-Locale` request header (D3/R1); a shared cache keyed
+    # on the URL alone could serve one reader's language to another. No such cache exists
+    # in this repo's topology today (auth-bearing responses, no CDN/reverse-proxy config),
+    # but the response should not depend on a fact that lives outside this file.
+    response.headers["Cache-Control"] = "private, no-store"
     result = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         role=authenticated.context.role,
@@ -135,6 +141,7 @@ async def list_dashboard_cards(
 )
 async def get_property_dashboard(
     property_id: uuid.UUID,
+    response: Response,
     authenticated: ReadDep,
     locale: RequestLocaleDep,
     today: TodayDep,
@@ -142,6 +149,7 @@ async def get_property_dashboard(
         GetPropertyDashboardUseCase, Depends(get_property_dashboard_use_case)
     ],
 ) -> PropertyDetailResponse:
+    response.headers["Cache-Control"] = "private, no-store"
     detail = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         property_id=property_id,

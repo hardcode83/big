@@ -95,6 +95,20 @@ async def test_an_entry_carries_exactly_the_contract_fields_and_never_metadata(
 
 
 @pytest.mark.asyncio
+async def test_the_timeline_is_not_cacheable_by_a_shared_cache(
+    api, users_by_role_a, property_a
+) -> None:
+    """Same reasoning as the dashboard routes (security review, round 6): `title` varies
+    on `X-Locale`, a header no shared cache keys on, so the response must not be
+    cacheable by anything but the requester's own client."""
+    response = await api.get(
+        _url(property_a), headers=auth_header(api, users_by_role_a[UserRole.TENANT_OWNER])
+    )
+
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+@pytest.mark.asyncio
 async def test_the_canonical_literals_travel_untranslated(
     api, db_session, tenant_a, users_by_role_a, property_a
 ) -> None:

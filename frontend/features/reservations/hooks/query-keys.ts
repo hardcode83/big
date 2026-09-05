@@ -9,7 +9,9 @@ import type { ReservationFilters } from "../data";
  * accident.
  *
  * The list key takes the filters object directly (precedent:
- * `dashboardKeys.propertyTimeline(tenantId, propertyId, filters)`). The
+ * `dashboardKeys.propertyTimeline(tenantId, propertyId, filters, locale)` —
+ * the filters-object part of that shape; this resource has no locale
+ * argument to carry). The
  * caller is responsible for passing an object whose key order is stable across
  * renders — that is what guarantees two equivalent renders produce the same
  * key and TanStack Query does not invalidate.

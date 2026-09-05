@@ -68,6 +68,21 @@ async def test_the_collection_answers_the_prd_pagination_envelope(
 
 
 @pytest.mark.asyncio
+async def test_the_collection_and_the_aggregate_are_not_cacheable_by_a_shared_cache(
+    api, users_by_role_a, property_a
+) -> None:
+    """Composed text varies on `X-Locale`, a request header no shared cache keys on
+    (security review, round 6): a stale response for one reader's locale must never be
+    served to another from a cache. `private, no-store` on both routes, matching the
+    existing `app/provenance/api/router.py` precedent."""
+    collection = await api.get(COLLECTION, headers=_owner(api, users_by_role_a))
+    aggregate = await api.get(_detail_url(property_a), headers=_owner(api, users_by_role_a))
+
+    assert collection.headers["cache-control"] == "private, no-store"
+    assert aggregate.headers["cache-control"] == "private, no-store"
+
+
+@pytest.mark.asyncio
 async def test_a_card_carries_exactly_the_contract_fields(
     api, users_by_role_a, property_a
 ) -> None:

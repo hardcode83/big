@@ -22,7 +22,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.auth.api.dependencies import AuthenticatedRequest, RequestLocaleDep, require
 from app.auth.domain.policy import Permission
@@ -83,6 +83,7 @@ ReadDep = Annotated[AuthenticatedRequest, Depends(require(Permission.READ_PROPER
 )
 async def get_property_timeline(
     property_id: uuid.UUID,
+    response: Response,
     authenticated: ReadDep,
     locale: RequestLocaleDep,
     use_case: Annotated[
@@ -96,6 +97,7 @@ async def get_property_timeline(
     occurred_from: Annotated[datetime | None, Query(alias="from")] = None,
     occurred_to: Annotated[datetime | None, Query(alias="to")] = None,
 ) -> TimelinePageResponse:
+    response.headers["Cache-Control"] = "private, no-store"
     result = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         property_id=property_id,
