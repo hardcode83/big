@@ -24,6 +24,9 @@ function renderDetail() {
 const FULL_DETAIL = {
   id: "reservation-1",
   propertyId: "property-1",
+  propertyName: "Casa del Mar",
+  propertyInternalCode: "CDM-01",
+  guestFullName: "Laura Gómez",
   status: "CONFIRMED",
   checkInDate: "2026-08-12",
   checkOutDate: "2026-08-15",
@@ -266,5 +269,46 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3);
     // No stray currency code: the three nulls must NOT render " EUR".
     expect(document.body.textContent ?? "").not.toContain("EUR");
+  });
+
+  it("renders the property identity block with both values present (R4.1)", () => {
+    useReservationMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: FULL_DETAIL,
+      refetch: vi.fn(),
+    });
+    renderDetail();
+    expect(
+      screen.getByText(esReservations.fields.propertyCode),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(esReservations.fields.propertyName),
+    ).toBeInTheDocument();
+    expect(screen.getByText("CDM-01")).toBeInTheDocument();
+    expect(screen.getByText("Casa del Mar")).toBeInTheDocument();
+  });
+
+  it("renders em-dashes for both property fields when null, without hiding the block (R4.2)", () => {
+    useReservationMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: {
+        ...FULL_DETAIL,
+        propertyName: null,
+        propertyInternalCode: null,
+      },
+      refetch: vi.fn(),
+    });
+    renderDetail();
+    // The block's own labels stay in the DOM — it is not hidden like
+    // DetailGuestBlock is when its data is null.
+    expect(
+      screen.getByText(esReservations.fields.propertyCode),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(esReservations.fields.propertyName),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
   });
 });
