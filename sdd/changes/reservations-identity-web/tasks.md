@@ -81,11 +81,16 @@
       `npx eslint features/reservations/` (el scope de este change) da **0 problemas**, y
       `npx eslint app components lib` (una de las dos mitades que evitan el OOM, per memoria del
       proyecto) también da 0.
-- [ ] 4.3 Comprobación manual: NO realizada. El navegador solo es alcanzable con
-      `make up PORT_OFFSET=<n>`, y con el host ya al límite de memoria (5 stacks de otros
-      worktrees vivos, ~536 MB disponibles de 8 GB) levantar puertos adicionales arriesgaba
-      desestabilizar sesiones ajenas en vez de una mejora proporcional al riesgo. Documentado
-      aquí en vez de omitido, tal como esta tarea anticipa.
+- [x] 4.3 Comprobación manual: **aceptada sin pase en navegador**, decisión humana (Jose,
+      2026-09-05, en respuesta a `BLOCKED.md`). Reconfirmado antes de decidir: host todavía a
+      109 MB libres de 15 GB, 65%+ CPU ocupada, varias sesiones hermanas activas — levantar
+      `make up PORT_OFFSET=<n>` seguía sin ser prudente. Se acepta la evidencia automática ya
+      reunida como suficiente para un cambio de riesgo bajo (solo renderizado, ningún endpoint ni
+      lógica de negocio tocados): panel de revisión completo 7/7 PASS sin hallazgos
+      (`/sdd:review`, sesión delegada), suite de la feature 8/8 ficheros y 63/63 tests en verde,
+      typecheck y lint del scope en 0 errores/problemas (4.1, 4.2). Sin este pase, el riesgo
+      residual es puramente visual (posición/estilo de la celda o del bloque nuevo), no funcional
+      — ya cubierto por los tests de Testing Library que sí ejercitan el DOM renderizado.
 
 ## Implementation Notes
 
