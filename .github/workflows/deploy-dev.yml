@@ -173,19 +173,31 @@ jobs:
     concurrency:
       group: deploy-dev
       cancel-in-progress: false
+    env:
+      # Fix rápido 2026-09-05: NO puede vivir en `$HOME` — desde `ci-runner-pool-oci` hay N agentes
+      # (`autohostai-dev-vm-<i>`), cada uno con su propio `$HOME`, y GitHub reparte `deploy` y
+      # `demo-reset` entre ellos sin garantía de que caigan en el mismo agente (visto: `deploy`
+      # corrió en vm-4 y el `demo-reset` programado del día siguiente en vm-2, que nunca vio el
+      # fichero — run 33953115006). Ruta fuera de `$HOME` pero legible/escribible por cualquier
+      # agente vía el grupo `ci-agents` ya existente (todos los `actions-runner-<i>` son miembros,
+      # `runner-bootstrap.sh`); no amplía el radio de confianza descrito en
+      # `sdd/specs/ci-runner-self-hosted.md` porque ese mismo grupo ya tiene sudo NOPASSWD.
+      RUNTIME_ENV_FILE: /opt/autohostai-dev-runtime/dev-runtime.env
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Render .env leyendo los secrets del OCI Vault (validación previa) [R4]
-        # Fuera del workspace del checkout a propósito, en `$HOME` (no en `_work/`, ni siquiera en
-        # `$RUNNER_TEMP`): desde ci-runner-oci el workspace es compartido con 7 workflows más
-        # `pull_request`-triggered, y el `git clean -ffdx` del checkout POR DEFECTO de cualquiera de
-        # ellos borraría un `.env` que viviera ahí — de hecho lo borra, sin necesidad de que nadie lo
-        # intente: el primer PR normal que corra tras un deploy real ya lo hace (hallazgo del panel
-        # de seguridad, sexta pasada). `$RUNNER_TEMP` tampoco vale: se limpia al inicializar el
-        # SIGUIENTE job, así que para cuando `demo-reset` lo necesitara ya habría desaparecido.
-        # `demo-reset.yml` lee este mismo fichero (ver su paso de precondición) — cualquier cambio
-        # de ruta aquí tiene que reflejarse allí.
+        # Fuera del workspace del checkout a propósito, en `$RUNTIME_ENV_FILE` (no en `_work/`, ni
+        # siquiera en `$RUNNER_TEMP`): desde ci-runner-oci el workspace es compartido con 7
+        # workflows más `pull_request`-triggered, y el `git clean -ffdx` del checkout POR DEFECTO
+        # de cualquiera de ellos borraría un `.env` que viviera ahí — de hecho lo borra, sin
+        # necesidad de que nadie lo intente: el primer PR normal que corra tras un deploy real ya
+        # lo hace (hallazgo del panel de seguridad, sexta pasada). `$RUNNER_TEMP` tampoco vale: se
+        # limpia al inicializar el SIGUIENTE job, así que para cuando `demo-reset` lo necesitara ya
+        # habría desaparecido. Tampoco vive en `$HOME` (ver el `env:` del job): un `.env` por
+        # `$HOME` es invisible para cualquier job que GitHub reparta a otro de los N agentes del
+        # pool. `demo-reset.yml` lee este mismo fichero (ver su paso de precondición) — cualquier
+        # cambio de ruta aquí tiene que reflejarse allí.
         env:
           # OCID del Vault: lo necesita la resolución POR NOMBRE del token del túnel. No puede salir
           # de /etc/autohostai-deploy.env porque ese fichero lo escribe cloud-init y `metadata` es
@@ -244,6 +256,10 @@ jobs:
           SMTP_PASSWORD="$(read_secret_by_name "autohostai-${ENV}-smtp-password" SMTP_PASSWORD)"
           SMTP_FROM_EMAIL="$(read_secret_by_name "autohostai-${ENV}-smtp-from-email" SMTP_FROM_EMAIL)"
           SMTP_USE_TLS="$(read_secret_by_name "autohostai-${ENV}-smtp-use-tls" SMTP_USE_TLS)"
+          # Idempotente: `install -d` no toca nada si el directorio ya existe con este dueño/modo.
+          # `2770` (setgid) para que todo fichero creado dentro herede el grupo `ci-agents` sin
+          # depender de qué agente numerado escriba primero.
+          sudo install -d -m 2770 -o root -g ci-agents "$(dirname "$RUNTIME_ENV_FILE")"
           umask 077
           {
             echo "IMAGE_TAG=sha-${GITHUB_SHA}"
@@ -272,8 +288,10 @@ jobs:
             echo "APP_PROVENANCE_PULL_REQUEST_NUMBER=${{ needs.provenance.outputs.pull_request_number }}"
             echo "APP_PROVENANCE_COMMIT_SHA=${{ needs.provenance.outputs.commit_sha }}"
             echo "APP_PROVENANCE_ACTIONS_RUN_ID=${{ needs.provenance.outputs.actions_run_id }}"
-          } > "$HOME/.autohostai-dev-runtime.env"
-          chmod 600 "$HOME/.autohostai-dev-runtime.env"
+          } > "$RUNTIME_ENV_FILE"
+          # 660, no 600: cualquier agente del pool (todos en `ci-agents`) tiene que poder leerlo Y
+          # sobrescribirlo en el próximo deploy, sea cual sea el agente que lo creó la vez anterior.
+          chmod 660 "$RUNTIME_ENV_FILE"
 
       - name: Login GHCR (GITHUB_TOKEN del job, read-only) [R3]
         # El job corre en un workflow del repo → su GITHUB_TOKEN (packages: read) está cubierto por
@@ -287,7 +305,7 @@ jobs:
       - name: Deploy — pull + preflight + up --wait [R3, R5]
         run: |
           set -euo pipefail
-          docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml pull
+          docker compose --env-file "$RUNTIME_ENV_FILE" -f docker-compose.deploy.yml pull
           # Preflight: una sola cabeza en el grafo de Alembic ANTES de tocar contenedores.
           # `up -d --wait` recrea backend/worker/beat/frontend y solo después espera a que
           # `migrate` termine; si `migrate` sale 255 con "Multiple head revisions" (2026-09-02,
@@ -297,16 +315,16 @@ jobs:
           # va a desplegar, no sobre el checkout, porque es esa imagen la que corre `migrate`.
           # `alembic heads` solo lee el directorio de scripts —no toca la base de datos—,
           # `--no-deps` evita arrancar `postgres` desde aquí y `--rm` no deja contenedor.
-          heads="$(docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml run --rm --no-deps -T migrate alembic heads)"
+          heads="$(docker compose --env-file "$RUNTIME_ENV_FILE" -f docker-compose.deploy.yml run --rm --no-deps -T migrate alembic heads)"
           count="$(printf '%s\n' "$heads" | grep -c '(head)' || true)"
           if [ "$count" -ne 1 ]; then
             echo "::error::el grafo de Alembic de la imagen tiene ${count} cabezas; no se ha tocado ningún contenedor y la versión anterior sigue sirviendo"
             printf '%s\n' "$heads"
             exit 1
           fi
-          if ! docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml up -d --wait --wait-timeout 180; then
+          if ! docker compose --env-file "$RUNTIME_ENV_FILE" -f docker-compose.deploy.yml up -d --wait --wait-timeout 180; then
             echo "::error::deploy falló — servicios no healthy dentro del timeout"
-            docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml logs --tail=200
+            docker compose --env-file "$RUNTIME_ENV_FILE" -f docker-compose.deploy.yml logs --tail=200
             exit 1
           fi
 
@@ -335,7 +353,7 @@ jobs:
         timeout-minutes: 2
         run: |
           set -euo pipefail
-          CID="$(docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml ps -q cloudflared)"
+          CID="$(docker compose --env-file "$RUNTIME_ENV_FILE" -f docker-compose.deploy.yml ps -q cloudflared)"
           if [ -z "${CID:-}" ]; then
             echo "::error::no hay contenedor de cloudflared en marcha: no se puede comprobar el origen"
             exit 1
@@ -412,7 +430,7 @@ jobs:
           docker rm -f "$PROBE" >/dev/null 2>&1 || true
           if [ "$CODE" != "0" ]; then
             echo "::error::el origen no es alcanzable desde la red de ingress ($NET) — el túnel serviría 502. ¿Está 'frontend' en esa red?"
-            docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml logs --tail=100 frontend cloudflared
+            docker compose --env-file "$RUNTIME_ENV_FILE" -f docker-compose.deploy.yml logs --tail=100 frontend cloudflared
             exit 1
           fi
 

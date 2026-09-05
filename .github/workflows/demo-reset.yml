@@ -35,13 +35,21 @@ jobs:
     concurrency:
       group: deploy-dev
       cancel-in-progress: false
+    env:
+      # Misma ruta que `deploy-dev.yml` (ver su `env:` de job) — fix rápido 2026-09-05: el reset
+      # programado de hoy (run 33953115006) cayó en `autohostai-dev-vm-2` mientras el `.env` lo
+      # había escrito el `deploy` anterior en el `$HOME` de `autohostai-dev-vm-4`; con N agentes
+      # repartiendo jobs, `$HOME` no es un sitio compartido. Cualquier cambio de ruta aquí tiene
+      # que reflejarse en `deploy-dev.yml`.
+      RUNTIME_ENV_FILE: /opt/autohostai-dev-runtime/dev-runtime.env
     steps:
       # Checkout por defecto (`clean: true`): desde ci-runner-oci el `.env` que `deploy` renderiza
-      # NO vive en el workspace del checkout — vive en `$HOME/.autohostai-dev-runtime.env`, fuera de
-      # todo lo que `actions/checkout`/`git clean` gestiona (hallazgo del panel de seguridad, sexta
-      # pasada: con 7 workflows `pull_request`-triggered ahora compartiendo este mismo workspace, un
-      # `.env` versionado-como-antes en la raíz del repo se borraría con el primer PR normal que
-      # corriera tras un deploy, no hacía falta ningún ataque). `clean: false` ya no hace falta.
+      # NO vive en el workspace del checkout — vive en `$RUNTIME_ENV_FILE` (fuera de `$HOME`, ver el
+      # `env:` del job), fuera de todo lo que `actions/checkout`/`git clean` gestiona (hallazgo del
+      # panel de seguridad, sexta pasada: con 7 workflows `pull_request`-triggered ahora
+      # compartiendo este mismo workspace, un `.env` versionado-como-antes en la raíz del repo se
+      # borraría con el primer PR normal que corriera tras un deploy, no hacía falta ningún
+      # ataque). `clean: false` ya no hace falta.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Precondición explícita ANTES de invocar nada (R5.5). Sin esto, un entorno no desplegado
@@ -49,11 +57,11 @@ jobs:
       - name: Precondición — el entorno está desplegado
         run: |
           set -euo pipefail
-          if [ ! -f "$HOME/.autohostai-dev-runtime.env" ]; then
-            echo "::error::precondición: el entorno no está desplegado (no hay $HOME/.autohostai-dev-runtime.env). Lanza deploy-dev primero." >&2
+          if [ ! -f "$RUNTIME_ENV_FILE" ]; then
+            echo "::error::precondición: el entorno no está desplegado (no hay $RUNTIME_ENV_FILE). Lanza deploy-dev primero." >&2
             exit 1
           fi
-          if ! docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml ps --status running --quiet postgres | grep -q .; then
+          if ! docker compose --env-file "$RUNTIME_ENV_FILE" -f docker-compose.deploy.yml ps --status running --quiet postgres | grep -q .; then
             echo "::error::precondición: el entorno no está desplegado (el servicio postgres no está corriendo)." >&2
             exit 1
           fi
@@ -101,7 +109,7 @@ jobs:
         id: reset
         run: |
           set -euo pipefail
-          docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml run --rm --no-deps -T \
+          docker compose --env-file "$RUNTIME_ENV_FILE" -f docker-compose.deploy.yml run --rm --no-deps -T \
             -e DEMO_ACCOUNT_PASSWORD \
             -e BOOTSTRAP_STORAGE_TYPE=S3 \
             backend python -m app.cli.demo_reset | tee "$RUNNER_TEMP/demo-reset.out"
