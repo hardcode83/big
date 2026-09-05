@@ -175,6 +175,40 @@ it("denies MANAGE_CONVERSATIONS to TENANT_OWNER — owner reads but does not ope
     expect(incidents.result.current).toBe(false);
   });
 
+  it("grants MANAGE_INCIDENTS to PROPERTY_MANAGER (R1.1, incident-triage-web D13)", () => {
+    useAuth.mockReturnValue({ user: { role: "PROPERTY_MANAGER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_INCIDENTS"),
+    );
+    expect(result.current).toBe(true);
+  });
+
+  it("denies MANAGE_INCIDENTS to TENANT_OWNER — owner keeps _INCIDENT_READ only (R1.1)", () => {
+    useAuth.mockReturnValue({ user: { role: "TENANT_OWNER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_INCIDENTS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
+  it("denies MANAGE_INCIDENTS to TECHNICIAN, CLEANER, SUPER_ADMIN (R1.1)", () => {
+    for (const role of ["TECHNICIAN", "CLEANER", "SUPER_ADMIN"]) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() =>
+        useHasPermission("MANAGE_INCIDENTS"),
+      );
+      expect(result.current, `${role} should not have it`).toBe(false);
+    }
+  });
+
+  it("denies MANAGE_INCIDENTS without an authenticated user (R1.1)", () => {
+    useAuth.mockReturnValue({ user: null });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_INCIDENTS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
   it("declares every UserRole of the generated contract", () => {
     expect(Object.keys(ROLE_UI_PERMISSIONS).sort()).toEqual([
       "CLEANER",

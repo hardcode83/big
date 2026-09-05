@@ -25,6 +25,11 @@ import type { components } from "@/lib/api/generated/openapi";
  * operates the inbox while the owner reads it, and granting the owner the
  * composer that the backend would then 403 is exactly the failure mode the
  * partial mirror exists to prevent.
+ *
+ * `incident-triage-web` D13 mirrors `MANAGE_INCIDENTS` (`policy.py`'s
+ * `_INCIDENT_MANAGE`) here too, `PROPERTY_MANAGER`-only: the owner keeps
+ * `_INCIDENT_READ` and stays absent from this permission, same split as
+ * `MANAGE_CONVERSATIONS` above.
  */
 type UserRole = components["schemas"]["UserRole"];
 
@@ -32,7 +37,8 @@ export type Permission =
   | "MANAGE_CLEANING_TASKS"
   | "MANAGE_PRICE_RECOMMENDATIONS"
   | "EXECUTE_INCIDENTS"
-  | "MANAGE_CONVERSATIONS";
+  | "MANAGE_CONVERSATIONS"
+  | "MANAGE_INCIDENTS";
 
 export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [],
@@ -52,6 +58,7 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "MANAGE_PRICE_RECOMMENDATIONS",
     "EXECUTE_INCIDENTS",
     "MANAGE_CONVERSATIONS",
+    "MANAGE_INCIDENTS",
   ],
   CLEANER: [],
   TECHNICIAN: [],

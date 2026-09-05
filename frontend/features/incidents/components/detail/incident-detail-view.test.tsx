@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { render, screen } from "@/test/render";
 import { I18nProvider } from "@/lib/i18n/client-provider";
@@ -11,6 +11,39 @@ import { severityColorGroup } from "../../lib/severity-tone";
 const useIncidentMock = vi.hoisted(() => vi.fn());
 vi.mock("../../hooks/use-incidents", () => ({
   useIncident: useIncidentMock,
+}));
+
+// `useHasPermission("MANAGE_INCIDENTS")` gates `ManagerIncidentActions`
+// (R1.1, R1.2). Default: no permission — most of this file's tests are
+// about the read-only detail, not the manager's controls.
+const useHasPermissionMock = vi.hoisted(() => vi.fn(() => false));
+vi.mock("@/lib/auth", () => ({
+  useHasPermission: useHasPermissionMock,
+}));
+
+// `useTechnicianDirectory` is what resolves the assigned technician's name
+// (R2.6, design D10) — called unconditionally by `IncidentDetailView`
+// itself, not by `ManagerIncidentActions`, so every viewer gets it regardless
+// of `MANAGE_INCIDENTS`.
+interface TechnicianSummaryFixture {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+const useTechnicianDirectoryMock = vi.hoisted(() =>
+  vi.fn((): { data: TechnicianSummaryFixture[] | undefined } => ({
+    data: undefined,
+  })),
+);
+vi.mock("../../hooks/use-incident-management", () => ({
+  useTechnicianDirectory: useTechnicianDirectoryMock,
+}));
+
+// `ManagerIncidentActions` itself — its internal behaviour (state→action
+// table, 409/422 paths, client validation) is covered by
+// `manager-incident-actions.test.tsx`. Here we only care whether it mounts.
+vi.mock("./manager-incident-actions", () => ({
+  ManagerIncidentActions: () => <div data-testid="manager-incident-actions" />,
 }));
 
 import { IncidentDetailView } from "./incident-detail-view";
@@ -45,6 +78,14 @@ const DETAIL = {
 } as const;
 
 describe("IncidentDetailView", () => {
+  // Every test starts read-only with an empty roster; individual tests opt
+  // into a manager permission or a resolved technician as needed. Without
+  // this reset, `mockReturnValue` from one test would leak into the next.
+  beforeEach(() => {
+    useHasPermissionMock.mockReturnValue(false);
+    useTechnicianDirectoryMock.mockReturnValue({ data: undefined });
+  });
+
   it("renders the loading state", () => {
     useIncidentMock.mockReturnValue({
       isPending: true,
@@ -86,11 +127,11 @@ describe("IncidentDetailView", () => {
       screen.queryByText(esIncidents.fields.assignedTechnician),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByText(esIncidents.fields.assignedTechnicianNote),
+      screen.queryByText(esIncidents.fields.technicianNotAvailable),
     ).not.toBeInTheDocument();
   });
 
-  it("renders the assigned-technician block under a secondary section with the localized note when assignedTechnicianId is set (R3.6)", () => {
+  it("renders the assigned-technician block with the resolved name when the roster contains the id (R2.6, D10)", () => {
     useIncidentMock.mockReturnValue({
       isPending: false,
       isError: false,
@@ -98,13 +139,68 @@ describe("IncidentDetailView", () => {
       data: { ...DETAIL, assignedTechnicianId: "uuid-123" },
       refetch: vi.fn(),
     });
+    useTechnicianDirectoryMock.mockReturnValue({
+      data: [{ id: "uuid-123", name: "Ana Pérez", isActive: true }],
+    });
+    const { container } = renderDetail();
+    expect(screen.getByText("Ana Pérez")).toBeInTheDocument();
+    // The UUID is NEVER printed (R2.6):
+    expect(container.textContent).not.toContain("uuid-123");
+  });
+
+  it("renders 'not available' when the roster does not contain the assigned id (R2.6, D10)", () => {
+    useIncidentMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+      data: { ...DETAIL, assignedTechnicianId: "uuid-123" },
+      refetch: vi.fn(),
+    });
+    useTechnicianDirectoryMock.mockReturnValue({
+      data: [{ id: "uuid-999", name: "Otro Técnico", isActive: true }],
+    });
     const { container } = renderDetail();
     expect(
-      screen.getByText(esIncidents.fields.assignedTechnicianNote),
+      screen.getByText(esIncidents.fields.technicianNotAvailable),
     ).toBeInTheDocument();
-    expect(screen.getByText("uuid-123")).toBeInTheDocument();
-    // No copy-UUID button / tooltip affordance:
-    expect(container.querySelector("button[aria-label*='opiar']")).toBeNull();
+    expect(container.textContent).not.toContain("uuid-123");
+  });
+
+  it("renders 'not available' when the technician directory query fails (R2.6, D10)", () => {
+    useIncidentMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+      data: { ...DETAIL, assignedTechnicianId: "uuid-123" },
+      refetch: vi.fn(),
+    });
+    useTechnicianDirectoryMock.mockReturnValue({ data: undefined });
+    renderDetail();
+    expect(
+      screen.getByText(esIncidents.fields.technicianNotAvailable),
+    ).toBeInTheDocument();
+  });
+
+  it("resolves the technician's name the same way for a manager and for a read-only TENANT_OWNER (R2.6)", () => {
+    useIncidentMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+      data: { ...DETAIL, assignedTechnicianId: "uuid-123" },
+      refetch: vi.fn(),
+    });
+    useTechnicianDirectoryMock.mockReturnValue({
+      data: [{ id: "uuid-123", name: "Ana Pérez", isActive: true }],
+    });
+
+    useHasPermissionMock.mockReturnValue(false); // TENANT_OWNER
+    const owner = renderDetail();
+    expect(owner.getByText("Ana Pérez")).toBeInTheDocument();
+    owner.unmount();
+
+    useHasPermissionMock.mockReturnValue(true); // PROPERTY_MANAGER
+    const manager = renderDetail();
+    expect(manager.getByText("Ana Pérez")).toBeInTheDocument();
   });
 
   it("renders description as plain text (D7): no <script> from string payload", () => {
@@ -277,5 +373,33 @@ describe("IncidentDetailView", () => {
     expect(TONE_BADGE_CLASS[severityColorGroup("CRITICAL")]).not.toBe(
       TONE_BADGE_CLASS[severityColorGroup("LOW")],
     );
+  });
+
+  it("does NOT mount ManagerIncidentActions without MANAGE_INCIDENTS — no reserved gap (R1.1, R1.2)", () => {
+    useHasPermissionMock.mockReturnValue(false);
+    useIncidentMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+      data: DETAIL,
+      refetch: vi.fn(),
+    });
+    renderDetail();
+    expect(
+      screen.queryByTestId("manager-incident-actions"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("mounts ManagerIncidentActions when MANAGE_INCIDENTS is held (R1.1)", () => {
+    useHasPermissionMock.mockReturnValue(true);
+    useIncidentMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+      data: DETAIL,
+      refetch: vi.fn(),
+    });
+    renderDetail();
+    expect(screen.getByTestId("manager-incident-actions")).toBeInTheDocument();
   });
 });

@@ -50,7 +50,7 @@
     "property": "Property",
     "reservation": "Reservation",
     "assignedTechnician": "Assigned technician",
-    "assignedTechnicianNote": "The identifier cannot be resolved to a name in this view",
+    "technicianNotAvailable": "Not available",
     "aiSummary": "Classifier summary",
     "description": "Description",
     "estimatedCost": "Estimated cost",
@@ -67,5 +67,73 @@
     "nextPage": "Next page",
     "forbidden": "You don't have permission to view this incident",
     "validation": "The submitted data is not valid"
+  },
+  "manager": {
+    "title": "Actions",
+    "none": "No actions are available for this incident.",
+    "actions": {
+      "classify": "Rerun classifier",
+      "assign": "Assign technician",
+      "reassign": "Reassign technician",
+      "triage": "Triage",
+      "cancel": "Cancel incident",
+      "sending": "Sending…"
+    },
+    "statusNote": {
+      "awaiting-owner": "The incident is waiting for the owner's response in /approvals."
+    },
+    "assign": {
+      "title": "Assign technician",
+      "titleReassign": "Reassign technician",
+      "technicianLabel": "Technician",
+      "technicianPlaceholder": "Select a technician",
+      "noteLabel": "Assignment note (optional)",
+      "notePlaceholder": "Add context for the technician…",
+      "noteHelp": "Up to 2000 characters.",
+      "reassignWarning": "Reassigning replaces the current ETA and assignment note: they will be lost.",
+      "confirm": "Confirm",
+      "sending": "Assigning…",
+      "errors": {
+        "noteTooLong": "The note exceeds 2000 characters.",
+        "noteControlChars": "The note contains characters that are not allowed."
+      }
+    },
+    "triage": {
+      "title": "Triage incident",
+      "categoryLabel": "Category",
+      "severityLabel": "Severity",
+      "costLabel": "Estimated cost",
+      "costPlaceholder": "0.00",
+      "costHelp": "Positive decimal with up to two decimals.",
+      "confirm": "Save",
+      "sending": "Saving…",
+      "errors": {
+        "invalidCost": "The cost must be a positive decimal with up to two decimals."
+      }
+    },
+    "cancel": {
+      "title": "Cancel incident",
+      "body": "This action is terminal and irreversible: the incident will move to Cancelled and the property's state will be recomposed. Are you sure you want to continue?",
+      "confirm": "Yes, cancel",
+      "keep": "Go back",
+      "sending": "Cancelling…"
+    },
+    "conflict": {
+      "closed": "The incident is already closed and does not accept this action.",
+      "awaiting-owner": "The incident is waiting for the owner's response and does not accept this action.",
+      "out-of-order": "The incident's status has changed; refresh to see the current status.",
+      "triage-not-classified": "Before setting a cost the incident must be classified: set its category and severity."
+    },
+    "errors": {
+      "invalid-technician": "The chosen technician is no longer available in the tenant.",
+      "invalid-cost": "The submitted cost is not valid."
+    },
+    "postClassify": {
+      "stillOpen": "The classifier did not reach the confidence threshold. Use manual triage to set category and severity."
+    },
+    "postTriage": {
+      "awaitingApproval": "The estimated cost exceeded the tenant's threshold: the incident is waiting for the owner's response.",
+      "stillOpen": "The incident is still pending classification. To classify it, set both category and severity."
+    }
   }
 }
