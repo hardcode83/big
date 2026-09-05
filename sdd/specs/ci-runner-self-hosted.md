@@ -97,8 +97,18 @@ aceptado" más abajo, que enumera explícitamente este radio.
 - Al ser un pool persistente compartido (no una VM efímera por job), THE SYSTEM SHALL evitar
   que el checkout de un workflow borre estado que otro necesita: todos los workflows usan el
   checkout por defecto (`clean: true`); el `.env` de `deploy-dev.yml` vive fuera del workspace,
-  en `$HOME/.autohostai-dev-runtime.env` (ver `app-deploy-dev`), precisamente porque 7 workflows
-  `pull_request`-triggered más comparten el mismo disco desde esta migración.
+  en `/opt/autohostai-dev-runtime/dev-runtime.env` (ver `app-deploy-dev`), precisamente porque 7
+  workflows `pull_request`-triggered más comparten el mismo disco desde esta migración.
+- **Corregido** (fix rápido 2026-09-05, fuera del flujo SDD): la ruta original de esta migración
+  era `$HOME/.autohostai-dev-runtime.env`, pero `$HOME` es por-agente (cada `actions-runner-<i>`
+  tiene el suyo) y GitHub reparte los jobs `deploy`/`demo-reset` entre los N agentes sin garantizar
+  que caigan en el mismo — el `demo-reset` programado de un día cayó en un agente que nunca vio el
+  `.env` escrito por el `deploy` del día anterior en otro agente (run 33953115006). THE SYSTEM
+  SHALL escribir y leer ese `.env` en una ruta fuera de `$HOME`, con el directorio contenedor
+  `chmod 2770` (setgid) y `chown root:ci-agents`, para que cualquier agente del pool (todos
+  miembros de `ci-agents`) pueda crearlo, leerlo y sobrescribirlo — esto no amplía el radio de
+  confianza descrito más abajo ("Riesgo aceptado"), porque `ci-agents` ya tiene sudo NOPASSWD
+  sobre toda la VM.
 - THE SYSTEM SHALL publicar los puertos de los `services` de `backend-tests.yml`
   (`postgres`/`redis`) únicamente en `127.0.0.1` (`127.0.0.1:5432:5432`,
   `127.0.0.1:6379:6379`): en un agente con IP pública, publicar a `0.0.0.0` expondría esos
