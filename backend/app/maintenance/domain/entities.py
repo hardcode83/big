@@ -204,6 +204,14 @@ class Incident:
         Mapping[str, tuple[frozenset[IncidentStatus], IncidentStatus]]
     ] = {
         "classify": (frozenset({IncidentStatus.OPEN}), IncidentStatus.CLASSIFIED),
+        # R3.5: a human triage that states both category and severity classifies the
+        # incident too. Its own row rather than a reuse of `classify`, even though both
+        # share origins and destination today: the table is keyed by operation precisely so
+        # that two operations sharing a pair can diverge later without dragging each other.
+        "classify_by_triage": (
+            frozenset({IncidentStatus.OPEN}),
+            IncidentStatus.CLASSIFIED,
+        ),
         "require_owner_approval": (
             frozenset({IncidentStatus.CLASSIFIED, IncidentStatus.IN_PROGRESS}),
             IncidentStatus.AWAITING_OWNER_APPROVAL,
@@ -410,17 +418,37 @@ class Incident:
         category: IncidentCategory | None = None,
         severity: IncidentSeverity | None = None,
         estimated_cost: Decimal | None = None,
-    ) -> None:
-        """Let a human fix what the classifier got wrong (R1.4) and cost the job.
+    ) -> bool:
+        """Let a human fix what the classifier got wrong (R1.4), cost the job, and — when
+        the same call states both category and severity on an `OPEN` incident — classify it
+        (R3.5).
 
-        No transition: triage annotates an incident wherever it is in the flow, and the
-        only bar is that it is not closed. Whether the new `estimated_cost` opens the
-        owner-approval gate is D11's decision and belongs to the use case; what this method
-        guarantees is that the fields move together with `updated_at`.
+        Annotating alone is not a transition: triage touches an incident wherever it is in
+        the flow, and the only bar is that it is not closed. Classifying is, and it goes
+        through the transitions table like every other move (`classify_by_triage`), never as
+        a hand-written assignment to `status`.
+
+        The condition is a business rule, so it lives here and not in the use case: the
+        caller only learns *whether* the incident was classified, from the returned flag,
+        and never has to re-derive it by comparing statuses — which would be
+        indistinguishable from the later jump to `AWAITING_OWNER_APPROVAL`.
+
+        Returns `True` when this call classified the incident, `False` otherwise. Whether
+        the new `estimated_cost` opens the owner-approval gate is D11's decision and belongs
+        to the use case; what this method guarantees is that the fields move together with
+        `updated_at`.
+
+        `ai_classification`, `title` and `description` are never touched (R3.5).
         """
         self._reject_if_closed()
         if estimated_cost is not None and estimated_cost < 0:
             raise MaintenanceValidationError("Estimated cost cannot be negative")
+
+        # Read before the fields move: `_check_transition` reads `self.status`, and the rule
+        # is about where the incident stood when the triage arrived.
+        classifies = (
+            self.status is IncidentStatus.OPEN and category is not None and severity is not None
+        )
 
         if category is not None:
             self.category = category
@@ -429,6 +457,10 @@ class Incident:
         if estimated_cost is not None:
             self.estimated_cost = estimated_cost
         self.updated_at = now
+
+        if classifies:
+            self._transition("classify_by_triage", now)
+        return classifies
 
     def require_owner_approval(
         self,

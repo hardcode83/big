@@ -1557,8 +1557,12 @@ class TriageIncidentUseCase(_NotifiesSeverity, _ApprovalGateMixin, _IncidentFlow
     ) -> Incident:
         incident = await self._load_incident(tenant_id, incident_id, actor)
         previous = (incident.category, incident.severity, incident.estimated_cost)
+        previous_status = incident.status
 
-        incident.set_triage(
+        # R3.5 — the rule of *when* a triage classifies lives on the entity (D2); what comes
+        # back is only whether it did, which is not the same question as
+        # `previous_status != incident.status`: the approval gate below moves the status too.
+        classified = incident.set_triage(
             category=category, severity=severity, estimated_cost=estimated_cost, now=now
         )
 
@@ -1580,9 +1584,40 @@ class TriageIncidentUseCase(_NotifiesSeverity, _ApprovalGateMixin, _IncidentFlow
             .diff("category", previous[0], incident.category)
             .diff("severity", previous[1], incident.severity)
             .diff("estimated_cost", previous[2], incident.estimated_cost)
-            .diff("owner_approval_required", False, incident.owner_approval_required),
+            .diff("owner_approval_required", False, incident.owner_approval_required)
+            # D4 — one audit row for the triage, never a second `INCIDENT_CLASSIFIED` one:
+            # the status move is part of what this triage did, so it belongs in this
+            # `ChangeSet`. Recorded unconditionally, exactly as `ClassifyIncidentUseCase`
+            # does: a triage that classifies nothing leaves `old == new`, which is the same
+            # shape the below-threshold classification already writes.
+            .diff("status", previous_status, incident.status),
             now=now,
         )
+
+        if classified:
+            # D4 — the milestone the automatic path also writes, with actor `USER`: R9's
+            # missing-actor exception belongs to the classifier, not to a human triage, and
+            # `_record_timeline` puts `AI` only when `actor is None`.
+            await self._record_timeline(
+                tenant_id=tenant_id,
+                incident=incident,
+                event_type=TimelineEventType.INCIDENT_CLASSIFIED,
+                actor=actor,
+                now=now,
+            )
+            # D5 — the same trigger `ClassifyIncidentUseCase` fires on its `CLASSIFIED`
+            # branch, and only on this transition: a triage that does not classify never
+            # recomputes the property's state. `MEDIUM`/`LOW` return `None` and fire
+            # nothing. After `save`, because `_fire_trigger` reads the incident back.
+            trigger = self._severity_trigger(incident)
+            if trigger is not None:
+                await self._fire_trigger(
+                    tenant_id=tenant_id,
+                    incident=incident,
+                    trigger=trigger,
+                    actor=actor,
+                    now=now,
+                )
 
         if gate_opened:
             await self._open_approval(

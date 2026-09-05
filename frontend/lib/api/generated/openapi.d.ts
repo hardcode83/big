@@ -464,7 +464,7 @@ export interface paths {
     get: operations["get_incident_api_v1_incidents__incident_id__get"];
     /**
      * Triage an incident
-     * @description Correct the category or the severity, and put a price on the job (R1.4). An `estimated_cost` above the tenant's threshold opens the owner-approval gate and moves the incident to `AWAITING_OWNER_APPROVAL` (R2.1).
+     * @description Correct the category or the severity, and put a price on the job (R1.4). A triage that sets **both** `category` and `severity` on an incident in `OPEN` also classifies it, moving it to `CLASSIFIED` (R3.5); setting only one of the two leaves it in `OPEN`. An `estimated_cost` above the tenant's threshold opens the owner-approval gate and moves the incident to `AWAITING_OWNER_APPROVAL` (R2.1).
      */
     patch: operations["triage_incident_api_v1_incidents__incident_id__patch"];
   };
@@ -7672,7 +7672,7 @@ export interface operations {
   };
   /**
    * Triage an incident
-   * @description Correct the category or the severity, and put a price on the job (R1.4). An `estimated_cost` above the tenant's threshold opens the owner-approval gate and moves the incident to `AWAITING_OWNER_APPROVAL` (R2.1).
+   * @description Correct the category or the severity, and put a price on the job (R1.4). A triage that sets **both** `category` and `severity` on an incident in `OPEN` also classifies it, moving it to `CLASSIFIED` (R3.5); setting only one of the two leaves it in `OPEN`. An `estimated_cost` above the tenant's threshold opens the owner-approval gate and moves the incident to `AWAITING_OWNER_APPROVAL` (R2.1).
    */
   triage_incident_api_v1_incidents__incident_id__patch: {
     parameters: {

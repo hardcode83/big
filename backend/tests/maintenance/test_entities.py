@@ -122,13 +122,24 @@ def test_owner_approval_has_no_created_or_updated_at() -> None:
 # design's *Data & interfaces* is here, and `test_operation_table_matches_entity_table`
 # checks this list against `Incident._TRANSITIONS` so neither can grow without the other.
 
-Operation = Callable[[Incident], None]
+#: `object` and not `None` as the return: every driver but one is a bare transition,
+#: while `classify_by_triage` answers whether it classified (R3.5, D2). What the table
+#: cares about is the move the call performs, never what it hands back.
+Operation = Callable[[Incident], object]
 
 _OPERATIONS: list[tuple[str, Operation, frozenset[IncidentStatus], IncidentStatus]] = [
     (
         "classify",
         lambda i: i.classify(
             classification(), confidence_threshold=Decimal("0.70"), adapter="test", now=LATER
+        ),
+        frozenset({IncidentStatus.OPEN}),
+        IncidentStatus.CLASSIFIED,
+    ),
+    (
+        "classify_by_triage",
+        lambda i: i.set_triage(
+            category=IncidentCategory.PLUMBING, severity=IncidentSeverity.HIGH, now=LATER
         ),
         frozenset({IncidentStatus.OPEN}),
         IncidentStatus.CLASSIFIED,
@@ -223,9 +234,17 @@ _ACCEPTED_CASES = [
     for source in sorted(sources, key=lambda s: s.value)
 ]
 
+#: `classify_by_triage` is the one row whose driver does not refuse from a non-origin
+#: status: R3.5 says a triage that does not classify — because the incident had already
+#: left `OPEN` — still annotates the fields and stays where it is, so there is nothing to
+#: raise. The refusals it *does* owe (a closed incident) and the non-transition it owes on
+#: every other status are asserted one by one in the manual-triage section below.
+_ANNOTATES_INSTEAD_OF_REFUSING = frozenset({"classify_by_triage"})
+
 _REJECTED_CASES = [
     pytest.param(operation, source, id=f"{name}-from-{source.value}")
     for name, operation, sources, _ in _OPERATIONS
+    if name not in _ANNOTATES_INSTEAD_OF_REFUSING
     for source in sorted(set(IncidentStatus) - sources, key=lambda s: s.value)
 ]
 
@@ -719,6 +738,113 @@ def test_triage_is_allowed_while_the_owner_has_not_answered() -> None:
     incident.set_triage(severity=IncidentSeverity.CRITICAL, now=LATER)
 
     assert incident.severity is IncidentSeverity.CRITICAL
+
+
+# --- Triage that classifies (R3.5, design D1/D2) -----------------------------------------
+
+
+def test_triage_with_both_fields_classifies_an_open_incident() -> None:
+    """R3.5: category **and** severity on an `OPEN` incident move it to `CLASSIFIED`."""
+    incident = make_incident(IncidentStatus.OPEN)
+
+    classified = incident.set_triage(
+        category=IncidentCategory.PLUMBING,
+        severity=IncidentSeverity.CRITICAL,
+        estimated_cost=Decimal("450.00"),
+        now=LATER,
+    )
+
+    assert classified is True
+    assert incident.status is IncidentStatus.CLASSIFIED
+    assert incident.category is IncidentCategory.PLUMBING
+    assert incident.severity is IncidentSeverity.CRITICAL
+    assert incident.updated_at == LATER
+
+
+def test_triage_that_classifies_leaves_the_classifier_fields_alone() -> None:
+    """R3.5: "NEVER SHALL tocar `ai_classification`, `title` ni `description`"."""
+    incident = make_incident(IncidentStatus.OPEN)
+    incident.ai_classification = {"adapter": "RuleBasedIncidentClassifier"}
+    before = (incident.ai_classification, incident.title, incident.description)
+
+    incident.set_triage(
+        category=IncidentCategory.PLUMBING, severity=IncidentSeverity.HIGH, now=LATER
+    )
+
+    assert (incident.ai_classification, incident.title, incident.description) == before
+
+
+@pytest.mark.parametrize(
+    ("category", "severity", "estimated_cost"),
+    [
+        pytest.param(IncidentCategory.PLUMBING, None, None, id="category-only"),
+        pytest.param(None, IncidentSeverity.CRITICAL, None, id="severity-only"),
+        pytest.param(None, None, Decimal("450.00"), id="cost-only"),
+        pytest.param(None, None, None, id="nothing"),
+        pytest.param(
+            IncidentCategory.PLUMBING, None, Decimal("450.00"), id="category-and-cost"
+        ),
+    ],
+)
+def test_triage_without_both_fields_leaves_an_open_incident_open(
+    category: IncidentCategory | None,
+    severity: IncidentSeverity | None,
+    estimated_cost: Decimal | None,
+) -> None:
+    """R3.5's negative case: "IF fija sólo uno de los dos, o ninguno, THEN la incidencia
+    SHALL seguir en `OPEN` exactamente como hoy"."""
+    incident = make_incident(IncidentStatus.OPEN)
+
+    classified = incident.set_triage(
+        category=category, severity=severity, estimated_cost=estimated_cost, now=LATER
+    )
+
+    assert classified is False
+    assert incident.status is IncidentStatus.OPEN
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        IncidentStatus.CLASSIFIED,
+        IncidentStatus.ASSIGNED,
+        IncidentStatus.ACCEPTED,
+        IncidentStatus.IN_PROGRESS,
+        IncidentStatus.WAITING_EXTERNAL_PARTS,
+        IncidentStatus.AWAITING_OWNER_APPROVAL,
+    ],
+)
+def test_triage_on_an_incident_past_open_annotates_without_transitioning(
+    status: IncidentStatus,
+) -> None:
+    """D1 — the row admits `OPEN` and nothing else, and a triage that does not classify is
+    still the annotation it has always been (R1.4)."""
+    incident = make_incident(status)
+
+    classified = incident.set_triage(
+        category=IncidentCategory.PLUMBING, severity=IncidentSeverity.CRITICAL, now=LATER
+    )
+
+    assert classified is False
+    assert incident.status is status
+    assert incident.category is IncidentCategory.PLUMBING
+    assert incident.severity is IncidentSeverity.CRITICAL
+
+
+@pytest.mark.parametrize("status", [IncidentStatus.RESOLVED, IncidentStatus.CANCELLED])
+def test_triage_that_would_classify_is_still_refused_on_a_closed_incident(
+    status: IncidentStatus,
+) -> None:
+    """`_reject_if_closed` runs first, so the new rule adds no way into a closed incident."""
+    incident = make_incident(status)
+    before = dataclasses.asdict(incident)
+
+    with pytest.raises(IncidentAlreadyClosedError):
+        incident.set_triage(
+            category=IncidentCategory.PLUMBING, severity=IncidentSeverity.CRITICAL, now=LATER
+        )
+
+    assert dataclasses.asdict(incident) == before
 
 
 # --- The cost fields the flow writes (R2.4, R4.2, R4.3; design D11) ---------------------

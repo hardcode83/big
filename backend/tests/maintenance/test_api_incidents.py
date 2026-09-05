@@ -168,6 +168,99 @@ async def test_the_happy_path_of_every_route(api, world, db_session) -> None:
     assert resolved.json()["resolved_at"] is not None
 
 
+# --- Triage that classifies over HTTP (R3.5, R3.6) --------------------------------------
+
+
+async def test_triaging_an_open_incident_with_both_fields_returns_it_classified(
+    api, world, db_session
+) -> None:
+    """R3.5 over HTTP — the human way out of `OPEN` when the classifier will not give one."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.OPEN)
+
+    response = await api.patch(
+        f"{INCIDENTS}/{incident.id}",
+        json={
+            "category": IncidentCategory.PLUMBING.value,
+            "severity": IncidentSeverity.MEDIUM.value,
+        },
+        headers=auth_header(api, world.manager),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == IncidentStatus.CLASSIFIED.value
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param({"category": IncidentCategory.PLUMBING.value}, id="category-only"),
+        pytest.param({"severity": IncidentSeverity.MEDIUM.value}, id="severity-only"),
+        pytest.param({"estimated_cost": "40.00"}, id="cost-only"),
+    ],
+)
+async def test_triaging_with_only_one_of_the_two_fields_leaves_the_incident_open(
+    api, world, db_session, body: dict
+) -> None:
+    """R3.5's negative case over HTTP: still a `200`, still `OPEN`."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.OPEN)
+
+    response = await api.patch(
+        f"{INCIDENTS}/{incident.id}", json=body, headers=auth_header(api, world.manager)
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == IncidentStatus.OPEN.value
+
+
+async def test_triaging_an_incident_of_another_tenant_is_a_404(
+    api, world, db_session
+) -> None:
+    """R3.6 — the new way out of `OPEN` is no way into somebody else's incident.
+
+    The classifying `PATCH` is the case worth adding on top of the existing isolation tests:
+    it is the one that now moves `status`, so a leak here would not merely read a neighbour's
+    row, it would write to it.
+
+    The `404` is the whole assertion, and reading the neighbour's row back afterwards is not
+    available to add to it: the shared session is bound to the caller's tenant, so
+    `app/core/db.py`'s listener filters the read-back to `None` whether or not the write
+    happened. Same net that makes the refusal itself, asserted at the only place it is
+    observable — the response.
+    """
+    from app.properties.infrastructure.models import PropertyModel
+    from app.tenants.infrastructure.models import TenantModel
+    from tests.maintenance.conftest import World, _user
+
+    neighbour_tenant = TenantModel(name="TenantB", billing_email="b@example.com")
+    db_session.add(neighbour_tenant)
+    await db_session.flush()
+    prop = PropertyModel(
+        tenant_id=neighbour_tenant.id, name="Theirs", internal_code="THEIRS"
+    )
+    db_session.add(prop)
+    await db_session.flush()
+    neighbour = World(
+        neighbour_tenant,
+        prop,
+        await _user(db_session, neighbour_tenant, "TENANT_OWNER"),
+        await _user(db_session, neighbour_tenant, "PROPERTY_MANAGER"),
+        await _user(db_session, neighbour_tenant, "TECHNICIAN"),
+        await _user(db_session, neighbour_tenant, "TECHNICIAN"),
+    )
+    theirs = await make_incident(db_session, neighbour, status=IncidentStatus.OPEN)
+
+    response = await api.patch(
+        f"{INCIDENTS}/{theirs.id}",
+        json={
+            "category": IncidentCategory.PLUMBING.value,
+            "severity": IncidentSeverity.CRITICAL.value,
+        },
+        headers=auth_header(api, world.manager),
+    )
+
+    assert response.status_code == 404
+
+
 async def test_the_old_start_route_no_longer_exists(api, world, db_session) -> None:
     """R2.3 — "se renombra, no se duplica", proved against the app's own route table.
 
