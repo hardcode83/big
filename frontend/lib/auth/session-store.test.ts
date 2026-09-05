@@ -9,20 +9,17 @@ import {
 describe("session store", () => {
   afterEach(() => clearSessionTokens());
 
-  it("stores and returns a defensive copy of the JWT pair in memory", () => {
-    const tokens = { accessToken: "access", refreshToken: "refresh" };
+  it("stores and returns a defensive copy of the access token in memory", () => {
+    const tokens = { accessToken: "access" };
 
     setSessionTokens(tokens);
     tokens.accessToken = "mutated";
 
-    expect(getSessionTokens()).toEqual({
-      accessToken: "access",
-      refreshToken: "refresh",
-    });
+    expect(getSessionTokens()).toEqual({ accessToken: "access" });
   });
 
   it("clears the pair idempotently", () => {
-    setSessionTokens({ accessToken: "access", refreshToken: "refresh" });
+    setSessionTokens({ accessToken: "access" });
 
     clearSessionTokens();
     clearSessionTokens();
@@ -42,8 +39,8 @@ describe("session store", () => {
     });
     const cookieWrite = vi.spyOn(Document.prototype, "cookie", "set");
 
-    setSessionTokens({ accessToken: "access", refreshToken: "refresh" });
-    expect(getSessionTokens()).toEqual({ accessToken: "access", refreshToken: "refresh" });
+    setSessionTokens({ accessToken: "access" });
+    expect(getSessionTokens()).toEqual({ accessToken: "access" });
     clearSessionTokens();
 
     expect(localStorageWrite).not.toHaveBeenCalled();

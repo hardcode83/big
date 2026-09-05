@@ -1,5 +1,6 @@
 """Auth endpoints (PRD §23, R1, R2, R3)."""
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response, status
@@ -16,16 +17,18 @@ from app.auth.api.dependencies import (
     get_request_password_reset_use_case,
     now_utc,
     require,
+    resolve_cookie_secure,
 )
 from app.auth.api.schemas import (
+    SESSION_REFRESH_COOKIE,
     ChangePasswordRequest,
     CurrentUserResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     LoginRequest,
-    RefreshRequest,
     ResetPasswordRequest,
     TokenPairResponse,
+    emit_refresh_cookie,
 )
 from app.auth.application.recovery import (
     ChangeOwnPasswordUseCase,
@@ -38,8 +41,12 @@ from app.auth.application.use_cases import (
     LogoutUseCase,
     RefreshTokenUseCase,
 )
+from app.auth.domain.exceptions import InvalidTokenError
 from app.auth.domain.policy import Permission
+from app.core.config import settings
 from app.core.openapi import AUTHENTICATED_RESPONSES
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -57,13 +64,28 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 async def login(
     body: LoginRequest,
     request: Request,
+    response: Response,
     use_case: Annotated[LoginUseCase, Depends(get_login_use_case)],
 ) -> TokenPairResponse:
+    # `InvalidCredentialsError`/`TooManyAttemptsError` raised inside `execute` propagate
+    # past this point, so the cookie below is never set on a failed login (R1.3) — no
+    # extra guard needed, `tests/auth/test_api.py` asserts it directly.
     pair = await use_case.execute(
         email=body.email,
         password=body.password,
         client_ip=get_client_ip(request),
         now=now_utc(),
+    )
+    secure = resolve_cookie_secure(request)
+    logger.info(
+        "auth.refresh_cookie_issued",
+        extra={"secure": secure, "scheme": request.url.scheme, "endpoint": "login"},
+    )
+    emit_refresh_cookie(
+        response,
+        pair.refresh_token,
+        secure=secure,
+        max_age_seconds=settings.jwt_refresh_token_days * 86400,
     )
     return TokenPairResponse(**vars(pair))
 
@@ -79,14 +101,33 @@ async def login(
 )
 async def refresh(
     request: Request,
-    body: RefreshRequest,
+    response: Response,
     use_case: Annotated[RefreshTokenUseCase, Depends(get_refresh_use_case)],
 ) -> TokenPairResponse:
+    # R2.3: the refresh token travels exclusively via the `SESSION_REFRESH_COOKIE`
+    # cookie — a body carrying `refresh_token` is never read, so it is silently ignored
+    # rather than accepted as a fallback.
+    token = request.cookies.get(SESSION_REFRESH_COOKIE)
+    if token is None:
+        # Same 401 `INVALID_TOKEN` envelope a missing/invalid Bearer token gets
+        # (`backend/app/auth/api/errors.py`) — no new error path for a missing cookie.
+        raise InvalidTokenError("Token is not valid")
     pair = await use_case.execute(
-        refresh_token=body.refresh_token,
+        refresh_token=token,
         # R8 of `api-ingress-routing`: the per-IP budget needs the client, same as login.
         client_ip=get_client_ip(request),
         now=now_utc(),
+    )
+    secure = resolve_cookie_secure(request)
+    logger.info(
+        "auth.refresh_cookie_issued",
+        extra={"secure": secure, "scheme": request.url.scheme, "endpoint": "refresh"},
+    )
+    emit_refresh_cookie(
+        response,
+        pair.refresh_token,
+        secure=secure,
+        max_age_seconds=settings.jwt_refresh_token_days * 86400,
     )
     return TokenPairResponse(**vars(pair))
 
@@ -102,6 +143,7 @@ async def refresh(
     responses=AUTHENTICATED_RESPONSES,
 )
 async def logout(
+    response: Response,
     authenticated: Annotated[
         AuthenticatedRequest, Depends(require(Permission.MANAGE_OWN_SESSION))
     ],
@@ -112,7 +154,18 @@ async def logout(
         family_id=authenticated.family_id,
         now=now_utc(),
     )
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    # Design D6: unconditional on both the "revoked something" and the "nothing to
+    # revoke" (idempotent, R3.2) paths — `use_case.execute` above does not branch on
+    # what it found, so there is nothing to condition this on.
+    #
+    # Mutates and returns the SAME `response` FastAPI injected, rather than
+    # constructing a fresh `Response(...)`: when an endpoint returns its own `Response`
+    # instance, FastAPI sends that instance as-is and does NOT merge headers set on the
+    # injected dependency — a fresh instance here would silently drop the
+    # `Set-Cookie` deletion.
+    response.delete_cookie(SESSION_REFRESH_COOKIE, path="/api/v1/auth")
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
 
 
 @router.post(

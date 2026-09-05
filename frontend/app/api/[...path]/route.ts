@@ -189,6 +189,23 @@ function outboundHeaders(request: NextRequest): Headers {
   if (clientIp) {
     headers.set("x-forwarded-for", clientIp);
   }
+  if (request.headers.has("cf-connecting-ip")) {
+    // `auth-session-persistence` R7.3: the backend's `resolve_cookie_secure` decides
+    // `Secure` from `request.url.scheme`, which uvicorn's `ProxyHeadersMiddleware` only
+    // rewrites from `X-Forwarded-Proto` for peers listed in `--forwarded-allow-ips` —
+    // this proxy's own address. Without re-adding it here, every refresh cookie ships
+    // without `Secure` in the deployed environment, even though the browser only ever
+    // reaches this origin over TLS.
+    //
+    // `cf-connecting-ip`'s mere PRESENCE is the same trust signal `edgeClientIp` above
+    // relies on (its validity is checked separately, only for the rate-limit key):
+    // `ingress-https-dev.md` has `cloudflared` connect to `frontend:3000` over the
+    // compose-internal network and the zone's `always_use_https` redirect any
+    // plain-HTTP request at the public hostname before it ever reaches the tunnel, so
+    // this header can only have been added by Cloudflare's TLS-terminating edge — never
+    // by a caller of this container directly.
+    headers.set("x-forwarded-proto", "https");
+  }
   return headers;
 }
 

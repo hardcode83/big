@@ -68,6 +68,20 @@ class Settings(BaseSettings):
     login_max_failed_attempts: int = 10
     login_lockout_minutes: int = 15
 
+    # CORS allowlist (change `auth-session-persistence`, R7, design D1). Not a secret — a
+    # regex of origins allowed to make credentialed cross-origin requests — so it gets a
+    # working default per rule 8 of `steering/security.md`. Origin reflection (regex match
+    # on the request's `Origin`, else no `Access-Control-Allow-Origin`) is the only shape
+    # that coexists with `allow_credentials=True`: a static `allow_origins` list forces `*`
+    # semantics at the ASGI layer once credentials are on, which browsers reject.
+    #
+    # The default covers dev (`localhost`/`127.0.0.1` with any `PORT_OFFSET`-shifted port)
+    # and the prod hostname; a deploy that adds a new origin sets this env var rather than
+    # editing code.
+    backend_cors_allowed_origin_regex: str = (
+        r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|https://autohostai\.digitalsec\.work$"
+    )
+
     # Password recovery. Design D13 named three; `password_reset_grace_minutes` below is the
     # fourth, added by D7's grace amendment during `run`, so **four** settings live here. None
     # of them is a secret, so each carries a working default and none belongs in the

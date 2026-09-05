@@ -6101,21 +6101,6 @@
         "title": "RecurringIssueTag",
         "type": "string"
       },
-      "RefreshRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "refresh_token": {
-            "minLength": 1,
-            "title": "Refresh Token",
-            "type": "string"
-          }
-        },
-        "required": [
-          "refresh_token"
-        ],
-        "title": "RefreshRequest",
-        "type": "object"
-      },
       "RegenerateReviewDraftRequest": {
         "additionalProperties": false,
         "description": "R3.5 — the body of `POST /reviews/{id}/response` (regenerate the draft).",
@@ -8185,10 +8170,6 @@
             "title": "Expires In",
             "type": "integer"
           },
-          "refresh_token": {
-            "title": "Refresh Token",
-            "type": "string"
-          },
           "token_type": {
             "title": "Token Type",
             "type": "string"
@@ -8196,7 +8177,6 @@
         },
         "required": [
           "access_token",
-          "refresh_token",
           "token_type",
           "expires_in"
         ],
@@ -10003,16 +9983,6 @@
       "post": {
         "description": "Anonymous: the refresh token itself is the credential. The presented token is invalidated. Presenting an already-used one revokes the whole session family.",
         "operationId": "refresh_api_v1_auth_refresh_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RefreshRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
@@ -10023,16 +9993,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "Rotate a refresh token",

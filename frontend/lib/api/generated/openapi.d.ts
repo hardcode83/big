@@ -3879,11 +3879,6 @@ export interface components {
      * @enum {string}
      */
     RecurringIssueTag: "WIFI" | "NOISE" | "CLEANLINESS" | "ACCESS" | "COMMUNICATION" | "LOCATION" | "VALUE" | "AMENITIES" | "OTHER";
-    /** RefreshRequest */
-    RefreshRequest: {
-      /** Refresh Token */
-      refresh_token: string;
-    };
     /**
      * RegenerateReviewDraftRequest
      * @description R3.5 — the body of `POST /reviews/{id}/response` (regenerate the draft).
@@ -4748,8 +4743,6 @@ export interface components {
       access_token: string;
       /** Expires In */
       expires_in: number;
-      /** Refresh Token */
-      refresh_token: string;
       /** Token Type */
       token_type: string;
     };
@@ -5399,22 +5392,11 @@ export interface operations {
    * @description Anonymous: the refresh token itself is the credential. The presented token is invalidated. Presenting an already-used one revokes the whole session family.
    */
   refresh_api_v1_auth_refresh_post: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["RefreshRequest"];
-      };
-    };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
           "application/json": components["schemas"]["TokenPairResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["ErrorEnvelope"];
         };
       };
     };

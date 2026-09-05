@@ -6,7 +6,6 @@
  */
 export interface SessionTokens {
   accessToken: string;
-  refreshToken: string;
 }
 
 let currentTokens: SessionTokens | null = null;

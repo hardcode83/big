@@ -139,6 +139,36 @@ def get_client_ip(request: Request) -> str:
     return canonical if len(canonical) <= MAX_CLIENT_IP_LENGTH else LOOPBACK
 
 
+def resolve_cookie_secure(request: Request) -> bool:
+    """Whether the refresh cookie should carry `Secure` (design D2, R7.2, R7.3).
+
+    Decided by the request's EXTERNAL scheme, resolved by `request.url.scheme == "https"`
+    alone (design D2).
+
+    **Corrected 2026-09-04** (the run panel's `sdd-security` found this docstring's
+    original premise factually wrong against the installed uvicorn 0.51.0 source):
+    uvicorn's `ProxyHeadersMiddleware` rewrites **both** `scope["client"]` (from
+    `X-Forwarded-For`) **and** `scope["scheme"]` (from `X-Forwarded-Proto`) under the exact
+    same `--forwarded-allow-ips` trust gate (`sdd/specs/auth-tenancy.md` §Identificación
+    del cliente) — it was wrong to claim the scheme rewrite doesn't happen. So
+    `request.url.scheme` is already proxy-aware and trust-gated, the same way
+    `get_client_ip` above already trusts `scope["client"]` rather than reading
+    `X-Forwarded-For` itself. A second, manual `request.headers.get("x-forwarded-proto")`
+    read would be redundant on the trusted path and, worse, ungated on the untrusted one:
+    the dev backend port intentionally runs without `--forwarded-allow-ips`
+    (`docker-compose.yml`, so any device on the LAN can reach `:8000` directly)
+    specifically so no forwarded header is trusted there — a raw header read would let any
+    LAN peer force `secure=True` by spoofing it, breaking that standing principle for
+    exactly the header `get_client_ip`'s own docstring warns against trusting
+    unconditionally. This helper therefore reads `request.url.scheme` only.
+
+    `True` in dev over plain HTTP would make the browser silently drop the cookie;
+    unconditionally `True` would also break local `make up PORT_OFFSET=<n>`, which is why
+    this is a per-request decision and not a setting (rejected at design gate).
+    """
+    return request.url.scheme == "https"
+
+
 def get_token_codec() -> JwtTokenCodec:
     return JwtTokenCodec(
         secret=settings.jwt_secret_key,

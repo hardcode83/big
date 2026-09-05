@@ -10,6 +10,7 @@ import {
 import { useRuntimeConfig } from "@/lib/config/runtime-config-provider";
 import { purgeSessionCache } from "@/lib/auth/session-cache-purge";
 import { clearSessionPresent } from "@/lib/auth/session-presence-cookie";
+import { refreshSession } from "@/lib/auth/refresh-coordinator";
 import {
   clearSessionTokens,
   getSessionTokens,
@@ -27,6 +28,22 @@ import { notifyLogout } from "@/lib/auth/logout-event";
  * call runs `purgeSessionCache → clearSessionTokens → clearSessionPresent`
  * regardless of success or 5xx/network error. The endpoint is best-effort;
  * the local cleanup is the contract.
+ *
+ * **A missing access token does not skip the call anymore.** The store can be
+ * empty at logout time — a mount-refresh that never repopulated it, or a
+ * session-expired reset — while the `autohostai.session.refresh` cookie the
+ * browser holds may still be perfectly live; skipping the request outright
+ * left that server-side session, and its cookie, alive with nothing to ever
+ * clear either (review finding: security panel, `auth-session-persistence`).
+ * So when the store is empty this now tries one `refreshSession` first — the
+ * same coordinator the mount-refresh effect uses — purely to obtain a Bearer
+ * token the logout call can present; a failed refresh means the cookie was
+ * already invalid, i.e. nothing left to revoke, and is swallowed rather than
+ * surfaced; the unconditional local purge below still runs either way. A
+ * stale-but-present token (the common case: an access token that expired
+ * without ever being cleared) needs no special handling here — the client's
+ * ordinary 401-recovery already retries logout once with a fresh token, now
+ * that logout is no longer excluded from it (`lib/api/client.ts`).
  *
  * **Query invalidation** (`onSuccess`): `queryClient.removeQueries` on the
  * `["auth", "me"]` key, so a subsequent `useAuth()` starts in `anonymous`
@@ -56,11 +73,11 @@ export function useLogoutMutation() {
   const { apiBaseUrl } = useRuntimeConfig();
   const queryClient = useQueryClient();
 
-  const apiClient = useMemo(() => {
+  const { apiClient, refreshTokens } = useMemo(() => {
     return createAuthenticatedClients({
       apiBaseUrl,
       onSessionExpired: notifySessionExpired,
-    }).apiClient;
+    });
   }, [apiBaseUrl]);
 
   return useMutation({
@@ -73,6 +90,9 @@ export function useLogoutMutation() {
       // a no-op (R3 #3, review F6).
       let networkError: unknown = null;
       try {
+        if (!getSessionTokens()) {
+          await refreshSession(refreshTokens).catch(() => undefined);
+        }
         if (getSessionTokens()) {
           await apiClient.request("/api/v1/auth/logout", { method: "POST" });
         }

@@ -11,13 +11,55 @@ de PRD §23.
 
 | Método | Ruta | Auth | Respuesta |
 |---|---|---|---|
-| `POST` | `/auth/login` | anónima | `200` con `access_token`, `refresh_token`, `token_type`, `expires_in` |
-| `POST` | `/auth/refresh` | anónima (el refresh es la credencial) | `200`, mismo cuerpo |
-| `POST` | `/auth/logout` | Bearer | `204` sin cuerpo |
+| `POST` | `/auth/login` | anónima | `200` con `access_token`, `token_type`, `expires_in` + cookie de refresh (ver abajo) |
+| `POST` | `/auth/refresh` | la cookie de refresh es la credencial | `200`, mismo cuerpo, cookie rotada |
+| `POST` | `/auth/logout` | Bearer | `204` sin cuerpo, borra la cookie |
 | `GET` | `/auth/me` | Bearer | `200` con `id`, `tenant_id`, `name`, `email`, `role`, `preferred_language` |
 
 El token de acceso vive 15 minutos y el de refresh 7 días, ambos configurables. La
 documentación navegable está en `/docs`, con el esquema Bearer declarado.
+
+### El refresh token viaja por cookie, no por cuerpo (`auth-session-persistence`)
+
+Desde este change, `refresh_token` **ya no aparece** en el cuerpo JSON de `/auth/login`
+ni de `/auth/refresh` — ninguno de los dos endpoints lo lee de un body tampoco: viajar
+por JavaScript es justo el riesgo (XSS) que esto cierra. En su lugar, ambos ponen
+`Set-Cookie: autohostai.session.refresh=<token>` con este juego de atributos fijo
+(`backend/app/auth/api/schemas.py`, `emit_refresh_cookie`):
+
+| Atributo | Valor | Por qué |
+|---|---|---|
+| `HttpOnly` | siempre | El token nunca es legible desde JS — es lo que mueve la superficie XSS a "ninguna". |
+| `SameSite` | `Lax` | Es el único valor que deja que una navegación de nivel superior desde un enlace de email a `/login` siga llevando la cookie en el `POST` que sigue; `Strict` rompería ese caso. |
+| `Path` | `/api/v1/auth` | La cookie no sale en ninguna otra ruta — más estrecho que `Path=/`, que la mandaría en cada petición. |
+| `Max-Age` | los mismos `JWT_REFRESH_TOKEN_DAYS` × 86400 segundos | Igual que la vida del token que lleva dentro. |
+| `Secure` | depende del esquema de la petición (ver abajo) | Sin esto, un downgrade a HTTP filtraría el token en claro. |
+
+`POST /auth/refresh` ya no acepta ningún `refresh_token` en el cuerpo: lee
+exclusivamente la cookie (`request.cookies.get(SESSION_REFRESH_COOKIE)`), y su ausencia
+responde el mismo `401 INVALID_TOKEN` que un Bearer inválido. `POST /auth/logout` borra
+la cookie de forma incondicional (`response.delete_cookie(...)`), tanto si había algo que
+revocar como si no — es idempotente por diseño (R3.2).
+
+**`Secure`, en dev y en producción.** La decisión la toma `resolve_cookie_secure()`
+(`backend/app/auth/api/dependencies.py`) leyendo únicamente `request.url.scheme`:
+
+- **Local (`docker-compose.yml`)**: el navegador habla HTTP con `backend:8000` sin pasar
+  por ningún proxy que reescriba el esquema, así que `request.url.scheme` es `http` y la
+  cookie **no** lleva `Secure` — si la llevara, el navegador la descartaría en silencio y
+  ningún login sobreviviría a un reload.
+- **Dev desplegado (`docker-compose.deploy.yml`, tras `ingress-https-dev`)**: el
+  navegador solo llega por `https://<hostname>` a través del túnel de Cloudflare; uvicorn
+  corre con `--proxy-headers --forwarded-allow-ips <IP del contenedor frontend>`, así que
+  reescribe `request.url.scheme` a `https` a partir de `X-Forwarded-Proto` **cuando ese
+  header llega de un peer de confianza**. El Route Handler de Next
+  (`frontend/app/api/[...path]/route.ts`) es quien pone ese header: descarta cualquier
+  `X-Forwarded-Proto` que mandara el cliente y lo vuelve a fijar a `https` él mismo,
+  únicamente cuando la petición trae `CF-Connecting-IP` — la señal de que de verdad
+  cruzó el edge de Cloudflare (que solo sirve por TLS, `always_use_https`) y no llegó
+  por un acceso directo al contenedor. Sin ese re-fijado la cookie nunca llevaría
+  `Secure` en el entorno desplegado, pese a que el navegador solo habla HTTPS con este
+  origen.
 
 ## Dar acceso a un entorno nuevo
 

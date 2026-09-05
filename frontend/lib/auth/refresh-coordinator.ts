@@ -1,17 +1,15 @@
 import {
   clearSessionTokens,
   getSessionGeneration,
-  getSessionTokens,
   setSessionTokens,
   type SessionTokens,
 } from "./session-store";
 import { clearSessionPresent, markSessionPresent } from "./session-presence-cookie";
 
-export type RefreshTokens = (refreshToken: string) => Promise<SessionTokens>;
+export type RefreshTokens = () => Promise<SessionTokens>;
 
 interface InFlightRefresh {
   generation: number;
-  refreshToken: string;
   promise: Promise<SessionTokens>;
 }
 
@@ -27,24 +25,23 @@ export class SessionInvalidatedError extends Error {
 /**
  * Coordinates one refresh operation for the browser runtime. React consumers
  * share this promise but do not own its lifecycle or its cleanup semantics.
+ *
+ * The refresh token itself never passes through this module — it travels via
+ * the `autohostai.session.refresh` httpOnly cookie, attached by the browser on
+ * the credentialed `/auth/refresh` request `refreshTokens` makes. This
+ * coordinator only dedupes concurrent within-tab callers on
+ * `sessionGeneration`; it does not gate on whether an access token currently
+ * sits in memory — a page reload legitimately starts with an empty store and
+ * a live cookie, and that path is served by the mount-refresh effect, not
+ * here (design D8's "two distinct callers").
  */
 export function refreshSession(refreshTokens: RefreshTokens): Promise<SessionTokens> {
-  const current = getSessionTokens();
-  if (!current) {
-    return Promise.reject(new Error("No refresh token available"));
-  }
-
   const generation = getSessionGeneration();
-  if (
-    inFlight &&
-    inFlight.generation === generation &&
-    inFlight.refreshToken === current.refreshToken
-  ) {
+  if (inFlight && inFlight.generation === generation) {
     return inFlight.promise;
   }
 
-  const refreshToken = current.refreshToken;
-  const promise = refreshTokens(refreshToken)
+  const promise = refreshTokens()
     .then((next) => {
       if (getSessionGeneration() !== generation) {
         throw new SessionInvalidatedError();
@@ -66,6 +63,6 @@ export function refreshSession(refreshTokens: RefreshTokens): Promise<SessionTok
       }
     });
 
-  inFlight = { generation, refreshToken, promise };
+  inFlight = { generation, promise };
   return promise;
 }
