@@ -7,3 +7,4 @@
 | 2026-09-04 | tasks | MiniMax-M3[1m] | 37330 | 6963 | 906368 | 0.8139 |  |
 | 2026-09-04 | run | MiniMax-M3[1m] claude-sonnet-5 | 2335075 | 281741 | 35836365 | 36.7861 | incl. subagents |
 | 2026-09-05 | ship | claude-sonnet-5 | 32 | 4435 | 1306943 | 0.5198 | incl. subagents |
+| 2026-09-05 | archive | claude-sonnet-5 | 24 | 2236 | 936709 | 0.2616 | incl. subagents |
