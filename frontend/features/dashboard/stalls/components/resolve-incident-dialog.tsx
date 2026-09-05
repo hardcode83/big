@@ -12,17 +12,9 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 
-import { useResolveIncident } from "@/features/incidents";
+import { isPositiveDecimal, useResolveIncident } from "@/features/incidents";
 
 import { stallsErrorKey } from "../lib/stalls-error";
-
-/**
- * Two decimals with an optional leading digit; accepts both `0.50` and
- * `.50` and rejects commas, exponents and trailing punctuation. The backend
- * schema accepts `number | string` (openapi.d.ts:3284), so the validated
- * value travels to the wire as a string to keep the formatting verbatim.
- */
-const POSITIVE_DECIMAL = /^\d+(\.\d{1,2})?$|^\.\d{1,2}$/;
 
 /**
  * Modal that confirms an incident resolution from the dashboard card
@@ -105,7 +97,7 @@ function ResolveIncidentDialogBody({
   const inputErrorId = useId();
   const submittingRef = useRef(false);
 
-  const parsed = POSITIVE_DECIMAL.test(value.trim());
+  const parsed = isPositiveDecimal(value.trim());
   const canSubmit = !mutation.isPending && parsed;
   const describedBy = [
     inputHelpId,
@@ -178,7 +170,7 @@ function ResolveIncidentDialogBody({
             setValue(event.target.value);
             if (
               validationError &&
-              POSITIVE_DECIMAL.test(event.target.value.trim())
+              isPositiveDecimal(event.target.value.trim())
             ) {
               setValidationError(false);
             }
