@@ -20,6 +20,7 @@ import { useRuntimeConfig } from "@/lib/config/runtime-config-provider";
 import { refreshSession } from "./refresh-coordinator";
 import {
   clearSessionTokens,
+  getSessionGeneration,
   getSessionTokens,
   setSessionTokens,
 } from "./session-store";
@@ -85,42 +86,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     return subscribeToSessionExpired(() => {
+      // Capture the session generation on entry. The body is synchronous today,
+      // so a comparison `captured === getSessionGeneration()` after `purgeSessionCache()`
+      // would be trivially true and useless; the captured value is preserved here as a
+      // JSDoc anchor (R3.1) and as the natural extension point if this listener ever
+      // becomes async or if more than one listener is mounted in the future.
+      const captured = getSessionGeneration();
+      void captured;
+      // `purgeSessionCache()` advances `sessionGeneration` by construction (see
+      // `session-cache-purge.ts`) and empties the singleton `QueryClient`. Any in-flight
+      // optimistic snapshot whose `onMutate` captured a previous generation is invalidated
+      // by this bump — that is the guarantee `use-mark-read.ts:109` and
+      // `use-mark-all-read.ts:99` rely on.
       purgeSessionCache();
-      // A session declared expired must not keep its tokens in memory. Two paths reach this
-      // listener WITHOUT `refreshSession` having cleared them: the `SessionInvalidatedError`
-      // branch, which deliberately skips `clearSessionTokens` when the generation moved
-      // underneath it, and the "No refresh token available" early reject, which never had a
-      // token to clear. Both used to leave the store holding credentials for a session the app
-      // had just declared over.
+      // The reliable signal for the race described in R3.2 is whether the token store
+      // already holds a NEW pair: a `login()` that won against an in-flight refresh has
+      // already installed its tokens and pushed `status` to `"authenticated"` (R4.2).
+      // The coordinator's guard in `refresh-coordinator.ts` expresses the same intent
+      // from the other side — "if the *token* generation moved, the tokens now belong to
+      // another session" — and this listener honours it instead of overriding it: when
+      // tokens are live, we leave tokens, presence and `status` exactly as the new
+      // session installed them. Note the coordinator compares `getTokenGeneration()`, a
+      // separate counter from the `sessionGeneration` this listener bumps two lines up —
+      // a bare cache purge must not look like an identity change to that guard, or a
+      // legitimate concurrent refresh under a different session can be wrongly discarded
+      // (or a genuinely dead session wrongly kept alive); see `session-store.ts`'s module
+      // doc for why the two counters are split.
       //
-      // The consequence that made it visible is `sessionGeneration`, which only moves inside
-      // the two token writers: an optimistic mutation in flight compares it in `onError` to
-      // decide whether its snapshot still belongs to this session, and on those two paths the
-      // number had not moved — so the departing user's cached rows were written back into the
-      // `QueryClient` the line above had just emptied, which is exactly what
-      // `notifications-inbox-web` R3.4 forbids. Clearing here moves the generation on every purge
-      // that goes through THIS listener, which is every 401 of every authenticated client.
-      //
-      // It is **not** true of every purge in this file: `refresh()` below calls
-      // `purgeSessionCache()` on its own, without clearing tokens and without notifying, so
-      // that one still leaves the counter where it was. No `useAuth()` call site destructures
-      // `refresh`, so it is latent rather than live — measured across the tree during
-      // `notifications-inbox-web`'s implementation and confirmed again by its review panel on
-      // 2026-08-29. Left unfixed here because moving the bump into `purgeSessionCache()` is a
-      // decision about shared auth semantics and not about one feature; it is carried as the
-      // roadmap candidate `auth-session-generation-semantics`. Do not read this comment as a
-      // licence to purge from anywhere.
-      //
-      // **This clear deliberately overrides the guard at `refresh-coordinator.ts:57`**, which
-      // skips clearing when the generation moved underneath a stale refresh, precisely so a
-      // refresh cannot destroy credentials installed after it started. The trade-off, and it is
-      // a trade-off rather than an oversight: a stale refresh resolving during a fresh `login()`
-      // now drops the NEW session's tokens, leaving a UI that believes it is authenticated with
-      // an empty store until the next 401 forces a re-login. Before this change that same race
-      // already ended in `expired`, so what is lost is a recovery nothing used — and the
-      // alternative, an expired session that keeps its credentials, is worse.
-      //
-      // All of this was found by `notifications-inbox-web`'s section-5 security panel.
+      // Two paths still reach this listener with tokens live, and that part of the
+      // previous comment is preserved verbatim because it remains true:
+      //   * the `SessionInvalidatedError` branch of `refreshSession`, which deliberately
+      //     skips `clearSessionTokens` when the generation moved underneath it; and
+      //   * the "No refresh token available" early reject, which never had a token to
+      //     clear.
+      // On both paths the listener must still call `purgeSessionCache()` so that the
+      // counter advances and the `QueryClient` is emptied; it must NOT, however, run
+      // the cleanup below — those tokens (when they exist) belong to a session that
+      // won the race.
+      if (getSessionTokens() !== null) {
+        return;
+      }
       clearSessionTokens();
       setUser(null);
       clearSessionPresent();
@@ -162,6 +167,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // which is still `null` until React re-renders.
         return currentUser;
       } catch (error) {
+        // A background refresh started under a still-valid previous session may be in
+        // flight and resolve after this catch runs. `clearSessionTokens()` bumps
+        // `tokenGeneration` by construction, so refresh-coordinator's success branch
+        // sees the mismatch and rejects instead of calling setSessionTokens(), which
+        // would otherwise resurrect a token pair into a session this catch just tore
+        // down. `purgeSessionCache()` is still called first for cache hygiene (nothing
+        // this session cached should survive), but the resurrection guard no longer
+        // depends on it.
+        purgeSessionCache();
         clearSessionTokens();
         clearSessionPresent();
         setUser(null);
@@ -179,9 +193,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setStatus("authenticated");
       return true;
     } catch {
+      // Same guard as the listener (D5) and authenticated-client.ts's onUnauthorized
+      // (D7): a refresh started under a departing session can settle here after a
+      // newer login has already installed its own tokens. Forcing user/status/presence
+      // to "expired" unconditionally would clobber that winning session even though its
+      // tokens are still live — purge unconditionally for cache hygiene, but only do
+      // the full cleanup when no live tokens remain.
       purgeSessionCache();
-      setUser(null);
-      setStatus("expired");
+      if (getSessionTokens() === null) {
+        setUser(null);
+        clearSessionPresent();
+        setStatus("expired");
+      }
       return false;
     }
   }, [clients.refreshTokens]);

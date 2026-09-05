@@ -1,11 +1,12 @@
 import {
   clearSessionTokens,
-  getSessionGeneration,
   getSessionTokens,
+  getTokenGeneration,
   setSessionTokens,
   type SessionTokens,
 } from "./session-store";
 import { clearSessionPresent, markSessionPresent } from "./session-presence-cookie";
+import { purgeSessionCache } from "./session-cache-purge";
 
 export type RefreshTokens = (refreshToken: string) => Promise<SessionTokens>;
 
@@ -34,7 +35,11 @@ export function refreshSession(refreshTokens: RefreshTokens): Promise<SessionTok
     return Promise.reject(new Error("No refresh token available"));
   }
 
-  const generation = getSessionGeneration();
+  // Identity, not cache: `getTokenGeneration()` moves only when the in-memory
+  // pair actually changes (a write or a clear), never on a bare cache purge.
+  // A purge triggered by an unrelated concurrent request's session-expiry
+  // listener must not make this guard believe this pair was superseded.
+  const generation = getTokenGeneration();
   if (
     inFlight &&
     inFlight.generation === generation &&
@@ -46,15 +51,27 @@ export function refreshSession(refreshTokens: RefreshTokens): Promise<SessionTok
   const refreshToken = current.refreshToken;
   const promise = refreshTokens(refreshToken)
     .then((next) => {
-      if (getSessionGeneration() !== generation) {
+      if (getTokenGeneration() !== generation) {
         throw new SessionInvalidatedError();
       }
       setSessionTokens(next);
       markSessionPresent();
       return next;
     })
+    /**
+     * On failure, the guard fires only when the token generation captured
+     * before the refresh still matches: if it did not move under this
+     * promise, the tokens still belong to the session that initiated the
+     * refresh and clearing them is safe; otherwise the current tokens
+     * belong to another session (a `login()` that won the race) and are
+     * left untouched. The clear goes through `purgeSessionCache()` so the
+     * cache invalidation and the token clear stay coupled here too, instead
+     * of depending on every future caller of `refreshSession()` to purge
+     * afterward on its own.
+     */
     .catch((error: unknown) => {
-      if (getSessionGeneration() === generation) {
+      if (getTokenGeneration() === generation) {
+        purgeSessionCache();
         clearSessionTokens();
         clearSessionPresent();
       }

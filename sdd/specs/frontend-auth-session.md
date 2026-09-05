@@ -46,33 +46,41 @@ para UX; el backend conserva la autoridad sobre autorización, RBAC y tenant.
   runtime, THE SYSTEM SHALL perder la sesión y requerir un nuevo login.
 - THE SYSTEM SHALL NOT escribir tokens ni credenciales en localStorage,
   sessionStorage, cookies, IndexedDB, Zustand ni otro almacenamiento persistente.
-- THE SYSTEM SHALL llevar un contador monótono de **generación de sesión**
-  (`lib/auth/session-store.ts`, expuesto como `getSessionGeneration()`), que
-  avanza en los dos escritores del almacén efímero: al escribir tokens y al
-  limpiarlos. Es lo que permite a un consumidor saber que la identidad cambió
-  bajo sus pies sin suscribirse al provider — la usa la mutación optimista de
-  `notifications-inbox-web` para no revertir sobre la caché de la sesión
-  entrante.
-- WHEN se declara una sesión expirada, THE SYSTEM SHALL limpiar los tokens en
-  el listener de la notificación, y no solo purgar la caché: una sesión
+- THE SYSTEM SHALL llevar dos contadores monótonos independientes en
+  `lib/auth/session-store.ts`, cada uno con un único dueño: **generación de
+  caché** (`getSessionGeneration()`), que avanza en `setSessionTokens` y en
+  `purgeSessionCache()` y es lo que permite a un consumidor saber que debe
+  descartar un snapshot de caché sin suscribirse al provider — la usa la
+  mutación optimista de `notifications-inbox-web` para no revertir sobre la
+  caché de la sesión entrante—; y **generación de identidad**
+  (`getTokenGeneration()`), que avanza únicamente en `setSessionTokens` y en
+  `clearSessionTokens` — nunca en una purga de caché por sí sola — y es la que
+  usa `refresh-coordinator.ts` para decidir si un refresco en vuelo sigue
+  perteneciendo a la sesión que lo inició. Los dos contadores se movían como
+  uno solo hasta que una purga de caché ajena a la sesión (p. ej. el listener
+  de otro cliente de feature) podía hacer que esa guarda creyera erróneamente
+  que la sesión había cambiado; la separación existe para que una purga sin
+  escritura ni borrado de tokens no se confunda con un cambio de identidad
+  (entrada de roadmap `auth-session-generation-semantics`, tercera ronda).
+- WHEN se declara una sesión expirada, THE SYSTEM SHALL purgar la caché en el
+  listener de la notificación y SHALL limpiar también los tokens siempre que,
+  tras la purga, no queden tokens vivos de una sesión más nueva
+  (`getSessionTokens()` es `null`) — no basta con purgar la caché: una sesión
   declarada expirada no debe conservar credenciales en memoria, y por dos
   caminos (`SessionInvalidatedError` y «No refresh token available») las
-  conservaba. **Contrapartida aceptada a sabiendas**: eso anula la guarda de
-  `refresh-coordinator.ts`, que limpiaba tokens solo si la generación no se
-  había movido, de modo que un refresco viejo que resuelve después de un login
-  nuevo tira los tokens de la sesión nueva y ésta se recupera sola en el
-  siguiente `401`. Se aceptó porque antes de ese cambio la misma carrera ya
-  terminaba en `expired` —lo que se pierde es una recuperación que nadie
-  usaba— y porque la alternativa, una sesión expirada con credenciales vivas,
-  es peor. La salida está escrita en la entrada de roadmap
+  conservaba. El listener honra la guarda del coordinador de `refresh`, que
+  limpia tokens solo si la generación de identidad no se ha movido — así, la
+  carrera del refresco viejo que resuelve después de un login nuevo se
+  resuelve sin destruir los tokens de la sesión nueva, y la pérdida (un `401`
+  que se recupera solo) se reduce a un caso de uso que ningún consumer actual
+  desestructura. La decisión queda registrada en la entrada de roadmap
   `auth-session-generation-semantics`.
-- **Deuda conocida, latente**: el `catch` de `refresh()` llama a
-  `purgeSessionCache()` sola, sin limpiar tokens y sin notificar expiración,
-  así que es el único camino de purga que **no** mueve la generación. Hoy no
-  la pisa nadie —ningún `useAuth()` del árbol desestructura `refresh`—, y el
-  arreglo bueno es mover el incremento dentro de la propia purga, para que
-  «toda purga invalida todo snapshot en vuelo» sea cierto por construcción.
-  Misma entrada de roadmap.
+- Toda purga del `QueryClient` singleton —venga de donde venga, incluido el
+  camino del `catch` de `refresh()`— avanza `sessionGeneration` en 1;
+  `purgeSessionCache()` es la única función del módulo que bumpea el contador
+  como efecto de purga. Las mutaciones optimistas de `use-mark-read.ts` y
+  `use-mark-all-read.ts` confían en esa invariante para descartar el rollback
+  cuando la sesión cambió bajo la mutación.
 
 ### Provider y transporte
 
