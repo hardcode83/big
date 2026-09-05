@@ -1,6 +1,6 @@
 ---
 schema: 1
-state: PR_OPEN
+state: ARCHIVED
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
@@ -8,9 +8,9 @@ head_branch: sdd/reservations-identity-web
 implementation_sha: 77ef79817744b541478b536018bfb7821560816d
 pr_number: 168
 pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/168
-pr_state: OPEN
-merge_evidence:
-merge_sha:
+pr_state: MERGED
+merge_evidence: pr
+merge_sha: a192bf041985b2c090e3412184139ede3a7718e8
 ---
 
 # Change lifecycle

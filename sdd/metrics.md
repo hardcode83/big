@@ -103,3 +103,4 @@
 | super-admin-console | new, design, tasks, run, review, ship, archive | 322498 | 899352 | 350676804 | 97.9082 | 2026-08-31 | 2026-09-04 |
 | ci-runner-pool-oci | new, design, tasks, run, review, ship, archive | 5629817 | 729863 | 170285694 | 104.3322 | 2026-09-04 | 2026-09-04 |
 | auth-session-generation-semantics | new, design, tasks, run, review, ship, archive | 2973295 | 1216003 | 208191958 | 98.3603 | 2026-09-04 | 2026-09-05 |
+| reservations-identity-web | new, tasks, run, review, ship, archive | 48198 | 268325 | 60302554 | 18.8499 | 2026-09-05 | 2026-09-05 |
