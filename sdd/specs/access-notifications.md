@@ -173,7 +173,9 @@ El adapter cableado es una sola línea de DI, señalada como tal.
 - THE SYSTEM SHALL resolver el adapter por canal desde un registro explícito construido con
   antelación: `EMAIL` y `CONSOLE` → `SMTPEmailAdapter` cuando `SMTP_HOST` está configurado, y
   `ConsoleEmailAdapter` si no (ver «El adapter SMTP real» abajo), `WHATSAPP` →
-  `MockWhatsAppAdapter`, `IN_APP` → `InAppNotificationAdapter`. `PUSH` **no tiene entrada** a
+  `WhatsAppCloudAdapter` cuando `WHATSAPP_PROVIDER=meta`, o `MockWhatsAppAdapter` cuando
+  `WHATSAPP_PROVIDER=mock` (ver [`whatsapp-cloud-adapter.md`](whatsapp-cloud-adapter.md)),
+  `IN_APP` → `InAppNotificationAdapter`. `PUSH` **no tiene entrada** a
   propósito — un marcador que informase de éxito marcaría `SENT` filas que nadie recibió.
 - THE SYSTEM SHALL hacer que `InAppNotificationAdapter` no llame a nada y devuelva éxito: en el
   canal in-app **la fila es la entrega**, y lo que la hace legible es el endpoint de lectura. Si
@@ -727,8 +729,7 @@ tres—, pero la separación existe para cuando alguno la necesite.
   `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS`) en `Settings` con defaults vacíos/permisivos,
   de modo que el import nunca falle y un entorno sin relay arranque sin exigir credenciales que no
   usa; la exigencia de configuración completa la hace cumplir `adapter_registry()` al construirse
-  (ver «El adapter SMTP real»). Las variables de un WhatsApp real siguen reservadas por la regla 8
-  de `steering/security.md`; `.env.example` conserva los seis nombres SMTP sin valor.
+  (ver «El adapter SMTP real»). Las cuatro variables de WhatsApp (`WHATSAPP_PROVIDER`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`) están declaradas de verdad en `Settings`, sin valor por defecto para las credenciales (regla 8) — ver [`whatsapp-cloud-adapter.md`](whatsapp-cloud-adapter.md); `.env.example` conserva los seis nombres SMTP sin valor.
 - THE SYSTEM SHALL registrar en la tabla única de cadencias `dispatch_notifications` cada minuto y
   `provision_access_records` cada 5 minutos, de modo que `beat_schedule` y el TTL del lock sigan
   derivándose de la misma fuente.
@@ -743,13 +744,15 @@ y no una contradicción. Los nombres de los cuatro originales no se tocan.
 
 ## Estado y deuda conocida
 
-- **`EMAIL` es real desde `smtp-delivery-adapter`; WhatsApp sigue siendo mock.** `SMTPEmailAdapter`
-  entrega por el relay de OCI Email Delivery cuando `SMTP_HOST` está configurado — dev lo está, y
-  el primer recorrido real (reset de contraseña, 2026-09-03) llegó a una bandeja real.
-  `MockWhatsAppAdapter` sigue marcado `EXTERNAL_DEPENDENCY`; el real es `whatsapp-cloud-adapter`,
-  entrada de roadmap aparte. La deuda que esto cerraba era una credencial sin entregar: los enlaces
-  de recuperación salen por `EMAIL` y ya llegan de verdad. En un entorno **sin** relay configurado
-  el enlace sigue sin poder leerse del log (la regla de arriba se lo prohíbe a
+- **`EMAIL` es real desde `smtp-delivery-adapter`; `WHATSAPP` es real desde
+  `whatsapp-cloud-adapter`.** `SMTPEmailAdapter` entrega por el relay de OCI Email Delivery cuando
+  `SMTP_HOST` está configurado — dev lo está, y el primer recorrido real (reset de contraseña,
+  2026-09-03) llegó a una bandeja real. `WhatsAppCloudAdapter` entrega por la Cloud API de Meta
+  cuando `WHATSAPP_PROVIDER=meta` (ver [`whatsapp-cloud-adapter.md`](whatsapp-cloud-adapter.md));
+  `MockWhatsAppAdapter` sigue disponible, marcado `EXTERNAL_DEPENDENCY`, para
+  `WHATSAPP_PROVIDER=mock`. La deuda que el primero cerraba era una credencial sin entregar: los
+  enlaces de recuperación salen por `EMAIL` y ya llegan de verdad. En un entorno **sin** relay
+  configurado el enlace sigue sin poder leerse del log (la regla de arriba se lo prohíbe a
   `ConsoleEmailAdapter`), así que ahí la vía que de verdad recupera una cuenta sigue siendo
   `python -m app.cli.reset_password`.
 - **`sent_at` es la marca de tiempo de la ejecución**, no el instante exacto del envío: el job toma

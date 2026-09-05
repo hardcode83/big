@@ -10,6 +10,7 @@ the conversation is `PENDING_HUMAN`") is enforced by `escalate` refusing any ori
 promise without any test going red.
 """
 
+import inspect
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -105,6 +106,118 @@ def test_the_property_column_stays_nullable() -> None:
     property is resolved.
     """
     assert ConversationModel.__table__.c.property_id.nullable is True
+
+
+# --- `business_phone_number` (`whatsapp-cloud-adapter` R4.5, D4 addendum) ----------------
+
+#: Meta's `phone_number_id`, a Graph API identifier — never `display_phone_number`.
+BUSINESS_NUMBER = "109876543210987"
+
+
+def test_a_whatsapp_conversation_carries_the_number_it_was_opened_on() -> None:
+    """D4 addendum: the tenant's own number the guest wrote **to**, so a reply leaves from
+    the number the thread started on."""
+    conversation = Conversation(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        channel=ConversationChannel.WHATSAPP,
+        created_at=NOW,
+        updated_at=NOW,
+        property_id=uuid.uuid4(),
+        business_phone_number=BUSINESS_NUMBER,
+    )
+
+    assert conversation.business_phone_number == BUSINESS_NUMBER
+
+
+def test_a_conversation_carries_no_business_number_by_default() -> None:
+    """Every channel but `WHATSAPP` — and a `WHATSAPP` row created before this change —
+    has none, so the field defaults rather than being required."""
+    assert make_conversation().business_phone_number is None
+
+
+@pytest.mark.parametrize(
+    "channel",
+    [
+        ConversationChannel.PORTAL,
+        ConversationChannel.EMAIL,
+        ConversationChannel.MANUAL,
+        ConversationChannel.PHONE_TRANSCRIPT,
+        ConversationChannel.AIRBNB_MSG,
+        ConversationChannel.BOOKING_MSG,
+    ],
+)
+def test_no_other_channel_may_carry_a_business_number(
+    channel: ConversationChannel,
+) -> None:
+    """The task's "`None` para cualquier canal que no sea `WHATSAPP`", as an invariant of the
+    entity rather than as a habit of its one writer: on any other channel there is no such
+    number, so a value here would describe a reply route that does not exist. Checked at
+    construction, which is what makes it true of `_to_conversation`'s read-back too."""
+    with pytest.raises(MessagingValidationError):
+        Conversation(
+            id=uuid.uuid4(),
+            tenant_id=uuid.uuid4(),
+            channel=channel,
+            created_at=NOW,
+            updated_at=NOW,
+            property_id=uuid.uuid4(),
+            business_phone_number=BUSINESS_NUMBER,
+        )
+
+
+@pytest.mark.parametrize("value", ["", "   ", "\t"])
+def test_a_blank_business_number_is_refused(value: str) -> None:
+    """A blank string is not `None`: it would pass every "is it set?" read while naming no
+    number at all."""
+    with pytest.raises(MessagingValidationError):
+        Conversation(
+            id=uuid.uuid4(),
+            tenant_id=uuid.uuid4(),
+            channel=ConversationChannel.WHATSAPP,
+            created_at=NOW,
+            updated_at=NOW,
+            property_id=uuid.uuid4(),
+            business_phone_number=value,
+        )
+
+
+def test_neither_refusal_quotes_the_number() -> None:
+    """Rule 11 of `steering/security.md` and this module's own habit: the refusal names the
+    field and the rule, never the value."""
+    with pytest.raises(MessagingValidationError) as raised:
+        Conversation(
+            id=uuid.uuid4(),
+            tenant_id=uuid.uuid4(),
+            channel=ConversationChannel.EMAIL,
+            created_at=NOW,
+            updated_at=NOW,
+            property_id=uuid.uuid4(),
+            business_phone_number=BUSINESS_NUMBER,
+        )
+
+    assert BUSINESS_NUMBER not in str(raised.value)
+
+
+def test_the_entity_offers_no_way_to_change_the_number() -> None:
+    """"Set once… and never changed after" (D4 addendum) is structural, not documented: no
+    method of this entity writes the field, so the only writer is the `INSERT` of
+    `ensure_whatsapp`. A future `retarget`/`set_business_phone_number` method makes this test
+    red, which is the moment to re-read the addendum rather than to delete the test."""
+    methods = {
+        name
+        for name in vars(Conversation)
+        if callable(getattr(Conversation, name)) and not name.startswith("_")
+    }
+    for method in methods:
+        source = inspect.getsource(getattr(Conversation, method))
+        assert "business_phone_number" not in source, method
+
+
+def test_the_business_number_column_is_nullable() -> None:
+    """The mirror of `test_the_property_column_stays_nullable`: the restriction is the
+    entity's, and the column stays open for the channels that have no number."""
+    assert ConversationModel.__table__.c.business_phone_number.nullable is True
 
 
 # --- escalation_status axis (R5.3, D4) --------------------------------------------------

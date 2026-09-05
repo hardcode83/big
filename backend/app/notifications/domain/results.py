@@ -39,6 +39,10 @@ class NotificationErrorCode(str, enum.Enum):
     NO_ADAPTER_FOR_CHANNEL = "NO_ADAPTER_FOR_CHANNEL"
     #: `notification_max_attempts` reached; the row moves to `FAILED` (R4.4).
     MAX_ATTEMPTS_EXCEEDED = "MAX_ATTEMPTS_EXCEEDED"
+    #: A WhatsApp free-text send was attempted more than 24h after the guest's last inbound
+    #: message (or with no known inbound message at all) and no `template_id` was supplied to
+    #: fall back to (`whatsapp-cloud-adapter` design D2, R2.1/R2.3).
+    OUTSIDE_SESSION_WINDOW = "OUTSIDE_SESSION_WINDOW"
 
 
 @dataclass(frozen=True)

@@ -24,7 +24,7 @@ las pantallas —; aquí va el *cómo se trabaja con ello*.
 
 ## La API (`dashboard-api`)
 
-Cinco rutas, todas autenticadas con `require(Permission.READ_PROPERTIES)`, todas
+Seis rutas, todas autenticadas con `require(Permission.READ_PROPERTIES)`, todas
 tenant-scoped y todas de solo lectura:
 
 | Ruta | Qué devuelve |
@@ -33,6 +33,7 @@ tenant-scoped y todas de solo lectura:
 | `GET /api/v1/properties/{id}/dashboard` | el agregado de PRD §9.2 para una vivienda |
 | `GET /api/v1/properties/{id}/state` | estado operacional canónico + instante de la última transición |
 | `GET /api/v1/timeline/{property_id}` | la cronología de la vivienda, filtrable y paginada (PRD §10) |
+| `GET /api/v1/timeline` | la misma cronología, filtrable y paginada igual que la de arriba, pero sin `property_id`: fusiona en una sola página los eventos de **todas** las viviendas del tenant; cada entrada añade `property_id`, `property_name` y `property_internal_code` de la vivienda de origen |
 | `GET /api/v1/dashboard/occupancy-series` | serie de ocupación de la semana ISO en curso del tenant: un punto por día (lunes a domingo, UTC) con el % de viviendas activas con «noche ocupada» ese día |
 
 Lo que conviene saber al operarlas:
@@ -50,7 +51,16 @@ Lo que conviene saber al operarlas:
   bloquear una vivienda o ponerla fuera de servicio—, así que no se compone desde el
   catálogo ni se traduce: se entrega tal cual se guardó. Una misma entrada puede, por
   tanto, traer el `title` en tu idioma y la `description` en el de quien la escribió.
-- **Un `404` no distingue** entre una vivienda que no existe y una de otro tenant.
+- **Un `404` no distingue** entre una vivienda que no existe y una de otro tenant. La
+  excepción es `GET /api/v1/timeline`: no hay identificador de recurso que pueda no
+  existir, así que un tenant sin propiedades o sin eventos recibe `200` con página
+  vacía, nunca `404`.
+- **`GET /api/v1/timeline` añade identidad de propiedad, no un lector nuevo.** Cada
+  entrada trae `property_id`, `property_name` y `property_internal_code` —mismos
+  nombres que fijó `reservation-property-identity` para reservas—, resueltos en un
+  número acotado de consultas independiente del tamaño de página. `property_name` y
+  `property_internal_code` llegan a `null` cuando el `property_id` del evento no
+  resuelve dentro del tenant: una entrada válida, no un error.
 - **Agregar no concede.** Un rol sin el permiso que protege el origen de un bloque
   recibe ese bloque a `null`, no su contenido: reserva y huésped con
   `READ_RESERVATIONS`, limpieza con `READ_CLEANING_TASKS`, acceso con
@@ -106,8 +116,10 @@ Lo que conviene saber al operarlas:
   Hasta que elijas una vivienda no se pide nada al servidor, y no hay
   autoselección: con varias viviendas cualquier elección automática sería
   arbitraria. La elección vive **solo en memoria** y se descarta si cambia el
-  tenant. **No hay cronología global** de todas las viviendas a la vez: el backend
-  sirve una por petición.
+  tenant. Esta pantalla sigue pidiendo una vivienda a la vez: el backend ya sirve
+  una cronología agregada de todo el tenant (`GET /api/v1/timeline`, arriba), pero
+  `/timeline` no la consume — su consumidor previsto es el widget «Actividad
+  Reciente» de `/dashboard` (ver «Deuda pendiente»).
 
 ## Lectura rápida de las tarjetas
 
@@ -168,9 +180,13 @@ make up SERVICE=frontend   # o: cd frontend && npm run dev
 - **Tiempo real**: la API entrega lectura con filtros y paginación. Empujar cambios
   al cliente (WebSocket/SSE) no lo cubre `dashboard-api` y no tiene todavía entrada
   propia.
-- **Cronología global**: `GET /api/v1/timeline` (PRD §23) no existe, así que
-  `/timeline` pide vivienda. Servir varias a la vez sería trabajo de backend y no
-  tiene entrada.
+- **Cronología global**: `GET /api/v1/timeline` (PRD §23) ya existe — lo entregó
+  `dashboard-activity-feed` — y agrega en una sola página los eventos de todas las
+  viviendas del tenant (arriba). Lo único que queda pendiente es el `[FE]`: el
+  widget «Actividad Reciente» de la maqueta rediseñada (Decisión 4 de
+  `visual-restyle-workspace`) que lo consuma y lo pinte en `/dashboard`, igual que
+  se dejó fuera en `dashboard-operational-kpis` y `dashboard-occupancy-series`. La
+  pantalla `/timeline` sigue pidiendo vivienda: no es su consumidor.
 - **Barra de páginas repetida**: la cronología, el portfolio y las reservas tienen
   cada uno su propia navegación de páginas. Unificarlas tocaría features ya
   archivadas y ninguna entrada lo ha decidido.

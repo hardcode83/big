@@ -8,7 +8,7 @@ session listener of `app/core/db.py` covers neither INSERTs nor the identity map
 
 import uuid
 from collections.abc import Collection, Sequence
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -18,7 +18,11 @@ from app.core.tenancy import CrossTenantWriteError
 from app.reservations.domain.entities import UPDATABLE_FIELDS, Reservation
 from app.reservations.domain.enums import ReservationStatus
 from app.reservations.domain.exceptions import DuplicateExternalReservationError
-from app.reservations.domain.repositories import Page, ReservationFilters
+from app.reservations.domain.repositories import (
+    RESERVATION_MATCH_GRACE_DAYS,
+    Page,
+    ReservationFilters,
+)
 from app.reservations.infrastructure.models import ReservationModel
 
 EXTERNAL_PMS_ID_CONSTRAINT = "uq_reservations_tenant_id_external_pms_id"
@@ -107,6 +111,22 @@ class SqlAlchemyReservationRepository:
                     # Stay overlap, the same criterion `_conditions` applies (design D12).
                     ReservationModel.check_in_date <= date_to,
                     ReservationModel.check_out_date >= date_from,
+                )
+            )
+        )
+        return [_to_reservation(model) for model in rows.scalars()]
+
+    async def find_active_for_guest(
+        self, tenant_id: uuid.UUID, guest_id: uuid.UUID, *, on_date: date
+    ) -> Sequence[Reservation]:
+        grace = timedelta(days=RESERVATION_MATCH_GRACE_DAYS)
+        rows = await self._session.execute(
+            _ordered(
+                select(ReservationModel).where(
+                    ReservationModel.tenant_id == tenant_id,
+                    ReservationModel.guest_id == guest_id,
+                    ReservationModel.check_in_date - grace <= on_date,
+                    ReservationModel.check_out_date + grace >= on_date,
                 )
             )
         )

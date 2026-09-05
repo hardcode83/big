@@ -149,3 +149,79 @@ Cuándo conviene migrar el runner a `infra-github-iac` (provider `integrations/g
 - Cuando se quiera que el `terraform plan` detecte drift en el registration del runner (hoy se detecta por la salida de `gh api /repos/.../actions/runners`, no por plan).
 
 Hasta entonces, `runner-bootstrap.sh` es la fuente de verdad y el reaprovisionamiento manual cubre el ciclo de vida de la VM. **No** se retira el script al migrar a `infra-github-iac` — se conserva como puente mientras el provider declara el equivalente, y se retira solo cuando el `apply` que use `integrations/github` esté verde en los tres entornos.
+
+## 7. Subir N
+
+Aumentar el número de agentes registrados contra GitHub, sin parar la app. Cambio declarativo en Terraform + reaplicar el bootstrap sobre la VM viva (change `ci-runner-pool-oci`).
+
+```bash
+# 1. Editar variables.tf (o, preferiblemente, dev.tfvars):
+#    runner_count = N (sube sobre el default; R6.1: rango razonable 1-4).
+#    Rango válido 1..4 (validation en variables.tf).
+
+# 2. Aplicar por el pipeline (RUNBOOK §0). El cambio solo toca el valor de la
+#    variable; los demás recursos quedan igual:
+gh workflow run infra-dev.yml --ref main -f action=plan
+gh workflow run infra-dev.yml --ref main -f action=apply
+
+# 3. En la VM, reaprovisionar el runner con el nuevo N. El bootstrap es idempotente:
+#    los agentes ya registrados no se re-crean (./config.sh --replace); los nuevos
+#    se añaden al bucle; el legado `autohostai-${ENV}-vm` (sin sufijo numérico) se
+#    retira una sola vez si la API de GitHub aún lo lista (ver design.md D3).
+#    OBLIGATORIO exportar RUNNER_COUNT antes de invocar el script: una asignación-
+#    prefijo (`VAR=x cmd "$VAR"`) NO hace visible VAR a la expansión de argumentos de
+#    ese mismo comando, así que sin el `export` "$RUNNER_COUNT" llega vacío y el
+#    script cae en silencio a su fallback interno (hallazgo del panel de
+#    `/sdd:review`, 2026-09-04).
+export RUNNER_COUNT=N   # el mismo N del paso 1 — sustituir el literal
+sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"
+```
+
+Verificar: GitHub lista exactamente N entradas con label `dev` y nombre `autohostai-${ENV}-vm-<i>` para `i ∈ [1..N]`, todas `online`, sin la entrada legada `autohostai-${ENV}-vm`:
+
+```bash
+gh api /repos/autohostai-labs/AutoHostAI/actions/runners?per_page=100 \
+  --jq '.runners[] | "  name=\(.name) status=\(.status) busy=\(.busy) labels=\([.labels[].name] | join(","))"'
+```
+
+El comando es seguro: el reaprovisionamiento no toca `/etc/autohostai-deploy.env`, no reescribe `docker compose` ni reinicia los servicios de la app (design.md D6).
+
+> **Por encima del default** (`runner_count > 4`) (R6.3): la métrica cambia. Antes de aceptar el cambio, archiva en `RUNBOOK.md §6.2` una nota de medición explícita — tiempo de suite del backend cuando otro agente corre la del frontend en paralelo, latencia p50 del frontend público — sobre la VM descrita en `infra/environments/dev/README.md` (4 OCPU/24 GB/AD-3 PAYG). Sin esa nota, no subas N.
+
+## 8. Bajar N
+
+Reducir el número de agentes. La fase de baja del bootstrap (`runner-bootstrap.sh`, design.md D3) **aborta** con `set -e` si algún agente a retirar está `active` o tiene jobs en vuelo — la retirada se ejecuta solo cuando el servicio systemd devuelve `inactive`/`failed`/`unknown` (`systemctl is-active`). El script nombra al agente y al job en vuelo antes de abortar.
+
+```bash
+# 1. Editar variables.tf o dev.tfvars: runner_count = N (menor que el actual).
+# 2. Aplicar por el pipeline (RUNBOOK §0):
+gh workflow run infra-dev.yml --ref main -f action=plan
+gh workflow run infra-dev.yml --ref main -f action=apply
+
+# 3. En la VM, reaprovisionar. OBLIGATORIO exportar RUNNER_COUNT primero — ver nota
+#    de §7: sin el `export`, "$RUNNER_COUNT" se expande vacío en la misma línea y
+#    el script cae en silencio a su fallback interno en vez de bajar a N.
+export RUNNER_COUNT=N   # el mismo N del paso 1 — sustituir el literal
+sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"
+```
+
+Si la fase de baja aborta con un mensaje del tipo `agente activo, jobs en vuelo: <run-url>`:
+
+- **Esperar** a que termine el job referenciado, o **cancelar** el PR que lo disparó.
+- Re-aplicar (con el mismo `export RUNNER_COUNT=N` de arriba) `sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"` — el bootstrap vuelve a evaluar Fase 1; si el agente ya está `inactive`, completa la baja y sigue con el bucle de alta. No hace falta editar nada.
+- Si la fase de baja aborta por varios agentes activos a la vez, el script los reporta **todos** en un solo mensaje antes de salir (no hace falta reintentar uno a uno).
+
+No hay paso a mano: la baja la hace el script, y la condición `is-active == inactive` es la garantía de que ningún job en vuelo queda a medias (D3; riesgos en `design.md`). **No** se sustituye por un banner + sleep — depende de Ctrl-C, choca con la norma IaC-first de `infra.md`.
+
+Verificar tras bajar: GitHub lista exactamente N entradas con label `dev`, **y** en la VM el principal local del agente retirado ya no existe (la baja también retira al usuario Linux y su membresía del grupo `docker` — ver `design.md` Risks):
+
+```bash
+gh api /repos/autohostai-labs/AutoHostAI/actions/runners?per_page=100 \
+  --jq '.runners[] | "  name=\(.name) status=\(.status) labels=\([.labels[].name] | join(","))"'
+
+# En la VM: el usuario del agente retirado ya no debe existir ni estar en el grupo docker.
+id actions-runner-<i> 2>&1        # esperado: "no such user"
+getent group docker | grep -c actions-runner-<i>   # esperado: 0
+```
+
+`runner_count = 1` es estado de rollback válido (R5.2): el reaprovisionamiento deja un único agente funcional (`autohostai-${ENV}-vm-1`). El legado `autohostai-${ENV}-vm` (sin sufijo) se retira en la primera reaplicación tras este change y no vuelve a aparecer — antes de aceptar `runner_count = 1` como rollback a `ci-runner-oci`, ten en cuenta que el nombre del agente **cambia** (de `autohostai-${ENV}-vm` a `autohostai-${ENV}-vm-1`); el comportamiento del pool (un agente online, label `dev`, sin paralelismo) sí es idéntico.

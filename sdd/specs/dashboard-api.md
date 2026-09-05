@@ -2,12 +2,12 @@
 
 ## Purpose
 
-Da al dashboard del propietario/manager (PRD §9, §10) su backend: seis endpoints de
+Da al dashboard del propietario/manager (PRD §9, §10) su backend: siete endpoints de
 **lectura pura**, tenant-scoped y autenticados, que responden «¿qué pasa y quién tiene la
 próxima acción?» sin obligar al cliente a componer siete dominios. Son la colección de cards,
-el agregado de detalle de una propiedad, su estado operacional, su timeline filtrable, los
-tres contadores operacionales a nivel de tenant y la serie semanal de ocupación a nivel de
-tenant.
+el agregado de detalle de una propiedad, su estado operacional, su timeline filtrable (por
+propiedad y a nivel de tenant), los tres contadores operacionales a nivel de tenant y la
+serie semanal de ocupación a nivel de tenant.
 
 No crea ninguna tabla, ninguna columna y ninguna vía de escritura: compone lo que otras
 capacidades ya persisten. El *cómo se opera* está en
@@ -25,7 +25,7 @@ de estados en un hub que importa a los otros siete.
 
 ### Reparto de rutas
 
-- THE SYSTEM SHALL servir exactamente estas seis rutas de lectura, y ninguna de escritura:
+- THE SYSTEM SHALL servir exactamente estas siete rutas de lectura, y ninguna de escritura:
 
   | Ruta | Router | Por qué ahí |
   |---|---|---|
@@ -35,6 +35,7 @@ de estados en un hub que importa a los otros siete.
   | `GET /api/v1/properties/{property_id}/dashboard` | `app/dashboard/api/router.py` | agregado multidominio, con la ruta que fija PRD §23:1943 |
   | `GET /api/v1/properties/{property_id}/state` | `app/properties/api/router.py` | lectura de un solo dominio, del módulo que posee la columna |
   | `GET /api/v1/timeline/{property_id}` | `app/timeline/api/router.py` | dominio propio, con la capa `api/` que estrena |
+  | `GET /api/v1/timeline` | `app/timeline/api/router.py` | la variante sin `property_id` de la misma ruta de PRD §23:1951, mismo router (`dashboard-activity-feed`) |
 
 - THE SYSTEM SHALL servir la colección bajo su propio prefijo `/dashboard` y no bajo
   `/properties`. `/properties/dashboard` y `/properties/{id}` compiten en FastAPI, que resuelve
@@ -43,9 +44,7 @@ de estados en un hub que importa a los otros siete.
   tampoco existen en el PRD, al no agregar ningún dato sobre una propiedad concreta— son las
   **únicas** rutas que el PRD no nombra, así que son las únicas que pueden moverse; las dos de
   §23:1942-1943 se quedan literales.
-- THE SYSTEM SHALL NOT exponer el timeline global `GET /api/v1/timeline` de PRD §23:1951: esta
-  capacidad acota a la variante por propiedad, que es la que consume el detalle.
-- **La pantalla no se alimenta sólo de aquí, y estas cinco rutas siguen siendo de lectura**: desde
+- **La pantalla no se alimenta sólo de aquí, y estas seis rutas siguen siendo de lectura**: desde
   `blocked-transitions-web` la card del dashboard lee además
   `GET /api/v1/blocked-transitions` (`celery-jobs.md`) y, con permisos de escritura, llama a
   `cleaning` y `maintenance`. Ninguna de esas rutas es de esta capacidad y ninguna se añade aquí; se
@@ -267,6 +266,57 @@ definición propia de "noche ocupada" que no existía en el sistema (`app/dashbo
   consulta de eventos por sí sola devolvería una página vacía con `200` sobre una propiedad
   ajena o inexistente, y eso filtraría por el código de estado lo que el 404 oculta.
 
+### Feed de actividad a nivel de tenant (`GET /api/v1/timeline`) — `dashboard-activity-feed`
+
+La variante sin `property_id` de la misma ruta: en vez del historial de una vivienda, la
+actividad de **todas** las del tenant, mezclada en una sola página. Alimenta el widget
+«Actividad Reciente» del dashboard rediseñado (PRD §23:1951), y es exactamente la unión de N
+peticiones a `GET /api/v1/timeline/{property_id}` que un portador de `READ_PROPERTIES` ya podía
+hacer una por una.
+
+- WHEN un usuario autenticado con `READ_PROPERTIES` la solicita, THE SYSTEM SHALL devolver
+  eventos de todas las propiedades de su tenant, paginados con `page`/`per_page`, **ordenados
+  por instante descendente con el mismo desempate determinista por `id`** que usa la ruta por
+  propiedad — mismo código de ordenación, no una copia.
+- THE SYSTEM SHALL contar en `total` el mismo conjunto filtrado que devuelve en `data`, nunca
+  todos los eventos del tenant.
+- THE SYSTEM SHALL aceptar los mismos filtros AND-combinados y los mismos nombres de contrato
+  que la ruta por propiedad —`event_type`, `severity`, `actor_type`, `from`/`to` inclusivos en
+  ambos extremos— y SHALL rechazar con `422` un rango invertido o sin zona horaria, con el
+  mismo `TimelineFilters` reutilizado sin cambios.
+- THE SYSTEM SHALL NOT aceptar ni exigir un `property_id`: es una ruta de colección, no de
+  recurso. IF el tenant no tiene ninguna propiedad o ninguna tiene eventos, THEN THE SYSTEM
+  SHALL devolver una página vacía con `200`, nunca `404` — a diferencia de la ruta por
+  propiedad, aquí no hay un identificador de recurso que pueda no existir, así que no hay
+  comprobación de propiedad previa.
+- THE SYSTEM SHALL incluir en cada entrada, además de los siete campos que ya expone
+  `GET /api/v1/timeline/{property_id}` (`id`, `occurred_at`, `actor_type`, `event_type`,
+  `severity`, `title`, `description`), los campos `property_id`, `property_name` y
+  `property_internal_code` de la vivienda que originó el evento — mismo patrón que
+  `reservation-property-identity` fijó para reservas. `property_id` es siempre no nulo;
+  `property_name` y `property_internal_code` viajan `null` cuando el `property_id` del evento
+  no resuelve dentro del tenant (fila con clave ajena no compuesta con `tenant_id`, deuda
+  registrada en `reservations.md`), lo que es una forma válida y nunca un motivo para descartar
+  la entrada o fallar la petición. Las tres claves están siempre presentes.
+- THE SYSTEM SHALL resolver `property_name` y `property_internal_code` con un lector por lotes
+  (`PropertyRepository.list_for_ids`), **una sola vez por página y después de la consulta de
+  eventos**, nunca una consulta por entrada: el número de sentencias es fijo (`count`, página,
+  lote de propiedades), independiente de `per_page` y del número de propiedades del tenant.
+- THE SYSTEM SHALL NOT serializar la columna `metadata` en esta ruta tampoco (misma ausencia
+  estructural que la ruta por propiedad).
+- THE SYSTEM SHALL gatear esta ruta con el mismo `READ_PROPERTIES` que la ruta por propiedad y
+  SHALL NOT declarar un permiso nuevo: agregar por tenant no ensancha quién puede leer qué,
+  porque cualquier portador de `READ_PROPERTIES` ya podía leer las mismas propiedades y el
+  mismo timeline uno a uno.
+- THE SYSTEM SHALL derivar el `tenant_id` del `RequestContext` autenticado y SHALL restringirlo
+  explícitamente en la consulta de eventos y en la de identidad de propiedad (convención D2 de
+  este documento), de modo que ningún evento ni ninguna identidad de otro tenant aparezca en la
+  respuesta.
+- THE SYSTEM SHALL componer `title` en el idioma de `preferred_language` del usuario
+  autenticado contra el mismo catálogo de la sección «Textos legibles en el idioma del
+  usuario», y SHALL devolver `description` verbatim, sin traducir, y SHALL NOT traducir los
+  literales canónicos — mismas reglas que la ruta por propiedad, misma función `render()`.
+
 ### Textos legibles en el idioma del usuario
 
 - WHEN el sistema compone una entrada de timeline o una etiqueta de card, THE SYSTEM SHALL
@@ -476,13 +526,24 @@ allí: pasa por esta sección.
   `backend/app/properties/infrastructure/repositories.py` — `PropertyStateTransitionRepository
   .history_for_properties` (`dashboard-occupancy-series` R3): el historial por lotes que
   reconstruye el estado de cada vivienda a lo largo de la semana, sin escritura.
-- `backend/app/timeline/api/` — `router.py`, `schemas.py`, `errors.py`, `dependencies.py`: la
-  capa `api/` que el módulo estrena.
-- `backend/app/timeline/application/use_cases.py` — `GetPropertyTimelineUseCase`.
+- `backend/app/timeline/api/` — `router.py` (las dos rutas, por propiedad y de tenant),
+  `schemas.py` (`TimelineEntryResponse`/`TimelinePageResponse` y, por herencia,
+  `TenantTimelineEntryResponse`/`TenantTimelinePageResponse` de `dashboard-activity-feed`),
+  `errors.py`, `dependencies.py`: la capa `api/` que el módulo estrena.
+- `backend/app/timeline/application/use_cases.py` — `GetPropertyTimelineUseCase` y
+  `ListTenantActivityUseCase` (`dashboard-activity-feed`): la segunda compone
+  `TimelineEventReader.list_for_tenant` con `PropertyRepository.list_for_ids` en un número
+  fijo de sentencias, sin `PropertyRepository.get` previo ni `404` — es una ruta de colección.
+- `backend/app/timeline/domain/read_models.py` — `TenantActivityEntry` (`dashboard-activity-feed`):
+  los siete campos de `RenderedEntry` más la identidad de la propiedad, y `from_rendered`;
+  Python puro, sin tocar `rendering.py`.
 - `backend/app/timeline/domain/rendering.py` — el catálogo de 47 tipos × 2 idiomas, la lista
-  blanca de metadata sustituible y `render`.
+  blanca de metadata sustituible y `render`, reutilizado sin cambios por las dos rutas.
 - `backend/app/timeline/domain/repositories.py` — `TimelineEventReader`, separado del escritor
-  (ver [`timeline-state-machine.md`](timeline-state-machine.md)).
+  (ver [`timeline-state-machine.md`](timeline-state-machine.md)): `list_for_property`,
+  `list_for_tenant` (`dashboard-activity-feed`) y `last_for_properties`.
+- `backend/app/timeline/infrastructure/models.py` — `ix_timeline_events_tenant_id_created_at`
+  (`dashboard-activity-feed`), el índice que cubre `list_for_tenant` sin filtro.
 - `backend/app/core/i18n.py` — `Locale` y `Catalog`: el mecanismo, sin mensajes.
 - `backend/app/auth/domain/context.py` — `RequestContext.preferred_language`.
 - `backend/app/maintenance/`, `backend/app/statements/`, `backend/app/guests/`,

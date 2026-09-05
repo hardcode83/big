@@ -61,7 +61,12 @@ from app.maintenance.infrastructure.models import (
     OwnerApprovalModel,
 )
 from app.messaging.domain.enums import ConversationChannel, MessageSenderType
-from app.messaging.infrastructure.models import ConversationModel, MessageModel
+from app.messaging.infrastructure.models import (
+    ConversationModel,
+    MessageModel,
+    WhatsAppInboundEventModel,
+    WhatsAppPhoneNumberModel,
+)
 from app.notifications.domain.enums import NotificationChannel
 from app.notifications.infrastructure.models import NotificationLogModel
 from app.pricing.infrastructure.models import PriceRecommendationModel, PricingRuleModel
@@ -1080,6 +1085,26 @@ async def populate_tenant(session: AsyncSession, tenant: TenantModel) -> dict[st
                 event_type="booking.updated",
                 payload={},
             ),
+            # `whatsapp-cloud-adapter`'s two tables. Seeded for the reason the comment above
+            # `empty` gives: a scoped table with no neighbour row turns D18.3's "photograph
+            # every row of the working tenant" into `[] == []`, and an unscoped delete on it
+            # would ship green.
+            WhatsAppPhoneNumberModel(
+                id=uuid.uuid4(),
+                tenant_id=tenant.id,
+                phone_number_id=uuid.uuid4().hex[:15],
+                default_property_id=prop.id,
+            ),
+            WhatsAppInboundEventModel(
+                id=uuid.uuid4(),
+                tenant_id=tenant.id,
+                default_property_id=prop.id,
+                phone_number_id=uuid.uuid4().hex[:15],
+                provider_message_id=f"wamid.{uuid.uuid4().hex}",
+                sender_phone="+34612345678",
+                message_text="Hola",
+                received_at=datetime(2026, 8, 2, tzinfo=UTC),
+            ),
             # R3.6's table, with a real row. Preserved — and until now its survival was only
             # asserted structurally, by `PRESERVED_TABLES` membership, so a typo in the loop's
             # skip condition would have emptied it with every test still green.
@@ -1167,6 +1192,14 @@ def test_the_delete_phase_covers_every_scoped_table_minus_the_four_it_preserves(
         "user_sessions",
         "webhook_endpoints",
         "webhook_events",
+        # `whatsapp-cloud-adapter`: the tenant's number-to-tenant association (section 6) and
+        # the inbound delivery queue (section 7). Both are emptied rather than preserved — a
+        # demo tenant's WhatsApp association is demo configuration, and its inbound traffic is
+        # demo traffic. Like `webhook_events`, the queue's `tenant_id` is nullable, so the rows
+        # of a delivery that resolved to no tenant survive the reset; that is the same
+        # deliberate consequence `delete_the_tenants_rows` records for its sibling.
+        "whatsapp_inbound_events",
+        "whatsapp_phone_numbers",
     }
 
 

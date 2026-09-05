@@ -75,3 +75,72 @@ class PMSChannelUnavailableError(MessagingDomainError):
 
 class MessagingValidationError(MessagingDomainError):
     """An invariant of an aggregate or value object was violated — answered 422."""
+
+
+class NoInboundMessageError(MessagingDomainError):
+    """The webhook body is well-formed but carries no inbound message
+    (`whatsapp-cloud-adapter` R3.2, R4.1; design D9) — answered 422 if it ever escapes.
+
+    Raised by `WhatsAppInboundProviderAdapter.parse`, and **it is a routine outcome rather
+    than a fault**: Meta posts delivery and read receipts to the very same webhook URL as
+    real messages, with `value.statuses` where a message would have had `value.messages`.
+    A deployment that receives one message receives many of these. The same error covers an
+    empty `entry`/`changes`/`messages`, a body that is not a JSON object at all, and a
+    message with no text body (an image, a sticker, a location) — none of which the
+    text-in/text-out pipeline of this change can process.
+
+    **Its own class, and not `MessagingValidationError`**, because the two need opposite
+    handling. A `MessagingValidationError` means somebody sent something wrong; this means
+    nothing is wrong and there is simply nothing to do. The receiving use case of section 7
+    must **catch it and answer `202`**: Meta redelivers on any non-2xx, so letting it reach
+    the error handler would make every status receipt retry on a schedule forever, and the
+    endpoint would spend its rate-limit budget on its own delivery receipts.
+
+    The 422 row it has in `api/errors.py` is therefore the second net and not the plan — it
+    exists so an escape is a named 422 rather than an unmapped 500 that leaks internals
+    (`test_errors.py` requires the row of every error in this module).
+
+    **The message names the field that was missing and never its value.** A webhook body is
+    the guest's phone number and the guest's words, and `str(exc)` is rendered into the
+    response body and into every log line — the standing rule of
+    `domain/value_objects.py` applies here for the same reason.
+    """
+
+class WhatsAppPhoneNumberAlreadyAssociatedError(MessagingDomainError):
+    """That `phone_number_id` already belongs to another tenant (R6.2) — answered 409.
+
+    `AssociateWhatsAppPhoneNumberUseCase.execute` never checks this with a prior read: the
+    value is genuinely global across tenants, so a read-then-write has a real TOCTOU race two
+    concurrent tenants could both win. The repository's `upsert` lets the database's own
+    unique constraint on `phone_number_id` raise, and this is what that `IntegrityError` is
+    translated into — the existing association is never overwritten in silence (design D8,
+    `steering/backend-architecture.md`'s "database-level check, not a prior read").
+    """
+
+class WhatsAppPhoneNumberNotFoundError(MessagingDomainError):
+    """This tenant has no WhatsApp number associated — answered 404.
+
+    Raised by `ReleaseWhatsAppPhoneNumberUseCase` when there is nothing to release. Not the
+    same class as `WhatsAppPhoneNumberAlreadyAssociatedError`: one means "somebody else already
+    has this number", the other "you have none to give up" — conflating them would answer a
+    409 for a request that named no conflicting resource at all.
+    """
+
+class WhatsAppWebhookAuthenticationError(MessagingDomainError):
+    """The inbound WhatsApp webhook did not authenticate — answered `403`, always the same.
+
+    `whatsapp-cloud-adapter` R3.2, R3.3; design D3a. **One class, carrying no reason, raised
+    from one place**, which is the whole of R3.3's indistinguishability: a missing
+    `X-Hub-Signature-256`, a malformed one, a digest computed under another key and a body
+    altered after signing are four different facts and exactly one answer. The structural
+    sibling is `app/integrations/domain/errors.py`'s `WebhookAuthenticationError`, whose
+    docstring records the same argument for the PMS receiver's uniform `404`.
+
+    It carries no message either. `register_messaging_error_handlers` renders `str(exc)` into
+    the envelope for any mapped status, so a message would become the oracle the class exists
+    to close — and `ReceiveWhatsAppWebhookUseCase` raises it with no argument.
+
+    **Nothing is written before this is raised.** The use case's `authenticate` touches no
+    repository at all, which is what makes "sin escribir nada" a property of the call graph
+    rather than of a caller remembering to roll back.
+    """

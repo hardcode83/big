@@ -11,9 +11,12 @@ puente entre "el rol existe y se autentica" (`super-admin-identity`) y "la conso
 operador aterriza" (`super-admin-console`), y no se solapa con la superficie de tenants o
 de users existente porque vive en su propio router bajo `/api/v1/platform`.
 
-El *cómo se opera* la superficie —reglas duras, diagnósticos, advertencias— lo escribirá
-`super-admin-console` cuando aterrice la consola de operador (corte c de la partición); aquí
-documenta el *qué hace* el backend que esa consola consume.
+Tres rutas, no dos, desde `super-admin-console` (corte c, archivada 2026-09-04): las dos de
+alta más `GET /api/v1/platform/tenants`, que cierra el límite que `platform-admin-api` había
+dejado fuera a propósito — sin lista, la consola solo podía operar sobre un `tenant_id` que
+el propio `SUPER_ADMIN` recordara de memoria. El *cómo se opera* la superficie —pantallas,
+formularios, manejo de la contraseña de un solo uso— lo documenta `sdd/specs/super-admin-console.md`;
+aquí sigue el *qué hace* el backend que esa consola consume.
 
 ## Requirements
 
@@ -71,6 +74,36 @@ documenta el *qué hace* el backend que esa consola consume.
   clases), mismo `must_change_password = true`, mismo formato de respuesta. La contraseña
   temporal nunca se serializa en `audit_logs.changes` (`{"changed": true}`), y nunca se
   persiste en claro ni se escribe en log de aplicación.
+
+### Listar tenants
+
+- WHEN se solicita `GET /api/v1/platform/tenants` con `page`/`per_page` opcionales, THE
+  SYSTEM SHALL devolver todos los tenants (sin filtro — no hay un alcance más estrecho que
+  "todos" para este llamante, y `tenants` no tiene columna `tenant_id` por la que acotar),
+  ordenados por `created_at` descendente, en la forma `TenantPageResponse` (`items`,
+  `total`, `page`, `per_page`, `total_pages`) — la misma envoltura que `IncidentPageResponse`,
+  `ConversationPageResponse` y `CleaningTaskPageResponse`, no la envoltura `{data, ...}` más
+  vieja de `GET /api/v1/users`.
+- THE SYSTEM SHALL acotar `page` a `[1, 100_000]` y `per_page` a `[1, 100]`
+  (`MAX_PAGE`/`MAX_PER_PAGE`, `backend/app/platform/api/schemas.py`), respondiendo `422` si
+  el llamante pide fuera de esos límites.
+- IF no existe ningún tenant, THEN THE SYSTEM SHALL responder `200` con `items: []`,
+  `total: 0` — nunca un error; ni el caso de uso ni el repositorio tienen una rama de error
+  que levantar para este listado.
+- THE SYSTEM SHALL mapear cada elemento con `TenantResponse` (`app/tenants/api/schemas.py`),
+  el mismo tipo que ya usa `POST /platform/tenants`, sin declarar una forma paralela. Un
+  tenant sin fila `tenant_configs` no puede existir por construcción (`TenantRepository.add`
+  escribe siempre las dos), así que el mapeo no necesita un `get_or_create` defensivo.
+- THE SYSTEM SHALL implementar el listado con `TenantRepository.list_page(page, per_page) ->
+  tuple[Sequence[tuple[Tenant, TenantConfig]], int]` en el puerto de dominio
+  (`app/tenants/domain/repositories.py`) — el primer método sin `tenant_id` en absoluto — y su
+  `SqlAlchemyTenantRepository.list_page`, que guarda el `JOIN` contra `tenant_configs` con
+  `require_unmarked_session(self._session, read="list_page")`: `tenant_configs` sí tiene
+  columna `tenant_id`, así que una sesión marcada estrecharía en silencio ese lado del join
+  en vez de levantar el error que la regla 1 de `steering/security.md` exige.
+- THE SYSTEM SHALL exponer este listado solo bajo `PlatformDep`
+  (`Require(Permission.MANAGE_PLATFORM)`) — mismo permiso, mismo `403` indiferenciado para
+  cualquier rol distinto de `SUPER_ADMIN` que las dos rutas de alta.
 
 ### Autorización: `MANAGE_PLATFORM` solo lo tiene `SUPER_ADMIN`
 
@@ -143,18 +176,21 @@ documenta el *qué hace* el backend que esa consola consume.
   operativos de un tenant; solo crea el tenant y le da cuentas.
 - Abrir `GRANTABLE_ROLES` para crear o promover a `SUPER_ADMIN` por API — la decisión
   sigue siendo no, heredada de `super-admin-identity` R4.2.
-- Listar, suspender, reactivar o borrar tenants — el router de `tenants` actual mantiene
-  `GET` y `PATCH` para el caso de uso propio del tenant; las acciones cross-tenant
-  sobre el ciclo de vida del tenant requieren alcance separado.
+- Suspender, reactivar o borrar tenants — el router de `tenants` actual mantiene `GET` y
+  `PATCH` para el caso de uso propio del tenant; las acciones cross-tenant sobre el ciclo de
+  vida del tenant requieren alcance separado. Listar tenants **sí** está en esta capacidad
+  (`GET /api/v1/platform/tenants`, añadido por `super-admin-console`) — ya no es una
+  frontera excluida.
 - Editar o resetear cuentas de un tenant desde la plataforma — el flujo propio del
   tenant (`PATCH /users/{id}`, `POST /users/{id}/reset-password`) cubre esos casos.
 
 ## Key files
 
-- `backend/app/platform/api/router.py` — los dos endpoints (`POST /platform/tenants`,
-  `POST /platform/tenants/{tenant_id}/users`).
+- `backend/app/platform/api/router.py` — los tres endpoints (`POST /platform/tenants`,
+  `POST /platform/tenants/{tenant_id}/users`, `GET /platform/tenants`).
 - `backend/app/platform/api/schemas.py` — DTOs (`CreateTenantRequest`,
-  `CreatePlatformUserRequest`, `CreatedPlatformUserResponse`, `PlatformUserResponse`).
+  `CreatePlatformUserRequest`, `CreatedPlatformUserResponse`, `PlatformUserResponse`,
+  `TenantPageResponse`, `MAX_PAGE`, `MAX_PER_PAGE`).
 - `backend/app/platform/api/dependencies.py` — `PlatformDep` con
   `Require(Permission.MANAGE_PLATFORM)`.
 - `backend/app/platform/api/errors.py` — mapeo de `TenantAlreadyExistsError` a `409` y
@@ -163,8 +199,10 @@ documenta el *qué hace* el backend que esa consola consume.
   uso.
 - `backend/app/platform/application/use_cases.py` — `CreateTenantUseCase` (orquesta
   `Tenant.create`, `tenant_config.with_defaults`, `TenantRepository.add`, auditoría,
-  `uow.commit` con traducción de `IntegrityError`) y `CreateUserInTenantUseCase`
-  (envuelve `CreateUserUseCase` con validación previa del tenant).
+  `uow.commit` con traducción de `IntegrityError`), `CreateUserInTenantUseCase`
+  (envuelve `CreateUserUseCase` con validación previa del tenant) y `ListTenantsUseCase`
+  (pass-through sobre `TenantRepository.list_page`, empareja cada `(Tenant, TenantConfig)`
+  en `TenantSettings`).
 - `backend/app/platform/domain/exceptions.py` — `TenantAlreadyExistsError` (409) y
   `TenantNotActiveError` (404).
 - `backend/app/main.py` — montaje del router bajo `API_V1_PREFIX`.
@@ -174,9 +212,11 @@ documenta el *qué hace* el backend que esa consola consume.
   cerrado y al `frozenset ACTIONS`.
 - `backend/app/tenants/domain/entities.py` — `Tenant.create(...)` con los mismos
   normalizadores que `Tenant.update`.
-- `backend/app/tenants/domain/repositories.py` — `TenantRepository.add(...)`.
+- `backend/app/tenants/domain/repositories.py` — `TenantRepository.add(...)` y
+  `list_page(page, per_page) -> tuple[Sequence[tuple[Tenant, TenantConfig]], int]`.
 - `backend/app/tenants/infrastructure/repositories.py` — implementación de `add(...)`
-  con dos `session.add` y un `flush` para que `uq_tenants_name` aflore como
+  y de `list_page(...)` (ordena por `created_at DESC`, guarda el `JOIN` con
+  `require_unmarked_session`) con dos `session.add` y un `flush` para que `uq_tenants_name` aflore como
   `IntegrityError`.
 - `backend/alembic/versions/936fef5a01b1_tenants_name_unique.py` — `uq_tenants_name`.
 - `backend/alembic/versions/936fef59b1d4_merge_platform_admin_api_pre_revision.py`,

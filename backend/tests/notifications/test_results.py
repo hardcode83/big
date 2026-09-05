@@ -47,6 +47,7 @@ def test_error_code_is_a_closed_enum() -> None:
         "TIMEOUT",
         "NO_ADAPTER_FOR_CHANNEL",
         "MAX_ATTEMPTS_EXCEEDED",
+        "OUTSIDE_SESSION_WINDOW",
     }
 
 

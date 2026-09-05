@@ -158,6 +158,7 @@ resource "oci_core_instance" "dev" {
     # instance principal y mintea tokens efímeros (D13/R7).
     user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {
       env                        = var.env
+      runner_count               = var.runner_count
       github_repo                = var.github_repo
       github_app_id              = var.github_app_id
       github_app_installation_id = var.github_app_installation_id

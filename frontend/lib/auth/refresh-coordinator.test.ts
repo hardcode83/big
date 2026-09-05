@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   clearSessionTokens,
+  getSessionGeneration,
   getSessionTokens,
   setSessionTokens,
 } from "@/lib/auth/session-store";
+import { purgeSessionCache } from "@/lib/auth/session-cache-purge";
 import { refreshSession } from "@/lib/auth/refresh-coordinator";
 import { SESSION_PRESENT_COOKIE } from "@/lib/config/constants";
 
@@ -103,6 +105,7 @@ describe("refresh coordinator", () => {
     );
 
     const pending = refreshSession(refresh);
+    purgeSessionCache();
     clearSessionTokens();
     resolveRefresh({ accessToken: "late-access" });
 
@@ -134,5 +137,71 @@ describe("refresh coordinator", () => {
     await expect(newPending).resolves.toEqual({ accessToken: "rotated-access" });
     expect(newRefresh).toHaveBeenCalledWith();
     expect(getSessionTokens()).toEqual({ accessToken: "rotated-access" });
+  });
+
+  // Security review (second `/sdd:review` round): the app has 11 independent
+  // `createAuthenticatedClients()` instances (one per feature module), all sharing this
+  // module's `inFlight` singleton. A purge triggered by one client's session-expired
+  // listener must not make a genuinely-unrelated, still-in-flight refresh from another
+  // client believe its own session was superseded — only an actual token write or clear
+  // should do that. Before the `tokenGeneration` split, both used the same
+  // `sessionGeneration` counter, so a bare purge looked identical to an identity change.
+
+  it("does not discard a legitimate token rotation when an unrelated cache purge happens mid-flight", async () => {
+    setSessionTokens({ accessToken: "old-access" });
+    let resolveRefresh!: (tokens: { accessToken: string }) => void;
+    const refresh = vi.fn(
+      () =>
+        new Promise<{ accessToken: string }>((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+
+    const pending = refreshSession(refresh);
+
+    // Simulates a different client's session-expired listener purging the cache for a
+    // reason unrelated to this refresh — no token write, no token clear.
+    purgeSessionCache();
+
+    resolveRefresh({ accessToken: "rotated-access" });
+
+    await expect(pending).resolves.toEqual({
+      accessToken: "rotated-access",
+    });
+    expect(getSessionTokens()).toEqual({
+      accessToken: "rotated-access",
+    });
+  });
+
+  it("still clears a genuinely revoked session when an unrelated cache purge happens mid-flight", async () => {
+    setSessionTokens({ accessToken: "old-access" });
+    let rejectRefresh!: (error: unknown) => void;
+    const refresh = vi.fn(
+      () =>
+        new Promise<{ accessToken: string }>((_resolve, reject) => {
+          rejectRefresh = reject;
+        }),
+    );
+
+    const pending = refreshSession(refresh);
+
+    purgeSessionCache();
+
+    rejectRefresh(new Error("refresh token revoked"));
+
+    await expect(pending).rejects.toThrow("refresh token revoked");
+    expect(getSessionTokens()).toBeNull();
+    expect(readPresenceCookie()).toBeNull();
+  });
+
+  it("advances the cache generation when its own guard clears the session, so no future caller has to purge on its behalf", async () => {
+    setSessionTokens({ accessToken: "old-access" });
+    const before = getSessionGeneration();
+    const refresh = vi.fn().mockRejectedValue(new Error("revoked"));
+
+    await expect(refreshSession(refresh)).rejects.toThrow("revoked");
+
+    expect(getSessionTokens()).toBeNull();
+    expect(getSessionGeneration()).toBeGreaterThan(before);
   });
 });

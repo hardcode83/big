@@ -29,6 +29,11 @@ class TimelineEventModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin):
             "reservation_id",
             text("created_at DESC"),
         ),
+        Index(
+            "ix_timeline_events_tenant_id_created_at",
+            "tenant_id",
+            text("created_at DESC"),
+        ),
     )
 
     property_id: Mapped[uuid.UUID] = mapped_column(

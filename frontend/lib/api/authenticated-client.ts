@@ -75,8 +75,14 @@ export function createAuthenticatedClients(
         options.onStatusChange?.("authenticated");
         return true;
       } catch {
+        // `onSessionExpired` runs the listener synchronously (R3.1-3): it clears tokens
+        // only when no newer session's tokens are live. Forcing "expired" unconditionally
+        // here would override a winning login's "authenticated" status a moment after the
+        // listener deliberately preserved it, so this mirrors the listener's own check.
         options.onSessionExpired?.();
-        options.onStatusChange?.("expired");
+        if (getSessionTokens() === null) {
+          options.onStatusChange?.("expired");
+        }
         return false;
       }
     },

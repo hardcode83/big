@@ -172,6 +172,12 @@ def test_the_conversation_repository_declares_only_what_this_change_consumes() -
     and they arrive with their consumers in the same change — which is the condition D2 sets
     for widening a port at all. They are **two** methods and not one with a flag because R2.5
     turns on the difference: reading a thread must create nothing.
+
+    `ensure_whatsapp` is `whatsapp-cloud-adapter`'s widening (R4.5, D4): the inbound webhook
+    path needs a thread per guest **and property** rather than per stay, because on that path
+    the reservation is frequently unknown while the thread must exist anyway (R4.3, R4.4).
+    Not a flag on `ensure_portal` for the same reason those two are separate methods — the
+    key differs, and a flag would hide which unique index the `ON CONFLICT` infers.
     """
     assert declared_methods(ConversationRepository) == {
         "add",
@@ -180,16 +186,22 @@ def test_the_conversation_repository_declares_only_what_this_change_consumes() -
         "list",
         "ensure_portal",
         "find_portal",
+        "ensure_whatsapp",
     }
 
 
 def test_the_message_repository_declares_only_what_this_change_consumes() -> None:
-    """Four methods, and each has its consumer in this same change (R1.1).
+    """Five methods, and each has its consumer in this same change (R1.1).
 
     `count_guest_messages` was not in the design's D2 list: it arrived while implementing
     section 6 as the only way to fill `ConversationContext.guest_message_count`, which R2.1
     and D6 declare as part of what an `AIAdapter` is told. R1.1 forbids a **speculative**
     method, not a fourth one — and D2 blesses exactly this shape of widening.
+
+    `last_guest_message_at` is `whatsapp-cloud-adapter` R2.4's widening, resolved with the
+    user 2026-09-02 (design D2): `Conversation.last_message_at` cannot answer "since the
+    guest's last message" because every sender touches it, so `DelegatingOutboundAdapter`
+    needs this fifth, guest-only method instead.
 
     No `save` in particular: `messages` is append-only and D14 was amended so the pipeline
     builds each row once, with its delivery outcome already in it.
@@ -199,6 +211,7 @@ def test_the_message_repository_declares_only_what_this_change_consumes() -> Non
         "list_for_conversation",
         "count_guest_messages",
         "count_unresolved_guest_messages_with_intent",
+        "last_guest_message_at",
     }
 
 
@@ -207,15 +220,22 @@ def test_every_message_repository_method_has_a_consumer_in_this_change() -> None
 
     A method nobody calls is the speculation the requirement forbids, and it is the failure
     this test would catch — including for the one added after the design was written.
+
+    Two source files, not one: `last_guest_message_at`'s consumer is
+    `DelegatingOutboundAdapter` in `infrastructure/channels.py` (`whatsapp-cloud-adapter`
+    R2.4, D2) — the window is resolved at the channel boundary, not inside a use case — while
+    the other four still call through `self._messages.<method>(` inside
+    `ProcessInboundGuestMessageUseCase`.
     """
     import inspect as _inspect
 
     from app.messaging.application import use_cases as messaging_use_cases
+    from app.messaging.infrastructure import channels as messaging_channels
 
-    source = _inspect.getsource(messaging_use_cases)
+    source = _inspect.getsource(messaging_use_cases) + _inspect.getsource(messaging_channels)
     for method in declared_methods(MessageRepository):
         assert f"._messages.{method}(" in source, (
-            f"MessageRepository.{method} has no consumer in messaging/application/"
+            f"MessageRepository.{method} has no consumer in messaging/"
         )
 
 

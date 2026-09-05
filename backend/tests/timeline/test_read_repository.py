@@ -65,6 +65,12 @@ async def _list(db_session, tenant, prop, *, filters=None, page=1, per_page=20):
     )
 
 
+async def _list_tenant(db_session, tenant, *, filters=None, page=1, per_page=20):
+    return await _reader(db_session).list_for_tenant(
+        tenant.id, filters=filters or TimelineFilters(), page=page, per_page=per_page
+    )
+
+
 # --- order (R4.1) ----------------------------------------------------------------------
 
 
@@ -301,6 +307,251 @@ async def test_another_property_of_the_same_tenant_is_not_mixed_in(db_session) -
     page = await _list(db_session, tenant, prop)
 
     assert [item.id for item in page.items] == [mine.id]
+
+
+# --- list_for_tenant (`dashboard-activity-feed` R1.1, R1.2, R1.3, R2.1, R4.3) -----------
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_merges_several_properties_newest_first_with_id_tiebreak(
+    db_session,
+) -> None:
+    tenant, one = await _tenant_and_property(db_session, "TenantA")
+    two = PropertyModel(tenant_id=tenant.id, name="Second", internal_code="A-2")
+    db_session.add(two)
+    await db_session.flush()
+    low = uuid.UUID("00000000-0000-4000-8000-000000000001")
+    high = uuid.UUID("ffffffff-0000-4000-8000-000000000002")
+    oldest = await _add_event(db_session, tenant, one, created_at=NOW - timedelta(hours=1))
+    tied_low = await _add_event(db_session, tenant, two, created_at=NOW, event_id=low)
+    tied_high = await _add_event(db_session, tenant, one, created_at=NOW, event_id=high)
+
+    page = await _list_tenant(db_session, tenant)
+
+    assert [item.id for item in page.items] == [tied_high.id, tied_low.id, oldest.id]
+    assert page.total == 3
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_paging_through_identical_timestamps_neither_repeats_nor_omits(
+    db_session,
+) -> None:
+    """Same failure mode `test_paging_through_identical_timestamps_neither_repeats_nor_omits`
+    reproduces for `list_for_property`, here spread across several properties of one tenant."""
+    tenant, one = await _tenant_and_property(db_session, "TenantA")
+    two = PropertyModel(tenant_id=tenant.id, name="Second", internal_code="A-2")
+    db_session.add(two)
+    await db_session.flush()
+    created = [
+        (await _add_event(db_session, tenant, one if i % 2 == 0 else two, created_at=NOW)).id
+        for i in range(10)
+    ]
+
+    seen: list[uuid.UUID] = []
+    for page_number in (1, 2, 3, 4):
+        page = await _list_tenant(db_session, tenant, page=page_number, per_page=3)
+        seen.extend(item.id for item in page.items)
+        assert page.total == 10
+
+    assert len(seen) == 10, "a page repeated or omitted an entry"
+    assert set(seen) == set(created)
+    assert len(set(seen)) == 10
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_event_type_filter_narrows_the_set_and_the_total(
+    db_session,
+) -> None:
+    tenant, prop = await _tenant_and_property(db_session, "TenantA")
+    wanted = await _add_event(
+        db_session, tenant, prop, created_at=NOW, event_type=TimelineEventType.CLEANING_COMPLETED
+    )
+    await _add_event(db_session, tenant, prop, created_at=NOW)
+
+    page = await _list_tenant(
+        db_session,
+        tenant,
+        filters=TimelineFilters(event_type=TimelineEventType.CLEANING_COMPLETED),
+    )
+
+    assert [item.id for item in page.items] == [wanted.id]
+    assert page.total == 1, "the total must count the filtered set, not the whole tenant"
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_severity_filter_narrows_the_set(db_session) -> None:
+    tenant, prop = await _tenant_and_property(db_session, "TenantA")
+    wanted = await _add_event(
+        db_session, tenant, prop, created_at=NOW, severity=TimelineSeverity.CRITICAL
+    )
+    await _add_event(db_session, tenant, prop, created_at=NOW)
+
+    page = await _list_tenant(
+        db_session, tenant, filters=TimelineFilters(severity=TimelineSeverity.CRITICAL)
+    )
+
+    assert [item.id for item in page.items] == [wanted.id]
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_actor_type_filter_narrows_the_set(db_session) -> None:
+    tenant, prop = await _tenant_and_property(db_session, "TenantA")
+    wanted = await _add_event(
+        db_session, tenant, prop, created_at=NOW, actor_type=TimelineActorType.GUEST
+    )
+    await _add_event(db_session, tenant, prop, created_at=NOW)
+
+    page = await _list_tenant(
+        db_session, tenant, filters=TimelineFilters(actor_type=TimelineActorType.GUEST)
+    )
+
+    assert [item.id for item in page.items] == [wanted.id]
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_date_bounds_are_inclusive_on_both_ends(db_session) -> None:
+    tenant, prop = await _tenant_and_property(db_session, "TenantA")
+    before = await _add_event(db_session, tenant, prop, created_at=NOW - timedelta(days=2))
+    on_lower = await _add_event(db_session, tenant, prop, created_at=NOW - timedelta(days=1))
+    on_upper = await _add_event(db_session, tenant, prop, created_at=NOW)
+    after = await _add_event(db_session, tenant, prop, created_at=NOW + timedelta(days=1))
+
+    page = await _list_tenant(
+        db_session,
+        tenant,
+        filters=TimelineFilters(occurred_from=NOW - timedelta(days=1), occurred_to=NOW),
+    )
+
+    assert {item.id for item in page.items} == {on_lower.id, on_upper.id}
+    assert before.id not in {item.id for item in page.items}
+    assert after.id not in {item.id for item in page.items}
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_filters_combine_with_and(db_session) -> None:
+    """R2.1: the same AND-combined contract `list_for_property` gives — matching only some
+    of the filters is not a match."""
+    tenant, prop = await _tenant_and_property(db_session, "TenantA")
+    wanted = await _add_event(
+        db_session,
+        tenant,
+        prop,
+        created_at=NOW,
+        event_type=TimelineEventType.INCIDENT_CREATED,
+        severity=TimelineSeverity.CRITICAL,
+        actor_type=TimelineActorType.GUEST,
+    )
+    # Right type and severity, wrong actor.
+    await _add_event(
+        db_session,
+        tenant,
+        prop,
+        created_at=NOW,
+        event_type=TimelineEventType.INCIDENT_CREATED,
+        severity=TimelineSeverity.CRITICAL,
+        actor_type=TimelineActorType.SYSTEM,
+    )
+    # Right type and actor, wrong severity.
+    await _add_event(
+        db_session,
+        tenant,
+        prop,
+        created_at=NOW,
+        event_type=TimelineEventType.INCIDENT_CREATED,
+        severity=TimelineSeverity.INFO,
+        actor_type=TimelineActorType.GUEST,
+    )
+
+    page = await _list_tenant(
+        db_session,
+        tenant,
+        filters=TimelineFilters(
+            event_type=TimelineEventType.INCIDENT_CREATED,
+            severity=TimelineSeverity.CRITICAL,
+            actor_type=TimelineActorType.GUEST,
+            occurred_from=NOW - timedelta(minutes=1),
+            occurred_to=NOW + timedelta(minutes=1),
+        ),
+    )
+
+    assert [item.id for item in page.items] == [wanted.id]
+    assert page.total == 1
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_a_single_date_bound_alone_still_filters(db_session) -> None:
+    """R2.1: the AND-combination tests above only ever supplied `occurred_from` and
+    `occurred_to` together. A single bound with the other left `None` is a distinct code
+    path — this confirms it still excludes events on the wrong side of the one bound
+    given, and still includes the boundary instant itself."""
+    tenant, prop = await _tenant_and_property(db_session, "TenantA")
+    before = await _add_event(db_session, tenant, prop, created_at=NOW - timedelta(days=2))
+    on_bound = await _add_event(db_session, tenant, prop, created_at=NOW - timedelta(days=1))
+    after = await _add_event(db_session, tenant, prop, created_at=NOW + timedelta(days=1))
+
+    from_only = await _list_tenant(
+        db_session, tenant, filters=TimelineFilters(occurred_from=NOW - timedelta(days=1))
+    )
+    assert {item.id for item in from_only.items} == {on_bound.id, after.id}
+    assert before.id not in {item.id for item in from_only.items}
+
+    to_only = await _list_tenant(
+        db_session, tenant, filters=TimelineFilters(occurred_to=NOW - timedelta(days=1))
+    )
+    assert {item.id for item in to_only.items} == {before.id, on_bound.id}
+    assert after.id not in {item.id for item in to_only.items}
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_never_returns_a_neighbour_tenants_events(db_session) -> None:
+    """DoD §28.18. The neighbour's event shares `event_type` and `severity` with the one
+    under test, so isolation being real (tenant_id in the WHERE) rather than accidental
+    (the values happening to differ) is what this actually proves."""
+    tenant_a, prop_a = await _tenant_and_property(db_session, "TenantA")
+    tenant_b, prop_b = await _tenant_and_property(db_session, "TenantB")
+    mine = await _add_event(
+        db_session,
+        tenant_a,
+        prop_a,
+        created_at=NOW,
+        event_type=TimelineEventType.INCIDENT_CREATED,
+        severity=TimelineSeverity.CRITICAL,
+    )
+    await _add_event(
+        db_session,
+        tenant_b,
+        prop_b,
+        created_at=NOW,
+        event_type=TimelineEventType.INCIDENT_CREATED,
+        severity=TimelineSeverity.CRITICAL,
+    )
+
+    page = await _list_tenant(db_session, tenant_a)
+
+    assert [item.id for item in page.items] == [mine.id]
+    assert page.total == 1
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_with_no_properties_is_empty(db_session) -> None:
+    tenant = TenantModel(name="Empty", billing_email="empty@example.com")
+    db_session.add(tenant)
+    await db_session.flush()
+
+    page = await _list_tenant(db_session, tenant)
+
+    assert page.items == ()
+    assert page.total == 0
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_with_properties_but_no_events_is_empty(db_session) -> None:
+    tenant, _prop = await _tenant_and_property(db_session, "TenantA")
+
+    page = await _list_tenant(db_session, tenant)
+
+    assert page.items == ()
+    assert page.total == 0
 
 
 # --- last_for_properties (R1.7, task 4.4) ------------------------------------------------
