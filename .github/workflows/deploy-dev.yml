@@ -260,7 +260,13 @@ jobs:
           # `2770` (setgid) para que todo fichero creado dentro herede el grupo `ci-agents` sin
           # depender de qué agente numerado escriba primero.
           sudo install -d -m 2770 -o root -g ci-agents "$(dirname "$RUNTIME_ENV_FILE")"
-          umask 077
+          # 007, no 077: el fichero tiene que nacer con el grupo `ci-agents` en rw (660), porque un
+          # `chmod` posterior no sirve — `chmod` exige ser el DUEÑO del fichero, y un deploy
+          # posterior en otro agente numerado no lo es (visto: run 33976548746, "Operation not
+          # permitted" al reintentar `chmod 660` sobre un fichero creado por otro agente). Con el
+          # modo correcto desde el `umask`, sobrescribir vía `>` solo necesita permiso de grupo,
+          # que sí tienen todos los agentes (miembros de `ci-agents`) — ningún `chmod` hace falta.
+          umask 007
           {
             echo "IMAGE_TAG=sha-${GITHUB_SHA}"
             echo "GHCR_NS=${GITHUB_REPOSITORY_OWNER}"
@@ -289,9 +295,6 @@ jobs:
             echo "APP_PROVENANCE_COMMIT_SHA=${{ needs.provenance.outputs.commit_sha }}"
             echo "APP_PROVENANCE_ACTIONS_RUN_ID=${{ needs.provenance.outputs.actions_run_id }}"
           } > "$RUNTIME_ENV_FILE"
-          # 660, no 600: cualquier agente del pool (todos en `ci-agents`) tiene que poder leerlo Y
-          # sobrescribirlo en el próximo deploy, sea cual sea el agente que lo creó la vez anterior.
-          chmod 660 "$RUNTIME_ENV_FILE"
 
       - name: Login GHCR (GITHUB_TOKEN del job, read-only) [R3]
         # El job corre en un workflow del repo → su GITHUB_TOKEN (packages: read) está cubierto por
