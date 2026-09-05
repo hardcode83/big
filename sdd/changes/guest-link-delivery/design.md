@@ -109,10 +109,11 @@ once, at the very end:
    `PortalStayLocator`/`LegalRegistrationStayStore` were both built to avoid (their docstrings
    say so explicitly). Reject `404` if the stay is absent/foreign-tenant, like the two existing
    use cases.
-2. IF `stay.guest_id` is `None`, look up the guest via `GuestRepository.get` and reject `422`
-   if its `email` is blank; IF `stay.guest_id` is `None` outright, reject `422` directly —
-   **before minting anything** (R3.2). This is why the guest/email check is its own step and
-   not folded into the mint use case, which has no reason to know about guests or email at all.
+2. IF `stay.guest_id` is **not** `None`, look up the guest via `GuestRepository.get` and reject
+   `422` if its `email` is blank; IF `stay.guest_id` **is** `None` (no `Guest` linked to this
+   stay yet — e.g. before check-in), reject `422` directly — **before minting anything** (R3.2).
+   This is why the guest/email check is its own step and not folded into the mint use case,
+   which has no reason to know about guests or email at all.
 3. Call the composed `IssueGuestAccessTokenUseCase.execute(...)` — same revoke-and-replace
    logic, same audit row, same "never re-issued to the caller" contract (R3.1) — but its
    `CallerOwnedUnitOfWork.commit()` is a no-op, so nothing is durable yet.
