@@ -92,6 +92,21 @@ bool`) was considered and rejected at gate: a knob a deploy could set wrong
 silently breaks dev and silently weakens prod, and the request-scheme
 derivation covers both paths.**
 
+**Accepted residual, corrected 2026-09-05 (review: `sdd-security`, fourth
+round)**: `SESSION_REFRESH_COOKIE` cannot carry the `__Host-` prefix, since
+D4 scopes it to `Path=/api/v1/auth` and the prefix mandates `Path=/`. This
+leaves it shadowable by a `Set-Cookie` from any sibling subdomain of
+`digitalsec.work` (or XSS on one) — `docs/ingress-https.md:90` records that
+the zone already hosts other services this project does not control, so
+the precondition holds *today*, not merely hypothetically; the original
+"no second host exists" deferral was factually wrong. Accepted as a MEDIUM
+risk for this ship rather than fixed here: closing it means `Path=/` plus
+`__Host-`, which forces dropping the dev-HTTP `Secure` exemption above —
+every local dev flow would need HTTPS, a real architecture decision about
+how dev serves TLS, not a same-day patch. **`/sdd:archive` must add a
+roadmap entry pointing at `sdd/roadmap/refresh-cookie-host-scoping.md`**
+(already written) when this change archives.
+
 ### D3 — `RefreshRequest.refresh_token` is removed, no dual period
 
 **Chosen**: drop the `refresh_token` field from `RefreshRequest`

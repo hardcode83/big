@@ -676,16 +676,28 @@
     `tests/auth/test_api.py`) and a rewritten integration test
     (`auth-session.integration.test.tsx`: "logs out with no cached access token via
     the cookie alone, no extra refresh").
-  - **LOW (`sdd-security`), residual recorded, not fixed — cookie shadowing by a
-    sibling subdomain**: `__Host-` is architecturally unavailable for this cookie (it
-    mandates `Path=/`, and D4 deliberately scopes it to `Path=/api/v1/auth`), so an
-    attacker controlling any sibling subdomain of `digitalsec.work` (or achieving XSS
-    on one) could `Set-Cookie` the same cookie name with `Domain=.digitalsec.work`,
-    and `request.cookies.get()`'s last-wins behavior could pick the attacker's value —
-    logging the victim into the attacker's session. No second host exists on the
-    `digitalsec.work` zone today, so this is not currently reachable; **re-open this
-    if one is ever added**, at which point closing it means `Path=/` plus the
-    `__Host-` prefix and dropping the dev-HTTP exemption (D2).
+  - **MEDIUM (`sdd-security`), corrected 2026-09-05 — cookie shadowing by a sibling
+    subdomain is reachable, not deferred as unreachable**: `__Host-` is
+    architecturally unavailable for this cookie (it mandates `Path=/`, and D4
+    deliberately scopes it to `Path=/api/v1/auth`), so an attacker controlling any
+    sibling subdomain of `digitalsec.work` (or achieving XSS on one) could
+    `Set-Cookie` the same cookie name with `Domain=.digitalsec.work`, and
+    `request.cookies.get()`'s last-wins behavior could pick the attacker's value —
+    logging the victim into the attacker's session (session fixation), or evicting
+    the victim's session at will. **This was first recorded as "no second host
+    exists on the zone today, so not currently reachable" — that premise is false**:
+    `docs/ingress-https.md:90` states the zone "aloja otros servicios" this project
+    does not control, so the sibling-host precondition already holds. This cookie
+    (`autohostai.session.refresh`) is new in this change — there was no persistent
+    refresh cookie, and so no shadowing surface, before it — so this is a risk this
+    change introduces, not a pre-existing one it inherits.
+    **Decision (accepted, scoped out of this change)**: the real fix (`Path=/` plus
+    the `__Host-` prefix, which forces dropping the dev-HTTP `Secure` exemption of
+    D2 — every local dev flow would need HTTPS) is a non-trivial architecture change
+    to how the cookie is scoped and how local dev works, not a same-day patch. Risk
+    is accepted as MEDIUM for this change's ship, with the fix tracked as its own
+    follow-up (see `sdd/roadmap/refresh-cookie-host-scoping.md`) rather than
+    implemented under review pressure here.
   - **LOW (`sdd-security`), re-confirmed deferred — CORS regex breadth**: unchanged
     from the deferral recorded above; still an explicit, agreed tradeoff, not an
     oversight (D1).
