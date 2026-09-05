@@ -134,7 +134,8 @@
       travels via cookie, never through this module). `refreshSession()` no
       longer reads `current.refreshToken` to decide whether a session exists
       or to key the in-flight dedupe (lines 32-46) — key the dedupe on
-      `sessionGeneration` alone, and treat "no access token in memory" as *not*
+      `tokenGeneration` alone (the token-identity counter, not `sessionGeneration`'s
+      cache-purge counter — see `session-store.ts`), and treat "no access token in memory" as *not*
       a reason to skip calling refresh (a reload legitimately starts with an
       empty store and a live cookie — that path belongs to task 5.1's
       mount-refresh, this coordinator keeps serving the within-tab 401-recovery
@@ -433,8 +434,9 @@
   - `refreshSession()` in `refresh-coordinator.ts` no longer short-circuits on "no access
     token in memory" — task 5.1's mount-refresh can rely on calling it directly with an
     empty store, and the existing `useEffect` ordering with `clearSessionTokens` / logout is
-    unchanged. Dedupe is still keyed on `sessionGeneration`, so StrictMode's double-mount
-    in task 5.2 still collapses to one network call inside this coordinator; the task's
+    unchanged. Dedupe is still keyed on `tokenGeneration` (the token-identity counter —
+    see `session-store.ts`, not `sessionGeneration`'s cache-purge counter), so StrictMode's
+    double-mount in task 5.2 still collapses to one network call inside this coordinator; the task's
     explicit `useRef`/module-level single-flight guard is belt-and-braces for the
     *mount-refresh* call site, not a replacement for this one (D11 is correct as written).
   - `clients.refreshTokens` is now `() => Promise<SessionTokens>` with no argument — the
@@ -492,7 +494,8 @@
     where the value is set moved. `design.md` D8's step ordering should be reconciled at
     archive time.
   - The D11 guard is `inFlightMountRefresh: {generation, promise} | null` at module scope in
-    `auth-provider.tsx`, keyed on `getSessionGeneration()`. It resolves
+    `auth-provider.tsx`, keyed on `getTokenGeneration()` (the token-identity counter, not
+    `getSessionGeneration()`'s cache-purge counter — see `session-store.ts`). It resolves
     `Promise<CurrentUser | null>` (as D11 now specifies, corrected 2026-09-05), so a provider that JOINS an
     in-flight refresh gets the identity without issuing a second `GET /auth/me` — the
     single-flight test asserts exactly one `/auth/refresh` AND exactly one `/auth/me` for two
@@ -538,7 +541,7 @@
     restantes" available without a second browser context (task 7.6's manual check is the
     real cross-tab verification).
   - **Section 5 panel fix (2026-09-05, `sdd-security` HIGH)**: `runMountRefresh` now re-checks
-    `getSessionGeneration()` against the generation captured at start *before* calling
+    `getTokenGeneration()` against the generation captured at start *before* calling
     `setSessionTokens`, and resolves `null` (dropping the token, without clearing — whatever
     the store holds then belongs to the newer session) when it moved; this is the same guard
     `refresh-coordinator.ts:46` applies, and it closes the gap `mountRefreshSuperseded` did
@@ -572,7 +575,7 @@
     of the two pre-existing `refresh-coordinator.ts` facts the roadmap entry catalogued) and
     it is fixed by the bullet below; D8 now describes it.
   - **Section 5 panel re-review fix (2026-09-05, `sdd-architect` HIGH / `sdd-security`
-    medium)**: `runMountRefresh` now captures `getSessionGeneration()` into
+    medium)**: `runMountRefresh` now captures `getTokenGeneration()` into
     `postInstallGeneration` immediately after its own `setSessionTokens` succeeds (replacing
     the `tokensInstalled` boolean, whose information it subsumes), and its `catch` calls
     `clearSessionTokens()` only while that value still equals the live generation — the
