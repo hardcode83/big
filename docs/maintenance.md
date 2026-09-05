@@ -12,19 +12,32 @@ alguien reporta una avería            (el portal del huésped, la limpiadora,
         │
         ▼
 incidencia OPEN, sin categoría ni severidad
-        │  classify_incidents (cada 5 min)  ── o ──  POST /incidents/{id}/classify
+        │
+        ├─ automático   classify_incidents (cada 5 min)  ── o ──  POST /incidents/{id}/classify
+        │                       │
+        │                  ¿confianza ≥ ai_confidence_threshold?
+        │                       │
+        │                       ├── sí ──► CLASSIFIED, con categoría y severidad
+        │                       │
+        │                       └── no ──► sigue OPEN, con `ai_classification` escrita
+        │                                    (queda para triaje humano, y el job ya no
+        │                                    vuelve a preguntar)
+        │
+        └─ humano        PATCH /incidents/{id}  con categoría **y** severidad
+                          (`classify_by_triage`: misma llegada que la vía automática, pero
+                          operación propia en `_TRANSITIONS` — sólo si la incidencia sigue OPEN)
+                                 │
+                                 ▼
+                          CLASSIFIED, con categoría y severidad
         ▼
-   ¿confianza ≥ ai_confidence_threshold?
-        │
-        ├── sí ──► CLASSIFIED, con categoría y severidad
-        │            │  si severidad HIGH/CRITICAL:
-        │            ├─► propiedad → MAINTENANCE_REQUIRED | CRITICAL_INCIDENT
-        │            └─► notificación a los managers (INCIDENT_CREATED_CRITICAL | _HIGH)
-        │
-        └── no ──► sigue OPEN, con `ai_classification` escrita
-                     (queda para triaje humano, y el job ya no vuelve a preguntar)
+   (por cualquiera de las dos vías, si la deja HIGH/CRITICAL):
+        ├─► propiedad → MAINTENANCE_REQUIRED | CRITICAL_INCIDENT
+        └─► notificación a los managers (INCIDENT_CREATED_CRITICAL | _HIGH)
         ▼
 el manager tría          PATCH /incidents/{id}     categoría, severidad, coste estimado
+        │                                        (si la incidencia no está OPEN, esta llamada
+        │                                        sólo anota los campos: la única transición que
+        │                                        dispara un triaje es la de arriba, y sólo desde OPEN)
         │                                        si la deja HIGH/CRITICAL y aún no se avisó:
         │                                        + notificación a los managers
         │
@@ -67,6 +80,22 @@ Ninguna de esas flechas de estado de propiedad la escribe este módulo por su cu
 pasan por `PropertyStateMachine`, que es el único sitio donde ocurre una transición
 (`sdd/steering/architecture.md`).
 
+**El triaje que clasifica (`classify_by_triage`).** Un triaje que fija sólo uno de los dos
+campos —o sólo el coste, sin ninguno de los dos— no transiciona nada: la incidencia sigue
+donde estaba, sea `OPEN` o no, exactamente como antes de este change. Sobre una incidencia
+que ya no está `OPEN` (`ASSIGNED`, por ejemplo), el triaje tampoco transiciona nunca por esta
+vía aunque traiga los dos campos: la fila `classify_by_triage` sólo admite `OPEN` como
+origen, así que ahí categoría, severidad y coste se limitan a anotarse. Si el mismo triaje
+clasifica (`OPEN → CLASSIFIED`) **y** su `estimated_cost` supera el umbral del tenant, la
+incidencia pasa por `CLASSIFIED` de camino a `AWAITING_OWNER_APPROVAL` en la misma petición
+— no es lógica nueva, sale del orden ya vigente (`set_triage` corre antes que la puerta de
+aprobación), sólo que ahora también puede arrancar desde `OPEN` y no sólo desde una
+incidencia ya clasificada. **Un matiz asimétrico que conviene saber**: triar *sólo* el coste
+estimado (sin categoría ni severidad) sobre una incidencia `OPEN` y por encima del umbral
+sigue dando `409` — no se queda `OPEN` con gracia — porque la puerta de aprobación sólo
+admite `CLASSIFIED`/`IN_PROGRESS` como origen; es comportamiento previo a este change, sin
+tocar.
+
 ## Las dos puertas de la propietaria, y por qué son dos
 
 PRD §12 pone el umbral sobre el **coste estimado**. Si sólo existiera esa puerta, estimar
@@ -101,7 +130,7 @@ y el técnico repite el cierre. Cerrarla por él haría que `resolved_at` dejara
 | Responder una aprobación | ✔ | — | — | — |
 | Abrir una incidencia desde su propia limpieza | — | — | — | ✔ |
 
-Tres cosas que no se ven en la tabla y conviene saber:
+Cuatro cosas que no se ven en la tabla y conviene saber:
 
 - **El técnico sólo ve y opera las suyas**, y eso no es un filtro que la petición pida: sale
   del rol del token. Una incidencia asignada a otro técnico devuelve el **mismo `404`** que
@@ -115,6 +144,12 @@ Tres cosas que no se ven en la tabla y conviene saber:
   conviene no negar**: al cerrar su limpieza puede recibir un `409` que le dice que en esa
   vivienda hay una incidencia `CRITICAL` sin resolver. Es un bit —existe o no—, sin id, sin
   título y sin descripción, y está descrito en [`cleaning.md`](cleaning.md).
+- **Esas cuatro acciones —clasificar, triar, asignar/reasignar, cancelar— se operan ahora
+  desde `/incidents/[id]`** en el navegador del manager, y no sólo por API directa: hasta
+  este change su único llamante de producción, fuera del job automático, era
+  `backend/app/cli/seed_demo.py`. El técnico asignado se enseña ya por **nombre**, resuelto
+  contra el roster de `GET /api/v1/users`, y no por UUID — para quien abra la pantalla,
+  manager o no.
 
 ## Reportar una incidencia desde una limpieza
 
@@ -458,27 +493,30 @@ nada, que es justo el razonamiento con el que alguien lo ensancharía.
 ## Cómo se ven desde la web
 
 La pantalla de **lista y detalle** de incidencias del workspace (`/incidents`,
-`/incidents/[id]`) está disponible en modo solo lectura desde `incidents-web` (archivado
-en `changes/archive/`). Cubre la consulta: la manager abre `/incidents`, filtra por `status`
-y `severity`, paginacliente (`lastPage = max(1, ceil(total / perPage))`, porque el endpoint
-no expone `total_pages`), y abre cada fila en `/incidents/[id]`. El detalle pinta los 20
-campos de `IncidentResponse` — incluido `description` como **texto plano** (regla 11 de
-`sdd/steering/security.md`: texto libre del huésped o de la limpiadora, nunca HTML) y
-`assigned_technician_id` bajo una sección secundaria etiquetada con su nota de limitación
-(no hay `GET /api/v1/users` en el contrato, así que el UUID no se resuelve a nombre aquí).
+`/incidents/[id]`) nació en modo solo lectura en `incidents-web` (archivado en
+`changes/archive/`) y gana aquí sus primeros controles de mutación. Cubre la consulta: la
+manager abre `/incidents`, filtra por `status` y `severity`, paginacliente (`lastPage =
+max(1, ceil(total / perPage))`, porque el endpoint no expone `total_pages`), y abre cada
+fila en `/incidents/[id]`. El detalle pinta los 20 campos de `IncidentResponse` — incluido
+`description` como **texto plano** (regla 11 de `sdd/steering/security.md`: texto libre del
+huésped o de la limpiadora, nunca HTML) — y el técnico asignado ya por **nombre**, resuelto
+contra `GET /api/v1/users` (ver «Quién puede hacer qué» arriba); el UUID ya no se enseña sin
+resolver.
 
-Quedan fuera de esa pantalla, hasta que lleguen sus entradas propias:
+Quien tiene `MANAGE_INCIDENTS` ve además, en el propio detalle, las **cuatro operaciones del
+manager** —`classify`, `triage` vía `PATCH`, `assign`/reasignar, `cancel`—, gateadas por
+estado con la misma tabla de transiciones de arriba. Las **seis de `EXECUTE_INCIDENTS`**
+—`accept`, `reject`, `en-route`, `wait-parts`, `resume` y `resolve`— siguen sin estar aquí:
+viven en la app del técnico descrita arriba, y esta pantalla del workspace sigue sin
+ofrecerlas. Cada una lleva su validación de transición (`IncidentAlreadyClosedError`,
+`InvalidIncidentTransitionError`, `IncidentBlockedByPendingApprovalError`) y su auditoría.
 
-- Las **cuatro operaciones del manager** (`classify`, `triage` vía `PATCH`, `assign`, `cancel`),
-  que llevan `MANAGE_INCIDENTS`. Las **seis de `EXECUTE_INCIDENTS`** —`accept`, `reject`,
-  `en-route`, `wait-parts`, `resume` y `resolve`— ya no están fuera de la web: viven en la app del
-  técnico descrita arriba, y de esta pantalla del workspace siguen ausentes. Cada una lleva su
-  validación de transición (`IncidentAlreadyClosedError`, `InvalidIncidentTransitionError`,
-  `IncidentBlockedByPendingApprovalError`) y su auditoría.
+Quedan fuera de esta pantalla, hasta que lleguen sus entradas propias:
+
 - **Responder una aprobación** (`POST /owner-approvals/{id}/respond`): la ruta `/approvals`
   sigue como `RoutePlaceholder` y la regla 11 ata esa pantalla a una decisión de UX sobre
   el flujo de la propietaria.
-- **Selector de propiedad** y **resolución nombre↔id de `assigned_technician_id`**: ambos
-  son `M` por derecho propio. No los desbloquea `tech-app`: la app del técnico resuelve **su**
-  vivienda con `tech-incident-context`, que proyecta el contexto de una incidencia y no ofrece
-  ningún catálogo con el que poblar un selector ni ninguna forma de resolver un UUID de usuario.
+- **Selector de propiedad**: es `M` por derecho propio. No lo desbloquea `tech-app` ni este
+  change: la app del técnico resuelve **su** vivienda con `tech-incident-context`, que
+  proyecta el contexto de una incidencia y no ofrece ningún catálogo con el que poblar un
+  selector.
