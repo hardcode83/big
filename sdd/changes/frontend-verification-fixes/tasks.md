@@ -273,7 +273,7 @@
   sentence is untouched and still literally true (design D3). The PRD:205 citation was kept
   and marked superseded-on-this-point rather than deleted — section 5 may want to mirror that
   phrasing rather than claim PRD:205 is simply wrong.
-- **Deviation from D5 that needs the owner's ruling (see CONFLICT below).** The guard in
+- **Deviation from D5 (resolved — see design.md's D5 amendment).** The guard in
   `backend/tests/test_layering.py` bans the shape `<anything>.context.preferred_language`
   across `backend/app/*/api/*.py` as specified, but carries a one-entry allowlist
   `LOCALE_ROW_READERS = {("app/auth/api/dependencies.py", "get_request_locale")}` — because

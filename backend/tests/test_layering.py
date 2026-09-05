@@ -286,15 +286,33 @@ def _api_modules() -> list[Path]:
 
 
 def _stored_locale_reads(tree: ast.Module) -> list[tuple[str | None, int]]:
-    """Every `<anything>.context.preferred_language` in `tree`, with its enclosing function.
+    """Every read of the stored `.context.preferred_language` in `tree`, with its enclosing
+    function.
 
     The enclosing function is resolved by walking down from the module rather than up from
     the node, because `ast` parents are not linked; a nested `def` reports the innermost
     one, which is the name a reader would have to write to claim the exemption.
 
-    Also catches the one-step-removed shape `ctx = x.context; ctx.preferred_language`: a
-    bare `.context` alias is resolved per enclosing function before the attribute walk, so
-    binding the owner to a local name first does not exit the ban.
+    Three shapes count as the same read, because each is a rewrite of the others that a
+    determined-but-not-adversarial future edit could plausibly reach for:
+
+    * The direct chain, `<anything>.context.preferred_language`.
+    * `ctx = x.context; ctx.preferred_language` — a bare `.context` alias, resolved per
+      enclosing function before the attribute walk, so binding the owner to a local name
+      first does not exit the ban.
+    * A bare name literally called `context` — `context.preferred_language`, own an
+      attribute *or* a function parameter — since the one-attribute-chain exemption exists
+      for the four serialisers that name the ORM row (`user`/`guest`), never for a variable
+      named after the thing this rule is about.
+    * `getattr(<context>, "preferred_language")`, where `<context>` is any of the three
+      owner shapes above — a `Call`, not an `Attribute`, so it needs its own check.
+
+    Not caught, and not attempted: a helper parameter named anything other than `context`
+    (e.g. `def _stored(ctx_row): return ctx_row.preferred_language`) still evades this,
+    because closing that requires tracing what a caller actually passed across a function
+    boundary, which this single-file AST walk does not do. Design D5's "sin lista blanca"
+    holds for the shapes above; it is not a claim that no rename can ever evade a per-file
+    check.
     """
     enclosing: dict[int, str | None] = {}
 
@@ -322,17 +340,31 @@ def _stored_locale_reads(tree: ast.Module) -> list[tuple[str | None, int]]:
                 if isinstance(target, ast.Name):
                     context_aliases.setdefault(enclosing[id(node)], set()).add(target.id)
 
+    def is_stored_context(owner: ast.AST, function: str | None) -> bool:
+        if isinstance(owner, ast.Attribute) and owner.attr == LOCALE_OWNER_ATTR:
+            return True
+        if isinstance(owner, ast.Name):
+            if owner.id == LOCALE_OWNER_ATTR:
+                return True
+            return owner.id in context_aliases.get(function, set())
+        return False
+
     found = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Attribute) or node.attr != LOCALE_ATTR:
-            continue
-        owner = node.value
         function = enclosing[id(node)]
-        is_direct_context = isinstance(owner, ast.Attribute) and owner.attr == LOCALE_OWNER_ATTR
-        is_aliased_context = isinstance(owner, ast.Name) and owner.id in context_aliases.get(
-            function, set()
-        )
-        if is_direct_context or is_aliased_context:
+        if isinstance(node, ast.Attribute) and node.attr == LOCALE_ATTR:
+            if is_stored_context(node.value, function):
+                found.append((function, node.lineno))
+            continue
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value == LOCALE_ATTR
+            and is_stored_context(node.args[0], function)
+        ):
             found.append((function, node.lineno))
     return found
 
@@ -423,3 +455,31 @@ def test_the_locale_check_catches_the_shapes_it_claims_to() -> None:
     assert _stored_locale_reads(aliased) == [("get_locale", 3)], (
         "binding `.context` to a local name first must not exit the ban"
     )
+
+    # A parameter literally named `context` reads the stored preference off a
+    # one-attribute chain — same shape as the exempt `user`/`guest` serialisers, but
+    # `context` is the one name that shape exemption must never cover.
+    named_param = ast.parse("def _stored(context):\n    return context.preferred_language\n")
+    assert _stored_locale_reads(named_param) == [("_stored", 2)], (
+        "a bare variable literally called `context` must not evade the ban"
+    )
+
+    # `getattr(...)` is a Call, not an Attribute, and must not be a side door — for both
+    # the direct owner and an aliased one.
+    reflective = ast.parse('locale = getattr(authenticated.context, "preferred_language")')
+    assert _stored_locale_reads(reflective) == [(None, 1)]
+
+    reflective_aliased = ast.parse(
+        "def get_locale(authenticated):\n"
+        "    ctx = authenticated.context\n"
+        '    return getattr(ctx, "preferred_language")\n'
+    )
+    assert _stored_locale_reads(reflective_aliased) == [("get_locale", 3)]
+
+    # `getattr` on an unrelated object, or for an unrelated attribute, is not this rule's
+    # business.
+    reflective_other_attr = ast.parse('x = getattr(authenticated.context, "role")')
+    assert _stored_locale_reads(reflective_other_attr) == []
+
+    reflective_other_owner = ast.parse('x = getattr(user, "preferred_language")')
+    assert _stored_locale_reads(reflective_other_owner) == []
