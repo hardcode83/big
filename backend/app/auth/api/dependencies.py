@@ -157,12 +157,15 @@ def resolve_cookie_secure(request: Request) -> bool:
     `get_client_ip` above already trusts `scope["client"]` rather than reading
     `X-Forwarded-For` itself. A second, manual `request.headers.get("x-forwarded-proto")`
     read would be redundant on the trusted path and, worse, ungated on the untrusted one:
-    the dev backend port intentionally runs without `--forwarded-allow-ips`
-    (`docker-compose.yml`, so any device on the LAN can reach `:8000` directly)
-    specifically so no forwarded header is trusted there — a raw header read would let any
-    LAN peer force `secure=True` by spoofing it, breaking that standing principle for
-    exactly the header `get_client_ip`'s own docstring warns against trusting
-    unconditionally. This helper therefore reads `request.url.scheme` only.
+    the dev stage pins `--forwarded-allow-ips 127.0.0.1` in `backend/devops/Dockerfile` —
+    not its absence — so `docker-compose.yml` can publish `:8000` on every interface and
+    still trust nobody but the container's own loopback; a LAN peer reaching the published
+    port directly does not present as loopback, so uvicorn never rewrites the scheme for
+    it regardless of what header it sends. A raw header read would bypass that gate
+    entirely and let any LAN peer force `secure=True` by spoofing it, breaking that
+    standing principle for exactly the header `get_client_ip`'s own docstring warns
+    against trusting unconditionally. This helper therefore reads `request.url.scheme`
+    only.
 
     `True` in dev over plain HTTP would make the browser silently drop the cookie;
     unconditionally `True` would also break local `make up PORT_OFFSET=<n>`, which is why
@@ -528,9 +531,17 @@ async def get_logout_subject(
     logout specifically: whatever the Bearer's fate, revocation is attempted straight
     off the cookie.
 
-    No `bind_session_to_tenant` call in the cookie branch, matching `/auth/refresh`
-    and `/auth/login` (also unauthenticated at this point): `revoke_family` takes
-    `tenant_id` as an explicit filter, not via the session-level marker.
+    Calls `bind_session_to_tenant` in the cookie branch when the decoded `tenant_id`
+    is not `None` (added 2026-09-05, review: `sdd-security` — the unmarked-session
+    state `steering/security.md` rule 1 names is the SUPER_ADMIN, `tenant_id is None`
+    case alone; a cookie naming a real tenant left the session unmarked too, a second,
+    undocumented way to reach that state). `revoke_family` already filters on the
+    explicit `tenant_id` argument regardless, so this adds a second, defense-in-depth
+    layer rather than fixing a reachable cross-tenant path — `LogoutUseCase.execute`
+    takes no other statement that could run unscoped today — but it keeps this route
+    on the same one mechanism every other tenant-scoped write relies on, so a future
+    edit to it inherits the global filter rather than needing its own tenant_id
+    argument to get it right.
 
     Tagged with `MANAGE_OWN_SESSION` for `test_route_authorization.py`'s structural
     walk even though the cookie path checks no role: that permission is in
@@ -565,6 +576,8 @@ async def get_logout_subject(
         claims = codec.decode_refresh(token)
     except InvalidTokenError:
         return None
+    if claims.tenant_id is not None:
+        bind_session_to_tenant(session, claims.tenant_id)
     return LogoutSubject(tenant_id=claims.tenant_id, family_id=claims.family_id)
 
 

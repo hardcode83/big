@@ -254,6 +254,13 @@ async def test_logout_with_no_bearer_only_revokes_the_presenting_tenants_family(
     logout = await api.post("/api/v1/auth/logout")
     assert logout.status_code == 204
 
+    # `get_logout_subject`'s cookie branch now marks the (test-shared) `db_session` to
+    # tenant A (review: sdd-security) — in production this is a fresh session per
+    # request and the mark dies with it, but this test reuses one `db_session` across
+    # calls, so it must be reset the same way `test_isolation.py`'s cross-tenant tests
+    # already do before the next call touches a different tenant.
+    db_session.info.pop(TENANT_ID_SESSION_KEY, None)
+
     # Tenant A's family is gone.
     api.cookies.set(SESSION_REFRESH_COOKIE, cookie_a)
     reused_a = await api.post("/api/v1/auth/refresh", json={})

@@ -71,10 +71,13 @@ is already proxy-aware and trust-gated, the same way `get_client_ip`
 already trusts `scope["client"]` rather than reading `X-Forwarded-For`
 itself. A second, manual `request.headers.get("x-forwarded-proto")` read is
 redundant on the trusted path and, worse, ungated on the untrusted one: the
-dev backend port intentionally runs without `--forwarded-allow-ips`
-(`docker-compose.yml`, so any device on the LAN can reach `:8000` directly)
-specifically so no forwarded header is trusted there — a raw header read
-would let any LAN peer force `secure=True` by spoofing it, breaking that
+dev stage pins `--forwarded-allow-ips 127.0.0.1` in `backend/devops/Dockerfile`
+— not its absence — so `docker-compose.yml` can publish `:8000` on every
+interface and still trust nobody but the container's own loopback; a LAN
+peer reaching the published port directly does not present as loopback, so
+uvicorn never rewrites the scheme for it regardless of what header it
+sends. A raw header read would bypass that gate entirely and let any LAN
+peer force `secure=True` by spoofing it, breaking that
 standing principle for exactly the header `get_client_ip`'s own docstring
 warns against trusting unconditionally. `resolve_cookie_secure` therefore
 reads `request.url.scheme` only.
