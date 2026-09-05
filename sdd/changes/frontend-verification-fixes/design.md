@@ -340,7 +340,7 @@ coste de contexto para quien lo abra, sin sustituir ninguna frase.
 | Frontend · tests | `frontend/lib/api/client.test.ts` o `authenticated-client` nuevo, `frontend/features/dashboard/hooks/query-keys.test.ts`, `frontend/features/dashboard/hooks/use-dashboard-data.test.tsx` | Cabecera presente y = locale activo; R2.4 (clave sin locale = rojo) y prefijo de invalidación intacto; cambio de idioma → clave nueva → refetch. |
 | Prosa viva · R3/R4 | `sdd/project.md`, `sdd/roadmap.md` (entrada), `sdd/roadmap/frontend-verification-fixes.md` | Párrafo de hidratación reescrito con el veredicto medido y la hipótesis marcada como tal (D9, D10); las tres casas del hallazgo corregidas (R4.4). |
 | Prosa viva · consecuencia de R1 | `docs/dashboard.md:43-45`, `sdd/roadmap/timeline-web.md:70`, `sdd/specs/dashboard-api.md:487`, `sdd/specs/revenue-statements.md:306` | Cuatro casas más de la redacción superada, fuera de las tres que R4.4 nombra — ver OQ3. |
-| Specs | `sdd/specs/dashboard-api.md` (`:270-307`), `sdd/specs/auth-tenancy.md` (`:243-251`, `:542`), `sdd/specs/frontend-foundation.md` (`:50-56`) | Los actualiza `/sdd:archive` tras el merge, no este change. |
+| Specs | `sdd/specs/auth-tenancy.md` (`:243-251`, `:542`), `sdd/specs/frontend-foundation.md` (`:50-56`) | Los actualiza `/sdd:archive` tras el merge, no este change. `sdd/specs/dashboard-api.md` (`:270-307`) no está aquí porque sí lo toca este change — tarea 5.3, ver la fila «Prosa viva» de arriba: la reescritura completa como `SHALL` queda para `/sdd:archive`, pero la corrección de la redacción que seguía afirmando lo contrario del código nuevo no espera. |
 
 ## Data & interfaces
 

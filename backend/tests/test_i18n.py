@@ -171,6 +171,15 @@ def test_a_supported_request_wins_over_a_different_stored_preference() -> None:
     assert resolve_locale("en", "es") is Locale.EN
 
 
+def test_a_request_normalizes_case_and_whitespace_same_as_the_stored_value() -> None:
+    """`resolve_locale`'s `requested` branch shares `Locale`'s own `.strip().lower()` —
+    pinned here directly so a regression that normalizes only the `stored` fallback (e.g.
+    `Locale(requested)` without strip/lower) fails on this branch, not just on
+    `Locale.resolve`'s own parametrization."""
+    assert resolve_locale("EN", "es") is Locale.EN
+    assert resolve_locale(" es ", "en") is Locale.ES
+
+
 def test_a_supported_request_wins_over_an_unsupported_stored_preference() -> None:
     assert resolve_locale("en", "fr") is Locale.EN
 

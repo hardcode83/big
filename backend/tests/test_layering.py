@@ -293,7 +293,7 @@ def _stored_locale_reads(tree: ast.Module) -> list[tuple[str | None, int]]:
     the node, because `ast` parents are not linked; a nested `def` reports the innermost
     one, which is the name a reader would have to write to claim the exemption.
 
-    Three shapes count as the same read, because each is a rewrite of the others that a
+    Four shapes count as the same read, because each is a rewrite of the others that a
     determined-but-not-adversarial future edit could plausibly reach for:
 
     * The direct chain, `<anything>.context.preferred_language`.
