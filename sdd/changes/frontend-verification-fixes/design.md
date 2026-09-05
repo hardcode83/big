@@ -149,6 +149,27 @@ Rejected (en la enmienda): mover el escalón de degradación de `get_request_loc
 la dependencia fuera del sitio que D3 le asigna a propósito, junto a `AuthenticatedDep`, por una razón
 que es de la guardia y no de la dependencia.
 
+**Segunda enmienda (review, rondas 2-3, 2026-09-05):** la primera enmienda fijó la forma prohibida
+en la cadena directa de dos atributos. Dos rondas de revisión encontraron sendas reescrituras de la
+misma idea que el AST original dejaba pasar: un alias de `.context` ligado a un nombre local (en
+cualquiera de sus formas — asignación simple o encadenada, anotada, walrus, desempaquetado de
+tupla/lista) y un parámetro o atributo literalmente llamado `context`; después, `getattr(<owner>,
+"preferred_language")` como llamada en vez de atributo. Las tres se añadieron a `_stored_locale_reads`
+en `backend/tests/test_layering.py`, con un test que prueba que el detector dispara sobre cada una
+(`test_the_locale_check_catches_the_shapes_it_claims_to`).
+
+Encontrada la tercera forma, la decisión fue parar: `getattr(getattr(x, "context"),
+"preferred_language")`, `x.context.__dict__[...]`, `operator.attrgetter(...)`, y cualquier otra vía de
+Python para obtener un atributo sin escribir `.attr` forman una lista abierta que un AST por fichero
+no puede enumerar — cada una necesita solo una capa más de indirección que la anterior. El docstring
+de `_stored_locale_reads` (líneas 314-326) lo deja explícito: la guardia es una barrera contra las
+formas a las que llega una edición ordinaria, no contra la ofuscación deliberada, y no se persigue esa
+lista porque el coste de un fallo (una traducción en el idioma equivocado, no una fuga entre tenants ni
+un fallo de autorización — ver D3) no lo justifica. Esta es la razón por la que D3 aísla el locale no
+verificado de `RequestContext`: si la guardia D5 cede ante una reescritura no prevista, el radio del
+fallo queda acotado a texto en el idioma incorrecto para el propio lector, nunca a un dato de otro
+tenant ni a una decisión de permisos.
+
 ### D6 — El idioma resuelto de i18next se publica en un módulo de `lib/i18n` que `getHeaders` lee
 
 **Chosen:** `frontend/lib/i18n/active-locale.ts` con un `getActiveLocale(): Locale` y un
@@ -166,9 +187,20 @@ equivalente que hay que argumentar. Se publica de forma síncrona al crear la in
 efecto) para que una consulta que arranque en el primer render ya lleve el valor bueno; antes de
 que monte cualquier proveedor vale `DEFAULT_LOCALE`, que es lo que el servidor habría resuelto.
 
-Un solo punto de edición cubre R1.4 entero ("todas las llamadas que pasan por el `ApiClient`"),
-porque `getHeaders` es el único sitio donde se pone la `Authorization`. El cliente anónimo del
-portal del huésped (`features/guest-portal/data/index.ts`) no se toca: ese eje está fuera de alcance.
+Un solo punto de edición cubre R1.4 para las nueve `features/*/data/index.ts` que construyen su
+cliente a través de `createAuthenticatedClients`/`authenticated-client.ts`, porque `getHeaders` es
+el sitio donde esas llamadas ponen la `Authorization`. El cliente anónimo del portal del huésped
+(`features/guest-portal/data/index.ts`) no se toca: ese eje está fuera de alcance.
+
+**Corrección (review, 2026-09-05):** la redacción original decía que `getHeaders` es "el único
+sitio donde se pone la `Authorization`" en todo el frontend, lo cual es falso —
+`features/provenance/provenance-panel.tsx:49-57` construye su propio `ApiClient` con un
+`getHeaders` inline que también pone `Authorization` y no pasa por `authenticated-client.ts`, así
+que no lleva `X-Locale`. Queda fuera de alcance de R1.4 a propósito y no por omisión: es
+pre-existente (no lo toca este change) y `/api/v1/provenance` no compone ningún texto dependiente
+de idioma — devuelve URL de repositorio, número de PR, SHA de commit, id de run y versión de app,
+todos datos técnicos, no traducidos. La afirmación correcta es la de arriba: el punto de edición
+cubre las nueve `data/index.ts` que sí pasan por el cliente autenticado compartido.
 
 Rejected: leer el cookie `autohostai.locale` desde `getHeaders` — cero estado nuevo y funciona,
 pero el valor que viajaría sería el del cookie y no el de i18next, que es el que R1.4 nombra.
