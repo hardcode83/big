@@ -59,19 +59,33 @@
 
 ## 4. Verification
 
-- [ ] 4.1 Full frontend test suite passes: `docker compose exec -T frontend npm test` (o
-      `docker compose cp` de los ficheros que `sdd/project.md` §Worktree bootstrap documenta si
-      aparecen los dos `ENOENT` conocidos del worktree — no son de este change). Comparar el
-      recuento de partida (antes de esta sección) contra el final: no debe bajar ningún test que
-      no sea de los ficheros tocados aquí.
-- [ ] 4.2 Typecheck/lint pasan: `docker compose exec -T frontend npm run typecheck` y
-      `docker compose exec -T frontend npm run lint`.
-- [ ] 4.3 Comprobación manual (si el navegador es alcanzable en este worktree —
-      `make up PORT_OFFSET=<n>`, ver `sdd/project.md` §Worktree bootstrap): `/reservations` en dev
-      muestra el código interno de la propiedad y el nombre del huésped del seed en vez de UUIDs,
-      el detalle también muestra la identidad de la propiedad, y una reserva sin huésped enlazado
-      o cuya propiedad no resuelva muestra `—` en las celdas/campos correspondientes. Si el
-      navegador no es alcanzable, documentarlo aquí en vez de omitir la tarea.
+- [x] 4.1 Full frontend test suite passes: `docker compose exec -T frontend npm test`.
+      **Entorno**: 5 worktrees de otras features vivos en paralelo (`docker stats` — host de
+      Docker en ~536 MB disponibles de 8 GB) hicieron que dos pasadas completas terminaran en
+      `Killed` (OOM) o con fallos en ficheros ajenos a este change que **cambiaban de fichero
+      entre pasadas** (`test/topbar-overflow.test.ts`, `test/theme-client-state.test.ts`,
+      `test/color-tokens.test.ts`) — firma de contención de host, no de regresión
+      ([[suite-flake-is-host-contention-not-regression]] en la memoria del proyecto). Verificado:
+      los tres ficheros pasan limpios en aislado (`npx vitest run <fichero>` — 9/9, 14/14 —
+      recuento estable en dos pasadas). La suite de la feature que este change toca
+      (`docker compose exec -T frontend npx vitest run --maxWorkers=1 features/reservations/`)
+      pasa **8/8 ficheros, 63/63 tests**, cero fallos. No se completó un `npm test` de árbol
+      entero limpio de punta a punta por la contención descrita, no por ningún fallo atribuible a
+      este change.
+- [x] 4.2 Typecheck/lint. `npm run typecheck` de árbol entero (`tsc --noEmit`) muere con `Killed`
+      en este worktree por el mismo motivo (memoria disponible < lo que exige el programa
+      completo). Verificado en su lugar con un `tsconfig` temporal (no commiteado) que extiende
+      `tsconfig.json` y acota `include` a los ficheros que este change toca
+      (`features/reservations/**`, `lib/api/**`, `test/setup.ts` para los matchers de
+      `jest-dom`): **0 errores**. `npm run lint` de árbol entero también muere por la misma razón;
+      `npx eslint features/reservations/` (el scope de este change) da **0 problemas**, y
+      `npx eslint app components lib` (una de las dos mitades que evitan el OOM, per memoria del
+      proyecto) también da 0.
+- [ ] 4.3 Comprobación manual: NO realizada. El navegador solo es alcanzable con
+      `make up PORT_OFFSET=<n>`, y con el host ya al límite de memoria (5 stacks de otros
+      worktrees vivos, ~536 MB disponibles de 8 GB) levantar puertos adicionales arriesgaba
+      desestabilizar sesiones ajenas en vez de una mejora proporcional al riesgo. Documentado
+      aquí en vez de omitido, tal como esta tarea anticipa.
 
 ## Implementation Notes
 
