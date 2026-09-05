@@ -29,8 +29,14 @@ is already called from two places (`auth/api/dependencies.py:254`, `scheduler/ta
 `GuestRepository.get(tenant_id, guest_id) -> GuestSummary | None`
 (`backend/app/guests/domain/repositories.py:28`) already returns `email` and
 `preferred_language` (`backend/app/guests/domain/value_objects.py:25-44`).
-`ReservationRepository.get(tenant_id, reservation_id) -> Reservation | None`
-(`backend/app/reservations/domain/repositories.py:64`) gives `guest_id` (nullable).
+`PortalStayLocator.find(tenant_id, reservation_id) -> PortalStay | None`
+(`backend/app/guests/domain/portal_ports.py:369,381`) — the port `IssueGuestAccessTokenUseCase`
+and `RevokeGuestAccessTokenUseCase` already use — gives `guest_id` (nullable) without this
+domain reaching into `reservations/domain`'s own `ReservationRepository` (see D4).
+`CallerOwnedUnitOfWork` (`backend/app/core/unit_of_work.py:59`) is the existing seam for a use
+case composing another over one session, built after an incident where composing
+`SetGuestDocumentUseCase` inside `SubmitGuestCheckinUseCase` shipped with two independent
+commits (see D4).
 
 On the frontend, `frontend/app/(workspace)/reservations/[id]/page.tsx` is the detail screen;
 `frontend/lib/auth/permissions.ts:61`'s `useHasPermission(permission)` is the existing gating
@@ -81,49 +87,72 @@ Rejected: reusing `find_live_by_token_hash` — that query resolves an unmarked 
 and has no `reservation_id` input; repurposing it would either add an unused parameter or search
 by a hash the caller does not have.
 
-### D4 — Delivery is a new use case that calls the existing mint, not a flag on it
+### D4 — Delivery is a new use case that calls the existing mint, not a flag on it; one
+transaction, one commit, `CallerOwnedUnitOfWork` on the composed mint
 
 **Chosen:** `SendGuestAccessTokenUseCase` (new class, `guests/application/portal.py`, sibling to
 `Issue`/`RevokeGuestAccessTokenUseCase`), with its own `execute(tenant_id, reservation_id,
-actor, now)`:
+actor, now)`. It composes `IssueGuestAccessTokenUseCase` **over the same session**, wired at
+construction with `uow=CallerOwnedUnitOfWork()` instead of `SqlAlchemyUnitOfWork(session)` —
+exactly the mechanism `app/core/unit_of_work.py:59` documents for this precise situation ("one
+use case composes another... and then exactly one of the two may end it"), built after
+`SubmitGuestCheckinUseCase`'s own composition of `SetGuestDocumentUseCase` first shipped with
+two independent real commits and four of five reviewers caught it. `SendGuestAccessTokenUseCase`
+itself holds the one real `SqlAlchemyUnitOfWork` and is the only one that calls `commit()`,
+once, at the very end:
 
-1. Load the reservation (`ReservationRepository.get`) and reject `404` if absent/foreign-tenant,
-   exactly like the two existing use cases.
-2. IF `reservation.guest_id` is `None` OR the loaded `GuestSummary.email` is blank, reject
-   `422` **before minting anything** (R3.2) — this is why the guest/email check is its own
-   step and not folded into the existing mint use case, which has no reason to know about
-   guests or email at all.
-3. Call `IssueGuestAccessTokenUseCase.execute(...)` **unchanged** — same revoke-and-replace
-   transaction, same audit row, same "never re-issued to the caller" contract (R3.1). Its
-   `commit()` already happened by the time this step returns.
+1. Load the stay via `PortalStayLocator.find(tenant_id, reservation_id)` — the same narrow,
+   guests-owned projection `IssueGuestAccessTokenUseCase`/`RevokeGuestAccessTokenUseCase`
+   already use (`portal.py:511,584`), **not** `ReservationRepository`: `PortalStay` already
+   carries `guest_id` (`portal_ports.py:59`), and reaching into `reservations/domain`'s own
+   repository from `guests/application` would reopen exactly the aggregate-leak
+   `PortalStayLocator`/`LegalRegistrationStayStore` were both built to avoid (their docstrings
+   say so explicitly). Reject `404` if the stay is absent/foreign-tenant, like the two existing
+   use cases.
+2. IF `stay.guest_id` is `None`, look up the guest via `GuestRepository.get` and reject `422`
+   if its `email` is blank; IF `stay.guest_id` is `None` outright, reject `422` directly —
+   **before minting anything** (R3.2). This is why the guest/email check is its own step and
+   not folded into the mint use case, which has no reason to know about guests or email at all.
+3. Call the composed `IssueGuestAccessTokenUseCase.execute(...)` — same revoke-and-replace
+   logic, same audit row, same "never re-issued to the caller" contract (R3.1) — but its
+   `CallerOwnedUnitOfWork.commit()` is a no-op, so nothing is durable yet.
 4. Build `subject`/`body` from constants + reservation/property identifiers only (never the
    guest's name, never the link) via a new pure builder `render_guest_link_email(language:
    str) -> tuple[str, str]` in `guests/domain/notifications.py`, choosing `es`/`en` from
    `GuestSummary.preferred_language` (already a stored field, default `"es"`; see D6).
 5. Call the `EMAIL` adapter synchronously with the **real** portal URL (built from the
    cleartext token step 3 returned, `{frontend_base_url}/guest/{token}` — same shape
-   `render_recovery_email` uses for its own link) and the guest's `email`.
-6. Write one `NotificationLog` row directly to `SENT`/`FAILED` (R3.3-R3.5), `related_type =
-   "reservation"`, `related_id = reservation_id`, `recipient_user_id = None` (the recipient is
-   a guest, not a `User` — the column already allows `NULL`), `recipient_contact =
-   guest.email`, mirroring `recovery.py:303-333` field for field.
+   `render_recovery_email` uses) and the guest's `email` — **before** the commit, on the same
+   open session, exactly as `recovery.py:280-335` itself does it (its own design D2 rejected a
+   post-response `BackgroundTask` precisely because the session would already be closed and the
+   adapter's result could not land in the same transaction as the mint — not because the
+   adapter call must happen after a commit; the two intermediate design paragraphs that said
+   otherwise were a misreading of that precedent and are corrected here).
+6. Build one `NotificationLog`, `SENT`/`FAILED` (R3.3-R3.5), `related_type = "reservation"`,
+   `related_id = reservation_id`, `recipient_user_id = None` (the recipient is a guest, not a
+   `User` — the column already allows `NULL`), `recipient_contact = guest.email`, mirroring
+   `recovery.py:303-333` field for field, and add it on the same session.
 7. Audit the send attempt (R3.6) via the same `GuestAuditWriter` the other two use cases
    already use, action `GUEST_ACCESS_TOKEN_SENT` (new, see D5), `entity_id` = the **new**
    token's id (already known from step 3), so `ix_audit_logs_tenant_id_entity_type_entity_id`
    keeps answering "everything that happened to this credential" the way `portal.py:356-361`
    already documents for issue/revoke.
+8. `commit()` once, here, on `SendGuestAccessTokenUseCase`'s own `SqlAlchemyUnitOfWork` — the
+   token, its audit row, the `NotificationLog` and the send's audit row land together or not at
+   all. There is no crash window where a token exists with zero notification/audit rows for it.
 
 Rejected: an optional `deliver: bool` parameter on `IssueGuestAccessTokenUseCase` — every
 existing caller and test of that use case would gain an unused dependency on `GuestRepository`
 and the adapter registry, for a capability only one caller needs; the two-step composition
-keeps mint single-purpose and testable without email infrastructure.
+keeps mint single-purpose and testable without email infrastructure, and `CallerOwnedUnitOfWork`
+is exactly the seam this codebase already built for composing it safely.
 
-Rejected: minting and emailing as one transaction spanning both the token repository and the
-notification repository — `auth-account-recovery`'s own design (D2, cited in its file) already
-established that the mint's commit must happen before the adapter call, because the adapter is
-an I/O boundary and a transaction should not hold row locks across a network call; this change
-keeps the same boundary (step 3 commits, step 5 is post-commit I/O, step 6 is a second, small
-transaction).
+Rejected (this design's own earlier draft): two independent commits — mint commits on its own,
+then a second small transaction for the notification row. Flagged by the architecture review as
+both a misattribution of `auth-account-recovery`'s actual precedent (which commits once, at the
+end) and a repeat of the exact `SubmitGuestCheckinUseCase` incident `CallerOwnedUnitOfWork` was
+built to prevent — a crash between the two commits would leave a live token with no
+`notification_logs` row and no `GUEST_ACCESS_TOKEN_SENT` audit row, violating R3.3/R3.6.
 
 ### D5 — New route, response, `NotificationType` member and audit action
 
@@ -185,7 +214,7 @@ All four disable their triggering control while `isPending` (R1.5).
 | Infrastructure | `backend/app/guests/infrastructure/portal_repositories.py` | `SqlAlchemyGuestAccessTokenRepository.find_live_for_reservation`; row mapping gains `issued_at` |
 | API | `backend/app/guests/api/router.py` | `GET`/`POST .../guest-access-token/send` routes |
 | API | `backend/app/guests/api/schemas.py` | `GuestAccessTokenStatusResponse`, `GuestAccessTokenSentResponse` |
-| API | `backend/app/guests/api/dependencies.py` | `get_guest_access_token_status_use_case`(unless folded into a query, see Open Questions)`, `get_send_guest_access_token_use_case` wiring `SqlAlchemyGuestRepository`, `adapter_registry()`, `NotificationLogRepository` |
+| API | `backend/app/guests/api/dependencies.py` | `get_guest_access_token_status_use_case` (unless folded into a query, see Open Questions), `get_send_guest_access_token_use_case` wiring `SqlAlchemyGuestRepository`, `adapter_registry()`, `NotificationLogRepository`, and the composed `IssueGuestAccessTokenUseCase` with `uow=CallerOwnedUnitOfWork()` (D4) |
 | Tests | `backend/tests/test_writer_census.py` | move `GUEST_PORTAL_LINK_DELIVERED` from `WITHOUT_WRITER` to `WITH_WRITER` |
 | Tests | `backend/tests/test_route_authorization.py` | new routes' permission coverage |
 | Frontend | `frontend/features/reservations/...` (new files) | `GuestPortalLinkCard`, its four hooks |
