@@ -180,10 +180,12 @@ checks no role: that permission is in `_SELF_SERVICE`
 (`app/auth/domain/policy.py`), held by every role there is, so there is no
 identity a valid credential of either kind could resolve to that this would
 ever refuse — authenticating by the cookie alone is equivalent to being
-authorised here, unlike every other endpoint `require(...)` guards. No
-`bind_session_to_tenant` call in the cookie branch, matching `/auth/refresh`
-and `/auth/login` (also unauthenticated at this point): `revoke_family` takes
-`tenant_id` as an explicit filter, not via the session-level marker. Returns
+authorised here, unlike every other endpoint `require(...)` guards. Calls
+`bind_session_to_tenant(session, claims.tenant_id)` in the cookie branch
+when the decoded `tenant_id` is not `None` (added in a later fix round, see
+D6c below) — defense-in-depth alongside `revoke_family`'s own explicit
+`tenant_id` filter, which remains the authoritative scoping mechanism
+either way. Returns
 `None` — nothing to revoke, not an error — when there is no Bearer, no
 cookie, or a cookie that fails to decode (expired, tampered, wrong
 signature), so R3.2's idempotent 204 covers this case too instead of turning
