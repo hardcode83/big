@@ -338,9 +338,9 @@ endpoint (`credentials: include`, empty body).
 ### D9 — `auth-client` `apiClient` and the new `authClient` both send `credentials: "include"`
 
 **Chosen**: in `frontend/lib/api/client.ts:200`, `doFetch(...)` is invoked with
-`credentials: "include"` whenever the request crosses origins **or** is to a
-known auth endpoint (`/api/v1/auth/login`, `/api/v1/auth/refresh`,
-`/api/v1/auth/logout`). The decision lives in a single helper
+`credentials: "include"` whenever the request is to a known auth endpoint
+(`/api/v1/auth/login`, `/api/v1/auth/refresh`, `/api/v1/auth/logout`) —
+path-only, not origin-based (see Rejected below). The decision lives in a single helper
 `needsCredentials(path)` so the cookie is sent on login (so the response
 cookie is stored), on refresh (so the request cookie is sent), and on logout
 (so the request cookie is sent before the response purges it). For other
