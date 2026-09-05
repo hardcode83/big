@@ -69,16 +69,19 @@ function LoginControl() {
 }
 
 function ProtectedSurface() {
-  const { logout } = useAuth();
+  // Mirrors the real wiring (`UserMenu`, D3/R3): the local-only `useAuth().logout()`
+  // wrapper was removed, so this exercises the same `useLogoutMutation()` production
+  // code path a click in the app actually runs.
+  const logoutMutation = useLogoutMutation();
   return (
     <AuthGuard>
       <span>protected content</span>
-      <button onClick={() => void logout()}>logout</button>
+      <button onClick={() => void logoutMutation.mutateAsync()}>logout</button>
     </AuthGuard>
   );
 }
 
-function renderSession(children: ReactNode, queryClient?: QueryClient) {
+function renderSession(children: ReactNode, queryClient: QueryClient = makeQueryClient()) {
   const tree = (
     <RuntimeConfigProvider config={RUNTIME_CONFIG}>
       <I18nProvider locale="es">
@@ -86,13 +89,7 @@ function renderSession(children: ReactNode, queryClient?: QueryClient) {
       </I18nProvider>
     </RuntimeConfigProvider>
   );
-  return render(
-    queryClient ? (
-      <QueryClientProvider client={queryClient}>{tree}</QueryClientProvider>
-    ) : (
-      tree
-    ),
-  );
+  return render(<QueryClientProvider client={queryClient}>{tree}</QueryClientProvider>);
 }
 
 describe("authenticated surface integration", () => {

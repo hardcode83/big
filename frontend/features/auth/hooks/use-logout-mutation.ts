@@ -65,9 +65,10 @@ import { notifyLogout } from "@/lib/auth/logout-event";
  * the retry config a no-op (review F6).
  *
  * **Module boundaries**: imports of `@/lib/auth/*` are made against the
- * specific files, not the barrel, to avoid a load-order cycle with
- * `lib/auth/auth-provider.tsx`, which itself imports this hook to keep
- * `useAuth().logout()` as a thin delegating wrapper (R3 #5).
+ * specific files, not the barrel, to avoid a load-order cycle — this hook
+ * and `lib/auth/auth-provider.tsx` communicate only through
+ * `lib/auth/logout-event.ts`'s pub/sub, never through a direct import of
+ * one from the other.
  */
 export function useLogoutMutation() {
   const { apiBaseUrl } = useRuntimeConfig();

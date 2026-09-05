@@ -192,7 +192,11 @@
       `AuthProvider` fresh with a mocked successful `/auth/refresh`, assert the
       transient `loading` state is followed by `authenticated` without a visible
       login form. Also confirm (R4.3, preexisting behavior — no code change
-      expected in `use-logout-mutation.ts`/`session-cache-purge.ts`) that a
+      expected in `use-logout-mutation.ts`/`session-cache-purge.ts` **at the
+      time this task was written**; superseded — see the review findings log
+      below, "HIGH (`sdd-security`)": a later review round DID change
+      `use-logout-mutation.ts`, to keep an empty-store logout able to revoke
+      the server-side session) that a
       logout still purges the access token, invalidates the `["auth", "me"]`
       query, and issues `POST /auth/logout`, unaffected by the cookie
       transport change (R6.2 — a second tab is untouched by this local purge
@@ -268,15 +272,13 @@
   la response para auditoría") is sections 2/3's responsibility: add one `logger.info` in
   English in each of the three handlers that calls `resolve_cookie_secure`, logging the
   resolved `secure` boolean — do not add a new log sink.
-- `CORSMiddleware` is mounted in `backend/app/main.py:create_app()` BEFORE
+- **Superseded by Fix 1 below — historical only, do not read as current state.** The
+  first pass mounted `CORSMiddleware` in `backend/app/main.py:create_app()` BEFORE
   `MaxBodySizeMiddleware` and `NoSniffMiddleware` in source order, making it the innermost
-  of the three (verified: `app.user_middleware` order is `[NoSniffMiddleware,
-  MaxBodySizeMiddleware, CORSMiddleware]`, newest-added first). It still wraps every
-  router and the exception handling registered above it in `create_app()`, which is what
-  satisfies "CORS wraps the whole app" per task 1.3's own parenthetical — it is NOT
-  outermost relative to `MaxBodySizeMiddleware`/`NoSniffMiddleware`, so a `413` from
-  `MaxBodySizeMiddleware._refuse()` will NOT carry CORS headers. Flagged here rather than
-  silently accepted in case a later section's browser-side test expects otherwise.
+  of the three, so a `413` from `MaxBodySizeMiddleware._refuse()` did NOT carry CORS
+  headers. Fix 1 corrected the mount order to outermost; `backend/tests/test_cors.py::
+  test_oversized_cross_origin_body_gets_413_with_cors_headers` now pins the corrected
+  (current) behavior — a `413` DOES carry `Access-Control-Allow-*` headers.
 - `test_cors.py` hits the anonymous, DB-free `/health` route rather than any `/auth/*`
   route, so it needs no `db_session` fixture. Starlette's `CORSMiddleware` sets
   `Access-Control-Allow-Credentials: true` on every "simple" (non-preflight) response once

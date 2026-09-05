@@ -3,6 +3,7 @@ import { useEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { useLogoutMutation } from "@/features/auth/hooks/use-logout-mutation";
 import { notifySessionExpired } from "@/lib/api/authenticated-client";
 import {
   clearSessionTokens,
@@ -13,6 +14,7 @@ import {
 import { refreshSession } from "@/lib/auth/refresh-coordinator";
 import { purgeSessionCache } from "@/lib/auth/session-cache-purge";
 import { markSessionPresent } from "@/lib/auth/session-presence-cookie";
+import { notifyLogout } from "@/lib/auth/logout-event";
 import { SESSION_PRESENT_COOKIE } from "@/lib/config/constants";
 import { RuntimeConfigProvider } from "@/lib/config/runtime-config-provider";
 import { makeQueryClient } from "@/lib/query/query-client";
@@ -234,11 +236,6 @@ describe("AuthProvider", () => {
     });
     vi.stubGlobal("fetch", fetchImpl);
 
-    function LogoutProbe() {
-      const { logout } = useAuth();
-      return <button onClick={() => void logout()}>logout</button>;
-    }
-
     render(
       <RuntimeConfigProvider
         config={{
@@ -252,7 +249,6 @@ describe("AuthProvider", () => {
         }}
       >
         <AuthProvider>
-          <LogoutProbe />
           <Probe />
         </AuthProvider>
       </RuntimeConfigProvider>,
@@ -264,7 +260,12 @@ describe("AuthProvider", () => {
         expect.anything(),
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "logout" }));
+    // Tears down the session mid-flight the way the real `useLogoutMutation`
+    // flow does: clear the store, then tell `AuthProvider` (`notifyLogout()`).
+    act(() => {
+      clearSessionTokens();
+      notifyLogout();
+    });
     resolveRefresh(jsonResponse(TOKEN_PAIR));
 
     await waitFor(() =>
@@ -860,46 +861,11 @@ describe("AuthProvider", () => {
     expect(readPresenceCookie()).toBeNull();
   });
 
-  it("logs out locally even when the backend logout is unavailable", async () => {
-    // `useAuth().logout()` runs the local-state purge only (F5 / review);
-    // the server round-trip is owned by `useLogoutMutation`. The "backend
-    // unavailable" path that was previously asserted on this test now
-    // belongs to `useLogoutMutation`'s own tests.
-    setSessionTokens({ accessToken: "access" });
-    markSessionPresent();
-
-    function LogoutProbe() {
-      const { logout } = useAuth();
-      return <button onClick={() => void logout()}>logout</button>;
-    }
-
-    render(
-      <RuntimeConfigProvider
-        config={{
-          apiBaseUrl: "",
-          appEnv: "test",
-          defaultLocale: "es",
-          featureFlags: {},
-          appVersion: "",
-          buildCommitShort: "",
-          appUrl: "",
-        }}
-      >
-        <AuthProvider>
-          <LogoutProbe />
-          <Probe />
-        </AuthProvider>
-      </RuntimeConfigProvider>,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "logout" }));
-
-    expect(await screen.findByTestId("status")).toHaveTextContent("anonymous");
-    expect(getSessionTokens()).toBeNull();
-    expect(readPresenceCookie()).toBeNull();
-  });
-
   it("invalidates an in-flight refresh when logout clears the session", async () => {
+    // Drives the clear the way the real `useLogoutMutation` flow does —
+    // `clearSessionTokens()` then `notifyLogout()` — instead of through
+    // `useAuth()`, which no longer exposes a `logout` method (the local-only
+    // wrapper was removed; the real flow lives in `useLogoutMutation`).
     setSessionTokens({ accessToken: "access" });
     let resolveRefresh!: (response: Response) => void;
     const fetchImpl = vi.fn().mockImplementation((url: string) => {
@@ -912,14 +878,9 @@ describe("AuthProvider", () => {
     });
     vi.stubGlobal("fetch", fetchImpl);
 
-    function SessionProbe() {
-      const { logout, refresh } = useAuth();
-      return (
-        <>
-          <button onClick={() => void refresh()}>refresh</button>
-          <button onClick={() => void logout()}>logout</button>
-        </>
-      );
+    function RefreshProbe() {
+      const { refresh } = useAuth();
+      return <button onClick={() => void refresh()}>refresh</button>;
     }
 
     render(
@@ -935,7 +896,7 @@ describe("AuthProvider", () => {
         }}
       >
         <AuthProvider>
-          <SessionProbe />
+          <RefreshProbe />
           <Probe />
         </AuthProvider>
       </RuntimeConfigProvider>,
@@ -946,7 +907,10 @@ describe("AuthProvider", () => {
       "/api/v1/auth/refresh",
       expect.anything(),
     ));
-    fireEvent.click(screen.getByRole("button", { name: "logout" }));
+    act(() => {
+      clearSessionTokens();
+      notifyLogout();
+    });
     resolveRefresh(new Response(JSON.stringify({
       access_token: "late-access",
       token_type: "bearer",
@@ -1223,14 +1187,16 @@ describe("AuthProvider — query cache purge on identity transitions", () => {
   });
 
   it("purges the query cache when logout completes (R4.1)", async () => {
+    // `useAuth()` no longer exposes `logout` — the real flow is
+    // `useLogoutMutation()` (D3/R3), exercised here the way `UserMenu` does.
     const cache = freshCache();
     setSessionTokens({ accessToken: "access" });
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchImpl);
 
     function LogoutProbe() {
-      const { logout } = useAuth();
-      return <button onClick={() => void logout()}>logout</button>;
+      const logoutMutation = useLogoutMutation();
+      return <button onClick={() => void logoutMutation.mutateAsync()}>logout</button>;
     }
 
     renderAuthWithCache(cache, <LogoutProbe />);
@@ -1254,8 +1220,12 @@ describe("AuthProvider — query cache purge on identity transitions", () => {
     vi.stubGlobal("fetch", fetchImpl);
 
     function LogoutProbe() {
-      const { logout } = useAuth();
-      return <button onClick={() => void logout()}>logout</button>;
+      const logoutMutation = useLogoutMutation();
+      return (
+        <button onClick={() => void logoutMutation.mutateAsync().catch(() => undefined)}>
+          logout
+        </button>
+      );
     }
 
     renderAuthWithCache(cache, <LogoutProbe />);

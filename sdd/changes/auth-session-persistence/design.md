@@ -206,8 +206,10 @@ any consumer"). A `useEffect` on mount then:
    when they navigate to a protected route.
 
 Before installing the resolved access token in step 2, the effect
-re-checks `getSessionGeneration()` against the generation captured when the
-mount-refresh started, and drops the result instead of calling
+re-checks `getTokenGeneration()` (the token-identity counter, not
+`getSessionGeneration()`'s cache-purge counter — see `session-store.ts`)
+against the generation captured when the mount-refresh started, and drops
+the result instead of calling
 `setSessionTokens` if the generation has moved on — **added 2026-09-05**
 (the run panel's `sdd-security` found the original implementation missing
 this guard, unlike its sibling `refresh-coordinator.ts:46`'s
@@ -221,7 +223,7 @@ a session the app had already torn down or superseded).
 The same guard applies a second time, symmetrically, around the failure
 branch's cleanup: if step 2's own `setSessionTokens` succeeded but the
 subsequent `GET /auth/me` then fails, the effect only calls
-`clearSessionTokens()` when `getSessionGeneration()` still equals the
+`clearSessionTokens()` when `getTokenGeneration()` still equals the
 generation captured **after** installing this mount-refresh's own token —
 **added 2026-09-05, same fix round** (both `sdd-architect` and
 `sdd-security`, independently, found the first guard's mirror image
