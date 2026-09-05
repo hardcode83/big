@@ -227,11 +227,15 @@ describe("authenticated surface integration", () => {
     expect(logoutCall![1].credentials).toBe("include");
   });
 
-  it("recovers a logout with no cached access token via a fresh refresh (R3, R6.2)", async () => {
+  it("logs out with no cached access token via the cookie alone, no extra refresh (R3, R6.2)", async () => {
     // The store can be empty at logout time — a mount-refresh that never repopulated
     // it, or a session-expired reset — while the refresh cookie the browser holds may
-    // still be perfectly live. Losing the request entirely here would leave a
-    // revocable session and its cookie behind.
+    // still be perfectly live. The backend now accepts that cookie directly as the
+    // logout credential (`get_logout_subject`), so the frontend no longer needs to
+    // call `/auth/refresh` first to obtain a Bearer — doing so used to rotate and
+    // re-extend the cookie by a fresh week before the logout call even ran, leaving a
+    // *longer-lived* session behind if that POST then failed (review finding: security
+    // panel, second round).
     let refreshCalls = 0;
     const fetchImpl = vi.fn().mockImplementation((url: string) => {
       if (url.endsWith("/auth/refresh")) {
@@ -276,7 +280,6 @@ describe("authenticated surface integration", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "logout via mutation" }));
 
-    await waitFor(() => expect(refreshCalls).toBe(2));
     const logoutCall = await waitFor(() => {
       const call = fetchImpl.mock.calls.find((entry: unknown[]) =>
         String(entry[0]).endsWith("/auth/logout"),
@@ -285,7 +288,10 @@ describe("authenticated surface integration", () => {
       return call!;
     });
     expect(logoutCall[1].method).toBe("POST");
+    expect(logoutCall[1].credentials).toBe("include");
     expect(getSessionTokens()).toBeNull();
+    // No refresh call was ever triggered by the empty-store logout.
+    expect(refreshCalls).toBe(1);
   });
 
   it("drops this tab to anonymous when the refresh 401s after another tab logged out (R6.3)", async () => {

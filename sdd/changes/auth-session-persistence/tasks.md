@@ -658,3 +658,42 @@
   - Not independently re-run in full after these fixes (scoped `pytest`/`vitest`
     runs on the touched files were used while iterating); Section 7's full-suite
     commands above should be re-run once more before the next `/sdd:review` pass.
+
+- **`/sdd:review` panel re-review, third pass (2026-09-05, second re-review round)**:
+  - **MEDIUM (`sdd-security`), supersedes this round's own prior HIGH fix above**:
+    the `refreshSession`-first fix just above closed the "logout skipped when the
+    store is empty" HIGH, but introduced a narrower problem: `refreshSession` rotates
+    and re-extends the refresh cookie by a fresh `jwt_refresh_token_days` window
+    *before* attempting to revoke it, so a `POST /auth/logout` that then failed left
+    the browser holding a **freshly-extended**, still-fully-valid session — worse than
+    the one being logged out of. Fixed properly this round (design D6a): the backend
+    now accepts the refresh cookie itself as the logout credential when no Bearer is
+    presented (`get_logout_subject`), the same stance `/auth/refresh` already takes —
+    removing the `refreshSession` round trip from `use-logout-mutation.ts` entirely
+    rather than trying to make it safe. Covered by three new backend tests
+    (`test_logout_with_no_bearer_revokes_via_the_refresh_cookie`,
+    `..._and_no_cookie_is_a_no_op`, `..._and_a_garbage_cookie_is_a_no_op` in
+    `tests/auth/test_api.py`) and a rewritten integration test
+    (`auth-session.integration.test.tsx`: "logs out with no cached access token via
+    the cookie alone, no extra refresh").
+  - **LOW (`sdd-security`), residual recorded, not fixed — cookie shadowing by a
+    sibling subdomain**: `__Host-` is architecturally unavailable for this cookie (it
+    mandates `Path=/`, and D4 deliberately scopes it to `Path=/api/v1/auth`), so an
+    attacker controlling any sibling subdomain of `digitalsec.work` (or achieving XSS
+    on one) could `Set-Cookie` the same cookie name with `Domain=.digitalsec.work`,
+    and `request.cookies.get()`'s last-wins behavior could pick the attacker's value —
+    logging the victim into the attacker's session. No second host exists on the
+    `digitalsec.work` zone today, so this is not currently reachable; **re-open this
+    if one is ever added**, at which point closing it means `Path=/` plus the
+    `__Host-` prefix and dropping the dev-HTTP exemption (D2).
+  - **LOW (`sdd-security`), re-confirmed deferred — CORS regex breadth**: unchanged
+    from the deferral recorded above; still an explicit, agreed tradeoff, not an
+    oversight (D1).
+  - Backend re-verified: `pytest tests/auth tests/test_route_authorization.py` — 909
+    passed (906 baseline + the 3 new logout-cookie tests above). Frontend re-verified
+    on the touched files only (`auth-provider.test.tsx`, `auth-session.integration.test.tsx`): 30
+    passed, `tsc --noEmit` clean — the full suite could not be re-run in this pass due
+    to host resource contention from concurrent worktree sessions sharing the same
+    Docker Desktop VM (unrelated to this change; documented in `sdd/changes/*` review
+    history elsewhere). Re-run the full suite once more before the next
+    `/sdd:review` pass.

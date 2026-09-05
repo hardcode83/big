@@ -3,6 +3,7 @@
 import ipaddress
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -23,6 +24,7 @@ from app.auth.application.use_cases import (
     LogoutUseCase,
     RefreshTokenUseCase,
 )
+from app.auth.api.schemas import SESSION_REFRESH_COOKIE
 from app.auth.domain.context import RequestContext
 from app.auth.domain.exceptions import InvalidTokenError, PasswordChangeRequiredError
 from app.auth.domain.policy import Permission, is_allowed
@@ -483,6 +485,73 @@ def require(permission: Permission) -> Callable[..., Awaitable[AuthenticatedRequ
 
     setattr(dependency, REQUIRED_PERMISSION_ATTR, permission)
     return dependency
+
+
+@dataclass(frozen=True)
+class LogoutSubject:
+    """What `/auth/logout` revokes: just enough to call `LogoutUseCase.execute`."""
+
+    tenant_id: uuid.UUID | None
+    family_id: uuid.UUID
+
+
+async def get_logout_subject(
+    request: Request,
+    session: SessionDep,
+    codec: CodecDep,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> LogoutSubject | None:
+    """Resolves who `/auth/logout` should revoke (review: `sdd-security`, R6.2).
+
+    A Bearer access token, when presented, is authenticated exactly as every other
+    endpoint does (`get_authenticated_request`) — unchanged behaviour. When none is
+    presented at all, this falls back to the refresh cookie itself as the credential,
+    the same stance `/auth/refresh` already takes ("the token IS the credential"):
+    the family it names is decoded directly from the JWT's `fam`/`tenant_id` claims,
+    with no repository round trip, since revocation does not need to know whether
+    the session row is still live — `revoke_family` is a no-op update either way.
+
+    This is what `use-logout-mutation.ts` needs for the empty-store case: without it,
+    the frontend had to call `refreshSession()` first purely to obtain a Bearer to
+    present here, which rotates and re-extends the refresh cookie by a fresh
+    `jwt_refresh_token_days` window — so a `POST /auth/logout` that then failed (5xx,
+    offline, a retry racing another empty-store path) left the browser holding a
+    *freshly extended*, still-fully-valid session, worse than the one the user tried
+    to end. Falling back to the cookie removes the refresh round trip entirely.
+
+    No `bind_session_to_tenant` call, matching `/auth/refresh` and `/auth/login`
+    (also unauthenticated at this point): `revoke_family` takes `tenant_id` as an
+    explicit filter, not via the session-level marker.
+
+    Tagged with `MANAGE_OWN_SESSION` for `test_route_authorization.py`'s structural
+    walk even though the cookie path checks no role: that permission is in
+    `_SELF_SERVICE`, held by every role there is (`policy.py`), so there is no
+    identity a valid credential — of either kind — could resolve to that this would
+    ever refuse. Authenticating by the cookie alone is therefore equivalent to being
+    authorised, unlike every other endpoint `require(...)` guards.
+
+    Returns `None` when there is nothing to revoke — no Bearer, no cookie, or a
+    cookie that fails to decode (expired, tampered, wrong signature) — so the
+    endpoint's existing idempotent-204 behaviour (R3.2) covers this case too rather
+    than turning a missing/invalid cookie into a new, distinguishable error surface.
+    """
+    if credentials is not None:
+        authenticated = await get_authenticated_request(request, session, codec, credentials)
+        return LogoutSubject(
+            tenant_id=authenticated.context.tenant_id, family_id=authenticated.family_id
+        )
+
+    token = request.cookies.get(SESSION_REFRESH_COOKIE)
+    if token is None:
+        return None
+    try:
+        claims = codec.decode_refresh(token)
+    except InvalidTokenError:
+        return None
+    return LogoutSubject(tenant_id=claims.tenant_id, family_id=claims.family_id)
+
+
+setattr(get_logout_subject, REQUIRED_PERMISSION_ATTR, Permission.MANAGE_OWN_SESSION)
 
 
 def require_any(*permissions: Permission) -> Callable[..., Awaitable[AuthenticatedRequest]]:

@@ -162,6 +162,52 @@ D5. Rejected: deleting the cookie only on success — would leave a stale
 cookie on a 5xx that the next reload would resurrect, defeating R3.2's
 idempotence guarantee.
 
+### D6a — `/auth/logout` accepts the refresh cookie as a credential when no Bearer is presented (added 2026-09-05, review: `sdd-security`, second round)
+
+**Chosen**: a new dependency, `get_logout_subject`
+(`backend/app/auth/api/dependencies.py`), resolves who to revoke: a Bearer
+access token when one is presented (unchanged — same
+`get_authenticated_request` every other endpoint uses), or, when none is
+presented at all, the family named by the `SESSION_REFRESH_COOKIE` itself,
+decoded directly (`codec.decode_refresh`, no repository round trip — revoking
+a family is a no-op update either way, so there is nothing to gain from
+checking the session row first). Tagged with `MANAGE_OWN_SESSION` for
+`test_route_authorization.py`'s structural walk even though the cookie path
+checks no role: that permission is in `_SELF_SERVICE`
+(`app/auth/domain/policy.py`), held by every role there is, so there is no
+identity a valid credential of either kind could resolve to that this would
+ever refuse — authenticating by the cookie alone is equivalent to being
+authorised here, unlike every other endpoint `require(...)` guards. No
+`bind_session_to_tenant` call in the cookie branch, matching `/auth/refresh`
+and `/auth/login` (also unauthenticated at this point): `revoke_family` takes
+`tenant_id` as an explicit filter, not via the session-level marker. Returns
+`None` — nothing to revoke, not an error — when there is no Bearer, no
+cookie, or a cookie that fails to decode (expired, tampered, wrong
+signature), so R3.2's idempotent 204 covers this case too instead of turning
+a missing/invalid cookie into a new, distinguishable error surface.
+
+**Why**: `use-logout-mutation.ts`'s empty-store case (no access token in
+memory — a mount-refresh that never repopulated it, or a session-expired
+reset) previously called `refreshSession()` first purely to obtain a Bearer
+to present to `/auth/logout`. That rotated and re-extended the refresh cookie
+by a fresh `jwt_refresh_token_days` window *before* attempting to revoke it —
+so a `POST /auth/logout` that then failed (offline, 5xx, a retry racing
+another empty-store path) left the browser holding a freshly-extended,
+still-fully-valid session, worse than the one the user tried to end. Letting
+the backend accept the cookie directly removes the refresh round trip, and
+with it the window, entirely. `use-logout-mutation.ts` now always calls
+`POST /api/v1/auth/logout` unconditionally (`needsCredentials` already sends
+`credentials: "include"` for this path regardless of Bearer presence).
+
+Rejected: keep the refresh-then-logout round trip and instead mitigate by
+purging local state first — does not address the actual exposure, since the
+server-side session (and its now-longer-lived cookie) survives regardless of
+local state. Rejected: make `get_authenticated_request` itself accept the
+cookie as a fallback — that function backs every `require(...)`-guarded
+endpoint in the app, not just logout; doing so would silently open the whole
+authenticated surface to cookie-only access, when the cookie's own `Path` is
+deliberately scoped to `/api/v1/auth` alone.
+
 ### D7 — `frontend/lib/auth/session-store.ts` keeps only the access token
 
 **Chosen**: `SessionTokens` becomes `{ accessToken: string }` (no

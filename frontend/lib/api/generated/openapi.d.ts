@@ -63,8 +63,8 @@ export interface paths {
   };
   "/api/v1/auth/logout": {
     /**
-     * End the session this access token belongs to
-     * @description Revokes the refresh family named by the token. Access tokens already issued keep working until they expire — at most their configured lifetime.
+     * End the session this access token or refresh cookie belongs to
+     * @description Revokes the refresh family named by the access token when one is presented, or by the refresh cookie itself when it is not — the cookie is as much a credential here as it already is for /auth/refresh (review: sdd-security, R6.2), so a caller with no access token in memory can still end its own session without minting a new one first. Idempotent: nothing to revoke answers the same 204.
      */
     post: operations["logout_api_v1_auth_logout_post"];
   };
@@ -5500,8 +5500,8 @@ export interface operations {
     };
   };
   /**
-   * End the session this access token belongs to
-   * @description Revokes the refresh family named by the token. Access tokens already issued keep working until they expire — at most their configured lifetime.
+   * End the session this access token or refresh cookie belongs to
+   * @description Revokes the refresh family named by the access token when one is presented, or by the refresh cookie itself when it is not — the cookie is as much a credential here as it already is for /auth/refresh (review: sdd-security, R6.2), so a caller with no access token in memory can still end its own session without minting a new one first. Idempotent: nothing to revoke answers the same 204.
    */
   logout_api_v1_auth_logout_post: {
     responses: {

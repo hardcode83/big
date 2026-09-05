@@ -191,6 +191,60 @@ async def test_the_whole_flow_login_me_refresh_logout(api, db_session, tenant_a)
 
 
 @pytest.mark.asyncio
+async def test_logout_with_no_bearer_revokes_via_the_refresh_cookie(
+    api, db_session, tenant_a
+) -> None:
+    """`auth-session-persistence` R6.2 (review: sdd-security): the cookie is a credential.
+
+    No `Authorization` header is ever sent — the client's in-memory access token is
+    "empty", the case `use-logout-mutation.ts` hits after a reload with no mount-refresh
+    yet, or a session-expired reset. The refresh cookie alone must still end the session,
+    with no prior `POST /auth/refresh` needed to obtain a Bearer.
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    login_response = await _login(api)
+    cookie = login_response.cookies.get(SESSION_REFRESH_COOKIE)
+    assert cookie is not None
+
+    logout = await api.post("/api/v1/auth/logout")
+
+    assert logout.status_code == 204
+    assert logout.content == b""
+    logout_set_cookie = logout.headers.get("set-cookie")
+    assert logout_set_cookie is not None
+    assert logout_set_cookie.startswith("autohostai.session.refresh=")
+    assert "Max-Age=0" in logout_set_cookie
+
+    # Proof the family was actually revoked, not just that the local cookie was purged:
+    # explicitly presenting the same (captured) cookie value to /auth/refresh is rejected.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie)
+    reused = await api.post("/api/v1/auth/refresh", json={})
+    assert reused.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_with_no_bearer_and_no_cookie_is_a_no_op(api) -> None:
+    """R3.2's idempotency extends to the cookie-only path: nothing to revoke is not
+    an error — same 204 as the authenticated "already logged out" case."""
+    response = await api.post("/api/v1/auth/logout")
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+@pytest.mark.asyncio
+async def test_logout_with_no_bearer_and_a_garbage_cookie_is_a_no_op(api) -> None:
+    """A cookie that fails to decode (tampered, wrong signature, expired) does not turn
+    into a distinguishable error — it is treated the same as no cookie at all (R3.2)."""
+    api.cookies.set(SESSION_REFRESH_COOKIE, "not.a.jwt")
+
+    response = await api.post("/api/v1/auth/logout")
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+@pytest.mark.asyncio
 async def test_the_whole_flow_login_me_refresh_logout_for_a_super_admin(api, db_session) -> None:
     """`super-admin-identity` R2: none of the four answers `500` for a tenantless account."""
     await insert_user(db_session, tenant=None, role=UserRole.SUPER_ADMIN, email="root@example.com")

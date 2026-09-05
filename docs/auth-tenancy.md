@@ -13,7 +13,7 @@ de PRD §23.
 |---|---|---|---|
 | `POST` | `/auth/login` | anónima | `200` con `access_token`, `token_type`, `expires_in` + cookie de refresh (ver abajo) |
 | `POST` | `/auth/refresh` | la cookie de refresh es la credencial | `200`, mismo cuerpo, cookie rotada |
-| `POST` | `/auth/logout` | Bearer | `204` sin cuerpo, borra la cookie |
+| `POST` | `/auth/logout` | Bearer, o la cookie de refresh si no hay Bearer | `204` sin cuerpo, borra la cookie |
 | `GET` | `/auth/me` | Bearer | `200` con `id`, `tenant_id`, `name`, `email`, `role`, `preferred_language` |
 
 El token de acceso vive 15 minutos y el de refresh 7 días, ambos configurables. La
@@ -40,6 +40,20 @@ exclusivamente la cookie (`request.cookies.get(SESSION_REFRESH_COOKIE)`), y su a
 responde el mismo `401 INVALID_TOKEN` que un Bearer inválido. `POST /auth/logout` borra
 la cookie de forma incondicional (`response.delete_cookie(...)`), tanto si había algo que
 revocar como si no — es idempotente por diseño (R3.2).
+
+**`POST /auth/logout` acepta la cookie como credencial cuando no hay Bearer**
+(`get_logout_subject`, `backend/app/auth/api/dependencies.py`) — la misma postura de
+"el token ES la credencial" que ya tiene `/auth/refresh`. Sin esto, el frontend con el
+store en memoria vacío (tras un reload sin mount-refresh todavía, o un
+session-expired) tenía que llamar primero a `/auth/refresh` solo para obtener un Bearer
+que presentar aquí, lo que rotaba y volvía a extender la cookie una semana entera antes
+de intentar revocarla — si ese `POST /auth/logout` fallaba después, el navegador se
+quedaba con una sesión *más larga* que la que el usuario intentaba cerrar (hallazgo del
+panel de seguridad, segunda ronda de `auth-session-persistence`). `MANAGE_OWN_SESSION`
+lo tiene todo rol (`_SELF_SERVICE` en `policy.py`), así que autenticar por la cookie es
+equivalente a estar autorizado — no hay ningún rol al que esto pudiera negarle nada. Una
+cookie ausente o que no decodifica (manipulada, caducada) no distingue: responde el
+mismo `204` idempotente que "nada que revocar".
 
 **`Secure`, en dev y en producción.** La decisión la toma `resolve_cookie_secure()`
 (`backend/app/auth/api/dependencies.py`) leyendo únicamente `request.url.scheme`:
