@@ -299,7 +299,11 @@ def _stored_locale_reads(tree: ast.Module) -> list[tuple[str | None, int]]:
     * The direct chain, `<anything>.context.preferred_language`.
     * `ctx = x.context; ctx.preferred_language` — a bare `.context` alias, resolved per
       enclosing function before the attribute walk, so binding the owner to a local name
-      first does not exit the ban.
+      first does not exit the ban. Alias-binding is recognised in every form Python offers
+      for it: plain assignment (incl. chained, `a = b = x.context`), annotated assignment
+      (`ctx: Context = x.context`), the walrus operator (`(ctx := x.context)`), and
+      tuple/list unpacking at any position (`ctx, y = x.context, 1`) — not just the single
+      plain-`Assign`-to-a-`Name` case.
     * A bare name literally called `context` — `context.preferred_language`, own an
       attribute *or* a function parameter — since the one-attribute-chain exemption exists
       for the four serialisers that name the ORM row (`user`/`guest`), never for a variable
@@ -330,15 +334,29 @@ def _stored_locale_reads(tree: ast.Module) -> list[tuple[str | None, int]]:
     descend(tree, None)
 
     context_aliases: dict[str | None, set[str]] = {}
-    for node in ast.walk(tree):
+
+    def register_alias(target: ast.AST, value: ast.AST, function: str | None) -> None:
+        if isinstance(value, ast.Attribute) and value.attr == LOCALE_OWNER_ATTR:
+            if isinstance(target, ast.Name):
+                context_aliases.setdefault(function, set()).add(target.id)
+            return
         if (
-            isinstance(node, ast.Assign)
-            and isinstance(node.value, ast.Attribute)
-            and node.value.attr == LOCALE_OWNER_ATTR
+            isinstance(target, (ast.Tuple, ast.List))
+            and isinstance(value, (ast.Tuple, ast.List))
+            and len(target.elts) == len(value.elts)
         ):
+            for target_elt, value_elt in zip(target.elts, value.elts):
+                register_alias(target_elt, value_elt, function)
+
+    for node in ast.walk(tree):
+        function = enclosing[id(node)]
+        if isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name):
-                    context_aliases.setdefault(enclosing[id(node)], set()).add(target.id)
+                register_alias(target, node.value, function)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            register_alias(node.target, node.value, function)
+        elif isinstance(node, ast.NamedExpr):
+            register_alias(node.target, node.value, function)
 
     def is_stored_context(owner: ast.AST, function: str | None) -> bool:
         if isinstance(owner, ast.Attribute) and owner.attr == LOCALE_OWNER_ATTR:
@@ -462,6 +480,35 @@ def test_the_locale_check_catches_the_shapes_it_claims_to() -> None:
     named_param = ast.parse("def _stored(context):\n    return context.preferred_language\n")
     assert _stored_locale_reads(named_param) == [("_stored", 2)], (
         "a bare variable literally called `context` must not evade the ban"
+    )
+
+    # Every other alias-binding shape Python offers, not just plain `Assign` to a `Name`:
+    # annotated assignment, the walrus operator, and tuple/list unpacking.
+    ann_assigned = ast.parse(
+        "def get_locale(authenticated):\n"
+        "    ctx: object = authenticated.context\n"
+        "    return ctx.preferred_language\n"
+    )
+    assert _stored_locale_reads(ann_assigned) == [("get_locale", 3)], (
+        "an annotated assignment (AnnAssign) must alias just like a plain Assign"
+    )
+
+    walrus = ast.parse(
+        "def get_locale(authenticated):\n"
+        "    return (ctx := authenticated.context) and ctx.preferred_language\n"
+    )
+    assert _stored_locale_reads(walrus) == [("get_locale", 2)], (
+        "the walrus operator (NamedExpr) must alias just like a plain Assign"
+    )
+
+    tuple_unpacked = ast.parse(
+        "def get_locale(authenticated):\n"
+        "    ctx, other = authenticated.context, 1\n"
+        "    return ctx.preferred_language\n"
+    )
+    assert _stored_locale_reads(tuple_unpacked) == [("get_locale", 3)], (
+        "tuple/list unpacking must alias the element bound to `.context`, not just a bare"
+        " single-target Assign"
     )
 
     # `getattr(...)` is a Call, not an Attribute, and must not be a side door — for both
