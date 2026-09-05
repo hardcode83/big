@@ -45,6 +45,9 @@ describe("HttpReservationsSource — listReservations", () => {
           legal_registration_status: "PENDING",
           created_at: "2026-08-01T09:00:00Z",
           updated_at: "2026-08-01T09:00:00Z",
+          property_name: "Hotel Sol",
+          property_internal_code: "HS-01",
+          guest_full_name: "Laura Gómez",
         },
       ],
       page: 1,
@@ -68,6 +71,9 @@ describe("HttpReservationsSource — listReservations", () => {
           currency: "EUR",
           grossAmount: "612.50",
           paymentStatus: "PENDING",
+          propertyName: "Hotel Sol",
+          propertyInternalCode: "HS-01",
+          guestFullName: "Laura Gómez",
         },
       ],
       page: 1,
@@ -76,6 +82,51 @@ describe("HttpReservationsSource — listReservations", () => {
       totalPages: 1,
     });
     expect(request).toHaveBeenCalledWith("/api/v1/reservations", { query: {} });
+  });
+
+  it("maps property_name/property_internal_code/guest_full_name to null when null or absent from the row (R1.3)", async () => {
+    const { source } = sourceWith({
+      data: [
+        {
+          id: "reservation-2",
+          property_id: "property-1",
+          status: "PENDING",
+          check_in_date: "2026-08-12",
+          check_out_date: "2026-08-15",
+          check_in_time: null,
+          check_out_time: null,
+          nights: 3,
+          total_guests: 2,
+          guest_id: null,
+          channel: "BOOKING",
+          currency: "EUR",
+          gross_amount: "612.50",
+          ota_commission: null,
+          net_amount: null,
+          payment_status: "PENDING",
+          cleaning_required: false,
+          access_status: "PENDING",
+          external_channel_id: null,
+          external_pms_id: null,
+          internal_notes: null,
+          special_requests: null,
+          legal_registration_status: "PENDING",
+          created_at: "2026-08-01T09:00:00Z",
+          updated_at: "2026-08-01T09:00:00Z",
+          property_name: null,
+          // property_internal_code and guest_full_name absent entirely.
+        },
+      ],
+      page: 1,
+      per_page: 20,
+      total: 1,
+      total_pages: 1,
+    });
+
+    const result = await source.listReservations(TENANT);
+    expect(result.data[0]?.propertyName).toBeNull();
+    expect(result.data[0]?.propertyInternalCode).toBeNull();
+    expect(result.data[0]?.guestFullName).toBeNull();
   });
 
   it("serializes v1 filters exactly and never adds property_id (D4)", async () => {
@@ -151,6 +202,9 @@ describe("HttpReservationsSource — getReservation", () => {
       updated_at: "2026-08-10T09:00:00Z",
       adults: 2,
       children: 0,
+      property_name: "Hotel Sol",
+      property_internal_code: "HS-01",
+      guest_full_name: "Laura Gómez",
       guest: {
         id: "guest-1",
         full_name: "Laura Gómez",
@@ -177,6 +231,9 @@ describe("HttpReservationsSource — getReservation", () => {
       currency: "EUR",
       grossAmount: "612.50",
       paymentStatus: "PAID",
+      propertyName: "Hotel Sol",
+      propertyInternalCode: "HS-01",
+      guestFullName: "Laura Gómez",
       checkInTime: "15:00",
       checkOutTime: "11:00",
       adults: 2,
@@ -236,12 +293,19 @@ describe("HttpReservationsSource — getReservation", () => {
       updated_at: "2026-08-01T09:00:00Z",
       adults: 0,
       children: 0,
+      property_name: null,
+      // property_internal_code and guest_full_name absent entirely.
       guest: null,
     });
 
     await expect(
       source.getReservation(TENANT, "reservation-2"),
-    ).resolves.toMatchObject({ guest: null });
+    ).resolves.toMatchObject({
+      guest: null,
+      propertyName: null,
+      propertyInternalCode: null,
+      guestFullName: null,
+    });
   });
 });
 

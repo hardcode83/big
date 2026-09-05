@@ -1,13 +1,13 @@
 # Tasks: reservations-identity-web
 
-## 1. DTO y mapper llevan los tres campos derivados
+## 1. DTO y mapper llevan los tres campos derivados <!-- panel: PASS 2026-09-05 -->
 
-- [ ] 1.1 En `frontend/features/reservations/data/dto.ts`, añadir `propertyName: string | null`,
+- [x] 1.1 En `frontend/features/reservations/data/dto.ts`, añadir `propertyName: string | null`,
       `propertyInternalCode: string | null` y `guestFullName: string | null` a
       `ReservationSummaryDto` (heredados automáticamente por `ReservationDetailDto`, que ya
       extiende de `ReservationSummaryDto`). Actualizar el comentario de cabecera del fichero si
       queda desactualizado. [R1]
-- [ ] 1.2 En `frontend/features/reservations/data/http/http-reservations-source.ts`, mapear
+- [x] 1.2 En `frontend/features/reservations/data/http/http-reservations-source.ts`, mapear
       `property_name → propertyName`, `property_internal_code → propertyInternalCode` y
       `guest_full_name → guestFullName` en `mapReservationSummary` (los tres ya están declarados
       como `string | null | undefined` opcionales en `ReservationResponse` de
@@ -16,7 +16,7 @@
       `ReservationSummaryDto` pero su función de mapeo es independiente (no llama a
       `mapReservationSummary`), así que replicar las mismas tres líneas ahí, leyendo de
       `ReservationDetailResponse` (`openapi.d.ts:4169,4193,4195`). [R1]
-- [ ] 1.3 Extender `frontend/features/reservations/data/http/http-reservations-source.test.ts`:
+- [x] 1.3 Extender `frontend/features/reservations/data/http/http-reservations-source.test.ts`:
       un caso con los tres campos presentes y otro con los tres `null`/ausentes, para
       `mapReservationSummary` (vía `listReservations`) y para `mapReservationDetail` (vía
       `getReservation`). Verificar que un campo ausente en el fixture de respuesta mapea a `null`,
@@ -74,3 +74,8 @@
       navegador no es alcanzable, documentarlo aquí en vez de omitir la tarea.
 
 ## Implementation Notes
+
+- Section 1 (dto.ts + http-reservations-source.ts): new DTO fields on `ReservationSummaryDto` are `propertyName: string | null`, `propertyInternalCode: string | null`, `guestFullName: string | null` — inherited as-is by `ReservationDetailDto`, no redeclaration needed.
+- Mapper reads `value.property_name ?? null`, `value.property_internal_code ?? null`, `value.guest_full_name ?? null` in `mapReservationSummary`; `mapReservationDetail` composes via `...mapReservationSummary(value)` for all shared fields (fix-round from the panel's architect finding — `ReservationDetailResponse` is structurally assignable into `ReservationResponse`) instead of duplicating the field list.
+- Row shape for section 2/3 consumers: `row.propertyName`, `row.propertyInternalCode`, `row.guestFullName` (camelCase, always `string | null`, never `undefined`).
+- Test command used: `docker compose exec -T frontend npx vitest run features/reservations/data/http/http-reservations-source.test.ts` — 11/11 passed.
