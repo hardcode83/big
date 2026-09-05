@@ -2,14 +2,17 @@ import type { ApiClient } from "@/lib/api";
 import type { components } from "@/lib/api/generated/openapi";
 
 import type {
+  IncidentCategory,
   IncidentContextDto,
   IncidentDetailDto,
   IncidentFilters,
   IncidentList,
   IncidentPhotoDto,
   IncidentPhotoStage,
+  IncidentSeverity,
   IncidentSummaryDto,
   CloseIncidentInput,
+  TechnicianSummary,
 } from "../dto";
 
 type IncidentResponse = components["schemas"]["IncidentResponse"];
@@ -17,6 +20,29 @@ type IncidentPageResponse = components["schemas"]["IncidentPageResponse"];
 type IncidentContextResponse = components["schemas"]["IncidentContextResponse"];
 type IncidentPhotoResponse = components["schemas"]["IncidentPhotoResponse"];
 type IncidentPhotoListResponse = components["schemas"]["IncidentPhotoListResponse"];
+type UserPageResponse = components["schemas"]["UserPageResponse"];
+type UserResponse = components["schemas"]["UserResponse"];
+
+/**
+ * Page size of the technician roster catalog call (R2.1, D7). Mirrors
+ * `features/cleaning/data/http/http-cleaning-source.ts`'s `CATALOG_PER_PAGE`
+ * (same value, not imported — this is the intentional duplication D7 chose
+ * over a shared `features/users` module).
+ */
+const CATALOG_PER_PAGE = 100;
+
+/** Triage input (R3.2): only the keys the caller actually sets are sent. */
+export interface TriageIncidentInput {
+  category?: IncidentCategory;
+  severity?: IncidentSeverity;
+  estimatedCost?: string;
+}
+
+/** Assignment input (R2.1, design D14). */
+export interface AssignIncidentInput {
+  technicianId: string;
+  assignmentNote?: string;
+}
 
 /** Map one list-row API response to `IncidentSummaryDto` (D3, D5). */
 function mapIncidentSummary(value: IncidentResponse): IncidentSummaryDto {
@@ -86,6 +112,19 @@ function mapIncidentPhoto(value: IncidentPhotoResponse): IncidentPhotoDto {
     uploadedBy: value.uploaded_by,
     createdAt: value.created_at,
     url: value.url,
+  };
+}
+
+/**
+ * Map one user to `TechnicianSummary` (R2.1). Not `mapCleaner` from
+ * `features/cleaning` — design D7 rejects sharing that module, so this is a
+ * deliberate duplicate.
+ */
+function mapTechnician(value: UserResponse): TechnicianSummary {
+  return {
+    id: value.id,
+    name: value.name,
+    isActive: value.status === "ACTIVE",
   };
 }
 
@@ -339,6 +378,110 @@ export class HttpIncidentsSource {
         pathParams: { incident_id: incidentId },
         body: { final_cost: finalCost },
       },
+    );
+    return mapIncidentDetail(response as IncidentResponse);
+  }
+
+  /**
+   * The tenant's technician roster (R2.1), same shape as `listCleaners` in
+   * `features/cleaning` (design D7): a catalog call with **no** `status`
+   * filter, so `isActive` is carried unfiltered for the caller to decide what
+   * to do with an inactive technician (resolve by name, but not select —
+   * that gate is UI, section 5).
+   */
+  async listTechnicians(_tenantId: string): Promise<TechnicianSummary[]> {
+    const response: UserPageResponse = await this.client.request<
+      "/api/v1/users",
+      "GET"
+    >("/api/v1/users", {
+      query: { page: 1, per_page: CATALOG_PER_PAGE, role: "TECHNICIAN" },
+    });
+    return response.data.map(mapTechnician);
+  }
+
+  /**
+   * Force the classifier over one incident (R4.1). Takes no body — the
+   * refresh of the detail afterwards is a hook concern (section 3).
+   */
+  async classifyIncident(
+    _tenantId: string,
+    incidentId: string,
+  ): Promise<IncidentDetailDto> {
+    const response = await this.client.request(
+      "/api/v1/incidents/{incident_id}/classify",
+      { method: "POST", pathParams: { incident_id: incidentId } },
+    );
+    return mapIncidentDetail(response as IncidentResponse);
+  }
+
+  /**
+   * Correct category, severity and/or estimated cost (R3.2). Only the keys
+   * present in `input` are sent — the schema is `extra="forbid"` and every
+   * field optional, so an absent key must not appear at all (not even as
+   * `undefined`). `estimatedCost` travels as the string it is given, never
+   * converted to `number` (design D7): the same reason `final_cost` does on
+   * `resolve` — a float round-trip corrupts a money value. Client-side cost
+   * validation belongs to section 4, not here.
+   */
+  async triageIncident(
+    _tenantId: string,
+    incidentId: string,
+    input: TriageIncidentInput,
+  ): Promise<IncidentDetailDto> {
+    const response = await this.client.request(
+      "/api/v1/incidents/{incident_id}",
+      {
+        method: "PATCH",
+        pathParams: { incident_id: incidentId },
+        body: {
+          ...(input.category !== undefined ? { category: input.category } : {}),
+          ...(input.severity !== undefined ? { severity: input.severity } : {}),
+          ...(input.estimatedCost !== undefined
+            ? { estimated_cost: input.estimatedCost }
+            : {}),
+        },
+      },
+    );
+    return mapIncidentDetail(response as IncidentResponse);
+  }
+
+  /**
+   * Assign or reassign a technician (R2.1, design D14). `assignmentNote`
+   * absent omits `assignment_note` from the body entirely; the backend
+   * treats an absent note the same as clearing it (design D14 quote above).
+   */
+  async assignIncident(
+    _tenantId: string,
+    incidentId: string,
+    input: AssignIncidentInput,
+  ): Promise<IncidentDetailDto> {
+    const response = await this.client.request(
+      "/api/v1/incidents/{incident_id}/assign",
+      {
+        method: "POST",
+        pathParams: { incident_id: incidentId },
+        body: {
+          technician_id: input.technicianId,
+          ...(input.assignmentNote !== undefined
+            ? { assignment_note: input.assignmentNote }
+            : {}),
+        },
+      },
+    );
+    return mapIncidentDetail(response as IncidentResponse);
+  }
+
+  /**
+   * Cancel the incident (R5.1, R5.3). No body and no reason parameter — the
+   * contract has none.
+   */
+  async cancelIncident(
+    _tenantId: string,
+    incidentId: string,
+  ): Promise<IncidentDetailDto> {
+    const response = await this.client.request(
+      "/api/v1/incidents/{incident_id}/cancel",
+      { method: "POST", pathParams: { incident_id: incidentId } },
     );
     return mapIncidentDetail(response as IncidentResponse);
   }

@@ -383,6 +383,9 @@ describe("HttpIncidentsSource", () => {
           "/api/v1/incidents/{incident_id}/wait-parts",
           "/api/v1/incidents/{incident_id}/resume",
           "/api/v1/incidents/{incident_id}/resolve",
+          "/api/v1/incidents/{incident_id}/classify",
+          "/api/v1/incidents/{incident_id}/assign",
+          "/api/v1/incidents/{incident_id}/cancel",
         ]),
       );
     });
@@ -533,6 +536,298 @@ describe("HttpIncidentsSource", () => {
       expect(formData.get("stage")).toBe("AFTER");
       expect(formData.get("file")).toBe(file);
       expect(result.stage).toBe("AFTER");
+    });
+  });
+
+  describe("listTechnicians (R2.1, D7)", () => {
+    it("GETs /api/v1/users with role=TECHNICIAN, page and per_page, and no status filter", async () => {
+      const request = vi.fn().mockResolvedValue({
+        data: [],
+        page: 1,
+        per_page: 100,
+        total: 0,
+        total_pages: 1,
+      });
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      await source.listTechnicians("tenant-1");
+
+      expect(request).toHaveBeenCalledWith("/api/v1/users", {
+        query: { page: 1, per_page: 100, role: "TECHNICIAN" },
+      });
+      expect(request.mock.calls[0][1].query).not.toHaveProperty("status");
+    });
+
+    it("maps each user to a TechnicianSummary, deriving isActive from status", async () => {
+      const request = vi.fn().mockResolvedValue({
+        data: [
+          {
+            id: "t1",
+            email: "t1@example.com",
+            created_at: "2026-08-12T08:00:00Z",
+            updated_at: "2026-08-12T08:00:00Z",
+            last_login_at: null,
+            name: "Ana Técnico",
+            phone: null,
+            preferred_language: "es",
+            role: "TECHNICIAN",
+            status: "ACTIVE",
+          },
+          {
+            id: "t2",
+            email: "t2@example.com",
+            created_at: "2026-08-12T08:00:00Z",
+            updated_at: "2026-08-12T08:00:00Z",
+            last_login_at: null,
+            name: "Beto Técnico",
+            phone: null,
+            preferred_language: "es",
+            role: "TECHNICIAN",
+            status: "SUSPENDED",
+          },
+        ],
+        page: 1,
+        per_page: 100,
+        total: 2,
+        total_pages: 1,
+      });
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      const result = await source.listTechnicians("tenant-1");
+
+      expect(result).toEqual([
+        { id: "t1", name: "Ana Técnico", isActive: true },
+        { id: "t2", name: "Beto Técnico", isActive: false },
+      ]);
+    });
+  });
+
+  describe("classifyIncident (R4.1)", () => {
+    it("POSTs the classify route with no body and maps the response", async () => {
+      const request = vi.fn().mockResolvedValue({
+        id: "i1",
+        property_id: "p1",
+        reservation_id: null,
+        source: "GUEST",
+        category: "WIFI",
+        severity: "LOW",
+        status: "CLASSIFIED",
+        title: "x",
+        description: "",
+        ai_summary: null,
+        assigned_technician_id: null,
+        owner_approval_required: false,
+        eta_at: null,
+        estimated_cost: null,
+        approved_cost: null,
+        final_cost: null,
+        materials: null,
+        resolved_at: null,
+        created_at: "2026-08-12T08:00:00Z",
+        updated_at: "2026-08-12T08:00:00Z",
+      });
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      const result = await source.classifyIncident("tenant-1", "i1");
+
+      expect(request).toHaveBeenCalledWith(
+        "/api/v1/incidents/{incident_id}/classify",
+        { method: "POST", pathParams: { incident_id: "i1" } },
+      );
+      expect(result.status).toBe("CLASSIFIED");
+    });
+  });
+
+  describe("triageIncident (R3.2, D7)", () => {
+    const RESPONSE = {
+      id: "i1",
+      property_id: "p1",
+      reservation_id: null,
+      source: "GUEST",
+      category: "PLUMBING",
+      severity: "HIGH",
+      status: "OPEN",
+      title: "x",
+      description: "",
+      ai_summary: null,
+      assigned_technician_id: null,
+      owner_approval_required: false,
+      eta_at: null,
+      estimated_cost: "150.00",
+      approved_cost: null,
+      final_cost: null,
+      materials: null,
+      resolved_at: null,
+      created_at: "2026-08-12T08:00:00Z",
+      updated_at: "2026-08-12T08:00:00Z",
+    };
+
+    it("PATCHes /api/v1/incidents/{incident_id} sending every field when all three are present", async () => {
+      const request = vi.fn().mockResolvedValue(RESPONSE);
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      await source.triageIncident("tenant-1", "i1", {
+        category: "PLUMBING",
+        severity: "HIGH",
+        estimatedCost: "150.00",
+      });
+
+      expect(request).toHaveBeenCalledWith("/api/v1/incidents/{incident_id}", {
+        method: "PATCH",
+        pathParams: { incident_id: "i1" },
+        body: {
+          category: "PLUMBING",
+          severity: "HIGH",
+          estimated_cost: "150.00",
+        },
+      });
+    });
+
+    it("omits the other two keys entirely when only one field changes (extra=forbid)", async () => {
+      const request = vi.fn().mockResolvedValue(RESPONSE);
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      await source.triageIncident("tenant-1", "i1", { severity: "HIGH" });
+
+      const body = request.mock.calls[0][1].body as Record<string, unknown>;
+      expect(body).toEqual({ severity: "HIGH" });
+      expect(body).not.toHaveProperty("category");
+      expect(body).not.toHaveProperty("estimated_cost");
+    });
+
+    it("sends estimated_cost as the string it was given, never converted to a number (D7)", async () => {
+      const request = vi.fn().mockResolvedValue(RESPONSE);
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      await source.triageIncident("tenant-1", "i1", { estimatedCost: "99.90" });
+
+      const body = request.mock.calls[0][1].body as Record<string, unknown>;
+      expect(body).toEqual({ estimated_cost: "99.90" });
+      expect(typeof body.estimated_cost).toBe("string");
+    });
+
+    it("sends an empty body when no field is present", async () => {
+      const request = vi.fn().mockResolvedValue(RESPONSE);
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      await source.triageIncident("tenant-1", "i1", {});
+
+      expect(request.mock.calls[0][1].body).toEqual({});
+    });
+
+    it("maps the response to IncidentDetailDto", async () => {
+      const request = vi.fn().mockResolvedValue(RESPONSE);
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      const result = await source.triageIncident("tenant-1", "i1", {
+        severity: "HIGH",
+      });
+
+      expect(result.category).toBe("PLUMBING");
+      expect(result.estimatedCost).toBe("150.00");
+    });
+  });
+
+  describe("assignIncident (R2.1, D14)", () => {
+    const RESPONSE = {
+      id: "i1",
+      property_id: "p1",
+      reservation_id: null,
+      source: "GUEST",
+      category: "WIFI",
+      severity: "LOW",
+      status: "ASSIGNED",
+      title: "x",
+      description: "",
+      ai_summary: null,
+      assigned_technician_id: "t1",
+      owner_approval_required: false,
+      eta_at: null,
+      estimated_cost: null,
+      approved_cost: null,
+      final_cost: null,
+      materials: null,
+      resolved_at: null,
+      created_at: "2026-08-12T08:00:00Z",
+      updated_at: "2026-08-12T08:00:00Z",
+    };
+
+    it("POSTs technician_id and assignment_note when both are given", async () => {
+      const request = vi.fn().mockResolvedValue(RESPONSE);
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      await source.assignIncident("tenant-1", "i1", {
+        technicianId: "t1",
+        assignmentNote: "Llama al llegar",
+      });
+
+      expect(request).toHaveBeenCalledWith(
+        "/api/v1/incidents/{incident_id}/assign",
+        {
+          method: "POST",
+          pathParams: { incident_id: "i1" },
+          body: { technician_id: "t1", assignment_note: "Llama al llegar" },
+        },
+      );
+    });
+
+    it("omits assignment_note entirely when absent", async () => {
+      const request = vi.fn().mockResolvedValue(RESPONSE);
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      await source.assignIncident("tenant-1", "i1", { technicianId: "t1" });
+
+      const body = request.mock.calls[0][1].body as Record<string, unknown>;
+      expect(body).toEqual({ technician_id: "t1" });
+      expect(body).not.toHaveProperty("assignment_note");
+    });
+
+    it("maps the response, including the new assignedTechnicianId", async () => {
+      const request = vi.fn().mockResolvedValue(RESPONSE);
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      const result = await source.assignIncident("tenant-1", "i1", {
+        technicianId: "t1",
+      });
+
+      expect(result.assignedTechnicianId).toBe("t1");
+    });
+  });
+
+  describe("cancelIncident (R5.1, R5.3)", () => {
+    it("POSTs the cancel route with no body and no reason parameter", async () => {
+      const request = vi.fn().mockResolvedValue({
+        id: "i1",
+        property_id: "p1",
+        reservation_id: null,
+        source: "GUEST",
+        category: "WIFI",
+        severity: "LOW",
+        status: "CANCELLED",
+        title: "x",
+        description: "",
+        ai_summary: null,
+        assigned_technician_id: null,
+        owner_approval_required: false,
+        eta_at: null,
+        estimated_cost: null,
+        approved_cost: null,
+        final_cost: null,
+        materials: null,
+        resolved_at: null,
+        created_at: "2026-08-12T08:00:00Z",
+        updated_at: "2026-08-12T08:00:00Z",
+      });
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      const result = await source.cancelIncident("tenant-1", "i1");
+
+      expect(request).toHaveBeenCalledWith(
+        "/api/v1/incidents/{incident_id}/cancel",
+        { method: "POST", pathParams: { incident_id: "i1" } },
+      );
+      expect(request.mock.calls[0][1]).not.toHaveProperty("body");
+      expect(result.status).toBe("CANCELLED");
     });
   });
 });
