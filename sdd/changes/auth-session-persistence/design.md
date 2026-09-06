@@ -263,6 +263,55 @@ caller that does not implement that specific retry shape (a future client, a
 retry that never runs, a user who navigates away mid-recovery). Fixing the
 endpoint closes the gap for every caller at once.
 
+### D6c — CSRF on the cookie-credentialed routes: an explicit `Origin` check, not a stronger `SameSite` (added 2026-09-06, review: `sdd-security`, round 4)
+
+**Chosen**: D6a/D6b made `/auth/logout` accept the ambient refresh cookie
+alone as its credential, the same stance `/auth/refresh` already took. Neither
+route gated the caller's `Origin` before doing so. `enforce_same_origin`
+(`backend/app/auth/api/dependencies.py`) rejects `POST /auth/refresh` with the
+existing `401 INVALID_TOKEN` shape when a present `Origin` header does not
+match `settings.backend_cors_allowed_origin_regex` — the same allowlist
+`CORSMiddleware` already reflects — wired in as
+`dependencies=[Depends(enforce_same_origin)]` on the route. `/auth/logout`
+cannot reuse that dependency as-is: D6/D6b commit it to never answering 401
+for an authentication reason, and raising here would violate that invariant.
+Its own `get_logout_subject` therefore applies the identical check inline, in
+the cookie branch only, and folds a mismatch into the function's existing
+"nothing to revoke" `None` return — the endpoint still answers its ordinary
+`204`, just without having revoked anything. A request with no `Origin`
+header at all is let through unchecked in both places: a browser always
+attaches one to a `POST` (same-origin or not) and a script cannot suppress it
+(`Origin` is a forbidden header name), so its absence means the call did not
+originate from a browser `fetch`/`XHR`/form to begin with.
+
+**Why not `SameSite=Strict`**: the security panel's finding was specifically
+that CORS and `SameSite` both fail to cover this. `CORSMiddleware` only gates
+whether the BROWSER may read the response — a cross-origin `POST` with a body
+simple enough to skip preflight still reaches the handler and executes.
+`SameSite` (`Lax` or `Strict`) only distinguishes *cross-site* from
+*same-site*; a sibling origin under the same registrable domain
+(`https://*.digitalsec.work`) is *same-site* by definition, so the cookie
+rides along regardless of which value is set — this is why `emit_refresh_cookie`
+was ALSO switched to `SameSite=Strict` (schemas.py) as a costless tightening
+(the cookie's own `Path=/api/v1/auth` was never in scope for the top-level
+navigation the old `Lax` rationale invoked, so there was no reason left to
+keep the weaker value), but that switch is not what closes the CSRF gap —
+`enforce_same_origin` and the inline check in `get_logout_subject` are.
+
+**Same-site refresh CSRF, previously an unowned deferral**: `tasks.md`'s
+review notes had recorded "same-site CSRF on `/auth/refresh`" as a Low
+deliberately left for a separate decision, with no design section and no
+roadmap entry (security panel finding, same round). This decision retires
+that deferral: `enforce_same_origin` closes it for `/auth/refresh` the same
+way it closes the sibling-logout case.
+
+Rejected: a double-submit CSRF token — more robust in the general case, but
+requires the frontend to read and re-send a token on every logout/refresh
+call, widening the diff and the test surface for a threat model the Origin
+check already closes given this app's actual topology (a fixed, small
+allowlist of frontend origins, not a public token-issuing API with arbitrary
+third-party callers).
+
 ### D7 — `frontend/lib/auth/session-store.ts` keeps only the access token
 
 **Chosen**: `SessionTokens` becomes `{ accessToken: string }` (no
@@ -339,6 +388,25 @@ already deferred to the separate `auth-session-generation-semantics`
 roadmap entry (dated 2026-08-29, before `runMountRefresh` existed) — this
 is a same-shaped race in code this change itself introduces, not one of
 the two facts that entry catalogued.
+
+**A third guard, orthogonal to the two generation checks above, arbitrates the
+mount-refresh against a concurrent DELIBERATE identity change** (added
+2026-09-05, same fix round; documented here 2026-09-06 — the review panel's
+`sdd-architect` found D8 silent on it, third round). `mountRefreshSuperseded`
+(a `useRef<boolean>`) is set to `true` by `login()`, `refresh()`, and the
+`logout`/`session-expired` event subscriptions the moment any of them starts —
+before the mount-refresh's own `.then()` can have settled. The mount-refresh
+checks it (alongside the token-generation check) before installing its
+resolved user, so a user who submits the login form (or triggers a manual
+refresh, or is logged out from another tab) while the silent restore is still
+in flight cannot have that restore's stale result overwrite the deliberate
+one, even in the narrow window where the token generation alone would not yet
+have moved. The unmount cleanup's own `applies` flag (`let applies = true`,
+flipped by the effect's cleanup function) is the fourth and unrelated guard in
+the same `.then()`: it covers the component actually unmounting (a route
+change navigating away mid-flight), not a same-mount identity change, which is
+why both checks appear together in the single early-return at the top of the
+`.then()` callback (`frontend/lib/auth/auth-provider.tsx`).
 
 Single-flighting is structural: the effect runs **once per provider
 mount**, and React strict-mode's double-invoke in dev — along with any

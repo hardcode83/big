@@ -709,3 +709,48 @@
     Docker Desktop VM (unrelated to this change; documented in `sdd/changes/*` review
     history elsewhere). Re-run the full suite once more before the next
     `/sdd:review` pass.
+
+- **`/sdd:review` panel re-review, fourth pass (2026-09-06)**:
+  - **MEDIUM (`sdd-security`) — CSRF on the cookie-credentialed routes, previously
+    unguarded**: `/auth/refresh` (always) and `/auth/logout` (via D6a/D6b's cookie
+    fallback) accepted the ambient refresh cookie alone as credential, and neither
+    `CORSMiddleware` (only gates whether the browser may READ the response, not
+    whether a cross-origin `POST` reaches the handler) nor `SameSite=Lax` (a sibling
+    origin under the same registrable domain is *same-site*, so the cookie rides
+    along regardless) closed a same-site-but-cross-origin forced revoke. Fixed
+    (design D6c): `enforce_same_origin` gates `/auth/refresh` with the existing `401`
+    shape; `get_logout_subject`'s cookie branch applies the identical `Origin` check
+    inline and folds a mismatch into its existing "nothing to revoke" `None`, so
+    `/auth/logout`'s never-401 invariant (D6/D6b) holds. Both check the `Origin`
+    header, when present, against the same `settings.backend_cors_allowed_origin_regex`
+    CORS already reflects.
+  - **LOW (`sdd-security`) — the same-site `/auth/refresh` CSRF deferral now has a
+    durable home**: previously recorded only in this file's third-pass entry above
+    with no design section or roadmap entry. Retired by D6c, which closes it directly
+    rather than merely documenting the deferral.
+  - **LOW (`sdd-security`) — `emit_refresh_cookie`'s `SameSite=Lax` rationale was
+    factually wrong**: the docstring (and its mirror in `docs/auth-tenancy.md`)
+    justified `Lax` with a top-level-navigation-from-an-email-link scenario that
+    cannot occur against `Path=/api/v1/auth` (a top-level navigation targets a PAGE,
+    never this path) and does not describe how `SameSite` actually gates cross-site
+    delivery. Fixed: switched to `SameSite=Strict` (costless given the `Path` scope)
+    and corrected both texts to name the real CSRF defense (D6c) instead.
+  - **LOW (`sdd-security`) — two comments credited an unreachable case**:
+    `client.ts`'s `recoveryExempt` comment and `use-logout-mutation.ts`'s doc comment
+    both described logout's 401-recovery path as covering a stale-Bearer retry that
+    D6b already made unreachable (a stale Bearer now falls through to the cookie
+    inside `get_logout_subject` rather than ever reaching a 401). Corrected both to
+    say the exclusion/behaviour is inert today, kept only as defence in depth.
+  - **MEDIUM (`sdd-architect`) — D8 silent on a third race-guard**: `design.md`'s D8
+    documented the two token-generation checks but not `mountRefreshSuperseded` (the
+    ref set by `login`/`refresh`/`logout`/session-expiry) or the unmount `applies`
+    flag, both load-bearing per this file's own third-pass notes. Fixed: added the
+    missing paragraph to D8.
+  - Backend re-verified on the touched scope only
+    (`tests/auth`, `tests/test_cors.py`, `tests/test_route_authorization.py`) —
+    full-suite and full-frontend-suite re-runs were attempted but both OOM-killed
+    twice by the host under concurrent worktree contention (same class of issue the
+    third pass hit, not a code failure); `uv run pyright .` confirmed 0 new errors
+    from this change's own files. **Re-run the full backend and frontend suites once
+    more before the next `/sdd:review` pass** — the last trustworthy full-suite
+    numbers on record (Section 7 above) predate this pass and the third pass alike.

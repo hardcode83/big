@@ -30,7 +30,7 @@ por JavaScript es justo el riesgo (XSS) que esto cierra. En su lugar, ambos pone
 | Atributo | Valor | Por qué |
 |---|---|---|
 | `HttpOnly` | siempre | El token nunca es legible desde JS — es lo que mueve la superficie XSS a "ninguna". |
-| `SameSite` | `Lax` | Es el único valor que deja que una navegación de nivel superior desde un enlace de email a `/login` siga llevando la cookie en el `POST` que sigue; `Strict` rompería ese caso. |
+| `SameSite` | `Strict` | Ni `Lax` ni `Strict` cubren un origen hermano bajo el mismo dominio registrable (`*.digitalsec.work`): `SameSite` solo distingue *cross-site* de *same-site*, y un hermano es *same-site* por definición. La defensa real contra ese CSRF es la comprobación de `Origin` de `enforce_same_origin` (ver abajo); `Strict` no cuesta nada frente a `Lax` dado el `Path` de la cookie. |
 | `Path` | `/api/v1/auth` | La cookie no sale en ninguna otra ruta — más estrecho que `Path=/`, que la mandaría en cada petición. |
 | `Max-Age` | los mismos `JWT_REFRESH_TOKEN_DAYS` × 86400 segundos | Igual que la vida del token que lleva dentro. |
 | `Secure` | depende del esquema de la petición (ver abajo) | Sin esto, un downgrade a HTTP filtraría el token en claro. |
@@ -58,6 +58,23 @@ todo rol (`_SELF_SERVICE` en `policy.py`), así que autenticar por la cookie es
 equivalente a estar autorizado — no hay ningún rol al que esto pudiera negarle nada. Una
 cookie ausente o que no decodifica (manipulada, caducada) no distingue: responde el
 mismo `204` idempotente que "nada que revocar".
+
+**CSRF: aceptar la cookie como credencial abre una puerta que `CORSMiddleware` y
+`SameSite` no cierran** (hallazgo del panel de seguridad, ronda 4). `CORSMiddleware`
+solo decide si el NAVEGADOR puede leer la respuesta; un `POST` cross-origin con un
+cuerpo lo bastante simple para no disparar preflight llega igual al handler y se
+ejecuta. `SameSite` tampoco basta: un origen hermano bajo el mismo dominio registrable
+(`https://*.digitalsec.work`) es *same-site*, así que la cookie viaja igual sea `Lax` o
+`Strict`. La defensa es explícita: `enforce_same_origin`
+(`backend/app/auth/api/dependencies.py`) rechaza `POST /auth/refresh` con el mismo `401`
+que una cookie ausente/inválida cuando el `Origin` presentado no está en el mismo
+allowlist que ya usa CORS (`settings.backend_cors_allowed_origin_regex`); `/auth/logout`
+aplica la misma comprobación en línea dentro de `get_logout_subject`, pero al no poder
+responder `401` (D6/D6b) un `Origin` no permitido se trata como "nada que revocar" —
+el intento queda en un `204` silencioso, no en una revocación. Una petición sin
+cabecera `Origin` en absoluto pasa sin comprobar: un navegador siempre añade una en un
+`POST`, mismo origen o no, y un script no puede suprimirla — su ausencia significa que
+la llamada no vino de un `fetch`/`XHR`/formulario de navegador.
 
 **`Secure`, en dev y en producción.** La decisión la toma `resolve_cookie_secure()`
 (`backend/app/auth/api/dependencies.py`) leyendo únicamente `request.url.scheme`:
