@@ -28,7 +28,12 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.messaging.domain.entities import MAX_MESSAGE_CONTENT_LENGTH, Conversation, Message
+from app.messaging.domain.entities import (
+    MAX_MESSAGE_CONTENT_LENGTH,
+    Conversation,
+    Message,
+    WhatsAppPhoneNumberAssociation,
+)
 from app.messaging.domain.enums import (
     ConversationChannel,
     ConversationEscalationStatus,
@@ -204,3 +209,48 @@ class CreateMessageRequest(BaseModel):
 def is_supported_language(value: str) -> bool:
     """Exposed for the route, which answers `422` rather than letting the entity raise a 500."""
     return value in SUPPORTED_LANGUAGES
+
+
+class AssociateWhatsAppPhoneNumberRequest(BaseModel):
+    """`POST /messaging/whatsapp-phone-number` (R6.1).
+
+    `phone_number_id` is always operator-supplied — never generated (task 6.3's own words) —
+    so it is a plain required string, not a value this schema invents a shape for. Meta's own
+    identifiers are digit strings of about 15 characters; `min_length=1` is the only guard
+    worth encoding here, because the real validation (does it authenticate real traffic) can
+    only happen against Meta itself, out of this change's scope.
+
+    `default_property_id` is required, not optional (design D8 addendum): `ensure_whatsapp`
+    has nowhere to anchor an unresolved sender's thread without it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    phone_number_id: Annotated[str, Field(min_length=1, max_length=32)]
+    display_phone_number: Annotated[str, Field(min_length=1, max_length=32)] | None = None
+    default_property_id: uuid.UUID
+
+
+class WhatsAppPhoneNumberResponse(BaseModel):
+    """What an authenticated operator may see about their tenant's association.
+
+    No secret to withhold (D3/D8's whole point), so unlike `WebhookEndpointMaterialResponse`
+    this carries nothing that is returnable "only once" — a `GET` of the tenant's own settings
+    could show this back safely, the same point design D8 makes.
+    """
+
+    id: uuid.UUID
+    phone_number_id: str
+    display_phone_number: str | None
+    default_property_id: uuid.UUID
+
+    @classmethod
+    def from_domain(
+        cls, association: WhatsAppPhoneNumberAssociation
+    ) -> "WhatsAppPhoneNumberResponse":
+        return cls(
+            id=association.id,
+            phone_number_id=association.phone_number_id,
+            display_phone_number=association.display_phone_number,
+            default_property_id=association.default_property_id,
+        )

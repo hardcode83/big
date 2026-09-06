@@ -13,6 +13,7 @@ every `AuditLog` in this codebase, so use cases of this module go through it the
 """
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -208,4 +209,35 @@ class CreateUserInTenantUseCase:
             actor_ip=actor_ip,
             command=command,
             now=now,
+        )
+
+
+@dataclass(frozen=True)
+class TenantPage:
+    """One page of tenants plus the total the response needs for `total_pages` (R2.1)."""
+
+    items: Sequence[TenantSettings]
+    total: int
+
+
+class ListTenantsUseCase:
+    """Thin pass-through over `TenantRepository.list_page` (R2.1, R2.2, R2.3, design D2).
+
+    Same shape as `ListConversationsUseCase` (`app/messaging/application/use_cases.py:836`):
+    no business rule to enforce, so there is nothing here beyond wiring the port to the
+    response shape. The one thing it does add is the pairing `list_page` cannot do itself:
+    the port returns `(Tenant, TenantConfig)` tuples, never `TenantSettings`, because a
+    domain port must not import the application layer (`tests/test_layering.py`) — this use
+    case already imports `TenantSettings` for `CreateTenantUseCase` above, so it is where the
+    pair becomes the one type `TenantResponse.from_settings` maps from.
+    """
+
+    def __init__(self, *, tenants: TenantRepository) -> None:
+        self._tenants = tenants
+
+    async def execute(self, *, page: int, per_page: int) -> TenantPage:
+        pairs, total = await self._tenants.list_page(page, per_page)
+        return TenantPage(
+            items=[TenantSettings(tenant=tenant, config=config) for tenant, config in pairs],
+            total=total,
         )

@@ -19,7 +19,11 @@ from app.messaging.domain.exceptions import (
     InvalidConversationTransitionError,
     MessagingDomainError,
     MessagingValidationError,
+    NoInboundMessageError,
     PMSChannelUnavailableError,
+    WhatsAppPhoneNumberAlreadyAssociatedError,
+    WhatsAppPhoneNumberNotFoundError,
+    WhatsAppWebhookAuthenticationError,
 )
 
 
@@ -44,6 +48,10 @@ def test_the_walk_finds_the_errors_that_exist() -> None:
         "ConversationClosedError",
         "PMSChannelUnavailableError",
         "MessagingValidationError",
+        "NoInboundMessageError",
+        "WhatsAppPhoneNumberAlreadyAssociatedError",
+        "WhatsAppPhoneNumberNotFoundError",
+        "WhatsAppWebhookAuthenticationError",
     }
 
 
@@ -65,6 +73,10 @@ def test_every_domain_error_has_a_row(error_class: type[MessagingDomainError]) -
         (ConversationClosedError("nope"), 409, ErrorCode.CONFLICT),
         (PMSChannelUnavailableError("nope"), 422, ErrorCode.VALIDATION_ERROR),
         (MessagingValidationError("nope"), 422, ErrorCode.VALIDATION_ERROR),
+        (NoInboundMessageError("nope"), 422, ErrorCode.VALIDATION_ERROR),
+        (WhatsAppPhoneNumberAlreadyAssociatedError("nope"), 409, ErrorCode.CONFLICT),
+        (WhatsAppPhoneNumberNotFoundError("nope"), 404, ErrorCode.NOT_FOUND),
+        (WhatsAppWebhookAuthenticationError(), 403, ErrorCode.FORBIDDEN),
     ],
     ids=lambda value: type(value).__name__ if isinstance(value, Exception) else str(value),
 )

@@ -103,8 +103,9 @@ export function useMarkRead(): UseMutationResult<void, Error, string, MarkReadCo
       // authenticated client purges the whole `QueryClient` BEFORE the request rejects, so a
       // revert that trusted its snapshot would write the departing user's rows and counter
       // back into a cache that was just emptied so the next person in this tab cannot read
-      // them. `sessionGeneration` moves on every token write and every clear, so this is a
-      // fact about the session rather than a guess about what React has flushed into this
+      // them. `sessionGeneration` moves on every token write (`setSessionTokens`) and every
+      // cache purge (`purgeSessionCache`) — not on a bare `clearSessionTokens()` — so this is
+      // a fact about the session rather than a guess about what React has flushed into this
       // closure. Found by the section-5 security panel.
       if (context.sessionGeneration !== getSessionGeneration()) {
         return;

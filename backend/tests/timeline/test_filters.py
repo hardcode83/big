@@ -89,6 +89,7 @@ def test_the_reader_is_a_separate_port_and_writes_nothing() -> None:
     hand every holder of the writer a reader and vice versa."""
     assert _protocol_methods(TimelineEventReader) == {
         "list_for_property",
+        "list_for_tenant",
         "last_for_properties",
     }
     assert not _protocol_methods(TimelineEventReader) & _protocol_methods(

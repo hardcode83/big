@@ -95,7 +95,7 @@ Recordatorio del bug histórico: `docker-compose-plugin` no está en los repos p
 
 ## 6. Despliegue de la app (CD — change `app-deploy-dev`)
 
-La app se despliega con `.github/workflows/deploy-dev.yml`: un **push a `main`** que toque `backend/**`/`frontend/**` (o `workflow_dispatch`) construye las imágenes `prod` arm64, las publica en **GHCR** (tag `sha-<commit>` + `dev`), y un job `deploy` en un **runner self-hosted que corre EN la VM** hace el deploy **localmente** (`docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml pull && up -d --wait`) — sin SSH ni puertos entrantes. El `.env` de runtime lo **lee del OCI Vault** por instance principal en cada deploy (secrets generados por Terraform); el `docker login ghcr.io` usa el **`GITHUB_TOKEN`** del propio job (la GitHub App **solo** registra el runner, no interviene en el pull de GHCR). **Cero secrets de app a mano.**
+La app se despliega con `.github/workflows/deploy-dev.yml`: un **push a `main`** que toque `backend/**`/`frontend/**` (o `workflow_dispatch`) construye las imágenes `prod` arm64, las publica en **GHCR** (tag `sha-<commit>` + `dev`), y un job `deploy` en un **runner self-hosted que corre EN la VM** hace el deploy **localmente** (`docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml pull && up -d --wait`) — sin SSH ni puertos entrantes. El `.env` de runtime lo **lee del OCI Vault** por instance principal en cada deploy (secrets generados por Terraform); el `docker login ghcr.io` usa el **`GITHUB_TOKEN`** del propio job (la GitHub App **solo** registra el runner, no interviene en el pull de GHCR). **Cero secrets de app a mano.**
 
 ### 6.1 GitHub App (único secret-zero) + variables
 
@@ -128,10 +128,13 @@ POSTGRES_USER=autohostai
 EOF
 sudo install -m0755 runner-bootstrap.sh /opt/bootstrap-runner.sh
 sudo install -m0755 gh-app-install-token.py /opt/gh-app-install-token.py
-sudo bash /opt/bootstrap-runner.sh
+export RUNNER_COUNT=4   # el valor de `runner_count` del apply (variables.tf/dev.tfvars) — NO copiar literal
+sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"
 ```
 
-Verificar: **Settings → Actions → Runners** muestra `autohostai-dev-vm` **Idle** con label `dev`. Recuperación: `sudo /opt/actions-runner/svc.sh start`; si se desregistra, re-ejecutar el bootstrap (`--replace`, idempotente).
+`$RUNNER_COUNT` debe coincidir con la variable `runner_count` del apply (`variables.tf` o `dev.tfvars`, validación 1..4; default 4 — change `ci-runner-pool-oci`). **El `export` de arriba es obligatorio**: sin él, `"$RUNNER_COUNT"` se expande vacío en esta misma línea de comando (una asignación-prefijo tipo `VAR=x cmd "$VAR"` no hace visible `VAR` a la expansión de argumentos de ese mismo comando — solo entra en el entorno del proceso ejecutado) y el script cae en silencio al `RUNNER_COUNT=4` interno de `runner-bootstrap.sh`, que puede no coincidir con el valor real del apply (hallazgo del panel de `/sdd:review`, `sdd-qa`/`sdd-review-cicd`, 2026-09-04). El `runcmd` del cloud-init no tiene este problema: pasa el valor de Terraform ya sustituido en tiempo de render, como argumento literal. Subir/bajar N: `docs/ci-runner-rollback.md §7–§8`.
+
+Verificar: **Settings → Actions → Runners** muestra **N entradas `autohostai-dev-vm-<i>`** (i ∈ [1..N]) **Idle** con label `dev`, y ningún principal local sobrante — `getent group docker` no debe listar usuarios `actions-runner-<i>` de agentes ya retirados (`id actions-runner-<i>` debe fallar). Recuperación de un agente puntual: `sudo /opt/actions-runner-<i>/svc.sh start`; si se desregistra, re-ejecutar el bootstrap (`--replace`, idempotente).
 
 ### 6.3 Arranque en frío (primer deploy sobre VM sin app)
 
@@ -169,7 +172,7 @@ En un stack recién creado esto no aparece: todos los contenedores nacen a la ve
 
 ```bash
 cd /opt/actions-runner/_work/AutoHostAI/AutoHostAI   # el checkout del runner (§7.4)
-docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml down
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml down
 ```
 
    y volver a lanzar el deploy. `down` **no borra los volúmenes con nombre**, así que la base de datos de dev sobrevive.
@@ -205,7 +208,7 @@ no es el deploy — mira la tabla de §7.
 ```bash
 # desde la VM, ver las colisiones (ojo: agrupado SOLO por la dirección, sin tenant_id —
 # dos tenants con el mismo email ya son una colisión)
-docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml exec postgres \
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml exec postgres \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
   "SELECT lower(email) AS addr, count(*), array_agg(id), array_agg(tenant_id) FROM users
    GROUP BY lower(email) HAVING count(*) > 1;"
@@ -236,7 +239,7 @@ BOOTSTRAP_SUPER_ADMIN_PASSWORD=...
 EOF
 
 # el heredoc con 'EOF' entre comillas no expande nada, y el fichero nace en 600
-docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml run --rm --no-deps \
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml run --rm --no-deps \
   --env-file /tmp/bootstrap.env backend python -m app.cli.bootstrap
 
 shred -u /tmp/bootstrap.env 2>/dev/null || rm -f /tmp/bootstrap.env
@@ -249,6 +252,44 @@ Notas que importan:
 - Si falta alguna variable, aborta **antes** de escribir nada y las lista todas.
 - `run --rm --no-deps` en vez de `exec`: el contenedor vive solo para este comando y se lleva las variables con él, en vez de inyectarlas en el proceso del `backend` que está sirviendo.
 - Comprueba que funciona con un login: ver `docs/auth-tenancy.md`.
+
+### 6.5.1 Verificar (o completar) el `SUPER_ADMIN` en un entorno ya bootstrapped
+
+Comprobado en `dev` el 2026-09-04, tras mergear `super-admin-console` (PR #162): la cuenta ya
+existía — se sembró junto al owner/manager la primera vez que se corrió §6.5 para
+`super-admin-identity`, y no hizo falta volver a tocar nada.
+
+```
+josegascon+superadmin@gmail.com | SUPER_ADMIN | tenant_id: (vacío)
+```
+
+Verificarlo sin escribir nada:
+
+```bash
+ssh -i ~/.ssh/autohostai_dev_vm ubuntu@<ip>
+cd /opt/actions-runner/_work/AutoHostAI/AutoHostAI
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml exec -T postgres \
+  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+    SELECT email, role, tenant_id FROM users WHERE role = '\''SUPER_ADMIN'\'';"'
+```
+
+**Si la fila no aparece** — un entorno que nunca corrió §6.5 con las tres variables
+`BOOTSTRAP_SUPER_ADMIN_*` rellenas, o uno bootstrapeado antes de `super-admin-identity` — el
+procedimiento es exactamente §6.5, sin variante: es la misma llamada convergente, así que
+repetirla con el `BOOTSTRAP_TENANT_NAME`/`OWNER_EMAIL`/`MANAGER_EMAIL` reales que ya existen
+(localizables con la consulta de §8.1) más las tres `BOOTSTRAP_SUPER_ADMIN_*` nuevas **no** toca
+ni recrea las cuentas que ya están: `apply_plan` (`backend/app/cli/bootstrap.py`) resuelve cada
+seed por email y salta en silencio la que ya existe — solo escribe la fila que falta.
+
+La contraseña de esta cuenta **no se documenta aquí**, mismo criterio que el resto de
+contraseñas reales del entorno (§6.5, §7.1). Si se pierde, el rescate es §8 (`reset_password`),
+no relanzar el bootstrap: `apply_plan` nunca actualiza una fila que ya existe, así que una
+contraseña nueva en `BOOTSTRAP_SUPER_ADMIN_PASSWORD` no llegaría a la cuenta.
+
+Una vez dentro, la consola vive en `/platform` (gated por `MANAGE_PLATFORM`, permiso exclusivo
+de `SUPER_ADMIN`) — `GET /api/v1/platform/tenants` lista todos los tenants de la instalación,
+sin la excepción de aislamiento que aplica al resto de roles (change `super-admin-console`,
+PR #162).
 
 ## 7. Ingress HTTPS — Cloudflare Tunnel (change `ingress-https-dev`)
 
@@ -301,10 +342,10 @@ Dos cosas no son codificables y se hacen en el dashboard de Cloudflare:
 
 ```bash
 # ¿El túnel está conectado al edge? (healthcheck del compose usa esto mismo)
-docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml exec cloudflared cloudflared tunnel ready
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml exec cloudflared cloudflared tunnel ready
 
 # Logs del túnel (registro de conexiones al edge, errores de origen)
-docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml logs --tail=100 cloudflared
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml logs --tail=100 cloudflared
 
 # Estado visto desde Cloudflare: Zero Trust → Networks → Tunnels (healthy / degraded / down)
 ```
@@ -426,7 +467,7 @@ done
 ```bash
 # En la VM: provoca un fallo de login por el hostname público desde tu móvil o tu portátil,
 # y mira con qué IP lo registró el backend
-docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml logs backend --tail 50 | grep -i "ip="
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml logs backend --tail 50 | grep -i "ip="
 ```
 
 Debe aparecer **tu IP pública**, no `10.89.0.10` (la del contenedor `frontend`). Si aparece la del contenedor, el `--forwarded-allow-ips` del `command:` de `backend` y el `ipv4_address` del `frontend` se han desincronizado — los dos salen del mismo ancla YAML, así que revisa que nadie haya escrito uno a mano.
@@ -482,7 +523,7 @@ pkill -f 'ssh -fN autohostai-dev'   # para cerrarlo
 ssh ubuntu@<IP pública>
 cd /opt/actions-runner/_work/AutoHostAI/AutoHostAI   # checkout del runner, con el docker-compose.deploy.yml
 # (localizarlo si cambia: sudo find /opt/actions-runner/_work -maxdepth 3 -name docker-compose.deploy.yml)
-C="docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml"
+C="docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml"
 
 $C ps                     # estado y healthy/unhealthy de los 7 servicios
 $C logs --tail=100 backend
@@ -659,7 +700,7 @@ un usuario que ya existe.
 ssh -i ~/.ssh/autohostai_dev_vm ubuntu@<ip>
 cd /opt/actions-runner/_work/AutoHostAI/AutoHostAI
 
-docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml exec backend \
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml exec backend \
   python -m app.cli.reset_password --email <dirección>
 ```
 
@@ -680,7 +721,7 @@ en la forma **sin punto** (`RUNBOOK-seed-demo.md` §2). Antes de dar por perdida
 hay:
 
 ```bash
-docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml exec -T postgres \
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml exec -T postgres \
   sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
     SELECT u.email, u.role, u.status, u.must_change_password, t.name AS tenant
     FROM users u JOIN tenants t ON t.id = u.tenant_id

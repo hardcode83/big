@@ -89,11 +89,17 @@ el comportamiento del reset se especifica en [`demo-tenant`](demo-tenant.md).
   `ignore_changes`, así que un cron por cloud-init no llegaría nunca a la VM viva.
 - THE SYSTEM SHALL hacer `checkout` con su comportamiento **por defecto** (`clean: true`).
   **Corregido por `ci-runner-oci`** (2026-09-04): el `.env` del despliegue **no está versionado**
-  y ya no vive en el workspace del checkout, sino en `$HOME/.autohostai-dev-runtime.env` — fuera
-  de `$GITHUB_WORKSPACE` y de `$RUNNER_TEMP`. Con `clean: false` el `.env` sobrevivía mientras el
-  workspace fuera solo del deploy y el reset; desde que 7 workflows `pull_request`-triggered más
-  comparten ese mismo disco físico, el `git clean -ffdx` del checkout por defecto de *cualquiera*
-  de ellos lo habría borrado igual, así que `clean: false` dejó de proteger nada y se retiró. La
+  y ya no vive en el workspace del checkout, sino en `/opt/autohostai-dev-runtime/dev-runtime.env`
+  — fuera de `$GITHUB_WORKSPACE` y de `$RUNNER_TEMP`. **Corregido de nuevo** (fix rápido
+  2026-09-05, fuera del flujo SDD): vivía en `$HOME/.autohostai-dev-runtime.env`, pero `$HOME` es
+  por-agente y GitHub reparte `deploy`/`demo-reset` entre los N agentes del pool sin garantizar
+  que caigan en el mismo (visto: `deploy` en `autohostai-dev-vm-4`, el `demo-reset` programado del
+  día siguiente en `autohostai-dev-vm-2`, precondición fallida — run 33953115006). La ruta nueva es
+  legible/escribible por cualquier agente vía el grupo `ci-agents` (ver `ci-runner-self-hosted`).
+  Con `clean: false` el `.env` sobrevivía mientras el workspace fuera solo del deploy y el reset;
+  desde que 7 workflows `pull_request`-triggered más comparten ese mismo disco físico, el
+  `git clean -ffdx` del checkout por defecto de *cualquiera* de ellos lo habría borrado igual, así
+  que `clean: false` dejó de proteger nada y se retiró. La
   deuda que esto nombraba —extraer el paso «Render .env» a un script versionado compartido por
   los dos workflows— sigue declarada y sin pagar.
 - THE SYSTEM SHALL comprobar como precondición, antes de tocar nada, que ese `.env` existe y que

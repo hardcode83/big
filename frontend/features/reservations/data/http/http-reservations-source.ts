@@ -41,6 +41,9 @@ function mapReservationSummary(value: ReservationResponse): ReservationSummaryDt
     currency: value.currency,
     grossAmount: value.gross_amount,
     paymentStatus: value.payment_status,
+    propertyName: value.property_name ?? null,
+    propertyInternalCode: value.property_internal_code ?? null,
+    guestFullName: value.guest_full_name ?? null,
   };
 }
 
@@ -49,18 +52,7 @@ function mapReservationDetail(
   value: ReservationDetailResponse,
 ): ReservationDetailDto {
   return {
-    id: value.id,
-    propertyId: value.property_id,
-    status: value.status,
-    checkInDate: value.check_in_date,
-    checkOutDate: value.check_out_date,
-    nights: value.nights,
-    totalGuests: value.total_guests,
-    guestId: value.guest_id,
-    channel: value.channel,
-    currency: value.currency,
-    grossAmount: value.gross_amount,
-    paymentStatus: value.payment_status,
+    ...mapReservationSummary(value),
     checkInTime: value.check_in_time,
     checkOutTime: value.check_out_time,
     adults: value.adults,

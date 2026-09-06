@@ -117,3 +117,7 @@ Los secrets de runtime (`POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`)
 
 - **`terraform apply` inicial** e infra: ya verificado y aplicado en changes previos; el `apply` con la IAM del runner (dynamic group + policy) y los secrets del Vault se dispara por el pipeline con confirmación explícita.
 - Ops del CD (a tu cargo, ver RUNBOOK §6): crear la GitHub App (variables `GH_APP_*` + secret `GH_APP_PRIVATE_KEY`), aplicar por el pipeline (crea IAM + secrets del Vault), provisionar el runner en la VM viva, y el primer deploy.
+
+## Runner self-hosted (pool N)
+
+El runner se registra como **pool de N agentes** con label `dev` en la misma VM (variable de Terraform `runner_count`, `infra/environments/dev/variables.tf`, default 4, validación 1..4 — change `ci-runner-pool-oci`), no como un proceso único. **Rango razonable 1–4**: la VM es `VM.Standard.A1.Flex`, 4 OCPU/24 GB/200 GB, AD-3, PAYG (ADR 0001 addendum 2026-07-21) y convive con el stack `docker compose` que sirve `autohostai.digitalsec.work`; por encima del default la contención empieza a degradar el servicio público (R6.1). Para `runner_count > default` (R6.3) exige nota de medición previa (suite del backend con la del frontend corriendo en paralelo en otro agente, latencia p50 del frontend público) archivada en `RUNBOOK.md §6.2`; sin esa nota, no se acepta el cambio. Subir/bajar N: `docs/ci-runner-rollback.md §7–§8`.

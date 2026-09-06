@@ -7,15 +7,22 @@ import * as dataModule from "../data";
 import { notificationsKeys } from "./query-keys";
 import { useMarkRead } from "./use-mark-read";
 import { useMarkAllRead } from "./use-mark-all-read";
+import { purgeSessionCache } from "@/lib/auth/session-cache-purge";
 
 const authState = { status: "authenticated", user: { tenant_id: "t1", id: "u1" } };
-// The generation is what the revert consults to decide whether its snapshot still belongs to
-// the session in the tab. Tests move it to simulate a logout/expiry landing mid-flight.
-const sessionState = { generation: 1 };
-vi.mock("@/lib/auth", () => ({
-  useAuth: () => authState,
-  getSessionGeneration: () => sessionState.generation,
-}));
+// The mock's `getSessionGeneration` proxies to the REAL implementation in
+// `session-store.ts`. The revert consults `getSessionGeneration()` to decide whether its
+// snapshot still belongs to the session in the tab; if the real counter advances mid-flight
+// (which only happens when something goes through `purgeSessionCache()`), the revert is
+// skipped. Proxying to the real counter is what makes R4.4 a real test of R1 — without the
+// proxy the test could pass even if `purgeSessionCache()` stopped advancing the counter.
+vi.mock("@/lib/auth", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/auth")>();
+  return {
+    ...real,
+    useAuth: () => authState,
+  };
+});
 
 const markRead = vi.fn();
 const markAllRead = vi.fn();
@@ -25,6 +32,31 @@ vi.spyOn(dataModule, "getNotificationsDataSource").mockImplementation(
       typeof dataModule.getNotificationsDataSource
     >,
 );
+
+/**
+ * Cache shim for the R4.4 test: when a test registers a per-test QueryClient via
+ * `useCacheClient()`, the mock at `@/lib/query/query-client` returns it from
+ * `getQueryClient()`. That makes the real `purgeSessionCache()` (the path the
+ * listener actually exercises) clear the same client the test reads from, so the
+ * assertions about the cache being empty after the rejection are observed against
+ * the production-shaped code path instead of a hand-written `client.clear()`.
+ */
+const cacheClientRef = vi.hoisted(() => ({
+  current: null as QueryClient | null,
+}));
+
+vi.mock("@/lib/query/query-client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/query/query-client")>();
+  return {
+    ...actual,
+    getQueryClient: () => cacheClientRef.current ?? actual.getQueryClient(),
+  };
+});
+
+function useCacheClient(client: QueryClient): QueryClient {
+  cacheClientRef.current = client;
+  return client;
+}
 
 const UNREAD_KEY = notificationsKeys.unread("t1", "u1");
 const LIST_KEY = notificationsKeys.list("t1", "u1", { page: 1 });
@@ -62,7 +94,7 @@ function readList(client: QueryClient) {
 beforeEach(() => {
   vi.clearAllMocks();
   authState.status = "authenticated";
-  sessionState.generation = 1;
+  cacheClientRef.current = null;
 });
 
 describe("useMarkRead (R5.1, R5.3, R5.4, design D13)", () => {
@@ -189,12 +221,13 @@ describe("useMarkAllRead (R5.2, R5.3, R5.4)", () => {
 
 describe("the revert does not survive the session that started it (R3.4)", () => {
   it("useMarkRead writes nothing back when the session ended mid-flight", async () => {
-    const client = seededClient();
+    const client = useCacheClient(seededClient());
     markRead.mockImplementation(async () => {
       // What really happens on a 401: the authenticated client purges the whole cache and
-      // the session generation moves, and only THEN does the request reject.
-      sessionState.generation = 2;
-      client.clear();
+      // the session generation moves, and only THEN does the request reject. We go through
+      // the real `purgeSessionCache()` so the generation bump comes from the production path,
+      // not from a hand-written counter.
+      purgeSessionCache();
       throw new Error("session expired");
     });
     const { result } = renderHook(() => useMarkRead(), { wrapper: wrapperFor(client) });
@@ -207,11 +240,44 @@ describe("the revert does not survive the session that started it (R3.4)", () =>
     expect(client.getQueryData(LIST_KEY)).toBeUndefined();
   });
 
+  it("useMarkRead does not resurrect rows when a mid-flight purgeSessionCache() advances the generation (R4.4)", async () => {
+    // R4.4: the production path is `notifySessionExpired` → listener → `purgeSessionCache()`,
+    // which advances `sessionGeneration` by 1 (D1 / R1.1). `use-mark-read.onError` compares
+    // `getSessionGeneration()` against the snapshot captured at `onMutate`; if the generation
+    // moved, the rollback is skipped. Without section 1, `purgeSessionCache()` did not bump
+    // the generation, the guard fired late or not at all, and the departing user's rows came
+    // back into a cache that was just emptied to keep the next person from seeing them.
+    //
+    // The test depends on the mock of `@/lib/auth` proxying `getSessionGeneration` to the
+    // real `session-store.ts` (see the `vi.mock` at the top of this file). Without that
+    // proxy, the test could pass even if `purgeSessionCache()` stopped advancing the real
+    // counter — making it useless as a guard of R1. With the proxy, a regression that
+    // removes the bump inside `purgeSessionCache()` is caught here: the real counter does
+    // not move, `getSessionGeneration()` returns the captured value, the guard lets the
+    // revert run, and the seeded rows come back into the cleared cache.
+    //
+    // The test registers the local `QueryClient` as the singleton via `useCacheClient`
+    // so that the real `purgeSessionCache()` clears the same client the assertions read
+    // from — the cache invariant (`getQueryData(...)` returns `undefined`) is observed
+    // against the production-shaped code path instead of a hand-written `client.clear()`.
+    const client = useCacheClient(seededClient());
+    markRead.mockImplementation(async () => {
+      purgeSessionCache();
+      throw new Error("session expired");
+    });
+    const { result } = renderHook(() => useMarkRead(), { wrapper: wrapperFor(client) });
+
+    act(() => { result.current.mutate("n1"); });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(client.getQueryData(UNREAD_KEY)).toBeUndefined();
+    expect(client.getQueryData(LIST_KEY)).toBeUndefined();
+  });
+
   it("useMarkAllRead writes nothing back when the session ended mid-flight", async () => {
-    const client = seededClient();
+    const client = useCacheClient(seededClient());
     markAllRead.mockImplementation(async () => {
-      sessionState.generation = 2;
-      client.clear();
+      purgeSessionCache();
       throw new Error("session expired");
     });
     const { result } = renderHook(() => useMarkAllRead(), { wrapper: wrapperFor(client) });

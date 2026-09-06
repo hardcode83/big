@@ -26,6 +26,7 @@ import enum
 import re
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 
 from app.messaging.domain.enums import (
@@ -206,6 +207,11 @@ class ChannelErrorCode(str, enum.Enum):
     CHANNEL_INBOUND_ONLY = "CHANNEL_INBOUND_ONLY"
     #: The adapter reported a failure it could not classify further.
     ADAPTER_UNAVAILABLE = "ADAPTER_UNAVAILABLE"
+    #: Free text was attempted outside the provider's session window and no `template_id`
+    #: was given — symmetric with `NotificationErrorCode.OUTSIDE_SESSION_WINDOW`
+    #: (`whatsapp-cloud-adapter` R2.3, R2.4, design D2). Translated 1:1 by `_translate` in
+    #: `infrastructure/channels.py`, never re-derived from `ADAPTER_UNAVAILABLE`.
+    OUTSIDE_SESSION_WINDOW = "OUTSIDE_SESSION_WINDOW"
 
 
 #: Which of a guest's contact details addresses a reply on each channel — and `None` for the
@@ -246,6 +252,28 @@ class InboundMessageActor:
     the bearer of a portal link describes something that cannot have happened, and
     `audit_logs` is append-only, so nobody can go back and decide which half was true.
 
+    **A third identity, `resolved_phone`** (`whatsapp-cloud-adapter` R4.2, D6): the E.164
+    number a WhatsApp inbound message was authenticated by, once
+    `PostWhatsAppInboundMessageUseCase` has normalised it. The webhook has no `User` and no
+    portal link behind it — Meta's signature authenticates the *request*, and the number is
+    the only thing that names *who wrote*. Reusing `token_hash` for a digest of the phone was
+    rejected in D6: it would silently change what that field means everywhere
+    `is_guest_token_digest` already guards it, and an auditor reading `actor_guest_token_hash`
+    on a `WHATSAPP` row would reasonably read it as a portal link.
+
+    **Exactly one** now covers three fields rather than two, and for the same reason: a row
+    claiming a write came from a logged-in manager *and* from a phone number describes
+    something that cannot have happened. `ip` stays outside the invariant — it says where, not
+    who, and every identity may carry one or none.
+
+    **`resolved_phone` has no `audit_logs` column of its own today.** `AuditLogFactory.build`
+    takes `actor_user_id`/`actor_guest_token_hash`/`actor_ip`, so an incident opened from a
+    WhatsApp conversation writes an audit row naming no actor at all (both id columns `NULL`,
+    which the factory permits — it refuses only *both set*). D6's "traceable in
+    `audit_logs.actor_*` the same way `token_hash` is today" is therefore not yet true: it
+    needs a new nullable column plus its CHECK, a schema change this change did not scope.
+    Recorded here rather than papered over by hashing the number into the digest column.
+
     **The digest IS validated here, and by the same predicate rather than a second spelling
     of it.** `is_guest_token_digest` is documented as the one predicate its layers must agree
     on, and it is *imported* — a `domain/` → `domain/` dependency, which is the direction the
@@ -275,6 +303,7 @@ class InboundMessageActor:
 
     user_id: uuid.UUID | None = None
     token_hash: str | None = None
+    resolved_phone: str | None = None
     ip: str | None = None
 
     def __post_init__(self) -> None:
@@ -283,15 +312,34 @@ class InboundMessageActor:
         # into a 422 body and into every log line. Naming the fields and the expected shape
         # is what the other refusals in this module do. Raised by the security panel of
         # section 2, which found the `user_id` half quoting itself.
-        if (self.user_id is None) == (self.token_hash is None):
+        #
+        # Counted rather than compared pairwise (`whatsapp-cloud-adapter` D6): with three
+        # identities the old `(a is None) == (b is None)` shape has no two-term equivalent —
+        # a chain of them accepts "all three at once" on some orderings — so the invariant is
+        # stated once, as the count it is. `ip` is not an identity and is not counted.
+        named = sum(
+            1
+            for identity in (self.user_id, self.token_hash, self.resolved_phone)
+            if identity is not None
+        )
+        if named != 1:
             raise MessagingValidationError(
-                "an InboundMessageActor names exactly one actor: either user_id or "
-                "token_hash, never both and never neither"
+                "an InboundMessageActor names exactly one actor: user_id, token_hash or "
+                "resolved_phone, never two of them and never none"
             )
         if self.token_hash is not None and not is_guest_token_digest(self.token_hash):
             raise MessagingValidationError(
                 "token_hash must be a lower-case SHA-256 hex digest of the portal token, "
                 "never the token itself"
+            )
+        if self.resolved_phone is not None and not self.resolved_phone.strip():
+            # A blank string is not `None`, so the count above reads it as an identity while
+            # it names nobody — the one shape that could make "exactly one" true and empty at
+            # the same time. No digest-shape check applies to a phone number (D6), and this is
+            # not one: it is the same refusal every other string field of this module makes.
+            raise MessagingValidationError(
+                "resolved_phone must be the E.164 number the inbound webhook resolved, "
+                "never blank"
             )
 
 
@@ -409,3 +457,91 @@ class MessageMetadata:
         if self.source_message_id is not None:
             emitted["source_message_id"] = str(self.source_message_id)
         return emitted
+
+
+#: Mirrors `entities.MAX_MESSAGE_CONTENT_LENGTH` (4000) rather than importing it: that module
+#: imports `InboundWhatsAppMessage` from here, so the reverse import would be circular.
+#: `reviews.domain.entities.MAX_REVIEW_CONTENT_LENGTH` pins the same number for the same
+#: reason. Kept in sync by `tests/messaging/test_value_objects.py`.
+_MAX_INBOUND_TEXT_LENGTH = 4000
+
+
+@dataclass(frozen=True)
+class InboundWhatsAppMessage:
+    """One message a guest sent over WhatsApp, with the provider already scraped off it
+    (`whatsapp-cloud-adapter` R3.5, R4.1; design D9).
+
+    "The only shape the receiving use case and `PostWhatsAppInboundMessageUseCase` ever see",
+    in D9's words. Meta's actual webhook is a four-level nest —
+    `entry[].changes[].value.messages[]`, `metadata.phone_number_id` off to one side — and the
+    whole point of this class is that neither `application/` nor the rest of `domain/` ever
+    learns that. `WhatsAppInboundProviderAdapter.parse` is the boundary where the nest stops.
+
+    **`business_phone_number` is informational and never a tenant-resolution input on its
+    own** (R4.1). It is `value.metadata.phone_number_id`, the Graph API identifier of the
+    number that received the message — the same kind of value the outbound side identifies
+    itself with (`WHATSAPP_PHONE_NUMBER_ID`), not the human-readable `display_phone_number`.
+    It is carried because an operator debugging a multi-number account needs to know which
+    number rang, and because it is the ONE field the receiving use case is allowed to look up
+    (never trust) against the `phone_number_id`-to-tenant provisioning table (R6, design D3,
+    superseded 2026-09-02 — one shared Meta App, one fixed route, no per-tenant route token) to
+    resolve `tenant_id`. Every OTHER field here is body-supplied content the sender controls,
+    so R4.1's "ningún dato que el cuerpo del webhook aporte" applies to those four in full:
+    nothing but the provisioning-table lookup on `business_phone_number` may select a tenant.
+
+    **`provider_message_id` is what makes R3.5 possible**, which is why a blank one is refused
+    rather than tolerated: the receiving use case deduplicates on it so a provider's delivery
+    retry does not add a second message to the conversation, and an empty key would collapse
+    every distinct message onto the same one — turning a missing field into silent data loss
+    instead of a loud refusal.
+
+    **`received_at` must be timezone-aware.** It is compared against the 24h session window on
+    the way back out (design D2), and a naive datetime in that comparison is a bare `TypeError`
+    from deep inside an adapter — the same guard `Incident.eta_at` and `ClockTrigger` carry, for
+    the same reason. `parse` builds it from Meta's Unix-seconds string as UTC.
+
+    Per this module's standing rule, **no refusal below quotes the value it refused**: these
+    five fields are the guest's phone number and the guest's words, and `str(exc)` reaches a
+    422 body and every log line.
+    """
+
+    sender_phone: str
+    provider_message_id: str
+    text: str
+    received_at: datetime
+    business_phone_number: str
+
+    def __post_init__(self) -> None:
+        if not self.sender_phone.strip():
+            raise MessagingValidationError(
+                "an inbound WhatsApp message must name the sender's phone number"
+            )
+        if not self.provider_message_id.strip():
+            raise MessagingValidationError(
+                "an inbound WhatsApp message must carry the provider's message id; it is the "
+                "key the delivery-retry deduplication of R3.5 is done on"
+            )
+        if not self.text.strip():
+            raise MessagingValidationError(
+                "an inbound WhatsApp message must carry text; a webhook with no text body is "
+                "not a message this pipeline can process"
+            )
+        if not self.business_phone_number.strip():
+            raise MessagingValidationError(
+                "an inbound WhatsApp message must name the business number that received it "
+                "(value.metadata.phone_number_id)"
+            )
+        if self.received_at.tzinfo is None or self.received_at.utcoffset() is None:
+            raise MessagingValidationError(
+                "received_at must be timezone-aware; it is compared against the 24h session "
+                "window, where a naive datetime is a TypeError instead of an answer"
+            )
+        # Truncated, not refused: unlike every other field here, `text` is not something the
+        # caller can fix and resubmit — Meta redelivers on any non-2xx, and a delivery this
+        # class refused would retry forever without ever becoming the row R3.5 deduplicates
+        # on. `Message.__post_init__` refuses over `MAX_MESSAGE_CONTENT_LENGTH` for prose we
+        # control the retry story for (a portal 422, a manager's own textarea); this is the
+        # one inbound sink where that same ceiling has to be an admission bound instead, so
+        # `whatsapp_inbound_events.message_text` never disagrees with rule 11's census.
+        if len(self.text) > _MAX_INBOUND_TEXT_LENGTH:
+            object.__setattr__(self, "text", self.text[:_MAX_INBOUND_TEXT_LENGTH])

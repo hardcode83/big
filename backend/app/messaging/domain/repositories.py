@@ -21,7 +21,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from app.messaging.domain.entities import Conversation, Message
+from app.messaging.domain.entities import (
+    Conversation,
+    InboundWhatsAppEvent,
+    Message,
+    WhatsAppPhoneNumberAssociation,
+)
 from app.messaging.domain.enums import (
     ConversationEscalationStatus,
     ConversationStatus,
@@ -151,6 +156,67 @@ class ConversationRepository(Protocol):
         """
         ...
 
+    async def ensure_whatsapp(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        guest_id: uuid.UUID | None,
+        property_id: uuid.UUID,
+        reservation_id: uuid.UUID | None,
+        language: str,
+        business_phone_number: str,
+        now: datetime,
+    ) -> Conversation:
+        """The guest's one `WHATSAPP` thread **for that property**, creating it if new.
+
+        `whatsapp-cloud-adapter` R4.5, design D4. **Never commits**, like `ensure_portal`:
+        the inbound WhatsApp path runs inside the same single transaction as the message, the
+        timeline event and the notification.
+
+        **Idempotent under concurrency by the same mechanism and not by a read-then-write**:
+        `INSERT ... ON CONFLICT DO NOTHING` against the partial unique index
+        `uq_conversations_whatsapp_guest_property` — `(tenant_id, guest_id, property_id)
+        WHERE channel = 'WHATSAPP'` — so two messages arriving at once land in one thread
+        rather than opening two. The loser inserts nothing, is **not** aborted, and reads the
+        winner's row back.
+
+        **Keyed by guest *and* property, not by guest alone** (D4, confirmed with the user): a
+        returning guest who writes about a second property of the same tenant gets a second
+        thread, because a message about property B must not surface property A's unrelated
+        history. And not by `reservation_id` like `ensure_portal`, because on this path the
+        reservation is frequently unknown (R4.3, R4.4) while the thread must exist anyway.
+
+        **`guest_id` and `reservation_id` are nullable for a requirement each**, not for
+        convenience: `guest_id` is `None` when the sender's phone matches no guest (R4.3),
+        `reservation_id` when no single active reservation resolves (R4.4). A `NULL` never
+        equals another `NULL` in a unique index, so those rows do not dedupe against each
+        other and an unresolved sender opens a new row per message — accepted in D4 and in
+        the design's Risks rather than papered over with a second index shape. `property_id`
+        is **not** among them: it is always resolved, either to the matched stay's property or
+        to the tenant's `default_property_id` fallback, so the caller guarantees it non-null
+        (design's amended D4/D5).
+
+        `language` applies **only when the row is created**, exactly as in `ensure_portal`:
+        the thread's language was decided by its first message.
+
+        `business_phone_number` is Meta's `phone_number_id` for the tenant's own number, the
+        one the guest wrote **to** (`InboundWhatsAppMessage.business_phone_number`, D4
+        addendum). Written once here and never again — on the conflict branch the existing
+        row keeps the number it was opened on, so a reply always leaves from the number the
+        conversation started on. It is **required** rather than `str | None`: every caller of
+        this method comes from an inbound webhook, which always names the number it arrived
+        on, and typing it makes that independent of which caller shows up.
+
+        **Precondition the caller must honour**, the same one `add` and `ensure_portal` state
+        and for the same schema reason (the foreign keys of `conversations` are global rather
+        than composite with the tenant): `guest_id`, `property_id` and `reservation_id` must
+        already have been resolved *within* `tenant_id`. On this path that means resolved
+        from `find_by_phone(tenant_id, ...)` and `find_active_for_guest(tenant_id, ...)`,
+        both of which take the tenant as a required parameter — and `tenant_id` itself comes
+        from the `phone_number_id` association and never from the message body (R4.1).
+        """
+        ...
+
     async def list(
         self,
         tenant_id: uuid.UUID,
@@ -262,5 +328,161 @@ class MessageRepository(Protocol):
         is exactly who the AI is failing — and it is the reading this change ships. A future
         change that wants per-episode counting brings the timestamp and a `since` parameter
         with it. Raised by the architecture panel of sections 3-4.
+        """
+        ...
+
+    async def last_guest_message_at(
+        self, tenant_id: uuid.UUID, conversation_id: uuid.UUID
+    ) -> datetime | None:
+        """When the guest last wrote — `None` if they never have (`whatsapp-cloud-adapter`
+        R2.4, design D2).
+
+        **A fifth method, and the reason `Conversation.last_message_at` does not answer this**:
+        that column is touched by every message of the conversation — the guest's, the AI's own
+        reply, a manager's — because nothing on `Conversation` distinguishes who wrote last.
+        Meta's real WhatsApp customer-service window is strictly "since the customer's last
+        message", so reading `last_message_at` would let the AI's own previous reply, or a
+        manager's manual one, silently reopen the free-text window without the guest having
+        said anything — resolved with the user 2026-09-02.
+
+        Same `sender_type == MessageSenderType.GUEST` filter as `count_guest_messages` and
+        `count_unresolved_guest_messages_with_intent` above — mirrors that precedent rather
+        than inventing a second way to ask "which messages are the guest's".
+
+        `None` when the guest has never written in this conversation — which
+        `DelegatingOutboundAdapter` treats as OUTSIDE the session window, the same as any
+        timestamp older than `WHATSAPP_SESSION_WINDOW` (D2, unchanged from section 1).
+        """
+        ...
+
+class WhatsAppPhoneNumberRepository(Protocol):
+    """The number-to-tenant association of section 6 (`whatsapp-cloud-adapter` R6.1-R6.3, D3/D8).
+
+    Its own port and not folded into `ConversationRepository`: this is a different aggregate
+    root (`whatsapp_phone_numbers`, not `conversations`), and `steering/backend-architecture.md`
+    puts one repository per aggregate root.
+
+    **`find_by_phone_number_id` is the only read that runs without a tenant**, for the same
+    reason `WebhookEndpointRepository.find_by_token_hash` does (`app/integrations/domain/
+    repositories.py`): section 7's inbound webhook carries no JWT, so `phone_number_id` is what
+    resolves the tenant, not something the tenant scopes. Its implementation therefore runs on
+    a session that was never marked, enforced by `require_unmarked_session`
+    (`tests/test_unscoped_reads.py` holds the census). Every other method here takes
+    `tenant_id` explicitly, like the rest of this module's ports.
+    """
+
+    async def upsert(
+        self, tenant_id: uuid.UUID, association: WhatsAppPhoneNumberAssociation
+    ) -> None:
+        """Store or replace this tenant's association. Never commits.
+
+        Create-or-replace, unlike `WebhookEndpointRepository.upsert`'s create-refuses/rotate
+        pair: there is no secret here whose lifetime a separate "rotate" verb needs to protect
+        (R6.3), so one call expresses both "this tenant has no number yet" and "this tenant's
+        number changed".
+
+        **Raises `WhatsAppPhoneNumberAlreadyAssociatedError` when `phone_number_id` already
+        belongs to a DIFFERENT tenant.** That is a database-level check on the column's own
+        unique index, not a prior read: `phone_number_id` is genuinely unique across the whole
+        table, not per tenant, so a read-then-write here would leave a real TOCTOU race two
+        concurrent tenants could both win (design D8,
+        `steering/backend-architecture.md`). The existing association — of the tenant that
+        legitimately holds the number — is never touched by a losing call.
+        """
+        ...
+
+    async def find_for_tenant(
+        self, tenant_id: uuid.UUID
+    ) -> WhatsAppPhoneNumberAssociation | None:
+        """This tenant's association, or `None` if it has never associated one."""
+        ...
+
+    async def delete_for_tenant(self, tenant_id: uuid.UUID) -> bool:
+        """Remove this tenant's association. `True` if a row existed and was removed.
+
+        Never touches `conversations` — releasing a number does not retroactively unlink the
+        threads already opened under it (R6.3's own words: "no toca las conversaciones ya
+        creadas bajo él").
+        """
+        ...
+
+    async def find_by_phone_number_id(
+        self, phone_number_id: str
+    ) -> WhatsAppPhoneNumberAssociation | None:
+        """The association that owns this number, or `None` — section 7's tenant resolution.
+
+        `None` rather than raising, the same reason `WebhookEndpointRepository
+        .find_by_token_hash` returns it: absence is an answer, and the caller turns every
+        negative into whatever indistinguishable outcome its own design requires.
+        """
+        ...
+
+
+class WhatsAppInboundEventRepository(Protocol):
+    """The inbound delivery queue of section 7 (R3.3, R3.4, R3.5; design D7).
+
+    Its own port, not folded into `WhatsAppPhoneNumberRepository`: that one holds a tenant's
+    configuration and this one holds traffic, which is a different aggregate root
+    (`whatsapp_inbound_events`, not `whatsapp_phone_numbers`) and a different lifetime.
+
+    **Two of its three methods run without a tenant, and for two different reasons**, so the
+    requirement is stated per method rather than per class — the mistake
+    `SqlAlchemyWebhookEventRepository`'s docstring records having made once:
+
+    - `add` writes a row whose `tenant_id` may legitimately be `NULL` (a validly signed
+      delivery for an unprovisioned number, R3.3 as amended). It is an `INSERT` by primary
+      key, never a scan, so the global filter has nothing to narrow — but the receiving route
+      is anonymous and its session is unmarked anyway;
+    - `locate_without_tenant_scoping` is a **read**, and the one that cannot be scoped: the
+      dispatched task is handed an event id and the row is what tells it which tenant the
+      message belongs to. `require_unmarked_session` enforces that rather than letting a
+      marked session silently answer `None`;
+    - `mark_processed` takes `tenant_id` explicitly, like the rest of this module's ports,
+      because by then the tenant is known and the worker is running on a marked session.
+    """
+
+    async def add(self, event: InboundWhatsAppEvent) -> bool:
+        """Record the delivery, unless its `provider_message_id` is already here. No commit.
+
+        Returns `True` when this call inserted the row and `False` when an identical
+        `provider_message_id` already existed — which is R3.5's answer to a provider
+        redelivery, and it is the **database** that decides: an `INSERT ... ON CONFLICT DO
+        NOTHING` against the unique index, never a prior `SELECT`. Meta redelivers
+        concurrently often enough that a read-then-write race here is not theoretical, and
+        both winners would post the guest's message twice.
+
+        A `False` return is not an error. The delivery has already been accepted once, so the
+        caller answers `202` and dispatches nothing.
+        """
+        ...
+
+    async def locate_without_tenant_scoping(
+        self, event_id: uuid.UUID
+    ) -> InboundWhatsAppEvent | None:
+        """The event a dispatched task was handed, or `None`.
+
+        **The one read of this port that runs on a session that was never marked.** The task
+        receives an id and nothing else (design D7), so the row is what resolves the tenant —
+        structurally the same class of read as `WhatsAppPhoneNumberRepository
+        .find_by_phone_number_id` and `WebhookEndpointRepository.find_by_token_hash`, and
+        declared in the same census (`tests/test_unscoped_reads.py`).
+
+        `None` rather than raising: a task whose row has gone is not a failure worth retrying
+        for ever, and the caller decides what to log.
+        """
+        ...
+
+    async def mark_processed(
+        self, tenant_id: uuid.UUID, event_id: uuid.UUID, *, now: datetime
+    ) -> bool:
+        """Claim the event for this run. `True` only for the run that claimed it. No commit.
+
+        A single conditional `UPDATE ... WHERE processed_at IS NULL`, so two concurrent runs
+        of the same task cannot both proceed — Celery's delivery is at-least-once, and the
+        outcome of a double run is the guest's message appearing twice in their thread, which
+        is precisely what R3.5 exists to prevent by the other route.
+
+        Called **before** the work and inside the same transaction, so a failure rolls the
+        claim back with it and the task is retryable.
         """
         ...

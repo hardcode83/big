@@ -67,6 +67,11 @@ tenants, ni salida de la API a internet (`api-ingress-routing`).
   es el mismo que aplica esta capacidad. No hay aquí un cambio de comportamiento: la API
   de plataforma delega, y el único contrato que expone es el de los tres campos del cuerpo
   (`email`, `full_name`, `role`) y la cabecera `Cache-Control: no-store`.
+- **Primer llamante de frontend de esa ruta (`super-admin-console`, R4):** hasta esa entrada,
+  `POST /api/v1/platform/tenants/{tenant_id}/users` no tenía caller de UI — el formulario de
+  alta de personal de la consola de plataforma (`sdd/specs/super-admin-console.md`) es quien
+  lo invoca hoy, mostrando la contraseña temporal una sola vez. El comportamiento del
+  endpoint y del caso de uso no cambia; solo gana un consumidor.
 
 ### Listado y consulta
 

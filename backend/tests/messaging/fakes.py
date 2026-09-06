@@ -9,7 +9,7 @@ R5.4 (one notification) and R4.7 (one commit).
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.auth.domain.entities import User
@@ -38,6 +38,7 @@ from app.messaging.domain.value_objects import (
     GeneratedResponse,
     MessageClassification,
 )
+from app.reservations.domain.repositories import RESERVATION_MATCH_GRACE_DAYS
 from app.tenants.domain.entities import TenantConfig
 
 
@@ -49,6 +50,10 @@ class FakeConversationRepository:
         #: they come from the `GuestSession` and from nowhere else, and `ensure_portal` does not
         #: check them itself.
         self.ensure_portal_calls: list[dict] = []
+        #: Same, for the WhatsApp twin: R4.1 forbids resolving the tenant from the body and
+        #: R4.4 forbids naming a guest that was not unambiguous, so *which* anchors the use
+        #: case passed is the assertion, not just the row that came back.
+        self.ensure_whatsapp_calls: list[dict] = []
 
     async def add(self, tenant_id: uuid.UUID, conversation: Conversation) -> None:
         self.rows[conversation.id] = conversation
@@ -105,6 +110,64 @@ class FakeConversationRepository:
             reservation_id=reservation_id,
             guest_id=guest_id,
             language=language,
+        )
+        self.rows[conversation.id] = conversation
+        return conversation
+
+    async def ensure_whatsapp(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        guest_id: uuid.UUID | None,
+        property_id: uuid.UUID | None,
+        reservation_id: uuid.UUID | None,
+        language: str,
+        business_phone_number: str,
+        now,
+    ) -> Conversation:
+        """The in-memory twin of the `(tenant_id, guest_id, property_id) WHERE channel =
+        'WHATSAPP'` partial unique index (`whatsapp-cloud-adapter` R4.5, D4).
+
+        Two halves are copied because the use case's behaviour turns on them: an existing row
+        is returned **without** its `language` or `business_phone_number` being overwritten
+        (`DO NOTHING`, not `DO UPDATE`), and **a `NULL` `guest_id` never matches another
+        `NULL`** — so a sender nobody recognised opens a row per message, which is the
+        accepted limitation D4 records and which a `==` over two `None`s would silently fix
+        here while production kept doing the opposite.
+
+        The race itself is not modelled: the concurrency contract is proved against Postgres
+        in `test_repositories.py`, which is the only place it can be.
+        """
+        self.ensure_whatsapp_calls.append(
+            {
+                "tenant_id": tenant_id,
+                "guest_id": guest_id,
+                "property_id": property_id,
+                "reservation_id": reservation_id,
+                "language": language,
+                "business_phone_number": business_phone_number,
+            }
+        )
+        if guest_id is not None:
+            for row in self.rows.values():
+                if (
+                    row.tenant_id == tenant_id
+                    and row.guest_id == guest_id
+                    and row.property_id == property_id
+                    and row.channel is ConversationChannel.WHATSAPP
+                ):
+                    return row
+        conversation = Conversation(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            channel=ConversationChannel.WHATSAPP,
+            created_at=now,
+            updated_at=now,
+            property_id=property_id,
+            reservation_id=reservation_id,
+            guest_id=guest_id,
+            language=language,
+            business_phone_number=business_phone_number,
         )
         self.rows[conversation.id] = conversation
         return conversation
@@ -187,6 +250,20 @@ class FakeMessageRepository:
             and row.intent == intent.value
         )
 
+    async def last_guest_message_at(
+        self, tenant_id: uuid.UUID, conversation_id: uuid.UUID
+    ) -> datetime | None:
+        """`whatsapp-cloud-adapter` R2.4, D2 — the most recent guest message's `created_at`,
+        `None` if the guest never wrote. Same filter as `count_guest_messages` above; `max`
+        over an in-memory list rather than a query."""
+        candidates = [
+            row.created_at
+            for row in self.rows
+            if row.conversation_id == conversation_id
+            and row.sender_type is MessageSenderType.GUEST
+        ]
+        return max(candidates) if candidates else None
+
     def by_sender(self, sender_type: MessageSenderType) -> list[Message]:
         return [row for row in self.rows if row.sender_type is sender_type]
 
@@ -229,7 +306,17 @@ class FakeOutboundAdapter:
     sends: list[dict] = field(default_factory=list)
 
     async def send(
-        self, *, channel, conversation_id, recipient_contact, content, language
+        self,
+        *,
+        channel,
+        conversation_id,
+        recipient_contact,
+        content,
+        language,
+        tenant_id,
+        last_inbound_at=None,
+        template_id=None,
+        phone_number_id=None,
     ) -> ChannelSendResult:
         self.sends.append(
             {
@@ -238,6 +325,10 @@ class FakeOutboundAdapter:
                 "recipient_contact": recipient_contact,
                 "content": content,
                 "language": language,
+                "tenant_id": tenant_id,
+                "last_inbound_at": last_inbound_at,
+                "template_id": template_id,
+                "phone_number_id": phone_number_id,
             }
         )
         return self.result
@@ -313,11 +404,38 @@ class FakeUserRepository:
 
 
 class FakeGuestRepository:
-    def __init__(self, *guests: GuestSummary) -> None:
+    def __init__(self, *guests: GuestSummary, tenants: dict[uuid.UUID, uuid.UUID] | None = None) -> None:
         self.rows = {guest.id: guest for guest in guests}
+        #: Which tenant each guest belongs to, for the isolation test. `GuestSummary` carries
+        #: no `tenant_id` (it is a projection of what a reservation may know about its guest),
+        #: so the real repository's `WHERE tenant_id = :tenant_id` has to be modelled here
+        #: rather than read off the row. Guests absent from this map belong to every tenant,
+        #: which keeps every existing test that never passes it working unchanged.
+        self.tenants = tenants or {}
+
+    def _visible(self, tenant_id: uuid.UUID, guest: GuestSummary) -> bool:
+        owner = self.tenants.get(guest.id)
+        return owner is None or owner == tenant_id
 
     async def get(self, tenant_id: uuid.UUID, guest_id: uuid.UUID) -> GuestSummary | None:
-        return self.rows.get(guest_id)
+        guest = self.rows.get(guest_id)
+        if guest is None or not self._visible(tenant_id, guest):
+            return None
+        return guest
+
+    async def find_by_phone(self, tenant_id: uuid.UUID, phone: str) -> list[GuestSummary]:
+        """Every guest of this tenant with that phone — plural, and unordered (R4.2, R4.4).
+
+        A blank value matches nothing, the guard the real adapter states, and for the same
+        reason: without it every guest stored with no phone would collide on `""`.
+        """
+        if not phone.strip():
+            return []
+        return [
+            guest
+            for guest in self.rows.values()
+            if guest.phone == phone and self._visible(tenant_id, guest)
+        ]
 
 
 @dataclass
@@ -355,6 +473,24 @@ class FakeReservationRepository:
 
     async def get(self, tenant_id: uuid.UUID, reservation_id: uuid.UUID):
         return self.rows.get(reservation_id)
+
+    async def find_active_for_guest(self, tenant_id: uuid.UUID, guest_id: uuid.UUID, *, on_date):
+        """The stay window widened by `RESERVATION_MATCH_GRACE_DAYS` on each side (D5).
+
+        The grace days are **imported, not restated**: the whole point of the constant is that
+        a later change can retune it in one place, and a fake carrying its own `2` would keep
+        passing while the real query answered differently. No status filter either, matching
+        the real adapter — which statuses count as "live" is the caller's policy, not this
+        query's.
+        """
+        grace = timedelta(days=RESERVATION_MATCH_GRACE_DAYS)
+        return [
+            reservation
+            for reservation in self.rows.values()
+            if reservation.tenant_id == tenant_id
+            and reservation.guest_id == guest_id
+            and reservation.check_in_date - grace <= on_date <= reservation.check_out_date + grace
+        ]
 
 
 @dataclass

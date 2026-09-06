@@ -13,6 +13,11 @@
  * strings (PRD §23) until a downstream component formats them. Types only — no
  * business logic, no runtime code.
  *
+ * `propertyName`, `propertyInternalCode` and `guestFullName` are derived,
+ * read-only fields the API resolves server-side (`property_name`,
+ * `property_internal_code`, `guest_full_name`); they are always nullable and
+ * never synthesized client-side (reservations-identity-web R1).
+ *
  * These shapes are the feature contract that `HttpReservationsSource` maps
  * from the two responses consumed by this change: the list and the detail.
  * Fields not present in those responses are not synthesized or fetched from
@@ -84,6 +89,9 @@ export interface ReservationSummaryDto {
   currency: string;
   grossAmount: string | null;
   paymentStatus: PaymentStatus;
+  propertyName: string | null;
+  propertyInternalCode: string | null;
+  guestFullName: string | null;
 }
 
 /**

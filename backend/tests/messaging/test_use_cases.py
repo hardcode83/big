@@ -92,6 +92,7 @@ def make_conversation(
     ai_enabled: bool = True,
     guest_id: uuid.UUID | None = None,
     language: str = "es",
+    business_phone_number: str | None = None,
 ) -> Conversation:
     return Conversation(
         id=uuid.uuid4(),
@@ -105,6 +106,7 @@ def make_conversation(
         escalation_status=escalation_status,
         ai_enabled=ai_enabled,
         language=language,
+        business_phone_number=business_phone_number,
     )
 
 
@@ -787,6 +789,35 @@ async def test_a_whatsapp_reply_is_addressed_to_the_guests_phone() -> None:
     await harness.run()
 
     assert harness.adapter.sends[0]["recipient_contact"] == "+34600123456"
+
+
+@pytest.mark.asyncio
+async def test_a_whatsapp_reply_passes_the_conversations_business_phone_number() -> None:
+    """`whatsapp-cloud-adapter` task 2.6, design D1: the reply must leave from the same
+    number the guest wrote to, and this use case is the only caller with the full
+    `Conversation` entity in scope to supply it — `DelegatingOutboundAdapter` never sees it
+    directly (`conversation_id` only)."""
+    guest = GuestSummary(
+        id=uuid.uuid4(),
+        full_name="Ada",
+        email="ada@example.com",
+        phone="+34600123456",
+        preferred_language="es",
+        document_status=GuestDocumentStatus.NOT_PROVIDED,
+        legal_registration_status=LegalRegistrationStatus.NOT_REQUIRED,
+    )
+    harness = Harness(
+        make_conversation(
+            channel=ConversationChannel.WHATSAPP,
+            guest_id=guest.id,
+            business_phone_number="1234567890",
+        ),
+        guests=FakeGuestRepository(guest),
+    )
+
+    await harness.run()
+
+    assert harness.adapter.sends[0]["phone_number_id"] == "1234567890"
 
 
 @pytest.mark.asyncio

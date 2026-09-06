@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  advanceSessionGeneration,
   clearSessionTokens,
   getSessionTokens,
+  getTokenGeneration,
   setSessionTokens,
 } from "@/lib/auth/session-store";
 
@@ -62,5 +64,18 @@ describe("session store", () => {
     } else {
       Reflect.deleteProperty(window, "indexedDB");
     }
+  });
+
+  it("moves tokenGeneration on a token write or clear, but not on a bare cache purge", () => {
+    const initial = getTokenGeneration();
+
+    setSessionTokens({ accessToken: "access", refreshToken: "refresh" });
+    expect(getTokenGeneration()).toBe(initial + 1);
+
+    advanceSessionGeneration(); // simulates purgeSessionCache()'s own bump — identity-unrelated
+    expect(getTokenGeneration()).toBe(initial + 1);
+
+    clearSessionTokens();
+    expect(getTokenGeneration()).toBe(initial + 2);
   });
 });

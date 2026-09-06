@@ -15,6 +15,13 @@ from app.reservations.domain.entities import Reservation
 from app.reservations.domain.enums import ReservationStatus
 from app.reservations.domain.exceptions import ReservationValidationError
 
+# `whatsapp-cloud-adapter` design D5: how far past check-out (or before check-in) a stay is
+# still considered "active" for phone-to-reservation matching (R4.2, R4.4) — covers
+# early-arrival/late-checkout questions without treating every past guest as indefinitely
+# active. A named constant, not a literal `2` inline, so a later change can retune it
+# without hunting for the number (confirmed with the user in design D5).
+RESERVATION_MATCH_GRACE_DAYS = 2
+
 
 @dataclass(frozen=True)
 class ReservationFilters:
@@ -91,6 +98,23 @@ class ReservationRepository(Protocol):
         pre-filtering here would put a second copy of that policy in SQL.
 
         An empty `property_ids` returns an empty list without querying.
+        """
+        ...
+
+    async def find_active_for_guest(
+        self, tenant_id: uuid.UUID, guest_id: uuid.UUID, *, on_date: date
+    ) -> Sequence[Reservation]:
+        """Which stay a guest's WhatsApp message is about (`whatsapp-cloud-adapter` R4.2, R4.4).
+
+        A reservation matches when its stay window, widened by `RESERVATION_MATCH_GRACE_DAYS`
+        on each side, contains `on_date`: `check_in_date - RESERVATION_MATCH_GRACE_DAYS <=
+        on_date <= check_out_date + RESERVATION_MATCH_GRACE_DAYS` (design D5). No status
+        filter — which statuses count as a live stay is a decision for the caller (R4.4's
+        escalation), the same way `list_for_properties` leaves status filtering to
+        `PropertyStateMachine` rather than duplicating that policy here.
+
+        More than one match is not an error here — it is exactly the signal R4.4 asks the
+        caller to escalate on, so this returns every match rather than picking one.
         """
         ...
 

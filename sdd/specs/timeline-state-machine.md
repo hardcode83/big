@@ -17,13 +17,16 @@ competencia de la fábrica que esta capacidad define.
 
 **Dónde se leen**: desde `dashboard-api` (2026-08-09) el timeline dejó de ser sólo escritura y
 tiene superficie de lectura — el endpoint `GET /api/v1/timeline/{property_id}` y el último
-evento por propiedad que alimenta las cards. **Esa lectura no se añadió a
-`TimelineEventRepository`**: vive en un `Protocol` aparte, `TimelineEventReader`, en el mismo
+evento por propiedad que alimenta las cards. `dashboard-activity-feed` (2026-09-04) añadió un
+tercer método, `list_for_tenant`: una página de eventos de **todas** las propiedades del
+tenant, mismo orden (`created_at DESC`, `id DESC` como desempate) y mismos filtros que
+`list_for_property`, sin `property_id`. **Ninguna de estas lecturas se añadió a
+`TimelineEventRepository`**: viven en un `Protocol` aparte, `TimelineEventReader`, en el mismo
 fichero. Es Interface Segregation, pero sobre todo es lo que conserva la propiedad que el
 párrafo anterior describe: que `add` sea el único método del escritor es lo que hace visible
-la inmutabilidad en una firma, y colgarle dos lectores la habría cambiado por un fichero más
+la inmutabilidad en una firma, y colgarle lectores la habría cambiado por un fichero más
 corto. Un test lo fija: los métodos del escritor son exactamente `{add}` y son disjuntos de
-los del lector. El *qué devuelve* esa lectura, con sus filtros, su orden y su localización,
+los del lector. El *qué devuelve* cada lectura, con sus filtros, su orden y su localización,
 está en [`dashboard-api.md`](dashboard-api.md).
 
 **Quién la conduce**: desde `celery-jobs` esta política tiene ejecutor. Su

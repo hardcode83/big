@@ -1,14 +1,17 @@
 import { getQueryClient } from "@/lib/query/query-client";
+import { advanceSessionGeneration } from "./session-store";
 
 /**
- * Purges every entry of the singleton `QueryClient` — query cache, mutation
- * cache, and the non-reactive client state. Called from `AuthProvider` at the
- * four identity transition points (logout, login, refresh failure, session
- * expiration) so a subsequent user in the same tab cannot read cached data
- * from the previous one. Returns `void` because `QueryClient.clear()` is
- * synchronous and infallible — the local cleanup is unconditional, mirroring
- * the in-memory token store.
+ * Empties the singleton `QueryClient` and advances `getSessionGeneration()` by
+ * exactly 1, without touching tokens. The invariant — every purge invalidates
+ * by construction any in-flight snapshots — is what the guards at
+ * `features/notifications/hooks/use-mark-read.ts:109` and
+ * `use-mark-all-read.ts:99` rely on: they compare `getSessionGeneration()`
+ * against the value captured at `onMutate` and drop the optimistic rollback
+ * whenever the session moved under the mutation. Adding a new purge path that
+ * does not go through here reintroduces the hole.
  */
 export function purgeSessionCache(): void {
+  advanceSessionGeneration();
   getQueryClient().clear();
 }

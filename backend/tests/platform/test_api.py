@@ -1,20 +1,20 @@
-"""The platform endpoints over ASGI (`platform-admin-api` R1.1-R1.4, R3.1-R3.6, R5).
+"""The platform endpoints over ASGI (`platform-admin-api` R1.1-R1.4, R3.1-R3.6, R5;
+`super-admin-console` R2.1-R2.3, R2.5).
 
-Two routes, eight contracts (R1.1 happy path, R1.2 duplicate, R1.3 invalid body, R1.4 RBAC,
-R3.1 user happy path, R3.3 SUSPENDED/missing tenants, R3.4 cross-tenant email, R3.5
-SUPER_ADMIN rejection). The patterns reuse the `users_by_role_a` and `auth_header` fixtures
-of `tests/auth/conftest.py` and the inline `super_admin` seeded in
-`tests/platform/conftest.py`.
+Three routes (`GET /tenants` added by `super-admin-console` R2). The patterns reuse the
+`users_by_role_a` and `auth_header` fixtures of `tests/auth/conftest.py` and the inline
+`super_admin` seeded in `tests/platform/conftest.py`.
 """
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
 
 from app.auth.domain.enums import UserRole
 from app.auth.infrastructure.models import UserModel
-from app.tenants.infrastructure.models import TenantModel
+from app.tenants.infrastructure.models import TenantConfigModel, TenantModel
 from app.tenants.domain.enums import TenantStatus
 from tests.auth.conftest import auth_header, insert_tenant, insert_user
 
@@ -340,3 +340,114 @@ async def test_no_platform_response_carries_password_material(
         if "tenants/" in endpoint and endpoint.endswith("/users"):
             continue
         assert "temporary_password" not in serialised
+
+
+# --- GET /platform/tenants (super-admin-console R2.1-R2.3, R2.5) -------------------
+
+
+async def _seed_tenant_at(db_session, *, name: str, created_at: datetime) -> TenantModel:
+    """A tenant + its config, `created_at` pinned so ordering assertions do not race `now()`.
+
+    Same helper as `tests/tenants/test_repositories.py::_seed_tenant_at`, duplicated rather
+    than imported across test modules: `TenantModel.created_at` is `server_default=func.now()`,
+    so two tenants inserted in the same test transaction would otherwise share one timestamp.
+    """
+    tenant = TenantModel(
+        id=uuid.uuid4(),
+        name=name,
+        billing_email=f"{name.lower()}@example.com",
+        status=TenantStatus.ACTIVE,
+        created_at=created_at,
+    )
+    db_session.add(tenant)
+    await db_session.flush()
+    db_session.add(TenantConfigModel(tenant_id=tenant.id))
+    await db_session.flush()
+    return tenant
+
+
+@pytest.mark.asyncio
+async def test_get_tenants_on_an_empty_table_answers_200_with_an_empty_page(
+    api, super_admin
+) -> None:
+    """R2.3: never an error, even with zero rows."""
+    response = await api.get(
+        "/api/v1/platform/tenants", headers=auth_header(api, super_admin)
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {"items": [], "total": 0, "page": 1, "per_page": 20, "total_pages": 0}
+
+
+@pytest.mark.asyncio
+async def test_get_tenants_orders_newest_first_with_the_shared_tenant_response_shape(
+    api, db_session, super_admin
+) -> None:
+    """R2.1 (shape), R2.2 (order), R2.6 (name/status/created_at visible)."""
+    base = datetime.now(UTC)
+    oldest = await _seed_tenant_at(db_session, name="Oldest", created_at=base)
+    newest = await _seed_tenant_at(
+        db_session, name="Newest", created_at=base + timedelta(minutes=1)
+    )
+    await db_session.commit()
+
+    response = await api.get(
+        "/api/v1/platform/tenants", headers=auth_header(api, super_admin)
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 2
+    assert body["page"] == 1
+    assert body["per_page"] == 20
+    assert body["total_pages"] == 1
+    assert [item["id"] for item in body["items"]] == [str(newest.id), str(oldest.id)]
+    # Same shape `TenantResponse` (and `POST /platform/tenants`) already return — R2.4/R2.6.
+    first = body["items"][0]
+    assert first["name"] == "Newest"
+    assert first["status"] == "ACTIVE"
+    assert "created_at" in first
+    assert "config" in first and "storage_type" in first["config"]
+
+
+@pytest.mark.asyncio
+async def test_get_tenants_paginates_by_page_and_per_page(
+    api, db_session, super_admin
+) -> None:
+    base = datetime.now(UTC)
+    seeded = [
+        await _seed_tenant_at(
+            db_session, name=f"Tenant{i}", created_at=base + timedelta(minutes=i)
+        )
+        for i in range(3)
+    ]
+    await db_session.commit()
+    expected_order = [str(tenant.id) for tenant in reversed(seeded)]
+
+    response = await api.get(
+        "/api/v1/platform/tenants",
+        params={"page": 2, "per_page": 2},
+        headers=auth_header(api, super_admin),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 3
+    assert body["page"] == 2
+    assert body["per_page"] == 2
+    assert body["total_pages"] == 2
+    assert [item["id"] for item in body["items"]] == expected_order[2:3]
+
+
+@pytest.mark.asyncio
+async def test_get_tenants_rejects_out_of_range_page_and_per_page_with_422(
+    api, super_admin
+) -> None:
+    for params in ({"page": 0}, {"per_page": 0}, {"per_page": 101}, {"page": 100_001}):
+        response = await api.get(
+            "/api/v1/platform/tenants",
+            params=params,
+            headers=auth_header(api, super_admin),
+        )
+        assert response.status_code == 422, (params, response.text)

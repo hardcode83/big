@@ -203,3 +203,52 @@ async def test_post_platform_users_in_named_tenant_fenced_super_admin_is_refused
     assert response.status_code == 403
     body = response.json()
     assert body["error"]["code"] in {"PASSWORD_CHANGE_REQUIRED", "FORBIDDEN"}
+
+
+# --- GET /platform/tenants per role (super-admin-console R2.1, R2.5) ------------------
+
+
+@pytest.mark.parametrize("role", ALL_ROLES)
+@pytest.mark.asyncio
+async def test_get_platform_tenants_is_allowed_for_platform_roles_only(
+    api, users_by_role_a, role: UserRole
+) -> None:
+    response = await api.get(
+        "/api/v1/platform/tenants",
+        headers=auth_header(api, users_by_role_a[role]),
+    )
+
+    assert response.status_code == (200 if role in PLATFORM_ROLES else 403)
+
+
+@pytest.mark.parametrize("role", ALL_ROLES)
+@pytest.mark.asyncio
+async def test_get_platform_tenants_unauthorized_carries_a_single_reason(
+    api, users_by_role_a, role: UserRole
+) -> None:
+    if role in PLATFORM_ROLES:
+        pytest.skip("authorized role; the 403 envelope is not what this test pins")
+
+    response = await api.get(
+        "/api/v1/platform/tenants",
+        headers=auth_header(api, users_by_role_a[role]),
+    )
+
+    assert response.status_code == 403
+    body = response.json()
+    assert body["error"]["code"] == "FORBIDDEN"
+    assert body["error"]["details"] == {}
+
+
+@pytest.mark.asyncio
+async def test_get_platform_tenants_fenced_super_admin_is_refused_403(
+    api, fenced_super_admin
+) -> None:
+    response = await api.get(
+        "/api/v1/platform/tenants",
+        headers=auth_header(api, fenced_super_admin),
+    )
+
+    assert response.status_code == 403
+    body = response.json()
+    assert body["error"]["code"] in {"PASSWORD_CHANGE_REQUIRED", "FORBIDDEN"}
