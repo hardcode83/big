@@ -234,10 +234,19 @@
   wasn't running yet; test invocation path inside the backend container is
   `tests/test_i18n.py` (not `backend/tests/test_i18n.py` — container workdir is `/app` mapped
   to `backend/`).
-- Full `tests/test_i18n.py` (42 tests) and `tests/test_layering.py` (1380 tests) both green
-  after the change — `app/core/i18n.py` stays pure Python, no framework/DB import added.
+- Full `tests/test_i18n.py` (43 tests, after round 5's `requested`-side normalization pin)
+  and `tests/test_layering.py` (1509 tests, after round 8's main catch-up) both green —
+  `app/core/i18n.py` stays pure Python, no framework/DB import added.
 
-### Section 2 (backend `X-Locale` + the three routes)
+### Section 2 (backend `X-Locale` + the three routes, plus a fourth on main catch-up)
+
+- **Round 8, main catch-up**: `dashboard-activity-feed` merged into `main` after this change
+  forked, adding a fourth route reading `preferred_language` directly —
+  `GET /api/v1/timeline` (`list_tenant_activity`). Converting it to `RequestLocaleDep` +
+  `Cache-Control` was not part of the original section 2 scope; it was done at review time
+  (design.md D5's "third amendment") once the base-catchup merge brought that route in red
+  against this change's own D5 guard. Its test coverage lives in
+  `backend/tests/timeline/test_tenant_feed_api.py`, not in this section's original files.
 
 - **Header name and import path** (what sections 3/4 must send): the constant is
   `LOCALE_HEADER = "X-Locale"` in `backend/app/auth/api/dependencies.py`, exported alongside

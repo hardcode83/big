@@ -192,20 +192,40 @@ async def test_the_title_is_composed_in_the_users_language(
     assert entry["title"] != "Stored English title"
 
 
+#: `frontend-verification-fixes` R1.1/R1.8, same matrix as the per-property sibling
+#: (`tests/timeline/test_api.py`) — the two mixed rows are the ones that carry the
+#: requirement.
+LOCALE_MATRIX = [
+    ("es", "es", "Limpieza completada"),
+    ("es", "en", "Limpieza completada"),
+    ("en", "es", "Cleaning completed"),
+    ("en", "en", "Cleaning completed"),
+]
+LOCALE_MATRIX_IDS = [f"asks-{asked}-row-{stored}" for asked, stored, _ in LOCALE_MATRIX]
+
+
 @pytest.mark.asyncio
-async def test_the_requested_locale_wins_over_the_stored_preference(
-    api, db_session, tenant_a, property_a
+@pytest.mark.parametrize(("asked", "stored_language", "expected"), LOCALE_MATRIX, ids=LOCALE_MATRIX_IDS)
+async def test_the_title_is_composed_in_the_language_the_request_asked_for(
+    api,
+    db_session,
+    tenant_a,
+    property_a,
+    asked: str,
+    stored_language: str,
+    expected: str,
 ) -> None:
     """`frontend-verification-fixes` R1: this route merged into `main` after that change
     forked, still reading `preferred_language` directly. Same fix applied here on catch-up
-    — `X-Locale` must win, matching the per-property sibling's `asks-en-row-es` case."""
-    user = await insert_user(db_session, tenant=tenant_a, preferred_language="es")
+    — `X-Locale` must win, matching the per-property sibling's full 4-combination matrix,
+    not just the one mismatch direction a first pass covered."""
+    user = await insert_user(db_session, tenant=tenant_a, preferred_language=stored_language)
     await _add_event(db_session, tenant_a, property_a)
 
-    response = await api.get(URL, headers={**auth_header(api, user), "X-Locale": "en"})
+    response = await api.get(URL, headers={**auth_header(api, user), "X-Locale": asked})
 
     entry = response.json()["data"][0]
-    assert entry["title"] == "Cleaning completed"
+    assert entry["title"] == expected
 
 
 @pytest.mark.asyncio

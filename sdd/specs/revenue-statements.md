@@ -313,7 +313,10 @@ de tablas locales, igual que `revenue-pricing`. La pantalla `/statements` queda 
   el cuerpo del backend — pero como `/statements` queda `RoutePlaceholder` en este
   change, esa capa de traducción no existe todavía para `owner-statements`/`expenses`.
   La tarea 10.1 de `tasks.md`, que se marcó completa, no encontró ningún módulo i18n
-  backend real que extender (no existía todavía cuando se ejecutó esa tarea).
+  backend real que extender — no porque no existiera (`backend/app/core/i18n.py` es de
+  `dashboard-api`, 2026-08-09, tres semanas antes), sino porque lo que existe compone
+  `title` de timeline y etiquetas de card, nunca mensajes de error, así que no había nada
+  ahí aplicable a extender.
 - **El `_MAPPING` de `app/statements/api/errors.py` no está wireado en la guarda de
   `backend/tests/test_openapi_contract.py`.** Es un duodécimo caso del mismo hueco que
   `sdd/specs/api-contract.md` ya documenta para `access`, `guests`, `maintenance`,
