@@ -74,7 +74,7 @@ async def test_login_returns_a_token_pair(api, db_session, tenant_a) -> None:
     assert cookie_header is not None
     assert cookie_header.startswith("autohostai.session.refresh=")
     assert "HttpOnly" in cookie_header
-    assert "samesite=lax" in cookie_header.lower()
+    assert "samesite=strict" in cookie_header.lower()
     assert "Path=/api/v1/auth" in cookie_header
     assert "Max-Age=604800" in cookie_header
 
@@ -339,6 +339,77 @@ async def test_logout_with_no_bearer_and_a_garbage_cookie_is_a_no_op(api) -> Non
 
     assert response.status_code == 204
     assert response.content == b""
+
+
+ALLOWED_ORIGIN = "http://localhost:3000"
+# Same-site (shares the `digitalsec.work` registrable domain) but cross-origin — the
+# case `SameSite=Lax`/`Strict` cannot distinguish from the real frontend, and the one
+# `enforce_same_origin`/`get_logout_subject`'s inline check exist to reject (design D6c).
+SIBLING_ORIGIN = "https://evil.digitalsec.work"
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_a_disallowed_cross_origin_caller(
+    api, db_session, tenant_a
+) -> None:
+    """`auth-session-persistence` design D6c (review: sdd-security, CSRF finding).
+
+    CORS alone would not stop this: a cross-origin `POST` with a simple body skips
+    preflight and reaches the handler regardless of `Access-Control-Allow-Origin`.
+    `enforce_same_origin` closes it explicitly, with the same `401` shape a
+    missing/invalid cookie already gets — no new, distinguishable error surface.
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    await _login(api)
+
+    response = await api.post(
+        "/api/v1/auth/refresh", json={}, headers={"Origin": SIBLING_ORIGIN}
+    )
+
+    assert response.status_code == 401
+    assert "set-cookie" not in response.headers
+
+
+@pytest.mark.asyncio
+async def test_refresh_allows_the_frontends_own_origin(api, db_session, tenant_a) -> None:
+    """The real frontend's own `Origin` (on the CORS allowlist) is unaffected by D6c."""
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    await _login(api)
+
+    response = await api.post(
+        "/api/v1/auth/refresh", json={}, headers={"Origin": ALLOWED_ORIGIN}
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_logout_with_no_bearer_and_a_disallowed_origin_cookie_is_a_no_op(
+    api, db_session, tenant_a
+) -> None:
+    """`auth-session-persistence` design D6c: a same-site sibling forcing a `POST
+    /auth/logout` with the victim's cookie must not actually revoke the session.
+
+    Unlike `/auth/refresh`, `/auth/logout` cannot answer `401` for this (D6/D6b's
+    never-401 invariant) — the disallowed `Origin` is folded into "nothing to revoke"
+    instead, so the response is still the ordinary idempotent `204`, but the family
+    is proven untouched: the same cookie still refreshes successfully afterwards.
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    login_response = await _login(api)
+    cookie = login_response.cookies.get(SESSION_REFRESH_COOKIE)
+    assert cookie is not None
+
+    logout = await api.post("/api/v1/auth/logout", headers={"Origin": SIBLING_ORIGIN})
+
+    assert logout.status_code == 204
+    assert logout.content == b""
+
+    # Proof nothing was actually revoked: the same cookie the forged request carried
+    # still rotates cleanly through a legitimate (no cross-origin Origin) refresh.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie)
+    still_valid = await api.post("/api/v1/auth/refresh", json={})
+    assert still_valid.status_code == 200
 
 
 @pytest.mark.asyncio

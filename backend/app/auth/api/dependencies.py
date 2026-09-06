@@ -1,6 +1,7 @@
 """Authentication and authorisation dependencies (R3, R4, design D7/D12/D16)."""
 
 import ipaddress
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -172,6 +173,39 @@ def resolve_cookie_secure(request: Request) -> bool:
     this is a per-request decision and not a setting (rejected at design gate).
     """
     return request.url.scheme == "https"
+
+
+def enforce_same_origin(request: Request) -> None:
+    """Rejects a same-site-but-cross-origin `POST /auth/refresh` (security panel finding,
+    review round 4 of `auth-session-persistence`: CORS and `SameSite` both fail to cover
+    this).
+
+    `CORSMiddleware` only gates whether the BROWSER may read the response; a cross-origin
+    `POST` with a body simple enough to skip preflight still reaches this handler and
+    executes. `SameSite` (`Lax` or `Strict`, see `emit_refresh_cookie`) cannot help either:
+    both flag the cookie for *cross-site* delivery only, and a sibling origin under the
+    same registrable domain (`https://*.digitalsec.work`) is *same-site* by definition — the
+    cookie rides along regardless of which value is set. The only signal that distinguishes
+    "this frontend" from a same-site sibling is the `Origin` the browser reports, checked
+    here against the exact allowlist CORS already reflects
+    (`settings.backend_cors_allowed_origin_regex`).
+
+    A request with no `Origin` header at all is let through: per the Fetch standard a
+    browser always attaches one to a `POST`, same-origin or not, and a script cannot
+    suppress it (`Origin` is a forbidden header name) — so its absence means this call did
+    not originate from a browser's `fetch`/`XHR`/form in the first place, and there is
+    nothing here to gate. This is the same non-goal `get_client_ip`'s docstring already
+    accepts for a differently-shaped input.
+
+    `/auth/logout` does NOT use this dependency: design D6/D6b commits it to never
+    answering `401` for an authentication reason, and raising here would break that
+    invariant. Its own cookie-fallback branch in `get_logout_subject` applies the same
+    check inline and folds a mismatch into the existing "nothing to revoke" `204`
+    instead — the attacker's forged Origin becomes a silent no-op, not a new error shape.
+    """
+    origin = request.headers.get("origin")
+    if origin is not None and re.fullmatch(settings.backend_cors_allowed_origin_regex, origin) is None:
+        raise InvalidTokenError("Origin is not allowed to use this credential")
 
 
 def get_token_codec() -> JwtTokenCodec:
@@ -550,11 +584,15 @@ async def get_logout_subject(
     ever refuse. Authenticating by the cookie alone is therefore equivalent to being
     authorised, unlike every other endpoint `require(...)` guards.
 
-    Returns `None` when there is nothing to revoke — no working Bearer AND (no
-    cookie, or a cookie that fails to decode: expired, tampered, wrong signature) —
-    so the endpoint's existing idempotent-204 behaviour (R3.2) covers this case too
-    rather than turning a failed credential into a new, distinguishable error
-    surface. `PasswordChangeRequiredError` is not caught here: `/auth/logout` is on
+    Returns `None` when there is nothing to revoke — no working Bearer AND (no cookie,
+    a cookie whose `Origin` is not on the CORS allowlist, or a cookie that fails to
+    decode: expired, tampered, wrong signature) — so the endpoint's existing
+    idempotent-204 behaviour (R3.2) covers this case too rather than turning a failed
+    credential into a new, distinguishable error surface. The Origin check is the CSRF
+    fix from review round 4 (security panel finding): folded in here, inline, rather
+    than as a separate `Depends(enforce_same_origin)` like `/auth/refresh` uses, because
+    that helper raises on a mismatch and this route must not. `PasswordChangeRequiredError`
+    is not caught here: `/auth/logout` is on
     `PASSWORD_CHANGE_EXEMPT`, so `get_authenticated_request` never raises it for this
     route — an unrelated exception type surfacing here would be a genuine bug, not a
     failed-credential case to fall through on.
@@ -571,6 +609,14 @@ async def get_logout_subject(
 
     token = request.cookies.get(SESSION_REFRESH_COOKIE)
     if token is None:
+        return None
+    origin = request.headers.get("origin")
+    if origin is not None and re.fullmatch(settings.backend_cors_allowed_origin_regex, origin) is None:
+        # CSRF from a same-site-but-cross-origin sibling (security panel finding, review
+        # round 4): `SameSite` cannot distinguish these, and design D6/D6b forbids this
+        # route from ever answering 401 for an auth reason, so a bad Origin is folded
+        # into "nothing to revoke" rather than raised — see `enforce_same_origin`, which
+        # `/auth/refresh` uses for the same allowlist check, for the full rationale.
         return None
     try:
         claims = codec.decode_refresh(token)

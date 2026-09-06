@@ -64,7 +64,7 @@ export interface paths {
   "/api/v1/auth/logout": {
     /**
      * End the session this access token or refresh cookie belongs to
-     * @description Revokes the refresh family named by a valid access token, or by the refresh cookie itself when there is no access token, or the one presented does not authenticate — the cookie is as much a credential here as it already is for /auth/refresh (review: sdd-security, R3.1/R6.2), so a caller with no valid access token can still end its own session without minting a new one first. Never answers 401 for an authentication reason: idempotent, nothing to revoke answers the same 204.
+     * @description Revokes the refresh family named by a valid access token, or by the refresh cookie itself when there is no access token, or the one presented does not authenticate — the cookie is as much a credential here as it already is for /auth/refresh (review: sdd-security, R3.1/R6.2), so a caller with no valid access token can still end its own session without minting a new one first. Never answers 401 for an authentication reason: idempotent, nothing to revoke answers the same 204 — including a cookie presented by a cross-origin caller outside the CORS allowlist (CSRF finding), which is treated as nothing to revoke rather than raised.
      */
     post: operations["logout_api_v1_auth_logout_post"];
   };
@@ -78,7 +78,7 @@ export interface paths {
   "/api/v1/auth/refresh": {
     /**
      * Rotate a refresh token
-     * @description Anonymous: the refresh token itself is the credential. The presented token is invalidated. Presenting an already-used one revokes the whole session family.
+     * @description Anonymous: the refresh token itself is the credential. The presented token is invalidated. Presenting an already-used one revokes the whole session family. Rejects a cross-origin caller outside the CORS allowlist with the same 401 a missing/invalid cookie gets (review: sdd-security, CSRF finding) — SameSite alone does not cover a same-site sibling origin.
      */
     post: operations["refresh_api_v1_auth_refresh_post"];
   };
@@ -5501,7 +5501,7 @@ export interface operations {
   };
   /**
    * End the session this access token or refresh cookie belongs to
-   * @description Revokes the refresh family named by a valid access token, or by the refresh cookie itself when there is no access token, or the one presented does not authenticate — the cookie is as much a credential here as it already is for /auth/refresh (review: sdd-security, R3.1/R6.2), so a caller with no valid access token can still end its own session without minting a new one first. Never answers 401 for an authentication reason: idempotent, nothing to revoke answers the same 204.
+   * @description Revokes the refresh family named by a valid access token, or by the refresh cookie itself when there is no access token, or the one presented does not authenticate — the cookie is as much a credential here as it already is for /auth/refresh (review: sdd-security, R3.1/R6.2), so a caller with no valid access token can still end its own session without minting a new one first. Never answers 401 for an authentication reason: idempotent, nothing to revoke answers the same 204 — including a cookie presented by a cross-origin caller outside the CORS allowlist (CSRF finding), which is treated as nothing to revoke rather than raised.
    */
   logout_api_v1_auth_logout_post: {
     responses: {
@@ -5551,7 +5551,7 @@ export interface operations {
   };
   /**
    * Rotate a refresh token
-   * @description Anonymous: the refresh token itself is the credential. The presented token is invalidated. Presenting an already-used one revokes the whole session family.
+   * @description Anonymous: the refresh token itself is the credential. The presented token is invalidated. Presenting an already-used one revokes the whole session family. Rejects a cross-origin caller outside the CORS allowlist with the same 401 a missing/invalid cookie gets (review: sdd-security, CSRF finding) — SameSite alone does not cover a same-site sibling origin.
    */
   refresh_api_v1_auth_refresh_post: {
     responses: {

@@ -34,9 +34,17 @@ def emit_refresh_cookie(
 
     - `HttpOnly`: the token is never readable from JS, which is the whole point of moving
       it out of memory (R1, R2).
-    - `SameSite=Lax`: the only value that still lets a top-level navigation from an email
-      link to `/login` carry the cookie back through a `POST`; `Strict` would break
-      reload-after-email-link.
+    - `SameSite=Strict`: **corrected 2026-09-06** (security panel finding, review round
+      4) — the docstring used to justify `Lax` with a scenario that does not occur: a
+      top-level navigation from an email link targets a PAGE (`/login`), never
+      `Path=/api/v1/auth`, so the cookie was never in scope for that navigation to carry
+      regardless of `SameSite`. Neither value stops a same-site sibling origin from
+      triggering a `POST` with this cookie attached — `SameSite` only distinguishes
+      *cross-site* from *same-site*, and a sibling under the same registrable domain is
+      same-site by definition — which is why `enforce_same_origin` and
+      `get_logout_subject`'s inline check exist as the actual CSRF defence
+      (`backend/app/auth/api/dependencies.py`). `Strict` costs nothing over `Lax` given
+      the cookie's own `Path` scope, so there is no reason left to keep the weaker value.
     - `Path=/api/v1/auth`: keeps the cookie off every other route — `Path=/` would send it
       on every request, wider than the contract asks for.
     """
@@ -47,7 +55,7 @@ def emit_refresh_cookie(
         path="/api/v1/auth",
         secure=secure,
         httponly=True,
-        samesite="lax",
+        samesite="strict",
     )
 
 
