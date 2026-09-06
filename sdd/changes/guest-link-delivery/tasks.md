@@ -35,13 +35,13 @@
       revoked token found (→ `None`), a live token of another tenant not found (tenant
       isolation, security rule 1). [R2.1, R2.3]
 
-## 3. Application: status and send use cases <!-- hard -->
+## 3. Application: status and send use cases <!-- hard --> <!-- panel: PASS 2026-09-06 -->
 
-- [ ] 3.1 New `GetGuestAccessTokenStatusUseCase` (`backend/app/guests/application/portal.py`),
+- [x] 3.1 New `GetGuestAccessTokenStatusUseCase` (`backend/app/guests/application/portal.py`),
       using `PortalStayLocator.find` (404 for absent/foreign-tenant stay) then
       `GuestAccessTokenRepository.find_live_for_reservation`, returning presence + `issued_at`
       only — never `token_hash`. [R2.1, R2.2, R2.3]
-- [ ] 3.2 New `SendGuestAccessTokenUseCase` (`portal.py`) per design D4: load the stay via
+- [x] 3.2 New `SendGuestAccessTokenUseCase` (`portal.py`) per design D4: load the stay via
       `PortalStayLocator.find`; if `stay.guest_id` is `None` or the guest's email is blank,
       reject `422` **before minting**; otherwise call the composed `IssueGuestAccessTokenUseCase`
       wired with `CallerOwnedUnitOfWork()` (`backend/app/core/unit_of_work.py:59`) so its own
@@ -52,11 +52,11 @@
       `related_id=reservation_id`, `recipient_user_id=None`); write the `GUEST_ACCESS_TOKEN_SENT`
       audit row (`entity_id` = the new token's id); commit **once**, on this use case's own
       `SqlAlchemyUnitOfWork`, after every write above. [R3.1-R3.6, D4]
-- [ ] 3.3 Unit tests for `SendGuestAccessTokenUseCase` with fakes: happy path (mint + `SENT` +
+- [x] 3.3 Unit tests for `SendGuestAccessTokenUseCase` with fakes: happy path (mint + `SENT` +
       audit, one commit); adapter reports failure (mint still committed, row `FAILED` with its
       error code, R3.5); no `Guest` linked (422, `IssueGuestAccessTokenUseCase` never called);
       blank email (422, same); foreign-tenant reservation (404). [R3.1-R3.6]
-- [ ] 3.4 Update `backend/tests/test_writer_census.py`: move `GUEST_PORTAL_LINK_DELIVERED` from
+- [x] 3.4 Update `backend/tests/test_writer_census.py`: move `GUEST_PORTAL_LINK_DELIVERED` from
       `WITHOUT_WRITER` to `WITH_WRITER`, attributed to this change's builder. [R4.3]
 
 ## 4. API: routes, schemas, DI wiring, OpenAPI
@@ -241,3 +241,108 @@
   rule 1), with a positive sanity check that the same token *is* found under its own tenant.
 - Verified: `docker compose exec backend uv run pytest tests/guests/test_portal_repositories.py -q`
   → 43 passed (39 pre-existing + 4 new). No regressions in this file.
+
+### Section 3 (application)
+
+**The section-1/2 breakage is closed.** `IssueGuestAccessTokenUseCase.execute` now passes
+`issued_at=now` (`portal.py`, inside the `minted = GuestAccessToken(...)` call), and
+`backend/tests/guests/test_portal_authenticator.py`'s `_build` helper passes
+`issued_at=datetime(2026, 9, 1, tzinfo=UTC)`. Every file section 1 flagged as expectedly red is
+green again — see the verification note at the end of this section.
+
+**What section 4 must wire, exactly.**
+
+- `GetGuestAccessTokenStatusUseCase` (`backend/app/guests/application/portal.py:658`).
+  - Constructor: `GetGuestAccessTokenStatusUseCase(*, tokens: GuestAccessTokenRepository,
+    stays: PortalStayLocator)` — two ports, nothing else. No `uow` (it writes nothing), no
+    `audit`, no `actor`.
+  - `async def execute(self, *, tenant_id: uuid.UUID, reservation_id: uuid.UUID) ->
+    GuestAccessTokenStatus`. **No `now` and no `actor` parameters** — unlike its two siblings,
+    whose `execute` takes both.
+  - Returns `GuestAccessTokenStatus` (`portal.py:641`), a frozen dataclass with exactly
+    `is_live: bool` and `issued_at: datetime | None`. `issued_at` is `None` iff `is_live` is
+    `False`. `GuestAccessTokenStatusResponse` (task 4.1) maps one-to-one onto it; there is no
+    `token_hash` field to remember to exclude.
+  - Raises **`ReservationNotFoundError`** for an absent or foreign-tenant stay → the existing
+    `404 NOT_FOUND` row already in `guests/api/errors.py`. Nothing new to map.
+- `SendGuestAccessTokenUseCase` (`portal.py:700`).
+  - Constructor (all keyword-only):
+    `SendGuestAccessTokenUseCase(*, issue: IssueGuestAccessTokenUseCase, tokens:
+    GuestAccessTokenRepository, stays: PortalStayLocator, guests: GuestRepository,
+    notifications: NotificationLogRepository, adapters: dict[NotificationChannel,
+    NotificationAdapter], audit: AuditLogRepository, uow: UnitOfWork, frontend_base_url: str)`.
+  - `async def execute(self, *, tenant_id: uuid.UUID, reservation_id: uuid.UUID, actor:
+    GuestActor, now: datetime) -> bool` — the same four keyword arguments as
+    `Issue`/`RevokeGuestAccessTokenUseCase`. Returns `delivered`, so
+    `GuestAccessTokenSentResponse{delivered: bool}` is the whole mapping. **The cleartext token
+    is never returned** (design D5).
+  - Raises **`ReservationNotFoundError`** (404, already mapped) and **`GuestContactMissingError`**
+    (new, `backend/app/guests/domain/exceptions.py:55`) for R3.2.
+- **Task 4.2/4.3 owns one API-layer edit this section deliberately did not make**:
+  `GuestContactMissingError` has **no row in `_MAPPING`** (`backend/app/guests/api/errors.py`),
+  whose docstring declares itself exhaustive over `GuestDomainError`. Until section 4 adds
+  `(GuestContactMissingError, 422, ErrorCode.VALIDATION_ERROR)` to that tuple, the exception
+  falls through to `500 "Unexpected guest error"` and R3.2 does not hold at HTTP level. It was
+  left out because this section's scope excludes the API layer, not because it is optional.
+  The exception carries two distinct messages as class constants —
+  `GuestContactMissingError.NO_GUEST` (stay has no `guest_id`) and `.NO_EMAIL` (guest has no
+  usable address, or a `guest_id` that does not resolve) — and both are safe to show the
+  operator: the stay has already been resolved inside the acting tenant before either is
+  raised.
+- **DI wiring for the composed mint (D4), the one detail that must not drift**: build the inner
+  `IssueGuestAccessTokenUseCase` with `uow=CallerOwnedUnitOfWork()` (imported from
+  `app.core.unit_of_work`), and give `SendGuestAccessTokenUseCase` the real
+  `SqlAlchemyUnitOfWork(session)`. Both take the **same** `SqlAlchemyGuestAccessTokenRepository`
+  and the same `PortalStayLocator` instance over the one request session. Sketch:
+
+  ```python
+  tokens = SqlAlchemyGuestAccessTokenRepository(session)
+  stays = SqlAlchemyPortalStayLocator(session)          # the adapter `get_issue_...` already builds
+  send = SendGuestAccessTokenUseCase(
+      issue=IssueGuestAccessTokenUseCase(
+          tokens=tokens, stays=stays, audit=audit, uow=CallerOwnedUnitOfWork()
+      ),
+      tokens=tokens, stays=stays, guests=SqlAlchemyGuestRepository(session),
+      notifications=SqlAlchemyNotificationLogRepository(session),
+      adapters=adapter_registry(), audit=audit,
+      uow=SqlAlchemyUnitOfWork(session),
+      frontend_base_url=settings.frontend_base_url,
+  )
+  ```
+
+  A real `SqlAlchemyUnitOfWork` on the inner use case is a **defect**, not a style choice — it
+  splits the operation into two commits and reopens the crash window D4 exists to close.
+  `test_the_composed_mint_never_ends_the_transaction` and
+  `test_the_wrong_wiring_is_visible_to_this_harness` (both in
+  `backend/tests/guests/test_guest_link_delivery.py`) pin it from the unit side, but neither
+  can see `dependencies.py` — the wiring is section 4's to get right.
+- **Why `tokens` is a dependency of the *outer* use case too**: the audit row needs the new
+  token's **id**, and `IssueGuestAccessTokenUseCase.execute` returns only the cleartext value.
+  `SendGuestAccessTokenUseCase` reads the row back with
+  `tokens.find_live_for_reservation(...)` on the same still-open session (the `SELECT`
+  autoflushes the pending `INSERT`) and compares its `token_hash` against
+  `hash_guest_token(token)`, raising `RuntimeError` on a mismatch rather than auditing a
+  credential the request did not create. Widening the mint's return type to `(token, id)` was
+  rejected: it would hand the credential and its identifier as one tuple to every caller of
+  that use case, the existing `POST` route included.
+- The send's `AuditLog` carries **`changes = NULL`** (an empty `ChangeSet`). A send moves no
+  column of `guest_access_tokens`, and `AUDITABLE_FIELDS["GUEST_ACCESS_TOKEN"]` allows only
+  `token_hash`/`revoked_at`, both of which would be false here; an invented `"delivered"` key is
+  what the allowlist exists to refuse. R3.6 is satisfied by `action` + `entity_id` + actor +
+  instant, which is what security rule 9 asks for. Whether the mail left is on the
+  `NotificationLog`, keyed to the same reservation.
+- `backend/tests/notifications/test_writer_census.py` (task 3.4) got **two** edits, not one:
+  `GUEST_PORTAL_LINK_DELIVERED` into `WITH_WRITER`, **and** `guests/application/portal.py` into
+  `CONSTRUCTION_SITES` — the second is required because `test_every_construction_site_is_one_
+  the_census_knows_about` fails on any module that builds a `NotificationLog` without being
+  declared. `WITHOUT_WRITER` is untouched (still the same four). The set's prose count was
+  recounted rather than incremented: it said "Fifteen" over sixteen entries, and now says
+  seventeen over seventeen.
+- Verified (stack up, `docker compose exec backend uv run pytest`):
+  - `tests/guests/test_guest_link_delivery.py` → 27 passed (new file: 21 for the send use case,
+    6 for the status one).
+  - `tests/guests/test_portal_authenticator.py tests/guests/test_portal_use_cases.py` → 40
+    passed — the two files section 1 left red.
+  - `tests/guests/ tests/notifications/ tests/audit/` → see the final verification note; the
+    four other files section 1 flagged (`test_portal_token_api.py`, `test_portal_api.py`,
+    `test_portal_token_conflict.py`, `test_portal_repositories.py`) are green again.
