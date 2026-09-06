@@ -151,10 +151,10 @@
       on; both are rendering-timing assertions (`Unable to find role="heading"`) consistent
       with the same host contention that slowed every other command this session, not a
       logic regression in this change's code.
-- [ ] 6.5 Manual end-to-end pass: from `/reservations/[id]`, mint the link and copy it; open
+- [ ] 6.5 <!-- manual --> Manual end-to-end pass: from `/reservations/[id]`, mint the link and copy it; open
       `/guest/[token]` in a second browser context and confirm the portal loads; trigger
       "send" and confirm the email arrives (dev SMTP relay or `ConsoleEmailAdapter` log line);
-      revoke and confirm the previously-copied link no longer authorizes the portal. <!-- manual -->
+      revoke and confirm the previously-copied link no longer authorizes the portal.
 
 ## Implementation Notes
 
