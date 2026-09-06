@@ -152,3 +152,16 @@ export interface ReservationFilters {
   page?: number;
   perPage?: number;
 }
+
+/**
+ * Live-token status for a reservation's guest portal link (proposal R1.1 / R2,
+ * design D1). `issuedAt` is `null` iff `isLive` is `false` — the same
+ * invariant `GuestAccessTokenStatus` (`application/portal.py`) documents on
+ * the backend. Never a `token`/`tokenHash` field: this DTO models exactly
+ * what `GET .../guest-access-token` returns, and that route deliberately
+ * never returns the credential itself (R2.2).
+ */
+export interface GuestAccessTokenStatusDto {
+  isLive: boolean;
+  issuedAt: IsoDateTime | null;
+}

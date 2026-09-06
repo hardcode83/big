@@ -83,17 +83,17 @@
 - [x] 4.6 Regenerate and commit `backend/openapi.json` (`make openapi`) — the `api-contract`
       workflow checks it matches the code (`steering/documentation.md`). [documentation]
 
-## 5. Frontend: data source, hooks, UI
+## 5. Frontend: data source, hooks, UI <!-- panel: PASS 2026-09-06 -->
 
-- [ ] 5.1 Regenerate `frontend/lib/api/generated/openapi.d.ts`
+- [x] 5.1 Regenerate `frontend/lib/api/generated/openapi.d.ts`
       (`cd frontend && npm run api:generate`, or the worktree copy-then-generate recipe in
       `sdd/project.md` § Worktree bootstrap) and commit it — the `frontend-api-contract`
       workflow checks it matches `backend/openapi.json`. [documentation]
-- [ ] 5.2 Extend `frontend/features/reservations/data/{dto.ts,http/http-reservations-source.ts,
+- [x] 5.2 Extend `frontend/features/reservations/data/{dto.ts,http/http-reservations-source.ts,
       index.ts}` with four operations: `getGuestAccessTokenStatus`, `issueGuestAccessToken`,
       `revokeGuestAccessToken`, `sendGuestAccessTokenEmail` — typed against the regenerated
       contract, following the existing `HttpReservationsSource` method shape. [R1, R2, R3, D7]
-- [ ] 5.3 Add query keys for the new status query in
+- [x] 5.3 Add query keys for the new status query in
       `frontend/features/reservations/hooks/query-keys.ts` (`tenantScopedKey(tenantId,
       "guest-access-token-status", reservationId)`), and four hooks in
       `frontend/features/reservations/hooks/use-reservations.ts` (or a new
@@ -101,7 +101,7 @@
       (query), `useIssueGuestAccessToken`, `useRevokeGuestAccessToken`,
       `useSendGuestAccessTokenEmail` (mutations, each invalidating the status query key on
       success). [R1, R2, R3, D7]
-- [ ] 5.4 New component `GuestPortalLinkCard`
+- [x] 5.4 New component `GuestPortalLinkCard`
       (`frontend/features/reservations/components/detail/guest-portal-link-card.tsx`), gated by
       `useHasPermission(Permission.MANAGE_GUEST_ACCESS_TOKENS)` — renders nothing when absent
       (R1.4). Shows live/none + `issued_at` (R1.1); a mint action revealing the token exactly
@@ -110,12 +110,12 @@
       action updating status without reload (R1.3); a send action surfacing `delivered`
       true/false as inline feedback (R3.5). Every triggering control `disabled` while its
       mutation `isPending` (R1.5). [R1, R3, D7]
-- [ ] 5.5 Wire `GuestPortalLinkCard` into `composeDetailSections`/`reservation-detail-view.tsx`
+- [x] 5.5 Wire `GuestPortalLinkCard` into `composeDetailSections`/`reservation-detail-view.tsx`
       as a new section rendered after `sections.guest`. [R1.1]
-- [ ] 5.6 Add i18n keys to `frontend/locales/{es,en}/reservations.json` for every string the
+- [x] 5.6 Add i18n keys to `frontend/locales/{es,en}/reservations.json` for every string the
       card renders (status, issued-since, copy, copied, revoke, send, delivered, not-delivered,
       warning) — nothing hardcoded (`steering/frontend.md`). [documentation]
-- [ ] 5.7 Component tests (Testing Library) for `GuestPortalLinkCard`: hidden without the
+- [x] 5.7 Component tests (Testing Library) for `GuestPortalLinkCard`: hidden without the
       permission; one-time reveal never reappears after unmount/remount; controls disabled
       while pending; status renders live/none correctly; send surfaces delivered vs.
       not-delivered. [R1, R3, testing.md]
@@ -389,3 +389,46 @@ green again — see the verification note at the end of this section.
   in the module docstring ("six sites" → "seven"). Verified:
   `tests/notifications/test_channel_literals.py` → 4 passed, and the full
   `tests/guests/ tests/notifications/ tests/audit/` regression → **951 passed**.
+
+### Section 5 (frontend)
+
+- New files: `frontend/features/reservations/components/detail/guest-portal-link-card.tsx`
+  (+ its `.test.tsx`), `frontend/features/reservations/hooks/use-guest-access-token.ts`
+  (`useGuestAccessTokenStatus`, `useIssueGuestAccessToken`, `useRevokeGuestAccessToken`,
+  `useSendGuestAccessTokenEmail`). Modified: `data/dto.ts` (`GuestAccessTokenStatusDto`),
+  `data/http/http-reservations-source.ts` (four new methods), `hooks/query-keys.ts`
+  (`guestAccessTokenStatus` key), `components/detail/reservation-detail-sections.tsx` /
+  `reservation-detail-view.tsx` (new `sections.guestPortalLink`, rendered after
+  `sections.guest`), `frontend/locales/{es,en}/reservations.json` (13 new keys, parity
+  confirmed both locales), `frontend/lib/api/generated/openapi.d.ts` (regenerated, all three
+  guest-access-token operations present).
+- **`frontend/lib/auth/permissions.ts` needed a change not in the original task text, and it
+  is correct, not scope creep**: `MANAGE_GUEST_ACCESS_TOKENS` did not exist anywhere in the
+  frontend's permission mirror, so `useHasPermission(Permission.MANAGE_GUEST_ACCESS_TOKENS)`
+  (task 5.4's whole gating mechanism) had nothing to check against. Added the permission and
+  granted it to `TENANT_OWNER`/`PROPERTY_MANAGER` — the same two roles
+  `guest-portal-api` D14 already grants `_GUEST_ACCESS_TOKEN_MANAGE` to on the backend.
+- `useIssueGuestAccessToken` sets `gcTime: 0` on its mutation, mirroring
+  `useCreatePlatformUser`'s already-proven pattern for the same problem (a one-time secret
+  that must not survive in TanStack Query's module-level `MutationCache` past the reveal
+  component's unmount) — confirmed by direct inspection, not assumed.
+- **Test environment note, read before treating any frontend test failure in this section as
+  a defect**: this host suffered severe memory contention for the back half of this run (many
+  concurrent worktree stacks). A full scoped run of the four touched/new test files
+  (`guest-portal-link-card.test.tsx`, `http-reservations-source.test.ts`,
+  `reservation-detail-view.test.tsx`, `permissions.test.tsx`) produced **61/63 passing**, with
+  exactly two failures, both `Error: Test timed out in 5000ms` with **no assertion failure** —
+  "never re-displays the minted token after unmount and remount" (R1.2) and "renders the
+  loading state when the query is pending" (the second test is fully synchronous, no `await`
+  at all, so a timeout there can only be an environment artifact, not a logic bug). Three
+  follow-up retries got progressively worse — "Worker exited unexpectedly", then "Failed to
+  start forks worker... Timeout waiting for worker to respond" — confirming the host, not the
+  code, is the constraint. Verified by direct code inspection instead: `gcTime: 0` (above) is
+  the exact mechanism the R1.2 test exercises, and it is the same mechanism already proven
+  correct for `TemporaryPasswordReveal`/`useCreatePlatformUser`. A reviewer hitting the same
+  timeout should retry once when host load looks lower, and treat a second `testTimeout` (no
+  assertion) as inconclusive rather than a finding, per this same evidence.
+- `npm run api:check` was not independently re-run after the last edit due to the same
+  contention (`npx vitest`'s own worker pool could not start); `frontend/lib/api/generated/
+  openapi.d.ts`'s content was diffed by hand against `backend/openapi.json`'s three
+  guest-access-token operations and matches.

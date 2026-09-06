@@ -11,6 +11,35 @@ vi.mock("../../hooks/use-reservations", () => ({
   useReservation: useReservationMock,
 }));
 
+// `GuestPortalLinkCard` (design D7) is rendered unconditionally by
+// `composeDetailSections` — gated on `useHasPermission`, not on this view.
+// This suite is about state routing (loading/forbidden/not-found/…), not the
+// card's own behavior (covered by `guest-portal-link-card.test.tsx`), so the
+// permission is mocked to `false` here: the card's early return keeps every
+// assertion below about the OTHER sections unaffected by its presence.
+vi.mock("@/lib/auth", () => ({ useHasPermission: () => false }));
+vi.mock("../../hooks/use-guest-access-token", () => ({
+  useGuestAccessTokenStatus: () => ({ isPending: false, data: undefined }),
+  useIssueGuestAccessToken: () => ({
+    isPending: false,
+    isError: false,
+    data: undefined,
+    mutate: vi.fn(),
+  }),
+  useRevokeGuestAccessToken: () => ({
+    isPending: false,
+    isError: false,
+    mutate: vi.fn(),
+  }),
+  useSendGuestAccessTokenEmail: () => ({
+    isPending: false,
+    isError: false,
+    isSuccess: false,
+    data: undefined,
+    mutate: vi.fn(),
+  }),
+}));
+
 import { ReservationDetailView } from "./reservation-detail-view";
 
 function renderDetail() {

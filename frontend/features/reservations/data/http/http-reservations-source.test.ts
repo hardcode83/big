@@ -309,6 +309,75 @@ describe("HttpReservationsSource — getReservation", () => {
   });
 });
 
+describe("HttpReservationsSource — guest access token (R1, R2, R3, D7)", () => {
+  it("maps the live status response to camelCase", async () => {
+    const { source, request } = sourceWith({
+      is_live: true,
+      issued_at: "2026-09-01T09:00:00Z",
+    });
+
+    await expect(
+      source.getGuestAccessTokenStatus(TENANT, "reservation-1"),
+    ).resolves.toEqual({ isLive: true, issuedAt: "2026-09-01T09:00:00Z" });
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/reservations/{reservation_id}/guest-access-token",
+      { pathParams: { reservation_id: "reservation-1" } },
+    );
+  });
+
+  it("maps the no-token status response with issuedAt null", async () => {
+    const { source } = sourceWith({ is_live: false, issued_at: null });
+
+    await expect(
+      source.getGuestAccessTokenStatus(TENANT, "reservation-1"),
+    ).resolves.toEqual({ isLive: false, issuedAt: null });
+  });
+
+  it("issues a fresh token and returns the cleartext value once", async () => {
+    const { source, request } = sourceWith({ token: "clear-token-abc" });
+
+    await expect(
+      source.issueGuestAccessToken(TENANT, "reservation-1"),
+    ).resolves.toBe("clear-token-abc");
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/reservations/{reservation_id}/guest-access-token",
+      { method: "POST", pathParams: { reservation_id: "reservation-1" } },
+    );
+  });
+
+  it("revokes the live token with a DELETE and resolves with no value", async () => {
+    const { source, request } = sourceWith(undefined);
+
+    await expect(
+      source.revokeGuestAccessToken(TENANT, "reservation-1"),
+    ).resolves.toBeUndefined();
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/reservations/{reservation_id}/guest-access-token",
+      { method: "DELETE", pathParams: { reservation_id: "reservation-1" } },
+    );
+  });
+
+  it("sends the guest link email and surfaces delivered: true", async () => {
+    const { source, request } = sourceWith({ delivered: true });
+
+    await expect(
+      source.sendGuestAccessTokenEmail(TENANT, "reservation-1"),
+    ).resolves.toBe(true);
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/reservations/{reservation_id}/guest-access-token/send",
+      { method: "POST", pathParams: { reservation_id: "reservation-1" } },
+    );
+  });
+
+  it("surfaces delivered: false distinctly from a thrown error (R3.5)", async () => {
+    const { source } = sourceWith({ delivered: false });
+
+    await expect(
+      source.sendGuestAccessTokenEmail(TENANT, "reservation-1"),
+    ).resolves.toBe(false);
+  });
+});
+
 describe("HttpReservationsSource — error propagation", () => {
   it.each([
     [401, "UNAUTHORIZED"],

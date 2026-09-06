@@ -175,6 +175,34 @@ it("denies MANAGE_CONVERSATIONS to TENANT_OWNER — owner reads but does not ope
     expect(incidents.result.current).toBe(false);
   });
 
+  it("grants MANAGE_GUEST_ACCESS_TOKENS to TENANT_OWNER and PROPERTY_MANAGER (guest-link-delivery D7, guest-portal-api D14)", () => {
+    for (const role of ["TENANT_OWNER", "PROPERTY_MANAGER"]) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() =>
+        useHasPermission("MANAGE_GUEST_ACCESS_TOKENS"),
+      );
+      expect(result.current, `${role} should have it`).toBe(true);
+    }
+  });
+
+  it("denies MANAGE_GUEST_ACCESS_TOKENS to CLEANER, TECHNICIAN, SUPER_ADMIN (guest-portal-api D14)", () => {
+    for (const role of ["CLEANER", "TECHNICIAN", "SUPER_ADMIN"]) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() =>
+        useHasPermission("MANAGE_GUEST_ACCESS_TOKENS"),
+      );
+      expect(result.current, `${role} should not have it`).toBe(false);
+    }
+  });
+
+  it("denies MANAGE_GUEST_ACCESS_TOKENS without an authenticated user", () => {
+    useAuth.mockReturnValue({ user: null });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_GUEST_ACCESS_TOKENS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
   it("declares every UserRole of the generated contract", () => {
     expect(Object.keys(ROLE_UI_PERMISSIONS).sort()).toEqual([
       "CLEANER",

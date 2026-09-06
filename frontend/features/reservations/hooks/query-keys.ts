@@ -19,4 +19,12 @@ export const reservationsKeys = {
     tenantScopedKey(tenantId, "reservations-list", filters),
   detail: (tenantId: string, reservationId: string): QueryKey =>
     tenantScopedKey(tenantId, "reservations-detail", reservationId),
+  /**
+   * The guest portal token's live status for one reservation (proposal R1.1 /
+   * R2, design D7). Every mint/revoke/send mutation invalidates exactly this
+   * key on success — never a broader prefix, since the status of one
+   * reservation's token has no bearing on any other reservation's.
+   */
+  guestAccessTokenStatus: (tenantId: string, reservationId: string): QueryKey =>
+    tenantScopedKey(tenantId, "guest-access-token-status", reservationId),
 } as const;

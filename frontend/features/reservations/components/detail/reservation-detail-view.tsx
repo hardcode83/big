@@ -88,6 +88,7 @@ export function ReservationDetailView({
       {sections.stay}
       {sections.party}
       {sections.guest}
+      {sections.guestPortalLink}
       {sections.financial}
       {sections.payment}
       {sections.notes}
