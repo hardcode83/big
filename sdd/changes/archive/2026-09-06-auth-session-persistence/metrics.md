@@ -6,3 +6,4 @@
 | 2026-09-04 | design | MiniMax-M3[1m] | 249458 | 6295 | 2471552 | 2.6404 |  |
 | 2026-09-04 | tasks | claude-sonnet-5 | 74 | 35278 | 5276871 | 1.8925 |  |
 | 2026-09-05 | run | claude-haiku-4-5-20251001 claude-opus-5[1m] claude-sonnet-5 | 315150 | 650889 | 172171012 | 55.8680 | incl. subagents |
+| 2026-09-06 | archive | claude-sonnet-5 | 16 | 1364 | 550835 | 0.1534 | incl. subagents |
