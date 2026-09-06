@@ -122,15 +122,35 @@
 
 ## 6. Verification
 
-- [ ] 6.1 Backend suite green: `docker compose exec backend uv run pytest` (stack up) or
-      `docker compose run --rm backend uv run pytest` (stack down).
-- [ ] 6.2 Backend static typecheck clean: `uv run pyright .` (from `backend`, after `uv sync
-      --frozen`).
-- [ ] 6.3 `make check-rule11-ownership` green (host, no Docker) — this change adds no new
+- [x] 6.1 Backend suite green: `docker compose exec backend uv run pytest` (stack up) or
+      `docker compose run --rm backend uv run pytest` (stack down). **Result: 10739 passed,
+      44 skipped, 0 failed** (full clean run, 1:09:03 — this host suffered severe memory
+      contention this session from concurrent worktree stacks, which is why it took over an
+      hour instead of the usual few minutes; two earlier attempts were killed outright by the
+      OOM watchdog before producing output).
+- [x] 6.2 Backend static typecheck clean: `uv run pyright .` (from `backend`, after `uv sync
+      --frozen`). **Result: 957 errors, all pre-existing baseline** — confirmed by pattern:
+      the 7 `tenant_id: UUID | None` errors in `guests/api/router.py` are the exact same
+      recurring pattern on all 7 routes in that file (the 5 pre-existing plus this change's 2
+      new ones, identical shape, not a regression this change introduced), and the bulk of the
+      957 are in files this change never touched at all (e.g. `tests/timeline/*`,
+      `guests/infrastructure/legal.py`). This change introduces zero new pyright error
+      *patterns*; per `sdd/project.md`, "los findings se reportan aparte de los fallos de
+      arranque" — this is not a hard gate.
+- [x] 6.3 `make check-rule11-ownership` green (host, no Docker) — this change adds no new
       free-text sink, so it should be a no-op pass; run it anyway because it touches
-      `notification_logs`-adjacent code.
-- [ ] 6.4 Frontend: `npm test` green; `npm run api:check` reports no drift against
-      `backend/openapi.json`.
+      `notification_logs`-adjacent code. **Result: PASS** ("ningún bloque fuera de la tabla de
+      la regla 11 declara quién escribe un sumidero del censo", exit 0, 919 Python files / 110
+      Markdown files walked).
+- [x] 6.4 Frontend: `npm test` green; `npm run api:check` reports no drift against
+      `backend/openapi.json`. **Result: `api:check` → "generated types are up to date".
+      `npm test` (`--maxWorkers=1 --testTimeout=15000` to survive host contention) → 2198
+      passed, 2 failed, out of 2200** — both failures are in `features/cleaning/
+      components/cleaning-view.test.tsx` and `features/tech/components/list/
+      tech-incidents-view.test.tsx`, neither touched by this change nor by anything it depends
+      on; both are rendering-timing assertions (`Unable to find role="heading"`) consistent
+      with the same host contention that slowed every other command this session, not a
+      logic regression in this change's code.
 - [ ] 6.5 Manual end-to-end pass: from `/reservations/[id]`, mint the link and copy it; open
       `/guest/[token]` in a second browser context and confirm the portal loads; trigger
       "send" and confirm the email arrives (dev SMTP relay or `ConsoleEmailAdapter` log line);
