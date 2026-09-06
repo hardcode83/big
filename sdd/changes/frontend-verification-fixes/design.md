@@ -108,6 +108,30 @@ a leerla.
 Rejected: un segundo campo `RequestContext.locale` junto al primero — mismo defecto que la anterior
 (entrada de petición dentro del objeto) más dos campos de idioma que hay que distinguir en cada uso.
 
+**Enmienda (review, ronda 12, 2026-09-06):** dos correcciones más, del mismo defecto en dos sitios
+que no se habían tocado hasta ahora.
+
+Primero, `sdd/specs/auth-tenancy.md:243-248` seguía describiendo `preferred_language` como lo que
+"la capa de lectura" usa para componer texto — la descripción que D3 sustituyó, sin corregir en el
+único otro documento que la repetía (`dashboard-api.md` ya se había corregido en R1.9; este no,
+porque su reescritura completa queda para `/sdd:archive`). Corregido con la misma nota mínima que
+`dashboard-api.md` ya lleva: el campo es el escalón de degradación de `RequestLocaleDep`, no lo que
+una ruta renderiza.
+
+Segundo, `frontend/lib/i18n/active-locale.ts`: `setActiveLocale` escribía incondicionalmente en un
+`let` de módulo, y su único punto de escritura (`client-provider.tsx`'s `useState(() =>
+createClientI18n(locale))`) corre también durante el render en servidor de un Client Component —
+no solo en el navegador. Un proceso Node sirve peticiones concurrentes de distintos visitantes
+compartiendo ese mismo módulo, así que el render SSR de una petición podía escribir momentáneamente
+el locale de otra encima. Ningún lector de `getActiveLocale()` corre hoy durante SSR (los tokens de
+sesión viven solo en memoria del navegador, así que ninguna petición autenticada —la única
+consumidora— puede dispararse ahí), pero la mutación compartida entre peticiones concurrentes no
+debía depender de que eso siga siendo cierto. `setActiveLocale` ahora es un no-op fuera del
+navegador (`typeof window === "undefined"`), lo que no cambia el comportamiento en ningún sitio que
+ya funcionara: la instancia de i18next también es local al render (D6), así que el valor real que
+un componente lee siempre viene de re-ejecutar el `useState` en el navegador durante la hidratación,
+nunca del valor que pudo quedar escrito por otra petición en el servidor.
+
 ### D4 — La cadena de degradación es una función pura en `app/core/i18n.py`
 
 **Chosen:** `resolve_locale(requested: str | None, stored: str | None) -> Locale`, junto a

@@ -13,8 +13,16 @@ import { DEFAULT_LOCALE, type Locale } from "@/lib/config/constants";
  * every `languageChanged` event; everything else only reads via
  * `getActiveLocale`.
  *
- * Before any provider has mounted (first paint, before hydration) this holds
- * `DEFAULT_LOCALE` — the same value the server would have resolved.
+ * `setActiveLocale` is a no-op outside the browser (security review, round 12):
+ * `useState`'s lazy initializer — where `client-provider.tsx` calls it — also
+ * runs during the server render of a Client Component, and `activeLocale` is a
+ * plain module `let` in one Node process shared by every concurrent request.
+ * Without the guard, one visitor's SSR pass could momentarily overwrite the
+ * value another concurrent request's server-side code would read. No such
+ * read exists today (auth tokens live only in browser memory, so no
+ * authenticated fetch — the only reader of `getActiveLocale` — happens during
+ * SSR), but the guard costs nothing and removes the shared-state hazard
+ * outright rather than relying on that absence staying true.
  */
 let activeLocale: Locale = DEFAULT_LOCALE;
 
@@ -23,5 +31,6 @@ export function getActiveLocale(): Locale {
 }
 
 export function setActiveLocale(locale: Locale): void {
+  if (typeof window === "undefined") return;
   activeLocale = locale;
 }
