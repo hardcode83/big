@@ -4,10 +4,11 @@
 
 Hogar único de las propiedades que el backend aplica a **toda** petición y **toda** respuesta,
 con independencia de la ruta: la cabecera `X-Content-Type-Options: nosniff` que impide que un
-navegador adivine el `Content-Type` de un cuerpo controlado por el cliente, y los cuatro topes de
-tamaño de cuerpo que rechazan una petición **antes** de leerla. Ambas son propiedades del sistema,
-no de los endpoints que alguien se acordó de anotar; esta spec existe porque las dos se decidieron
-bien en una ruta y se olvidaron en las demás.
+navegador adivine el `Content-Type` de un cuerpo controlado por el cliente, los cuatro topes de
+tamaño de cuerpo que rechazan una petición **antes** de leerla, y la postura CORS que decide qué
+origen puede leer una respuesta con credenciales (`auth-session-persistence`, R7). Las tres son
+propiedades del sistema, no de los endpoints que alguien se acordó de anotar; esta spec existe
+porque se decidieron bien en una ruta y se olvidaron en las demás.
 
 ## Requirements
 
@@ -172,6 +173,34 @@ bien en una ruta y se olvidaron en las demás.
   consumidor no-HTTP). Lo prohibido es presentarlas como defensa frente a un `Content-Length`
   mentido.
 
+### CORS: credenciales cruzadas con `Origin` explícito, nunca `*` (`auth-session-persistence`, R7)
+
+- THE SYSTEM SHALL responder con `Access-Control-Allow-Credentials: true` y con
+  `Access-Control-Allow-Origin` igual al `Origin` exacto de la petición cuando ese origen
+  está en el allowlist (`BACKEND_CORS_ALLOWED_ORIGIN_REGEX`) — nunca `*`: un `allow_origins`
+  estático fuerza semántica `*` en cuanto `allow_credentials=True`, y los navegadores la
+  rechazan con credenciales.
+- IF el `Origin` de la petición no está en el allowlist, THEN THE SYSTEM SHALL responder sin
+  `Access-Control-Allow-Origin` — la petición se ejecuta igual (CORS no bloquea la
+  ejecución en el servidor, solo la lectura de la respuesta en el navegador), pero el
+  script que la originó no puede leer el resultado.
+- THE SYSTEM SHALL montar `CORSMiddleware` **el último**, después de `MaxBodySizeMiddleware`
+  y `NoSniffMiddleware`, para que sea el más EXTERNO de los tres (misma regla de posición
+  que la sección de arriba): solo desde fuera decora también el `413` que
+  `MaxBodySizeMiddleware` construye y envía por sí solo, sin pasar por ningún handler.
+- THE SYSTEM SHALL resolver el allowlist por **regex verificado con `re.fullmatch`**
+  (`Starlette.CORSMiddleware`), nunca por subcadena: un origen como
+  `https://<host-permitido>.evil.com` NO debe encajar solo por contener el hostname
+  permitido como sufijo o infijo.
+- Ni CORS ni `SameSite` bastan por sí solos para cerrar CSRF contra un origen **hermano**
+  bajo el mismo dominio registrable que un origen sí allowlisted (p. ej. otro subdominio de
+  `digitalsec.work`): ese hermano es *same-site*, así que una cookie `SameSite=Strict` viaja
+  igual, y `CORSMiddleware` solo decide si el navegador puede LEER la respuesta, no si la
+  petición ejecuta en el servidor. `/auth/refresh` y la caída a cookie de `/auth/logout`
+  cierran ese hueco con una comprobación explícita de `Origin` contra el mismo allowlist
+  (`enforce_same_origin`, `sdd/specs/auth-tenancy.md`) — una defensa de aplicación, no algo
+  que esta postura HTTP genérica resuelva por sí misma.
+
 ## Key files
 
 - `backend/app/core/response_headers.py` — `NoSniffMiddleware`, el sello y el residuo nombrado.
@@ -179,7 +208,9 @@ bien en una ruta y se olvidaron en las demás.
 - `backend/app/main.py` — el montaje de ambos, su orden, y el proveedor por ruta con los cuatro
   techos y el riesgo aceptado.
 - `backend/app/core/config.py` — `photo_upload_max_bytes`, `csv_import_max_bytes`,
-  `request_max_bytes`.
+  `request_max_bytes`, `backend_cors_allowed_origin_regex`.
+- `backend/tests/test_cors.py` — el allowlist reflejado/rechazado, el truco de sufijo, el
+  origen `PORT_OFFSET` de dev, y el `413` con cabeceras CORS.
 - `sdd/steering/security.md` regla 14 — hogar único del contrato de «rechazar antes de leer»;
   `sdd/steering/backend.md` lo enlaza desde su sección *Don'ts*.
 - `backend/app/integrations/api/signed_media.py` — el punto de salida único de las dos rutas

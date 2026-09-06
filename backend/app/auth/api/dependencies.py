@@ -1,8 +1,10 @@
 """Authentication and authorisation dependencies (R3, R4, design D7/D12/D16)."""
 
 import ipaddress
+import re
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -23,6 +25,7 @@ from app.auth.application.use_cases import (
     LogoutUseCase,
     RefreshTokenUseCase,
 )
+from app.auth.api.schemas import SESSION_REFRESH_COOKIE
 from app.auth.domain.context import RequestContext
 from app.auth.domain.exceptions import InvalidTokenError, PasswordChangeRequiredError
 from app.auth.domain.policy import Permission, is_allowed
@@ -137,6 +140,86 @@ def get_client_ip(request: Request) -> str:
     # zone is rejected, which is exactly why a cheap assertion belongs here: the next
     # surprising-but-valid address form must fail closed rather than reach the sinks.
     return canonical if len(canonical) <= MAX_CLIENT_IP_LENGTH else LOOPBACK
+
+
+def resolve_cookie_secure(request: Request) -> bool:
+    """Whether the refresh cookie should carry `Secure` (design D2, R7.2, R7.3).
+
+    Decided by the request's EXTERNAL scheme, resolved by `request.url.scheme == "https"`
+    alone (design D2).
+
+    **Corrected 2026-09-04** (the run panel's `sdd-security` found this docstring's
+    original premise factually wrong against the installed uvicorn 0.51.0 source):
+    uvicorn's `ProxyHeadersMiddleware` rewrites **both** `scope["client"]` (from
+    `X-Forwarded-For`) **and** `scope["scheme"]` (from `X-Forwarded-Proto`) under the exact
+    same `--forwarded-allow-ips` trust gate (`sdd/specs/auth-tenancy.md` §Identificación
+    del cliente) — it was wrong to claim the scheme rewrite doesn't happen. So
+    `request.url.scheme` is already proxy-aware and trust-gated, the same way
+    `get_client_ip` above already trusts `scope["client"]` rather than reading
+    `X-Forwarded-For` itself. A second, manual `request.headers.get("x-forwarded-proto")`
+    read would be redundant on the trusted path and, worse, ungated on the untrusted one:
+    the dev stage pins `--forwarded-allow-ips 127.0.0.1` in `backend/devops/Dockerfile` —
+    not its absence — so `docker-compose.yml` can publish `:8000` on every interface and
+    still trust nobody but the container's own loopback; a LAN peer reaching the published
+    port directly does not present as loopback, so uvicorn never rewrites the scheme for
+    it regardless of what header it sends. A raw header read would bypass that gate
+    entirely and let any LAN peer force `secure=True` by spoofing it, breaking that
+    standing principle for exactly the header `get_client_ip`'s own docstring warns
+    against trusting unconditionally. This helper therefore reads `request.url.scheme`
+    only.
+
+    `True` in dev over plain HTTP would make the browser silently drop the cookie;
+    unconditionally `True` would also break local `make up PORT_OFFSET=<n>`, which is why
+    this is a per-request decision and not a setting (rejected at design gate).
+    """
+    return request.url.scheme == "https"
+
+
+def is_same_origin_allowed(request: Request) -> bool:
+    """Whether this request's `Origin` (if any) is on the CORS allowlist.
+
+    The shared primitive behind `enforce_same_origin` (which raises on `False`) and
+    `/auth/logout`'s cookie-fallback check (which folds `False` into "nothing to
+    revoke" instead — it can never raise, design D6/D6b). `CORSMiddleware` only gates
+    whether the BROWSER may read the response; a cross-origin `POST` with a body
+    simple enough to skip preflight still reaches the handler and executes.
+    `SameSite` (`Lax` or `Strict`, see `emit_refresh_cookie`) cannot help either: both
+    flag the cookie for *cross-site* delivery only, and a sibling origin under the
+    same registrable domain (`https://*.digitalsec.work`) is *same-site* by
+    definition — the cookie rides along regardless of which value is set. The only
+    signal that distinguishes "this frontend" from a same-site sibling is the
+    `Origin` the browser reports, checked here against the exact allowlist CORS
+    already reflects (`settings.backend_cors_allowed_origin_regex`).
+
+    A request with no `Origin` header at all is treated as allowed: per the Fetch
+    standard a browser always attaches one to a `POST`, same-origin or not, and a
+    script cannot suppress it (`Origin` is a forbidden header name) — so its absence
+    means this call did not originate from a browser's `fetch`/`XHR`/form in the
+    first place, and there is nothing here to gate. This is the same non-goal
+    `get_client_ip`'s docstring already accepts for a differently-shaped input.
+    """
+    origin = request.headers.get("origin")
+    if origin is None:
+        return True
+    return re.fullmatch(settings.backend_cors_allowed_origin_regex, origin) is not None
+
+
+def enforce_same_origin(request: Request) -> None:
+    """Rejects a same-site-but-cross-origin `POST /auth/refresh` (security panel finding,
+    review round 4 of `auth-session-persistence`: CORS and `SameSite` both fail to cover
+    this) — see `is_same_origin_allowed` for the shared check this wraps.
+
+    `/auth/logout` does NOT use this dependency: design D6/D6b commits it to never
+    answering `401` for an authentication reason, and raising here would break that
+    invariant. It calls `is_same_origin_allowed` directly instead, in two places: the
+    cookie-fallback branch of `get_logout_subject` folds a mismatch into the existing
+    "nothing to revoke" `204`, and the router additionally skips the `Set-Cookie`
+    deletion in that case (review round 6 — an earlier version of this fix left the
+    deletion unconditional, so a forged-Origin request could not revoke the session
+    but could still evict the victim's cookie from their browser).
+    """
+    if not is_same_origin_allowed(request):
+        raise InvalidTokenError("Origin is not allowed to use this credential")
 
 
 def get_token_codec() -> JwtTokenCodec:
@@ -453,6 +536,113 @@ def require(permission: Permission) -> Callable[..., Awaitable[AuthenticatedRequ
 
     setattr(dependency, REQUIRED_PERMISSION_ATTR, permission)
     return dependency
+
+
+@dataclass(frozen=True)
+class LogoutSubject:
+    """What `/auth/logout` revokes: just enough to call `LogoutUseCase.execute`."""
+
+    tenant_id: uuid.UUID | None
+    family_id: uuid.UUID
+
+
+async def get_logout_subject(
+    request: Request,
+    session: SessionDep,
+    codec: CodecDep,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> LogoutSubject | None:
+    """Resolves who `/auth/logout` should revoke (review: `sdd-security`, R3.1/R6.2).
+
+    A Bearer access token, when presented AND valid, is authenticated exactly as every
+    other endpoint does (`get_authenticated_request`) — unchanged behaviour. In every
+    other case — no Bearer at all, OR a Bearer that fails to authenticate (expired,
+    malformed, an unknown/inactive user or tenant) — this falls back to the refresh
+    cookie itself as the credential, the same stance `/auth/refresh` already takes
+    ("the token IS the credential"): the family it names is decoded directly from the
+    JWT's `fam`/`tenant_id` claims, with no repository round trip, since revocation
+    does not need to know whether the session row is still live — `revoke_family` is
+    a no-op update either way.
+
+    **A failed Bearer falls through instead of raising — this is the fix for a gap
+    the panel found in the first version of this function (added 2026-09-05, same
+    day, review round 2 of `get_logout_subject` itself)**: that version only
+    fell back when NO Bearer was presented at all. A stale-but-present Bearer (the
+    common case: an access token that expired without ever being cleared) still hit
+    `get_authenticated_request` and raised — reaching the client's ordinary
+    401-recovery, which calls `refreshSession()` before retrying, rotating and
+    re-extending the refresh cookie by a fresh week. If THAT retry then failed, the
+    browser was left holding a freshly-extended, still-valid session — the exact
+    failure mode this dependency exists to close, just reached through a different
+    door (a stale Bearer instead of an empty store). Falling through here means a
+    stale Bearer alone can never trigger that refresh-before-revoke round trip for
+    logout specifically: whatever the Bearer's fate, revocation is attempted straight
+    off the cookie.
+
+    Calls `bind_session_to_tenant` in the cookie branch when the decoded `tenant_id`
+    is not `None` (added 2026-09-05, review: `sdd-security` — the unmarked-session
+    state `steering/security.md` rule 1 names is the SUPER_ADMIN, `tenant_id is None`
+    case alone; a cookie naming a real tenant left the session unmarked too, a second,
+    undocumented way to reach that state). `revoke_family` already filters on the
+    explicit `tenant_id` argument regardless, so this adds a second, defense-in-depth
+    layer rather than fixing a reachable cross-tenant path — `LogoutUseCase.execute`
+    takes no other statement that could run unscoped today — but it keeps this route
+    on the same one mechanism every other tenant-scoped write relies on, so a future
+    edit to it inherits the global filter rather than needing its own tenant_id
+    argument to get it right.
+
+    Tagged with `MANAGE_OWN_SESSION` for `test_route_authorization.py`'s structural
+    walk even though the cookie path checks no role: that permission is in
+    `_SELF_SERVICE`, held by every role there is (`policy.py`), so there is no
+    identity a valid credential — of either kind — could resolve to that this would
+    ever refuse. Authenticating by the cookie alone is therefore equivalent to being
+    authorised, unlike every other endpoint `require(...)` guards.
+
+    Returns `None` when there is nothing to revoke — no working Bearer AND (no cookie,
+    a cookie whose `Origin` is not on the CORS allowlist, or a cookie that fails to
+    decode: expired, tampered, wrong signature) — so the endpoint's existing
+    idempotent-204 behaviour (R3.2) covers this case too rather than turning a failed
+    credential into a new, distinguishable error surface. The Origin check is the CSRF
+    fix from review round 4 (security panel finding): folded in here, inline, rather
+    than as a separate `Depends(enforce_same_origin)` like `/auth/refresh` uses, because
+    that helper raises on a mismatch and this route must not. `PasswordChangeRequiredError`
+    is not caught here: `/auth/logout` is on
+    `PASSWORD_CHANGE_EXEMPT`, so `get_authenticated_request` never raises it for this
+    route — an unrelated exception type surfacing here would be a genuine bug, not a
+    failed-credential case to fall through on.
+    """
+    if credentials is not None:
+        try:
+            authenticated = await get_authenticated_request(request, session, codec, credentials)
+        except InvalidTokenError:
+            authenticated = None
+        if authenticated is not None:
+            return LogoutSubject(
+                tenant_id=authenticated.context.tenant_id, family_id=authenticated.family_id
+            )
+
+    token = request.cookies.get(SESSION_REFRESH_COOKIE)
+    if token is None:
+        return None
+    if not is_same_origin_allowed(request):
+        # CSRF from a same-site-but-cross-origin sibling (security panel finding, review
+        # round 4): `SameSite` cannot distinguish these, and design D6/D6b forbids this
+        # route from ever answering 401 for an auth reason, so a bad Origin is folded
+        # into "nothing to revoke" rather than raised — see `enforce_same_origin` for the
+        # full rationale. The router (`logout()`) makes the same check separately before
+        # deleting the cookie (review round 6): this dependency only decides whether to
+        # revoke, not whether the response purges the browser's cookie.
+        return None
+    try:
+        claims = codec.decode_refresh(token)
+    except InvalidTokenError:
+        return None
+    if claims.tenant_id is not None:
+        bind_session_to_tenant(session, claims.tenant_id)
+    return LogoutSubject(tenant_id=claims.tenant_id, family_id=claims.family_id)
+
+
+setattr(get_logout_subject, REQUIRED_PERMISSION_ATTR, Permission.MANAGE_OWN_SESSION)
 
 
 def require_any(*permissions: Permission) -> Callable[..., Awaitable[AuthenticatedRequest]]:

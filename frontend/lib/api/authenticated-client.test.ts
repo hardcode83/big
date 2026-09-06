@@ -21,7 +21,7 @@ function unauthorizedResponse(): Response {
 
 describe("createAuthenticatedClients onUnauthorized", () => {
   it("does not clobber status to 'expired' when tokens are live after the session-expired listener runs (a winning login)", async () => {
-    setSessionTokens({ accessToken: "old-access", refreshToken: "old-refresh" });
+    setSessionTokens({ accessToken: "old-access" });
 
     const statuses: string[] = [];
     const fetchImpl = vi.fn().mockResolvedValue(unauthorizedResponse());
@@ -34,7 +34,7 @@ describe("createAuthenticatedClients onUnauthorized", () => {
         // By the time the real listener (auth-provider.tsx) runs, a concurrent login
         // may already have installed a new pair (D5's "login wins" branch) — simulated
         // directly here rather than depending on refresh-coordinator's cleanup order.
-        setSessionTokens({ accessToken: "new-access", refreshToken: "new-refresh" });
+        setSessionTokens({ accessToken: "new-access" });
       },
     });
 
@@ -44,7 +44,7 @@ describe("createAuthenticatedClients onUnauthorized", () => {
   });
 
   it("still transitions status to 'expired' when no live tokens remain (genuine expiration)", async () => {
-    setSessionTokens({ accessToken: "old-access", refreshToken: "old-refresh" });
+    setSessionTokens({ accessToken: "old-access" });
 
     const statuses: string[] = [];
     const fetchImpl = vi.fn().mockResolvedValue(unauthorizedResponse());

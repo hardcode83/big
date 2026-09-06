@@ -155,6 +155,20 @@ function resolvePath(path: string, pathParams: Record<string, string | number> =
   });
 }
 
+/**
+ * True for the auth endpoints whose refresh cookie needs to travel with the
+ * request (design D9) — `credentials: "include"` on every other endpoint
+ * would widen credential exposure the `Path=/api/v1/auth` cookie attribute
+ * already scopes away.
+ */
+export function needsCredentials(path: string): boolean {
+  return new Set([
+    "/api/v1/auth/login",
+    "/api/v1/auth/refresh",
+    "/api/v1/auth/logout",
+  ]).has(path);
+}
+
 function appendQuery(
   path: string,
   query: Record<string, string | number | boolean | null | undefined> = {},
@@ -204,22 +218,33 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         // a recovered 401 — it is replayable, unlike a stream.
         body: formData ?? (hasBody ? JSON.stringify(body) : undefined),
         signal,
+        ...(needsCredentials(String(path)) ? { credentials: "include" as const } : {}),
       });
 
       const hadAccessToken = /^Bearer\s+\S+$/i.test(
         finalHeaders.get("Authorization") ?? "",
       );
-      const authEndpoint = new Set([
+      // login's and refresh's own 401s mean "these credentials/this cookie are
+      // invalid", not "the access token used to call this endpoint expired" —
+      // recovering by refreshing and retrying would be nonsensical for either.
+      // logout is deliberately NOT in this set — it still needs
+      // `credentials: "include"` above (via `needsCredentials`) to carry and clear the
+      // cookie — but as of D6b (`get_logout_subject`,
+      // `backend/app/auth/api/dependencies.py`) a stale/expired Bearer no longer makes
+      // logout answer 401 at all: it falls through to the refresh cookie as the
+      // credential instead. So this exclusion is inert today, not a fix for a reachable
+      // case — kept anyway as defence in depth against a future change to that
+      // fallthrough, and because there is no upside to excluding it.
+      const recoveryExempt = new Set([
         "/api/v1/auth/login",
         "/api/v1/auth/refresh",
-        "/api/v1/auth/logout",
       ]).has(String(path));
 
       if (
         response.status === 401 &&
         options.onUnauthorized &&
         hadAccessToken &&
-        !authEndpoint &&
+        !recoveryExempt &&
         retryCount === 0
       ) {
         const recovered = await options.onUnauthorized({
