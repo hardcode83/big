@@ -45,6 +45,8 @@
     "email": "Correo electrónico",
     "phone": "Teléfono",
     "preferredLanguage": "Idioma",
-    "openReservation": "Abrir reserva"
+    "openReservation": "Abrir reserva",
+    "propertyCode": "Código interno",
+    "propertyName": "Nombre de la propiedad"
   }
 }

@@ -29,10 +29,18 @@ const SAMPLE = {
       status: "PENDING",
       checkInDate: "2026-08-12",
       checkOutDate: "2026-08-15",
-      guestId: null,
+      // A real (non-null) guestId paired with a null guestFullName: this is
+      // the regression-catching shape for R3.2 — if the Guest cell ever
+      // fell back to `row.guestId ?? "—"` instead of `row.guestFullName ??
+      // "—"`, this literal value would leak into the DOM instead of the
+      // em-dash.
+      guestId: "guest-uuid-x",
       channel: "MANUAL",
       currency: "EUR",
       grossAmount: "612.50",
+      propertyName: null,
+      propertyInternalCode: null,
+      guestFullName: null,
     },
   ],
   page: 1,
@@ -168,7 +176,7 @@ describe("ReservationsView (R2, R3.5, R4, R5.2, R5.4)", () => {
     );
   });
 
-  it("guestId null renders as an em-dash, not the id", () => {
+  it("guestFullName/propertyInternalCode null render as em-dashes, never the guestId/propertyId (R2.2, R3.2)", () => {
     useReservationsMock.mockReturnValue({
       isPending: false,
       isError: false,
@@ -178,8 +186,42 @@ describe("ReservationsView (R2, R3.5, R4, R5.2, R5.4)", () => {
     renderView();
     // The row index is the guest cell with the em-dash (the link inside
     // has `aria-label="Abrir reserva"`, so the cell's accessible name is
-    // that string, not the dash — the dash is the visible text).
-    expect(screen.getByText("—")).toBeInTheDocument();
+    // that string, not the dash — the dash is the visible text). The
+    // property cell renders a second em-dash for the same reason.
+    expect(screen.getAllByText("—")).toHaveLength(2);
+    expect(document.body.textContent ?? "").not.toContain("property-1");
+    // SAMPLE's guestId is a real (non-null) value while guestFullName is
+    // null: the Guest cell must still show the em-dash and must NOT fall
+    // back to rendering the raw guestId.
+    expect(document.body.textContent ?? "").not.toContain("guest-uuid-x");
+  });
+
+  it("propertyInternalCode/propertyName/guestFullName present render the code/name, not the raw UUIDs (R2.1, R3.1)", () => {
+    useReservationsMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: {
+        ...SAMPLE,
+        data: [
+          {
+            ...SAMPLE.data[0],
+            guestId: "guest-1",
+            guestFullName: "Ada Lovelace",
+            propertyInternalCode: "PROP-001",
+            propertyName: "Casa Ada",
+          },
+        ],
+      },
+      refetch: vi.fn(),
+    });
+    renderView();
+    expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
+    const propertyCell = screen.getByText("PROP-001");
+    expect(propertyCell).toBeInTheDocument();
+    expect(propertyCell).toHaveAttribute("title", "Casa Ada");
+    // Never the raw UUIDs as fallback.
+    expect(document.body.textContent ?? "").not.toContain("property-1");
+    expect(document.body.textContent ?? "").not.toContain("guest-1");
   });
 
   it("the table does NOT include internal_notes or special_requests (detail-only)", () => {
@@ -265,8 +307,9 @@ describe("ReservationsView (R2, R3.5, R4, R5.2, R5.4)", () => {
     });
     renderView();
     // At least one em-dash — the amount cell now paints "—" when the amount
-    // is null. The guestId null already contributes one, so `>= 1` is the
-    // minimum required to satisfy this assertion without coupling to that.
+    // is null. SAMPLE's guestFullName null already contributes one, so
+    // `>= 1` is the minimum required to satisfy this assertion without
+    // coupling to that.
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
     // No stray currency code: the previous `?? ""` pattern left " EUR" in
     // the DOM. Asserting not.toContain on the body text is the strict gate.

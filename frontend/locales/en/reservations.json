@@ -45,6 +45,8 @@
     "email": "Email",
     "phone": "Phone",
     "preferredLanguage": "Language",
-    "openReservation": "Open reservation"
+    "openReservation": "Open reservation",
+    "propertyCode": "Internal code",
+    "propertyName": "Property name"
   }
 }

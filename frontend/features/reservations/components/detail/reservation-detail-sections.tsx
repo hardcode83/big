@@ -43,6 +43,30 @@ export function DetailHeader({
   );
 }
 
+export function DetailPropertyBlock({
+  propertyInternalCode,
+  propertyName,
+}: {
+  propertyInternalCode: string | null;
+  propertyName: string | null;
+}) {
+  const { t } = useTranslation("reservations");
+  return (
+    <section aria-label={t("fields.property")}>
+      <dl className="grid grid-cols-2 gap-2 text-sm">
+        <div>
+          <dt className="text-muted-foreground">{t("fields.propertyCode")}</dt>
+          <dd>{propertyInternalCode ?? "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">{t("fields.propertyName")}</dt>
+          <dd>{propertyName ?? "—"}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
 export function DetailStayBlock({
   checkInDate,
   checkOutDate,
@@ -246,6 +270,12 @@ export function DetailNotesBlock({
 export function composeDetailSections(detail: ReservationDetailDto) {
   return {
     header: <DetailHeader id={detail.id} status={detail.status} channel={detail.channel} />,
+    property: (
+      <DetailPropertyBlock
+        propertyInternalCode={detail.propertyInternalCode}
+        propertyName={detail.propertyName}
+      />
+    ),
     stay: (
       <DetailStayBlock
         checkInDate={detail.checkInDate}
