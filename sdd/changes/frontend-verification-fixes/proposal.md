@@ -122,9 +122,13 @@ Acceptance criteria:
    driver usado, `PORT_OFFSET`, si fue contra `next dev` o contra el build de producción, errores de
    consola, si aparecen claves `__react*` en el documento, y si un clic en el conmutador de idioma
    muta el DOM.
-2. IF la hidratación se completa, THEN THE SYSTEM SHALL declararlo como medido con su fecha y el
-   hallazgo 2 SHALL quedar cerrado como falso en la prosa viva (`sdd/project.md`, `sdd/roadmap.md` y
-   `sdd/roadmap/frontend-verification-fixes.md`).
+2. IF la hidratación se completa, THEN THE SYSTEM SHALL declararlo como medido con su fecha, en una
+   sola casa (`sdd/project.md`), y `sdd/roadmap.md` y `sdd/roadmap/frontend-verification-fixes.md`
+   SHALL apuntar a ese párrafo en vez de repetir el veredicto — una sola casa por hecho (regla 1),
+   para que el hallazgo 2 no pueda quedar "cerrado como falso" en un sitio y sin tocar en otro.
+   (Enmienda, design D9, 2026-09-05: la redacción original pedía las tres casas declarando el cierre
+   por separado; D9 decidió que repetirlo tres veces es la misma redundancia que el hallazgo 2
+   arregla en otro sitio.)
 3. IF la hidratación no se completa, THEN THE SYSTEM SHALL registrar la condición exacta bajo la que
    falla y SHALL NOT atribuirla a una causa que la pasada no haya medido.
 4. THE SYSTEM SHALL usar esa misma pasada para verificar R1 y R2 a mano en las cuatro combinaciones
