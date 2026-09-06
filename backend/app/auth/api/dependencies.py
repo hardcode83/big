@@ -175,36 +175,50 @@ def resolve_cookie_secure(request: Request) -> bool:
     return request.url.scheme == "https"
 
 
+def is_same_origin_allowed(request: Request) -> bool:
+    """Whether this request's `Origin` (if any) is on the CORS allowlist.
+
+    The shared primitive behind `enforce_same_origin` (which raises on `False`) and
+    `/auth/logout`'s cookie-fallback check (which folds `False` into "nothing to
+    revoke" instead — it can never raise, design D6/D6b). `CORSMiddleware` only gates
+    whether the BROWSER may read the response; a cross-origin `POST` with a body
+    simple enough to skip preflight still reaches the handler and executes.
+    `SameSite` (`Lax` or `Strict`, see `emit_refresh_cookie`) cannot help either: both
+    flag the cookie for *cross-site* delivery only, and a sibling origin under the
+    same registrable domain (`https://*.digitalsec.work`) is *same-site* by
+    definition — the cookie rides along regardless of which value is set. The only
+    signal that distinguishes "this frontend" from a same-site sibling is the
+    `Origin` the browser reports, checked here against the exact allowlist CORS
+    already reflects (`settings.backend_cors_allowed_origin_regex`).
+
+    A request with no `Origin` header at all is treated as allowed: per the Fetch
+    standard a browser always attaches one to a `POST`, same-origin or not, and a
+    script cannot suppress it (`Origin` is a forbidden header name) — so its absence
+    means this call did not originate from a browser's `fetch`/`XHR`/form in the
+    first place, and there is nothing here to gate. This is the same non-goal
+    `get_client_ip`'s docstring already accepts for a differently-shaped input.
+    """
+    origin = request.headers.get("origin")
+    if origin is None:
+        return True
+    return re.fullmatch(settings.backend_cors_allowed_origin_regex, origin) is not None
+
+
 def enforce_same_origin(request: Request) -> None:
     """Rejects a same-site-but-cross-origin `POST /auth/refresh` (security panel finding,
     review round 4 of `auth-session-persistence`: CORS and `SameSite` both fail to cover
-    this).
-
-    `CORSMiddleware` only gates whether the BROWSER may read the response; a cross-origin
-    `POST` with a body simple enough to skip preflight still reaches this handler and
-    executes. `SameSite` (`Lax` or `Strict`, see `emit_refresh_cookie`) cannot help either:
-    both flag the cookie for *cross-site* delivery only, and a sibling origin under the
-    same registrable domain (`https://*.digitalsec.work`) is *same-site* by definition — the
-    cookie rides along regardless of which value is set. The only signal that distinguishes
-    "this frontend" from a same-site sibling is the `Origin` the browser reports, checked
-    here against the exact allowlist CORS already reflects
-    (`settings.backend_cors_allowed_origin_regex`).
-
-    A request with no `Origin` header at all is let through: per the Fetch standard a
-    browser always attaches one to a `POST`, same-origin or not, and a script cannot
-    suppress it (`Origin` is a forbidden header name) — so its absence means this call did
-    not originate from a browser's `fetch`/`XHR`/form in the first place, and there is
-    nothing here to gate. This is the same non-goal `get_client_ip`'s docstring already
-    accepts for a differently-shaped input.
+    this) — see `is_same_origin_allowed` for the shared check this wraps.
 
     `/auth/logout` does NOT use this dependency: design D6/D6b commits it to never
     answering `401` for an authentication reason, and raising here would break that
-    invariant. Its own cookie-fallback branch in `get_logout_subject` applies the same
-    check inline and folds a mismatch into the existing "nothing to revoke" `204`
-    instead — the attacker's forged Origin becomes a silent no-op, not a new error shape.
+    invariant. It calls `is_same_origin_allowed` directly instead, in two places: the
+    cookie-fallback branch of `get_logout_subject` folds a mismatch into the existing
+    "nothing to revoke" `204`, and the router additionally skips the `Set-Cookie`
+    deletion in that case (review round 6 — an earlier version of this fix left the
+    deletion unconditional, so a forged-Origin request could not revoke the session
+    but could still evict the victim's cookie from their browser).
     """
-    origin = request.headers.get("origin")
-    if origin is not None and re.fullmatch(settings.backend_cors_allowed_origin_regex, origin) is None:
+    if not is_same_origin_allowed(request):
         raise InvalidTokenError("Origin is not allowed to use this credential")
 
 
@@ -610,13 +624,14 @@ async def get_logout_subject(
     token = request.cookies.get(SESSION_REFRESH_COOKIE)
     if token is None:
         return None
-    origin = request.headers.get("origin")
-    if origin is not None and re.fullmatch(settings.backend_cors_allowed_origin_regex, origin) is None:
+    if not is_same_origin_allowed(request):
         # CSRF from a same-site-but-cross-origin sibling (security panel finding, review
         # round 4): `SameSite` cannot distinguish these, and design D6/D6b forbids this
         # route from ever answering 401 for an auth reason, so a bad Origin is folded
-        # into "nothing to revoke" rather than raised — see `enforce_same_origin`, which
-        # `/auth/refresh` uses for the same allowlist check, for the full rationale.
+        # into "nothing to revoke" rather than raised — see `enforce_same_origin` for the
+        # full rationale. The router (`logout()`) makes the same check separately before
+        # deleting the cookie (review round 6): this dependency only decides whether to
+        # revoke, not whether the response purges the browser's cookie.
         return None
     try:
         claims = codec.decode_refresh(token)

@@ -388,7 +388,8 @@ async def test_logout_with_no_bearer_and_a_disallowed_origin_cookie_is_a_no_op(
     api, db_session, tenant_a
 ) -> None:
     """`auth-session-persistence` design D6c: a same-site sibling forcing a `POST
-    /auth/logout` with the victim's cookie must not actually revoke the session.
+    /auth/logout` with the victim's cookie must not actually revoke the session —
+    and, since review round 6's fix, must not evict the victim's cookie either.
 
     Unlike `/auth/refresh`, `/auth/logout` cannot answer `401` for this (D6/D6b's
     never-401 invariant) — the disallowed `Origin` is folded into "nothing to revoke"
@@ -404,10 +405,18 @@ async def test_logout_with_no_bearer_and_a_disallowed_origin_cookie_is_a_no_op(
 
     assert logout.status_code == 204
     assert logout.content == b""
+    # The other half of the round-6 fix: a disallowed Origin must not purge the
+    # cookie either, or a CSRF attacker could still force a re-login even though
+    # the session survives server-side. No Set-Cookie at all on this response —
+    # neither a rotation (there's nothing to rotate on logout) nor a deletion.
+    assert "set-cookie" not in logout.headers
+    # httpx's cookie jar never saw a deletion to apply, so this holds even without
+    # re-setting it — kept explicit so the test still passes if the client ever
+    # stops tracking cookies across requests within the same test.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie)
 
     # Proof nothing was actually revoked: the same cookie the forged request carried
     # still rotates cleanly through a legitimate (no cross-origin Origin) refresh.
-    api.cookies.set(SESSION_REFRESH_COOKIE, cookie)
     still_valid = await api.post("/api/v1/auth/refresh", json={})
     assert still_valid.status_code == 200
 

@@ -18,6 +18,7 @@ from app.auth.api.dependencies import (
     get_logout_use_case,
     get_refresh_use_case,
     get_request_password_reset_use_case,
+    is_same_origin_allowed,
     now_utc,
     require,
     resolve_cookie_secure,
@@ -157,6 +158,7 @@ async def refresh(
     responses=AUTHENTICATED_RESPONSES,
 )
 async def logout(
+    request: Request,
     response: Response,
     subject: Annotated[LogoutSubject | None, Depends(get_logout_subject)],
     use_case: Annotated[LogoutUseCase, Depends(get_logout_use_case)],
@@ -170,12 +172,22 @@ async def logout(
             family_id=subject.family_id,
             now=now_utc(),
         )
-    # Mutates and returns the SAME `response` FastAPI injected, rather than
-    # constructing a fresh `Response(...)`: when an endpoint returns its own `Response`
-    # instance, FastAPI sends that instance as-is and does NOT merge headers set on the
-    # injected dependency — a fresh instance here would silently drop the
-    # `Set-Cookie` deletion.
-    response.delete_cookie(SESSION_REFRESH_COOKIE, path="/api/v1/auth")
+    # NOT unconditional (review round 6, security panel finding): a same-site-but-
+    # cross-origin caller whose Origin get_logout_subject already rejected (folding it
+    # into "nothing to revoke" above) must not be able to purge the victim's cookie
+    # either — an earlier version deleted it here regardless of subject/Origin, so a
+    # forged-Origin request could not revoke the session but could still force the
+    # browser to drop its cookie and lose the persisted session. A legitimate caller
+    # (allowed Origin, or no Origin at all — a non-browser client) still gets the
+    # deletion unconditionally, whatever subject resolved to, preserving R3.2's
+    # idempotent cleanup for every real case (no cookie, garbage cookie, stale Bearer).
+    if is_same_origin_allowed(request):
+        # Mutates and returns the SAME `response` FastAPI injected, rather than
+        # constructing a fresh `Response(...)`: when an endpoint returns its own
+        # `Response` instance, FastAPI sends that instance as-is and does NOT merge
+        # headers set on the injected dependency — a fresh instance here would silently
+        # drop the `Set-Cookie` deletion.
+        response.delete_cookie(SESSION_REFRESH_COOKIE, path="/api/v1/auth")
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
 
