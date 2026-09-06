@@ -25,7 +25,7 @@ La fuente del problema, verificada en código:
   alcance, sin más razón que el recorte de ese change.
 
 Esta entrada reabre ese recorte: cambia el transporte del refresh token a una cookie
-`httpOnly` + `Secure` + `SameSite=Lax` (invisible a JS, inmune al vector de robo que
+`httpOnly` + `Secure` + `SameSite=Strict` (invisible a JS, inmune al vector de robo que
 memoria-pura ya evita) y deja el access token de vida corta donde está hoy. Una pestaña
 nueva o un reload dispara un refresh silencioso contra `/auth/refresh` leyendo la
 cookie, sin que el frontend toque el refresh token en ningún momento.
@@ -37,7 +37,7 @@ Roadmap note: `sdd/roadmap/auth-session-persistence.md` (entrada registrada el
 ## What changes
 
 - `POST /api/v1/auth/login`: deja de devolver `refresh_token` en el body; emite una
-  cookie `httpOnly Secure SameSite=Lax` con nombre `autohostai.session.refresh` y
+  cookie `httpOnly Secure SameSite=Strict` con nombre `autohostai.session.refresh` y
   `Max-Age` igual a la expiración vigente del refresh token (7 días, según PRD).
   El access token **sigue** viajando en el body porque JS debe leerlo para llevarlo
   a memoria.
@@ -70,7 +70,7 @@ Roadmap note: `sdd/roadmap/auth-session-persistence.md` (entrada registrada el
 ### R1 — `/auth/login` emite refresh en cookie httpOnly
 
 **As a** backend de autenticación, **I want** emitir el refresh token en una
-cookie `httpOnly Secure SameSite=Lax` en la response de `/auth/login`,
+cookie `httpOnly Secure SameSite=Strict` en la response de `/auth/login`,
 **so that** ningún código JS pueda leerlo ni exfiltrarlo vía XSS, y el
 navegador lo envíe automáticamente en cada request al backend.
 
@@ -79,7 +79,7 @@ Acceptance criteria:
 1. WHEN `POST /api/v1/auth/login` recibe credenciales válidas, THE SYSTEM SHALL
    responder 200 con `access_token` en el body **y** un header `Set-Cookie` cuyo
    nombre es `autohostai.session.refresh`, con los atributos `HttpOnly`,
-   `SameSite=Lax`, `Path=/api/v1/auth`, `Max-Age=604800` (igual a la expiración
+   `SameSite=Strict`, `Path=/api/v1/auth`, `Max-Age=604800` (igual a la expiración
    vigente del refresh token) y `Secure` cuando el request entrante usó HTTPS.
 2. WHEN la response de `/auth/login` se serializa, THE SYSTEM SHALL NOT incluir
    un campo `refresh_token` en el JSON del body — la transferencia del refresh
@@ -119,10 +119,18 @@ Acceptance criteria:
 1. WHEN `POST /api/v1/auth/logout` recibe una request con la cookie
    `autohostai.session.refresh`, THE SYSTEM SHALL revocar la familia del refresh
    token asociada (comportamiento ya exigido por `auth-tenancy.md`) **y**
-   responder 200 con `Set-Cookie: autohostai.session.refresh=; Max-Age=0;
-   Path=/api/v1/auth` que sobrescribe la cookie con expiración inmediata.
-2. IF no hay cookie o ya fue revocada, THEN THE SYSTEM SHALL responder 200 de
-   todos modos (logout idempotente) y SHALL emitir la `Set-Cookie` de purga.
+   responder **204** (el contrato de logout ya existente, sin cuerpo) con
+   `Set-Cookie: autohostai.session.refresh=; Max-Age=0; Path=/api/v1/auth` que
+   sobrescribe la cookie con expiración inmediata — **corregido 2026-09-06**
+   (panel de QA, quinta/sexta ronda): esta acceptance criterion decía "200"
+   cuando se escribió; `/auth/logout` nunca cambió su código de estado
+   existente y el implementador ya lo había señalado como una discrepancia de
+   redacción a reconciliar (`tasks.md`), no un cambio de comportamiento.
+2. IF no hay cookie o ya fue revocada, THEN THE SYSTEM SHALL responder **204**
+   de todos modos (logout idempotente) y SHALL emitir la `Set-Cookie` de purga
+   — salvo que el `Origin` de la request esté presente y fuera del allowlist de
+   CORS, en cuyo caso SHALL responder **204** sin revocar ni purgar la cookie
+   (CSRF, ver `auth-tenancy.md` y design D6c).
 
 ### R4 — `session-store` deja de guardar el refresh token
 

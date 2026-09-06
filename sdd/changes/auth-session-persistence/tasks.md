@@ -337,8 +337,10 @@
   (`Data & interfaces`) keeps it at 204. Task 3.3 keeps 204 — the requirement's
   substance (revoke + purge the cookie) is unaffected by the status code, and
   changing an established contract with no test or caller asking for it would
-  be an unrelated behavior change. Flag for `/sdd:archive` to reconcile the
-  wording in `proposal.md`/`sdd/specs/auth-tenancy.md`.
+  be an unrelated behavior change. **Reconciled 2026-09-06** (sdd-qa, sixth
+  review pass): `proposal.md`'s R3 now says 204; `sdd/specs/auth-tenancy.md`
+  already described the real 204 contract (fixed in the fifth pass's spec
+  updates), so no further wording drift remained there.
 - **Section 3 landed (2026-09-04)**: `/auth/refresh` now reads
   `SESSION_REFRESH_COOKIE` from `request.cookies` and raises
   `InvalidTokenError("Token is not valid")` (the same 401 `INVALID_TOKEN`
@@ -805,4 +807,29 @@
     findings describe. Not re-triggering a re-review of this reviewer for a
     same-session mixup; flagged for whoever operates the panel dispatch next time a
     session's cwd and the change's actual worktree diverge.
-  - QA: pending at time of writing this entry.
+  - **LOW (`sdd-security`) — the D6c Origin check on `/auth/logout` suppressed
+    revocation but not cookie deletion**: `logout()`'s `response.delete_cookie`
+    ran unconditionally, so a disallowed-Origin CSRF request couldn't revoke
+    the session but could still force the victim's browser to drop its
+    refresh cookie. Fixed: factored the check into a shared
+    `is_same_origin_allowed(request)` helper (`enforce_same_origin` now wraps
+    it); `logout()` skips the cookie deletion only when the Origin is present
+    and disallowed. New assertion in
+    `test_logout_with_no_bearer_and_a_disallowed_origin_cookie_is_a_no_op`
+    that the response carries no `Set-Cookie` at all in that case. Scoped
+    re-run: `tests/auth/test_api.py` → 35 passed.
+  - **FAIL (`sdd-qa`) — two `proposal.md` acceptance criteria drifted from
+    already-reasoned shipped behaviour**: R1.1 still said `SameSite=Lax`
+    (round 4 tightened this to `Strict`, reasoned in schemas.py and design
+    D6c); R3.1 still said logout responds `200` (it has always been `204`,
+    already flagged by the implementer in this file's second-pass notes above
+    as "flag for `/sdd:archive` to reconcile"). Both were pure wording drift,
+    not functional gaps — QA's own criteria table marked every R# met or
+    "partially met" (met in substance, drifted in the literal proposal text).
+    Fixed now rather than deferred to archive: `proposal.md`'s R1 and R3
+    updated to `SameSite=Strict` and `204` respectively, with a note on R3
+    recording the correction; this file's earlier reconciliation note updated
+    to reflect it no longer needs an archive-time fix.
+  - CI/CD, i18n, tenancy, architect, security (after its low fix), qa (after
+    its two low fixes): all **PASS**. Sixth pass is the first to certify the
+    full change with zero outstanding findings across all seven reviewers.
