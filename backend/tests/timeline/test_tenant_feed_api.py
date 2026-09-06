@@ -193,6 +193,38 @@ async def test_the_title_is_composed_in_the_users_language(
 
 
 @pytest.mark.asyncio
+async def test_the_requested_locale_wins_over_the_stored_preference(
+    api, db_session, tenant_a, property_a
+) -> None:
+    """`frontend-verification-fixes` R1: this route merged into `main` after that change
+    forked, still reading `preferred_language` directly. Same fix applied here on catch-up
+    — `X-Locale` must win, matching the per-property sibling's `asks-en-row-es` case."""
+    user = await insert_user(db_session, tenant=tenant_a, preferred_language="es")
+    await _add_event(db_session, tenant_a, property_a)
+
+    response = await api.get(URL, headers={**auth_header(api, user), "X-Locale": "en"})
+
+    entry = response.json()["data"][0]
+    assert entry["title"] == "Cleaning completed"
+
+
+@pytest.mark.asyncio
+async def test_it_is_not_cacheable_by_a_shared_cache(
+    api, db_session, tenant_a, property_a, users_by_role_a
+) -> None:
+    """Same reasoning as the other three locale-dependent routes (security review,
+    round 6/8): `title` varies on `X-Locale`, so the response must not be cacheable by
+    anything but the requester's own client."""
+    await _add_event(db_session, tenant_a, property_a)
+
+    response = await api.get(
+        URL, headers=auth_header(api, users_by_role_a[UserRole.TENANT_OWNER])
+    )
+
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+@pytest.mark.asyncio
 async def test_the_description_is_returned_verbatim(
     api, db_session, tenant_a, users_by_role_a, property_a
 ) -> None:

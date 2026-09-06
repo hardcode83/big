@@ -312,10 +312,14 @@ hacer una por una.
   explícitamente en la consulta de eventos y en la de identidad de propiedad (convención D2 de
   este documento), de modo que ningún evento ni ninguna identidad de otro tenant aparezca en la
   respuesta.
-- THE SYSTEM SHALL componer `title` en el idioma de `preferred_language` del usuario
-  autenticado contra el mismo catálogo de la sección «Textos legibles en el idioma del
+- THE SYSTEM SHALL componer `title` en el idioma que declara la petición vía la cabecera
+  `X-Locale` (`RequestLocaleDep`), degradando a `preferred_language` del usuario autenticado
+  y luego a `es`, contra el mismo catálogo de la sección «Textos legibles en el idioma del
   usuario», y SHALL devolver `description` verbatim, sin traducir, y SHALL NOT traducir los
-  literales canónicos — mismas reglas que la ruta por propiedad, misma función `render()`.
+  literales canónicos — mismas reglas que la ruta por propiedad, misma función `render()`
+  (corregido por `frontend-verification-fixes`, que cerró aquí el mismo defecto que arregló en
+  las otras tres rutas: esta ruta se sumó a `main` con la redacción vieja después de que ese
+  change bifurcara).
 
 ### Textos legibles en el idioma del usuario
 

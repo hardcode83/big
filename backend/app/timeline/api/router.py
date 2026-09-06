@@ -92,9 +92,10 @@ ReadDep = Annotated[AuthenticatedRequest, Depends(require(Permission.READ_PROPER
         "carries `property_id`, `property_name` and `property_internal_code` — the latter "
         "two are `null` on the rare event whose `property_id` does not resolve within the "
         "tenant, which is a valid shape and never a reason to drop the entry or fail the "
-        "request. `title` arrives already composed in the authenticated user's language "
-        "(PRD §10); `description` does not — it carries operator-written text and is "
-        "returned verbatim in whatever language it was typed. The `event_type`, "
+        "request. `title` arrives already composed in the language the request states in "
+        "its `X-Locale` header, falling back to the authenticated user's stored preference "
+        "and then to Spanish (PRD §10); `description` does not — it carries operator-written "
+        "text and is returned verbatim in whatever language it was typed. The `event_type`, "
         "`actor_type` and `severity` literals are never translated. The `metadata` "
         "column is not part of this contract and is never serialised. A tenant with no "
         "properties, or with properties that have no events, answers `200` with an empty "
@@ -102,7 +103,9 @@ ReadDep = Annotated[AuthenticatedRequest, Depends(require(Permission.READ_PROPER
     ),
 )
 async def list_tenant_activity(
+    response: Response,
     authenticated: ReadDep,
+    locale: RequestLocaleDep,
     use_case: Annotated[
         ListTenantActivityUseCase, Depends(get_tenant_activity_use_case)
     ],
@@ -114,6 +117,7 @@ async def list_tenant_activity(
     occurred_from: Annotated[datetime | None, Query(alias="from")] = None,
     occurred_to: Annotated[datetime | None, Query(alias="to")] = None,
 ) -> TenantTimelinePageResponse:
+    response.headers["Cache-Control"] = "private, no-store"
     result = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         filters=TimelineFilters(
@@ -125,7 +129,7 @@ async def list_tenant_activity(
         ),
         page=page,
         per_page=per_page,
-        locale=authenticated.context.preferred_language,
+        locale=locale,
     )
     return TenantTimelinePageResponse.build(result, page=page, per_page=per_page)
 

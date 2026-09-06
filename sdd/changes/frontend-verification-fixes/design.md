@@ -184,6 +184,17 @@ verificado de `RequestContext`: si la guardia D5 cede ante una reescritura no pr
 fallo queda acotado a texto en el idioma incorrecto para el propio lector, nunca a un dato de otro
 tenant ni a una decisión de permisos.
 
+**Tercera enmienda (review, ronda 8, 2026-09-06 — catch-up con `main`):** `dashboard-activity-feed`
+mergeó a `main` tras la bifurcación de este change y añadió `GET /api/v1/timeline`
+(`list_tenant_activity`) leyendo `authenticated.context.preferred_language` directamente — la
+misma forma que D5 prohíbe, en un fichero que la guardia ya escaneaba. El catch-up con `main`
+(merge, no rebase — el mismo criterio que rige en ship) trajo esa ruta a este árbol con la guardia
+en rojo. La resolución fue la misma que R1 aplica a las otras tres: convertir la ruta a
+`RequestLocaleDep` y `Cache-Control: private, no-store`, no ampliar `LOCALE_ROW_READERS` — ensanchar
+la lista blanca por una ruta ajena a este change habría sido la erosión que la propia guardia existe
+para impedir. `sdd/specs/dashboard-api.md`'s SHALL de esta ruta (sección «Feed de actividad a nivel
+de tenant») se corrigió a la vez, con la misma redacción que las otras tres.
+
 ### D6 — El idioma resuelto de i18next se publica en un módulo de `lib/i18n` que `getHeaders` lee
 
 **Chosen:** `frontend/lib/i18n/active-locale.ts` con un `getActiveLocale(): Locale` y un
