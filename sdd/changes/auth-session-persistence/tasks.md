@@ -746,11 +746,63 @@
     ref set by `login`/`refresh`/`logout`/session-expiry) or the unmount `applies`
     flag, both load-bearing per this file's own third-pass notes. Fixed: added the
     missing paragraph to D8.
-  - Backend re-verified on the touched scope only
-    (`tests/auth`, `tests/test_cors.py`, `tests/test_route_authorization.py`) —
-    full-suite and full-frontend-suite re-runs were attempted but both OOM-killed
-    twice by the host under concurrent worktree contention (same class of issue the
-    third pass hit, not a code failure); `uv run pyright .` confirmed 0 new errors
-    from this change's own files. **Re-run the full backend and frontend suites once
-    more before the next `/sdd:review` pass** — the last trustworthy full-suite
-    numbers on record (Section 7 above) predate this pass and the third pass alike.
+  - Backend re-verified on the touched scope: `pytest tests/auth tests/test_cors.py
+    tests/test_route_authorization.py tests/test_openapi_contract.py` → **935 passed, 0
+    failed**. `tsc --noEmit` on the frontend → clean. `lib/api/client.test.ts` → 23
+    passed. Full backend pytest, full frontend vitest, frontend lint, and `uv run
+    pyright .` were all attempted but every one was OOM-killed by the host under
+    concurrent worktree contention (6 stacks sharing one Docker Desktop VM — same
+    class of issue the third pass hit, not a code failure) — **no pyright number was
+    obtained this pass**, unlike what an earlier draft of this note claimed. **Re-run
+    the full backend and frontend suites, frontend lint, and `pyright` once more
+    before the next `/sdd:review` pass** — the last trustworthy full-suite numbers on
+    record (Section 7 above) predate this pass and the third pass alike, and the
+    pyright baseline (907 pre-existing, confirmed 0 new errors as of the third pass's
+    own touched-file diff check) has not been re-confirmed since.
+
+- **`/sdd:review` panel re-review, fifth pass (2026-09-06, fresh full panel run after
+  the fourth pass's fixes were committed)**:
+  - CI/CD, i18n, tenancy, security: **PASS**, no findings — security explicitly
+    re-verified the D6c CSRF fix (re-derived the CORS regex outcomes independently
+    rather than trusting the new tests' assertions) and confirmed no exploitable path
+    in two things it noted but did not report as findings: the deploy compose's
+    unset `BACKEND_CORS_ALLOWED_ORIGIN_REGEX` (falls back to the dev-inclusive
+    default, not exploitable given `SameSite=Strict` + host-only cookie) and
+    `mountRefreshSuperseded` never resetting to `false` (no reachable path found).
+  - **HIGH×2/MEDIUM (`sdd-architect`) — three shipped specs never got the update
+    `proposal.md`'s own "Affected specs" section committed to**: `sdd/specs/frontend-auth-session.md`
+    still said "THE SYSTEM SHALL NOT escribir tokens ni credenciales en … cookies …"
+    (a flat prohibition the shipped `emit_refresh_cookie` directly contradicts) and
+    still described the reload-loses-session behaviour R5's mount-refresh replaced;
+    `sdd/specs/auth-tenancy.md` still showed `/auth/login`/`/auth/refresh` returning
+    a body `refresh_token` and described `/auth/logout` as Bearer-only, with no
+    mention of the D6a/D6b/D6c cookie-fallback or the cookie attribute set at all;
+    `sdd/specs/backend-http-posture.md` had no CORS requirement despite design D1
+    introducing `CORSMiddleware` globally. None of the four prior review passes'
+    fixes had touched `sdd/specs/` at all — every fix so far landed in `docs/`
+    (operational pages) or the change's own `design.md`/`tasks.md`, leaving the
+    living spec of record silently stale. Fixed: rewrote the affected sections of
+    all three specs per proposal.md's prescribed wording (frontend-auth-session.md's
+    persistent-session/mount-refresh requirements and corrected SHALL-NOT line;
+    auth-tenancy.md's login/refresh/logout endpoint descriptions, a new "Transporte
+    del refresh token: cookie, no cuerpo" section with the attribute set, and the
+    logout cookie-fallback/never-401 requirements; backend-http-posture.md's new
+    CORS section plus Purpose-paragraph and Key-files updates).
+  - **Documentation reviewer's 4 findings determined to be false positives**: all
+    four (missing `BACKEND_CORS_ALLOWED_ORIGIN_REGEX` in `.env.example`, stale
+    "Sesión efímera" wording in `docs/frontend-auth-session.md`, `refresh_token` in
+    body in `docs/auth-tenancy.md`'s table, missing `sdd/roadmap/refresh-cookie-host-scoping.md`)
+    were directly checked against the actual files in this worktree and are already
+    correct/present — `.env.example` documents the variable (lines 62-67),
+    `docs/frontend-auth-session.md`'s section is titled "Sesión persistente entre
+    reloads" and describes the cookie model, `docs/auth-tenancy.md`'s table already
+    shows no `refresh_token` in the body, and the roadmap file exists. The evidence
+    paths in two of the four findings were prefixed with the ORCA worktree's path
+    (`/Users/hardcode/orca/workspaces/AutoHostAI/auth-session-persistence/...`) rather
+    than this SDD worktree's — that orca-worktree branch never received this
+    feature's commits at all (confirmed: its HEAD is an unrelated `ci-runner-rollback`
+    docs commit), so reading it reproduces exactly the pre-change state these four
+    findings describe. Not re-triggering a re-review of this reviewer for a
+    same-session mixup; flagged for whoever operates the panel dispatch next time a
+    session's cwd and the change's actual worktree diverge.
+  - QA: pending at time of writing this entry.
