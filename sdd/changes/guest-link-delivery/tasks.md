@@ -1,37 +1,37 @@
 # Tasks: guest-link-delivery
 
-## 1. Domain: token status, notification type, email templates
+## 1. Domain: token status, notification type, email templates <!-- panel: PASS 2026-09-06 -->
 
-- [ ] 1.1 Add `issued_at: datetime` to the `GuestAccessToken` dataclass
+- [x] 1.1 Add `issued_at: datetime` to the `GuestAccessToken` dataclass
       (`backend/app/guests/domain/portal_ports.py:26-38`). [R2, D2]
-- [ ] 1.2 Add `find_live_for_reservation(tenant_id, reservation_id) -> GuestAccessToken | None`
+- [x] 1.2 Add `find_live_for_reservation(tenant_id, reservation_id) -> GuestAccessToken | None`
       to the `GuestAccessTokenRepository` `Protocol` (`portal_ports.py:313-366`). Rewrite the
       class docstring (lines 314-320) to state what now reads by reservation (presence,
       `revoked_at`, `issued_at`) and why rule 3(a)'s "returned once" still holds (`token_hash`
       is never exposed by this method). [R2, D3]
-- [ ] 1.3 Add `NotificationType.GUEST_PORTAL_LINK_DELIVERED` to
+- [x] 1.3 Add `NotificationType.GUEST_PORTAL_LINK_DELIVERED` to
       `backend/app/notifications/domain/enums.py`, declared as an explicit PRD §14 divergence
       like `PASSWORD_RESET_REQUESTED`/`REVIEW_RESPONSE_APPROVED`. Add/confirm a test asserting
       `escalation_for` returns `None` for it (no SLA deadline). [R4.1, R4.2]
-- [ ] 1.4 Add audit action `GUEST_ACCESS_TOKEN_SENT` next to `GUEST_ACCESS_TOKEN_ISSUED`/
+- [x] 1.4 Add audit action `GUEST_ACCESS_TOKEN_SENT` next to `GUEST_ACCESS_TOKEN_ISSUED`/
       `_REVOKED` in the guests audit vocabulary (`backend/app/audit/domain/actions.py` or
       wherever those two already live — follow the existing constant, not a new module).
       [R3.6]
-- [ ] 1.5 New `backend/app/guests/domain/notifications.py`:
+- [x] 1.5 New `backend/app/guests/domain/notifications.py`:
       `render_guest_link_email(language: str) -> tuple[str, str]` returning constant
       `(subject, body)` for `es`/`en`, falling back to `es` for any other value, with **no
       interpolation of guest name, reservation id, or link** — only fixed prose (R3.4). Unit
       tests for both languages and the fallback. [R3.4, D6]
 
-## 2. Infrastructure: repository read, row mapping
+## 2. Infrastructure: repository read, row mapping <!-- panel: PASS 2026-09-06 -->
 
-- [ ] 2.1 Implement `find_live_for_reservation` on `SqlAlchemyGuestAccessTokenRepository`
+- [x] 2.1 Implement `find_live_for_reservation` on `SqlAlchemyGuestAccessTokenRepository`
       (`backend/app/guests/infrastructure/portal_repositories.py`): `WHERE tenant_id = :tenant
       AND reservation_id = :reservation AND revoked_at IS NULL`, same predicate the partial
       unique index enforces. [R2.1, R2.3, D3]
-- [ ] 2.2 Map `issued_at` from `GuestAccessTokenModel.created_at` in the existing row→entity
+- [x] 2.2 Map `issued_at` from `GuestAccessTokenModel.created_at` in the existing row→entity
       conversion. [R2, D2]
-- [ ] 2.3 Integration tests (`backend/tests/guests/`): live token found, no token found, only a
+- [x] 2.3 Integration tests (`backend/tests/guests/`): live token found, no token found, only a
       revoked token found (→ `None`), a live token of another tenant not found (tenant
       isolation, security rule 1). [R2.1, R2.3]
 
@@ -137,3 +137,107 @@
       revoke and confirm the previously-copied link no longer authorizes the portal. <!-- manual -->
 
 ## Implementation Notes
+
+### Section 1 (domain)
+
+- `GuestAccessToken.issued_at: datetime` is a required field (no default), inserted **before**
+  `revoked_at` in `portal_ports.py` (field order: `id, tenant_id, reservation_id, token_hash,
+  issued_at, revoked_at=None`) — `revoked_at` keeps its default, so it must stay last.
+- `GuestAccessTokenRepository.find_live_for_reservation(self, tenant_id: uuid.UUID,
+  reservation_id: uuid.UUID) -> GuestAccessToken | None` — declared on the `Protocol` only
+  (body is `...`), predicate `WHERE reservation_id = … AND revoked_at IS NULL`, same as
+  `revoke_live_for_reservation`'s own predicate (task 2.1 implements it).
+- **Known, expected breakage left for section 2/3 to fix** (not touched here per this section's
+  scope — "do not touch the repository implementation or the use cases"):
+  - `backend/app/guests/infrastructure/portal_repositories.py:91`
+    (`find_live_by_token_hash`'s row→entity mapping) constructs `GuestAccessToken(...)` without
+    `issued_at` → `TypeError` at runtime. Task 2.2 fixes it by selecting
+    `GuestAccessTokenModel.created_at` and mapping `issued_at=row.created_at`.
+  - `backend/app/guests/application/portal.py:521`
+    (`IssueGuestAccessTokenUseCase.execute`, inside the `minted = GuestAccessToken(...)` call)
+    is missing `issued_at` too → same `TypeError`. `now` is already a parameter of `execute`, so
+    the natural fix is `issued_at=now`.
+  - Test fixtures that construct `GuestAccessToken(...)` directly and will need the same one-line
+    fix: `backend/tests/guests/test_portal_authenticator.py:89` and
+    `backend/tests/guests/test_portal_repositories.py:70`.
+  - Any test that exercises either of the two call sites above transitively (e.g.
+    `test_portal_use_cases.py`, `test_portal_token_api.py`, `test_portal_api.py`,
+    `test_portal_token_conflict.py`) is red until 2.2/3.x land — this is expected, not a
+    regression introduced by scope creep.
+- `NotificationType.GUEST_PORTAL_LINK_DELIVERED` lives in
+  `backend/app/notifications/domain/enums.py`, no `escalation_for` entry in
+  `backend/app/notifications/domain/escalation.py` (so it resolves to `None` — R4.2 holds by
+  omission, verified by both a dedicated test and the existing exhaustive test).
+  `backend/tests/notifications/test_writer_census.py`'s
+  `test_every_type_is_classified_one_way_or_the_other` is now red (the new member is in neither
+  `WITH_WRITER` nor `WITHOUT_WRITER`) — **expected**, fixed by task 3.4 once the writer exists.
+- `audit_actions.GUEST_ACCESS_TOKEN_SENT` lives in `backend/app/audit/domain/actions.py`, next to
+  `GUEST_ACCESS_TOKEN_ISSUED`/`_REVOKED`, already added to the `ACTIONS` frozenset. Same
+  `entity_type` as the other two: `audit_actions.ENTITY_GUEST_ACCESS_TOKEN`
+  (`"GUEST_ACCESS_TOKEN"`). No new `AUDITABLE_FIELDS` entry needed for it — section 3's audit
+  row can use the same `redacted("token_hash")`/plain-field shape the issue row already uses, or
+  no diffed fields at all, since task 3.2 doesn't ask for one.
+- `render_guest_link_email(language: str) -> tuple[str, str]` lives in the **new**
+  `backend/app/guests/domain/notifications.py`. Returns exactly `(subject, body)`, fixed
+  constants keyed only by `"es"`/`"en"` (module-level dicts `_SUBJECT`/`_BODY`), any other
+  `language` value falls back to `"es"`. **No reservation/property identifiers are interpolated
+  into the text at all** — despite design D4 bullet 4's wording ("constants + reservation/
+  property identifiers"), task 1.5's literal contract ("no interpolation of guest name,
+  reservation id, or link — only fixed prose") and the security steering quote ("identifiers
+  travel via `related_id`/`related_type` on the `NotificationLog`, not via the rendered text")
+  both say the function takes only `language` and returns pure prose. Section 3's
+  `SendGuestAccessTokenUseCase` must attach the reservation identifier via
+  `NotificationLog.related_type="reservation"` / `related_id=reservation_id`, not by formatting
+  it into the string.
+- **Correction (review-panel fix, architect HIGH finding):** the bullet above is stale on the
+  function name and on the "one text only" premise. `render_guest_link_email` was renamed to
+  **`render_stored_guest_link_notice(language: str) -> tuple[str, str]`** — same behavior, same
+  `_SUBJECT`/`_BODY` dicts, still the link-free text for the persisted `NotificationLog` row
+  (R3.4). A **second** function was added, **`render_guest_link_delivery_email(language: str,
+  portal_url: str) -> tuple[str, str]`**, mirroring `render_recovery_email`
+  (`auth/domain/recovery_messages.py`): it returns `(subject, body)` where `body` contains the
+  real `portal_url` verbatim, keyed by language (`_SENT_BODY` dict with a `{portal_url}` slot),
+  falling back to `"es"` the same way. This is the text section 3 must hand to the `EMAIL`
+  adapter for R3.1 ("...email... containing the portal URL"); `render_stored_guest_link_notice`
+  remains the text written to `NotificationLog.subject`/`body` afterwards. Both live in
+  `backend/app/guests/domain/notifications.py`; both are exercised in
+  `backend/tests/guests/test_notifications.py`.
+
+### Section 2 (infrastructure)
+
+- `SqlAlchemyGuestAccessTokenRepository.find_live_for_reservation(tenant_id, reservation_id)`
+  is implemented in `backend/app/guests/infrastructure/portal_repositories.py`, right after
+  `revoke_live_for_reservation`. It selects columns (never the model, same style as its
+  siblings in this file) filtered on `tenant_id == …`, `reservation_id == …`,
+  `revoked_at.is_(None)` — the exact predicate `revoke_live_for_reservation` writes and the
+  partial unique index enforces. Returns a `GuestAccessToken` built from the row (`id`,
+  `tenant_id`, `reservation_id`, `token_hash`, `issued_at=row.created_at`, `revoked_at`), or
+  `None` when no row matches (absent, revoked, or belongs to another tenant — all three
+  collapse to the same `None`, which is what section 3's status use case needs: it should
+  never distinguish "no token" from "revoked" from "not yours" at this layer).
+- Fixed the known-broken `find_live_by_token_hash` row→entity mapping (section 1's flagged
+  `TypeError`): the `select(...)` now also pulls `GuestAccessTokenModel.created_at`, and the
+  constructed `GuestAccessToken` passes `issued_at=row.created_at`. Same one-line fix applied
+  to `find_live_for_reservation`'s own mapping (new code, so it never had the bug, but noting
+  it here since it's the same pattern).
+  - `GuestAccessTokenModel` already carries `created_at` via `TimestampMixin` — no new column,
+    no migration, exactly as D2 says.
+- Fixed the test fixture flagged by section 1: `backend/tests/guests/test_portal_repositories.py`'s
+  `_token(tenant, reservation, token_hash)` helper now passes `issued_at=datetime.now(UTC)`
+  (both `datetime` and `UTC` were already imported in that file). This helper is shared by
+  every test in the `SqlAlchemyGuestAccessTokenRepository` section, so this one fix unblocked
+  all of them — none of those tests needed further changes.
+- **`portal.py` (`IssueGuestAccessTokenUseCase.execute`) was NOT touched** — left for section 3
+  as instructed. `test_portal_authenticator.py:89`'s fixture (the other flagged test
+  construction site) was also NOT touched — it's not in section 2's scope (repository test
+  file only); leaving it for whichever later section owns that file, most likely section 3
+  since it's adjacent to the use-case fix.
+- Test coverage added in `backend/tests/guests/test_portal_repositories.py`, new section
+  `--- SqlAlchemyGuestAccessTokenRepository.find_live_for_reservation ---` (right before the
+  `SqlAlchemyGuestPortalStayReader` section): live token found (asserts `id`, `reservation_id`,
+  `revoked_at is None`, `issued_at is not None`); no token at all → `None`; only a revoked
+  token → `None` (same predicate as `revoke_live_for_reservation`, exercised together);
+  another tenant's live token not found when queried under a different `tenant_id` (security
+  rule 1), with a positive sanity check that the same token *is* found under its own tenant.
+- Verified: `docker compose exec backend uv run pytest tests/guests/test_portal_repositories.py -q`
+  → 43 passed (39 pre-existing + 4 new). No regressions in this file.
