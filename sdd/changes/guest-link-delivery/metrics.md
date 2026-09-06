@@ -2,7 +2,8 @@
 
 | date | phase | models | tokens in | tokens out | tokens cache | cost USD (est) | notes |
 |---|---|---|---|---|---|---|---|
-| 2026-09-06 | new | claude-sonnet-5 | 40 | 14387 | 2925005 | 1.0023 |  |
-| 2026-09-06 | design | claude-sonnet-5 | 46 | 17766 | 5213056 | 1.5344 |  |
-| 2026-09-06 | tasks | claude-sonnet-5 | 20 | 11586 | 2844999 | 0.7618 |  |
-| 2026-09-06 | run | claude-haiku-4-5-20251001 claude-opus-5[1m] claude-sonnet-5 | 248487 | 560523 | 279609887 | 90.0870 | incl. subagents |
+| 2026-09-06 | new | claude-sonnet-5 | 44 | 15106 | 3263396 | 1.0815 |  |
+| 2026-09-06 | design | claude-opus-5 claude-sonnet-5 | 15410 | 61904 | 13669021 | 6.5247 | incl. subagents |
+| 2026-09-06 | tasks | claude-sonnet-5 | 22 | 11817 | 3142513 | 0.8278 |  |
+| 2026-09-06 | run | claude-haiku-4-5-20251001 claude-opus-5[1m] claude-sonnet-5 | 248493 | 561329 | 281477262 | 90.4744 | incl. subagents |
+| 2026-09-06 | review | claude-haiku-4-5-20251001 claude-opus-5[1m] claude-sonnet-5 | 562 | 80902 | 8103105 | 3.8786 | incl. subagents |
