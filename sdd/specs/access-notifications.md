@@ -444,16 +444,21 @@ escritos aunque desapareciesen sus builders. Y sin la segunda, `SLA_BREACH` y
 `test_free_text_sink_contract.py` documenta sobre el suyo: un guardián que lee texto se sortea
 escribiendo el nombre en un comentario.
 
-**Los dieciséis con escritor y los cuatro sin él** viven en `WITH_WRITER`/`WITHOUT_WRITER` de
+**Los diecisiete con escritor y los cuatro sin él** viven en `WITH_WRITER`/`WITHOUT_WRITER` de
 `test_writer_census.py` — este módulo no los enumera aquí para no duplicar el censo; la única
 excepción nominal a PRD §14 que añade `revenue-reviews` es `REVIEW_RESPONSE_APPROVED`, con
-escritor declarado en `reviews/domain/notifications.py`. `staff-messaging` añade los dos últimos
-—`CLEANING_TASK_MESSAGE` (`cleaning/domain/notifications.py`) e `INCIDENT_MESSAGE`
+escritor declarado en `reviews/domain/notifications.py`. `staff-messaging` añade los dos
+siguientes —`CLEANING_TASK_MESSAGE` (`cleaning/domain/notifications.py`) e `INCIDENT_MESSAGE`
 (`maintenance/domain/notifications.py`), cada una construida por un `staff_message_notification`
 gemelo cuyo `body` lleva solo `message_id` y `task_id`/`incident_id` más un texto constante,
 **nunca** el `content` del mensaje (regla 11 de `steering/security.md`, misma disciplina que
 `assignment_notification`)—, subiendo el total de catorce a dieciséis sin ampliar el catálogo de
-PRD §14 más allá de esa excepción ya declarada. Los dos tipos de texto libre que **no** son
+PRD §14 más allá de esa excepción ya declarada. `guest-link-delivery` añade el decimoséptimo:
+`GUEST_PORTAL_LINK_DELIVERED`, con escritor declarado en `guests/application/portal.py`
+(`SendGuestAccessTokenUseCase`), cuyo `subject`/`body` construye
+`guests/domain/notifications.py`'s `render_stored_guest_link_notice` — constante, sin
+identificadores del enlace, el mismo contrato que `auth-account-recovery`'s
+`STORED_RECOVERY_SUBJECT`/`BODY`. Los dos tipos de texto libre que **no** son
 miembros del enum —`INCIDENT_REJECTED` y `LEGAL_REGISTRATION_FAILED`, sobre la columna
 `String(100)`— quedan fuera del censo por construcción: no hay `NotificationType.<X>` que casar.
 
@@ -603,14 +608,19 @@ sobre datos de registro policial, y llegan con la integración real.
 resuelve a nada: una presentación fallida avisa a los managers y no escala a nadie. Es deliberado
 —inventar un tipo del PRD sería peor— y queda anotado como deuda.
 
-El enum `NotificationType` ya no tiene dieciséis miembros sino **dieciocho**: `auth-account-recovery`
-añadió `PASSWORD_RESET_REQUESTED` y `revenue-reviews` añadió `REVIEW_RESPONSE_APPROVED`,
-ambos declarados como divergencia explícita de PRD §14 igual que esta capacidad declaró sus dos
-jobs frente a los cuatro de PRD §8.3. Ninguno de los dos tiene escalado, y en ambos casos **no es
-deuda** — una recuperación de contraseña y una aprobación de respuesta son eventos sin plazo
-que incumplir —, así que sus filas se escriben sin `sla_deadline_at` a propósito. Qué guardián
-mide el conjunto de escritores y cómo lo hace
-mide— vive en «El censo de escritores», más arriba.
+El enum `NotificationType` ya no tiene dieciséis miembros sino **diecinueve**: `auth-account-recovery`
+añadió `PASSWORD_RESET_REQUESTED`, `revenue-reviews` añadió `REVIEW_RESPONSE_APPROVED` y
+`guest-link-delivery` añadió `GUEST_PORTAL_LINK_DELIVERED` (el enlace del portal entregado por
+email al huésped, `POST .../guest-access-token/send` — [`guest-portal-api.md`](guest-portal-api.md)),
+los tres declarados como divergencia explícita de PRD §14 igual que esta capacidad declaró sus dos
+jobs frente a los cuatro de PRD §8.3. Ninguno de los tres tiene escalado, y en los tres casos
+**no es deuda** — una recuperación de contraseña, una aprobación de respuesta y un enlace que el
+operador decidió enviar son eventos sin plazo que incumplir —, así que sus filas se escriben sin
+`sla_deadline_at` a propósito. `guest-link-delivery` sigue además el patrón síncrono de
+`auth-account-recovery` (más abajo): el escritor invoca el adapter `EMAIL` dentro de la propia
+petición y escribe `SENT`/`FAILED` directamente, nunca `PENDING` — la fila nunca pasa por
+`dispatch_notifications`. Qué guardián mide el conjunto de escritores y cómo lo hace mide— vive
+en «El censo de escritores», más arriba.
 
 ### Protección del dato de documento
 

@@ -116,10 +116,33 @@ garantiza el sistema.
   que su reintento acuña limpio.
 - THE SYSTEM SHALL auditar la emisión y la revocación, y NEVER SHALL escribir fila de auditoría
   cuando la revocación no revocó nada.
-- La **entrega** del enlace al huésped es manual hoy: `ConsoleEmailAdapter` y `MockWhatsAppAdapter`
-  son los únicos adapters y sus plantillas no llevan enlace de portal, así que emitirlo desde el
-  barrido de accesos acuñaría credenciales que nadie recibe. La costura está hecha —el caso de uso
-  y su puerto existen—, y la emisión automática es después un llamante más.
+- **La entrega al huésped es un llamante distinto de la emisión, no una emisión automática**
+  (`guest-link-delivery`, PRD §14): `POST /api/v1/reservations/{reservation_id}/guest-access-token/send`
+  acuña el token exactamente como el `POST` de arriba —revoca-y-sustituye en la misma
+  transacción, mismo permiso `MANAGE_GUEST_ACCESS_TOKENS`— y, dentro de la misma petición,
+  entrega el enlace real por email al `Guest.email` de la reserva vía el adapter `EMAIL`
+  (`SMTPEmailAdapter`, ver [`access-notifications.md`](access-notifications.md) §"El adapter
+  SMTP real", si `SMTP_HOST` está configurado,
+  `ConsoleEmailAdapter` si no). THE SYSTEM SHALL responder `200 { delivered: bool }` —**nunca**
+  el valor en claro del token, que solo el `POST` simple devuelve— y SHALL mint incondicionalmente
+  incluso si el adapter falla al entregar (`delivered: false` no revierte la emisión). IF la
+  reserva no tiene `Guest` enlazado o su `email` está en blanco, THEN THE SYSTEM SHALL rechazar
+  con `422` **antes de acuñar nada**. El caso de uso compone el `POST` simple con
+  `CallerOwnedUnitOfWork` (un solo commit para token, auditoría de emisión, fila de notificación
+  y auditoría de envío), mirando el patrón síncrono de `auth-account-recovery` para no violar la
+  regla 11 de `steering/security.md`: el cuerpo persistido en `notification_logs` es constante
+  y sin identificadores del enlace —ver [`access-notifications.md`](access-notifications.md)
+  para el contrato de esa fila—, mientras que el correo realmente enviado sí lleva la URL real.
+- **Ver si hay un enlace vivo, sin acuñar uno** (`guest-link-delivery`, R2): `GET
+  /api/v1/reservations/{reservation_id}/guest-access-token`, mismo permiso, devuelve `200
+  { is_live: bool, issued_at: string | null }` — presencia e instante de emisión, **nunca**
+  el token ni su hash. Es la lectura por reserva que el puerto
+  `GuestAccessTokenRepository` explícitamente no ofrecía hasta este change (ver Key files:
+  `portal_ports.py`); `find_live_for_reservation` colapsa "nunca tuvo token", "solo tiene uno
+  revocado" y "token de otro tenant" al mismo `None`, así que la separación tenant-aware la
+  sostiene `PortalStayLocator.find`, ejecutado antes y con el mismo `404` que sus dos hermanos.
+- La entrega automática (recordatorios, disparo desde `provision_access_records`) sigue siendo
+  fuera de alcance de este módulo: es `guest-scheduled-comms`.
 
 ### Autorización: el token es la única identidad
 
@@ -501,10 +524,20 @@ Ninguna es secreta, así que las tres primeras llevan defecto funcional.
   [`messaging-ai.md`](messaging-ai.md) para el pipeline que ejecutan.
 - `backend/app/guests/api/portal_router.py`, `portal_schemas.py`, `portal_dependencies.py` — las
   seis rutas anónimas y su cableado.
-- `backend/app/guests/api/router.py`, `errors.py` — las dos rutas de operador y la traducción del
-  conflicto de emisión.
+- `backend/app/guests/api/router.py`, `errors.py` — las cuatro rutas de operador (emitir,
+  revocar, estado, enviar — las dos últimas de `guest-link-delivery`) y la traducción del
+  conflicto de emisión y de `GuestContactMissingError` (`422`).
+- `backend/app/guests/application/portal.py` — `GetGuestAccessTokenStatusUseCase` y
+  `SendGuestAccessTokenUseCase` (`guest-link-delivery`), esta última componiendo
+  `IssueGuestAccessTokenUseCase` con `CallerOwnedUnitOfWork` (`app/core/unit_of_work.py`) para
+  que el mint, su auditoría, la fila de notificación y la auditoría del envío comiteen una
+  sola vez.
+- `backend/app/guests/domain/notifications.py` — `render_stored_guest_link_notice` (texto
+  constante y sin enlace, para la fila persistida) y `render_guest_link_delivery_email` (el
+  correo real, con la URL), deliberadamente dos funciones y no una (`guest-link-delivery`).
 - `backend/app/guests/infrastructure/portal_repositories.py` — los adaptadores, incluida la
-  consulta sin scope y la proyección de la estancia.
+  consulta sin scope, la proyección de la estancia y `find_live_for_reservation`
+  (`guest-link-delivery`, tenant-scoped, nunca expone `token_hash`).
 - `backend/app/guests/infrastructure/portal_throttle.py` — los dos límites.
 - `backend/app/guests/application/use_cases.py` — `GuestActor` y el escritor único del documento.
 - `backend/app/maintenance/{domain/repositories.py,application/use_cases.py,infrastructure/repositories.py}`
