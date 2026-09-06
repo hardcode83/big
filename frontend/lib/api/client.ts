@@ -227,12 +227,14 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       // login's and refresh's own 401s mean "these credentials/this cookie are
       // invalid", not "the access token used to call this endpoint expired" —
       // recovering by refreshing and retrying would be nonsensical for either.
-      // logout is deliberately NOT in this set (`auth-session-persistence` R3, R6.2):
-      // it still needs `credentials: "include"` above (via `needsCredentials`) to carry
-      // and clear the cookie, but its 401 is an ordinary expired-access-token 401 like
-      // any other authenticated endpoint's — excluding it here too used to leave a
-      // logout called with a stale Bearer token unrecovered, so the server-side session
-      // and its cookie stayed alive, which is exactly what logout exists to close.
+      // logout is deliberately NOT in this set — it still needs
+      // `credentials: "include"` above (via `needsCredentials`) to carry and clear the
+      // cookie — but as of D6b (`get_logout_subject`,
+      // `backend/app/auth/api/dependencies.py`) a stale/expired Bearer no longer makes
+      // logout answer 401 at all: it falls through to the refresh cookie as the
+      // credential instead. So this exclusion is inert today, not a fix for a reachable
+      // case — kept anyway as defence in depth against a future change to that
+      // fallthrough, and because there is no upside to excluding it.
       const recoveryExempt = new Set([
         "/api/v1/auth/login",
         "/api/v1/auth/refresh",

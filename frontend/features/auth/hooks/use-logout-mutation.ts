@@ -45,9 +45,13 @@ import { notifyLogout } from "@/lib/auth/logout-event";
  * panel, second round). Letting the backend read the cookie directly removes
  * that round trip, and with it the window entirely. A stale-but-present token
  * (the common case: an access token that expired without ever being cleared)
- * needs no special handling either — the client's ordinary 401-recovery
- * already retries logout once with a fresh token, now that logout is no
- * longer excluded from it (`lib/api/client.ts`).
+ * needs no special handling either — the backend's own fallthrough
+ * (`get_logout_subject`, `backend/app/auth/api/dependencies.py`, design D6b)
+ * already falls back to the refresh cookie as the credential when the Bearer
+ * fails, so this call never reaches a 401 to recover from in the first place.
+ * `lib/api/client.ts` still does not exempt this path from its 401-recovery —
+ * that exclusion is inert today given the backend fallthrough, kept only as
+ * defence in depth.
  *
  * **Query invalidation** (`onSuccess`): `queryClient.removeQueries` on the
  * `["auth", "me"]` key, so a subsequent `useAuth()` starts in `anonymous`
