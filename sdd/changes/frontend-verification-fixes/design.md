@@ -67,7 +67,9 @@ descarta, porque añade el parámetro a las tres rutas y por tanto al contrato g
 **Enmienda (review, ronda 6, 2026-09-06):** las tres rutas que leen `RequestLocaleDep`
 (`list_dashboard_cards`, `get_property_dashboard`, `get_property_timeline`) ahora ponen
 `Cache-Control: private, no-store` en la respuesta — mismo patrón que ya usa
-`app/provenance/api/router.py:39`. Su cuerpo depende de una cabecera de petición (`X-Locale`) que
+`app/provenance/api/router.py:39`. (Una cuarta ronda de review, la 8, sumó `list_tenant_activity`
+a este mismo tratamiento tras el catch-up con `main` — ver D5, tercera enmienda — así que hoy son
+cuatro, no tres.) Su cuerpo depende de una cabecera de petición (`X-Locale`) que
 ninguna caché compartida indexa; sin este encabezado, una respuesta cacheada por URL sola podría
 servir el idioma de un lector a otro. Hoy no hay ruta de explotación real —el entorno dev sí vive
 detrás de un Cloudflare Tunnel (`sdd/specs/ingress-https-dev.md`), pero su nivel de caché estándar
