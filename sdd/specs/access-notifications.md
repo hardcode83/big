@@ -608,14 +608,16 @@ sobre datos de registro policial, y llegan con la integración real.
 resuelve a nada: una presentación fallida avisa a los managers y no escala a nadie. Es deliberado
 —inventar un tipo del PRD sería peor— y queda anotado como deuda.
 
-El enum `NotificationType` ya no tiene dieciséis miembros sino **diecinueve**: `auth-account-recovery`
-añadió `PASSWORD_RESET_REQUESTED`, `revenue-reviews` añadió `REVIEW_RESPONSE_APPROVED` y
-`guest-link-delivery` añadió `GUEST_PORTAL_LINK_DELIVERED` (el enlace del portal entregado por
-email al huésped, `POST .../guest-access-token/send` — [`guest-portal-api.md`](guest-portal-api.md)),
-los tres declarados como divergencia explícita de PRD §14 igual que esta capacidad declaró sus dos
-jobs frente a los cuatro de PRD §8.3. Ninguno de los tres tiene escalado, y en los tres casos
-**no es deuda** — una recuperación de contraseña, una aprobación de respuesta y un enlace que el
-operador decidió enviar son eventos sin plazo que incumplir —, así que sus filas se escriben sin
+El enum `NotificationType` ya no tiene dieciséis miembros sino **veintiuno**: `auth-account-recovery`
+añadió `PASSWORD_RESET_REQUESTED`, `revenue-reviews` añadió `REVIEW_RESPONSE_APPROVED`,
+`staff-messaging` añadió `CLEANING_TASK_MESSAGE` e `INCIDENT_MESSAGE` (ya contadas en «El censo
+de escritores», más arriba) y `guest-link-delivery` añadió `GUEST_PORTAL_LINK_DELIVERED` (el
+enlace del portal entregado por email al huésped, `POST .../guest-access-token/send` —
+[`guest-portal-api.md`](guest-portal-api.md)), las cinco declaradas como divergencia explícita
+de PRD §14 igual que esta capacidad declaró sus dos jobs frente a los cuatro de PRD §8.3.
+Ninguna de las cinco tiene escalado, y en los cinco casos **no es deuda** — una recuperación de
+contraseña, una aprobación de respuesta, dos hilos de personal y un enlace que el operador
+decidió enviar son eventos sin plazo que incumplir —, así que sus filas se escriben sin
 `sla_deadline_at` a propósito. `guest-link-delivery` sigue además el patrón síncrono de
 `auth-account-recovery` (más abajo): el escritor invoca el adapter `EMAIL` dentro de la propia
 petición y escribe `SENT`/`FAILED` directamente, nunca `PENDING` — la fila nunca pasa por
