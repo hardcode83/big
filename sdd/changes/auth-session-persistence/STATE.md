@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/auth-session-persistence
 implementation_sha: 49273a3f43663b9f9e668a221c89e0886e1cea8f
 pr_number:
 pr_url:
