@@ -59,28 +59,28 @@
 - [x] 3.4 Update `backend/tests/test_writer_census.py`: move `GUEST_PORTAL_LINK_DELIVERED` from
       `WITHOUT_WRITER` to `WITH_WRITER`, attributed to this change's builder. [R4.3]
 
-## 4. API: routes, schemas, DI wiring, OpenAPI
+## 4. API: routes, schemas, DI wiring, OpenAPI <!-- panel: PASS 2026-09-06 -->
 
-- [ ] 4.1 New schemas in `backend/app/guests/api/schemas.py`:
+- [x] 4.1 New schemas in `backend/app/guests/api/schemas.py`:
       `GuestAccessTokenStatusResponse { is_live: bool, issued_at: datetime | None }`,
       `GuestAccessTokenSentResponse { delivered: bool }`. [D5]
-- [ ] 4.2 New routes on `backend/app/guests/api/router.py`, same `ManageAccessTokenDep` and
+- [x] 4.2 New routes on `backend/app/guests/api/router.py`, same `ManageAccessTokenDep` and
       404-for-foreign-tenant convention as the existing `POST`/`DELETE`:
       `GET /api/v1/reservations/{reservation_id}/guest-access-token` (status) and
       `POST /api/v1/reservations/{reservation_id}/guest-access-token/send` (mint + deliver,
       `422` on no-guest/blank-email). Docstrings in the same style as the two existing routes.
       [R1.1, R2.1, R3.1, R3.2, D5]
-- [ ] 4.3 Wire both in `backend/app/guests/api/dependencies.py`: the status use case (existing
+- [x] 4.3 Wire both in `backend/app/guests/api/dependencies.py`: the status use case (existing
       repositories only); the send use case with `SqlAlchemyGuestRepository`,
       `adapter_registry()`, `SqlAlchemyNotificationLogRepository`, and the composed
       `IssueGuestAccessTokenUseCase` built with `uow=CallerOwnedUnitOfWork()`. [D4, D5]
-- [ ] 4.4 Update `backend/tests/test_route_authorization.py`'s permission census for the two new
+- [x] 4.4 Update `backend/tests/test_route_authorization.py`'s permission census for the two new
       routes (both require `MANAGE_GUEST_ACCESS_TOKENS`, neither is anonymous). [security
       rule 2]
-- [ ] 4.5 Integration tests (httpx `AsyncClient`): `GET` status (live/none), `POST /send`
+- [x] 4.5 Integration tests (httpx `AsyncClient`): `GET` status (live/none), `POST /send`
       (delivered `true`/`false`, `422` no-guest, `422` blank-email, `404` foreign-tenant, `403`
       without the permission). [R1-R3]
-- [ ] 4.6 Regenerate and commit `backend/openapi.json` (`make openapi`) — the `api-contract`
+- [x] 4.6 Regenerate and commit `backend/openapi.json` (`make openapi`) — the `api-contract`
       workflow checks it matches the code (`steering/documentation.md`). [documentation]
 
 ## 5. Frontend: data source, hooks, UI
@@ -346,3 +346,46 @@ green again — see the verification note at the end of this section.
   - `tests/guests/ tests/notifications/ tests/audit/` → see the final verification note; the
     four other files section 1 flagged (`test_portal_token_api.py`, `test_portal_api.py`,
     `test_portal_token_conflict.py`, `test_portal_repositories.py`) are green again.
+
+### Section 4 (API)
+
+**What section 5 (frontend) consumes** — two new operations under the existing resource:
+
+- `GET /api/v1/reservations/{reservation_id}/guest-access-token` → `200
+  GuestAccessTokenStatusResponse { is_live: bool, issued_at: string | null }` (ISO 8601, like
+  every other timestamp in the contract), `404` for an absent/foreign-tenant reservation
+  (same body shape as the existing `POST`/`DELETE` siblings), `403` without
+  `MANAGE_GUEST_ACCESS_TOKENS`. No request body, no query params.
+- `POST /api/v1/reservations/{reservation_id}/guest-access-token/send` → `200
+  GuestAccessTokenSentResponse { delivered: bool }` — **never the cleartext token**. `404`
+  foreign-tenant, `422` (`ErrorCode.VALIDATION_ERROR`) when the stay has no linked guest or the
+  guest's email is blank (`GuestContactMissingError`, two distinct messages —
+  `NO_GUEST`/`NO_EMAIL` — both safe to show the operator verbatim), `403` without the
+  permission. No request body.
+- `backend/openapi.json` is regenerated and committed — `frontend/lib/api/generated/
+  openapi.d.ts` (task 5.1) will pick up all three routes (`GET`/`POST`/`POST .../send`) the
+  next time `npm run api:generate` runs; the existing `POST`/`DELETE` were already in the
+  contract before this change (unused by any screen, per the proposal's Why) and are now
+  joined by the two new operations.
+- `GuestContactMissingError` is mapped in `backend/app/guests/api/errors.py`'s `_MAPPING` to
+  `(422, ErrorCode.VALIDATION_ERROR)` — confirmed present, this closed the one gap section 3
+  explicitly flagged as deliberately left for this section.
+- Verified: `tests/guests/test_guest_link_delivery_api.py` (new, 402 lines) +
+  `test_route_authorization.py` → 36 passed. Broader regression check,
+  `docker compose exec backend uv run pytest tests/guests/` → **440 passed**, confirming the
+  `router.py`/`dependencies.py`/`errors.py` edits didn't disturb any sibling route in the same
+  file.
+- **A latent gap from section 3, found and closed here**: `SendGuestAccessTokenUseCase`
+  (`portal.py`) names `NotificationChannel.EMAIL` literally four times — the same synchronous-
+  adapter exception design D4 says mirrors `RequestPasswordResetUseCase` field for field — but
+  `app/guests/application/portal.py` was never added to
+  `tests/notifications/test_channel_literals.py`'s `CHANNEL_LITERAL_WHITELIST`
+  (`notification-channel-routing` D6's allowlist guard), so
+  `test_every_literal_lives_inside_the_whitelist` was red the moment the full suite ran it
+  (section 3's own verification note ran `tests/notifications/` but did not name this file
+  specifically). Added the entry, with the same "still-literal-EMAIL exception" reasoning
+  already on record for `app/auth/application/recovery.py`, and updated the two tests that pin
+  the set's exact membership (`test_whitelist_is_exactly_the_design_d6_set`) and its own count
+  in the module docstring ("six sites" → "seven"). Verified:
+  `tests/notifications/test_channel_literals.py` → 4 passed, and the full
+  `tests/guests/ tests/notifications/ tests/audit/` regression → **951 passed**.

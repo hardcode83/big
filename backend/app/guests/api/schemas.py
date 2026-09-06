@@ -10,11 +10,12 @@ to this one is how the exception becomes the rule.
 """
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.guests.application.portal import GuestAccessTokenStatus
 from app.guests.application.use_cases import GuestDocument
 from app.guests.domain.enums import (
     GuestDocumentStatus,
@@ -62,6 +63,35 @@ class GuestAccessTokenIssuedResponse(BaseModel):
     """
 
     token: str
+
+
+class GuestAccessTokenStatusResponse(BaseModel):
+    """Presence and issuance instant of a stay's live portal token (`guest-link-delivery` R2).
+
+    Deliberately **not** `token_hash` or anything that could reconstruct it: this is the
+    surface R2.2 asks for precisely so a frontend need not mint a token merely to learn
+    whether one already exists. `issued_at` is `None` exactly when `is_live` is `False`,
+    mirroring `GuestAccessTokenStatus` (`application/portal.py`) field for field — this class
+    exists only to give that dataclass a JSON shape, not to widen it.
+    """
+
+    is_live: bool
+    issued_at: datetime | None
+
+    @classmethod
+    def from_domain(cls, status: GuestAccessTokenStatus) -> "GuestAccessTokenStatusResponse":
+        return cls(is_live=status.is_live, issued_at=status.issued_at)
+
+
+class GuestAccessTokenSentResponse(BaseModel):
+    """Whether the email adapter accepted the delivery (`guest-link-delivery` R3.5, D5).
+
+    **Never** the cleartext token — R1 keeps "copy it yourself" (the existing `POST`) and
+    "email it to the guest" (this route) as two distinct operator actions, and an operator who
+    triggered a send has no reason to also see the value in their own browser.
+    """
+
+    delivered: bool
 
 
 class DocumentStoredResponse(BaseModel):
