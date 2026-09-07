@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/ci-pr-gates-optimization
 implementation_sha: d4bd5510e67b3c461c7bb9aab46f7802175631ef
 pr_number:
 pr_url:
