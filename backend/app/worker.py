@@ -4,8 +4,9 @@ Celery is imported here and under `app/scheduler/` and nowhere else —
 `tests/test_layering.py` enforces it, so a domain module cannot quietly grow a task
 decorator.
 
-`app.scheduler.tasks` is imported for its side effect (registering the four tasks) at the
-bottom, after `celery_app` exists, because the task module imports it back.
+`app.scheduler.tasks` is imported for its side effect (registering the clock-driven tasks) at
+the bottom, after `celery_app` exists, because the task module imports it back. So is
+`app.scheduler.whatsapp_tasks`, which registers the one task nothing schedules.
 """
 
 from celery import Celery
@@ -21,3 +22,10 @@ celery_app.conf.beat_schedule = beat_schedule()
 celery_app.conf.timezone = "UTC"
 
 import app.scheduler.tasks  # noqa: E402,F401  (registers the tasks with `celery_app`)
+
+# `whatsapp-cloud-adapter` (design D7): the one task nothing schedules. Imported for the same
+# side effect and for the same reason — a task that is not registered with `celery_app` is a
+# `.delay(...)` that vanishes into the broker and is never routed to a worker. It has no
+# `beat_schedule` entry on purpose; `ON_DEMAND_TASKS` in `app/scheduler/schedule.py` is where
+# that is declared.
+import app.scheduler.whatsapp_tasks  # noqa: E402,F401

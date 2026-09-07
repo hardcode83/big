@@ -4,6 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, ClassVar, Mapping
 
+from app.auth.domain.enums import UserRole
 from app.maintenance.domain.enums import (
     IncidentCategory,
     IncidentPhotoStage,
@@ -135,6 +136,11 @@ MAX_INCIDENT_DESCRIPTION = 5000
 #: note a person types about one job, and a list of parts is shorter than a description of a
 #: fault.
 MAX_MATERIALS = 2000
+#: `incident_messages.content` is `VARCHAR(2000)` (`staff-messaging` design D5), the mirror
+#: of `cleaning`'s `MAX_CLEANING_TASK_MESSAGE_LENGTH`. This module owns the column — the
+#: entity below and its DDL next door in `maintenance/infrastructure/models.py` — so this is
+#: where the width lives; `api/schemas.py` imports it rather than repeating a literal.
+MAX_INCIDENT_MESSAGE_LENGTH = 2000
 
 
 @dataclass
@@ -778,4 +784,22 @@ class IncidentPhoto:
     #: *transaction* timestamp, so several photos inserted together would share one instant and
     #: the listing's ordering would fall through to a random `uuid4`. The upload order is what
     #: R3.1 asks the listing to preserve.
+    created_at: datetime
+
+
+@dataclass
+class IncidentMessage:
+    """One staff-to-manager message on an incident's thread (`staff-messaging` R2).
+
+    The mirror of `app.cleaning.domain.entities.CleaningTaskMessage` — see that class for
+    the reasoning behind the shape (plain dataclass, no invariant of its own) and behind
+    `author_role` being frozen at write time rather than joined from `users.role`.
+    """
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    incident_id: uuid.UUID
+    author_id: uuid.UUID
+    author_role: UserRole
+    content: str
     created_at: datetime

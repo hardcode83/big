@@ -32,4 +32,9 @@ describe("Button", () => {
     render(<Button disabled>Guardar</Button>);
     expect(screen.getByRole("button", { name: "Guardar" })).toBeDisabled();
   });
+
+  it("keeps its accessible name/role when glow is set", () => {
+    render(<Button glow>Guardar</Button>);
+    expect(screen.getByRole("button", { name: "Guardar" })).toBeInTheDocument();
+  });
 });

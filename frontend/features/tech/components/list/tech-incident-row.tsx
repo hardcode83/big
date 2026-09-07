@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
+import { Card } from "@/components/ui/card";
 import { TONE_BADGE_CLASS } from "@/lib/ui/status-tone";
 import {
   severityColorGroup,
@@ -34,43 +35,45 @@ export function TechIncidentRow({
   const dash = "—";
 
   return (
-    <li className="rounded-lg border bg-surface">
-      <Link
-        href={`/tech/incidents/${incident.id}`}
-        className="flex min-h-11 flex-col gap-2 p-4"
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={`rounded-full border px-2 py-0.5 text-xs ${
-              TONE_BADGE_CLASS[severityColorGroup(incident.severity)]
-            }`}
-          >
-            {t(`incidents:severity.${incident.severity}`)}
-          </span>
-          <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
-            {t(`incidents:status.${incident.status}`)}
-          </span>
-        </div>
+    <li className="list-none">
+      <Card className="p-4">
+        <Link
+          href={`/tech/incidents/${incident.id}`}
+          className="flex min-h-11 flex-col gap-2"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`rounded-full border px-2 py-0.5 text-xs ${
+                TONE_BADGE_CLASS[severityColorGroup(incident.severity)]
+              }`}
+            >
+              {t(`incidents:severity.${incident.severity}`)}
+            </span>
+            <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+              {t(`incidents:status.${incident.status}`)}
+            </span>
+          </div>
 
-        <span className="text-base font-semibold text-foreground">
-          {incident.title}
-        </span>
+          <span className="text-body-lg font-semibold text-foreground">
+            {incident.title}
+          </span>
 
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm text-muted-foreground">
-          <dt>{t("tech:context.propertyName")}</dt>
-          <dd className="text-foreground">{propertyName ?? dash}</dd>
-          <dt>{t("tech:context.propertyInternalCode")}</dt>
-          <dd className="text-foreground">{propertyInternalCode ?? dash}</dd>
-          <dt>{t("tech:fields.category")}</dt>
-          <dd className="text-foreground">
-            {t(`incidents:category.${incident.category}`)}
-          </dd>
-          <dt>{t("tech:fields.createdAt")}</dt>
-          <dd className="text-foreground">
-            {formatDateTime(incident.createdAt, i18n.language)}
-          </dd>
-        </dl>
-      </Link>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-body-base text-muted-foreground">
+            <dt>{t("tech:context.propertyName")}</dt>
+            <dd className="text-foreground">{propertyName ?? dash}</dd>
+            <dt>{t("tech:context.propertyInternalCode")}</dt>
+            <dd className="text-foreground">{propertyInternalCode ?? dash}</dd>
+            <dt>{t("tech:fields.category")}</dt>
+            <dd className="text-foreground">
+              {t(`incidents:category.${incident.category}`)}
+            </dd>
+            <dt>{t("tech:fields.createdAt")}</dt>
+            <dd className="text-foreground">
+              {formatDateTime(incident.createdAt, i18n.language)}
+            </dd>
+          </dl>
+        </Link>
+      </Card>
     </li>
   );
 }

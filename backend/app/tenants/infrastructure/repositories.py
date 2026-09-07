@@ -5,14 +5,25 @@ live or die together (R6.4).
 """
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db import require_unmarked_session
 from app.tenants.domain.entities import Tenant, TenantConfig
+from app.tenants.domain.exceptions import TenantAlreadyExistsError
 from app.tenants.infrastructure.models import TenantConfigModel, TenantModel
+
+# `platform-admin-api` R-2: the only UNIQUE constraint the migration adds on `tenants`.
+# Substring-matched against `IntegrityError.orig` so a Postgres-level rename still maps
+# here, and so a future UNIQUE on a *different* column reaches the router unmapped
+# rather than a 409 it cannot justify.
+# Both schema paths (`create_all` from the model metadata, and the migration) now name
+# this constraint identically, so there is exactly one spelling to recognise.
+_UNIQUE_NAME_CONSTRAINT = "uq_tenants_name"
 
 # `status` is absent on purpose (R5.3), and so are the identity columns.
 TENANT_WRITABLE = frozenset(
@@ -63,6 +74,98 @@ class SqlAlchemyTenantRepository:
         )
         if result.rowcount != 1:
             raise ValueError("Cannot update a tenant that does not exist")
+
+    async def add(self, tenant: Tenant, config: TenantConfig) -> None:
+        """Persist both rows in one call, raising `TenantAlreadyExistsError` on a clash.
+
+        The tenant row is flushed before the config is added: `tenant_configs.tenant_id`
+        is a `ForeignKey` and SQLAlchemy does not guarantee the `INSERT` order across two
+        `session.add` calls, so the `FK` violation would race the `UNIQUE` violation we
+        actually want to translate. The first `flush` is what surfaces the `uq_tenants_name`
+        violation at a known place and folds it into `TenantAlreadyExistsError`; the second
+        `flush` is the one that writes the configuration.
+
+        Only the `uq_tenants_name` violation is mapped. Everything else re-raises so the
+        router can see the failure as the unmapped `500` it is — the caller's contract
+        is "this name is free", not "I shielded the database from every failure mode".
+        """
+        self._session.add(
+            TenantModel(
+                id=tenant.id,
+                name=tenant.name,
+                billing_email=tenant.billing_email,
+                country=tenant.country,
+                timezone=tenant.timezone,
+                default_language=tenant.default_language,
+                status=tenant.status,
+            )
+        )
+        try:
+            await self._session.flush()
+        except IntegrityError as error:
+            if _UNIQUE_NAME_CONSTRAINT in str(error.orig):
+                raise TenantAlreadyExistsError(
+                    f"A tenant named {tenant.name!r} already exists"
+                ) from error
+            raise
+        self._session.add(
+            TenantConfigModel(
+                id=config.id,
+                tenant_id=config.tenant_id,
+                owner_approval_threshold_eur=config.owner_approval_threshold_eur,
+                ai_confidence_threshold=config.ai_confidence_threshold,
+                sla_critical_minutes=config.sla_critical_minutes,
+                sla_high_minutes=config.sla_high_minutes,
+                sla_medium_minutes=config.sla_medium_minutes,
+                sla_low_minutes=config.sla_low_minutes,
+                checkin_window_hours_before=config.checkin_window_hours_before,
+                checkout_ready_hours_after=config.checkout_ready_hours_after,
+                auto_create_cleaning_task=config.auto_create_cleaning_task,
+                cleaning_photo_required=config.cleaning_photo_required,
+                storage_type=config.storage_type,
+                notification_email_enabled=config.notification_email_enabled,
+                notification_whatsapp_enabled=config.notification_whatsapp_enabled,
+                review_recurring_issues_top_n=config.review_recurring_issues_top_n,
+            )
+        )
+        await self._session.flush()
+
+    async def list_page(
+        self, page: int, per_page: int
+    ) -> tuple[Sequence[tuple[Tenant, TenantConfig]], int]:
+        """Every tenant, paired with its configuration, ordered `created_at DESC` (R2.1-R2.3).
+
+        Two queries, the same shape `ConversationRepository.list` uses: a `count(*)` for
+        `total`, and one `SELECT` joining `tenants`/`tenant_configs` for the page itself. The
+        tie-break on `id` makes the order total — two tenants created in the same instant
+        (the same transaction, in a test, shares one `now()`) cannot swap between pages on
+        consecutive requests, the same reasoning `ConversationRepository.list`'s own
+        tie-break documents.
+
+        `require_unmarked_session` guards the join for a reason specific to this query:
+        `TenantConfigModel.tenant_id` IS one of `tenant_scoped_classes()`'s columns (unlike
+        `TenantModel`, which has none), so a marked session would have the global filter
+        silently narrow the `tenant_configs` side of the `JOIN` to one tenant while leaving
+        `tenants` unfiltered — an inner join that then drops every other tenant without
+        raising, the exact silent-wrong-answer shape rule 1 of `steering/security.md` exists
+        to convert into a loud failure instead. `SUPER_ADMIN`'s session is unmarked by design
+        (`super-admin-identity`), so this never fires on the one path this method is built
+        for; it exists for whichever future caller runs it on a marked session by mistake.
+        """
+        require_unmarked_session(self._session, read="list_page")
+        total = await self._session.scalar(select(func.count()).select_from(TenantModel))
+        rows = await self._session.execute(
+            select(TenantModel, TenantConfigModel)
+            .join(TenantConfigModel, TenantConfigModel.tenant_id == TenantModel.id)
+            .order_by(TenantModel.created_at.desc(), TenantModel.id)
+            .limit(per_page)
+            .offset((page - 1) * per_page)
+        )
+        pairs = tuple(
+            (_to_tenant(tenant_model), _to_config(config_model))
+            for tenant_model, config_model in rows.all()
+        )
+        return pairs, int(total or 0)
 
 
 class SqlAlchemyTenantConfigRepository:

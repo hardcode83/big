@@ -9,7 +9,10 @@
  * one-shot refresh handshake that lives in `@/lib/api/authenticated-client`.
  */
 
-import { createAuthenticatedClients } from "@/lib/api/authenticated-client";
+import {
+  createAuthenticatedClients,
+  notifySessionExpired,
+} from "@/lib/api/authenticated-client";
 import { HttpStallsSource } from "./http/http-stalls-source";
 
 import type { StallsDataSource } from "./stalls-source";
@@ -19,6 +22,7 @@ export type { BlockedTransitionSummary, BlockedTransitionPage } from "./dto";
 
 const { apiClient } = createAuthenticatedClients({
   apiBaseUrl: "",
+  onSessionExpired: notifySessionExpired,
 });
 const stallsDataSource: StallsDataSource = new HttpStallsSource(apiClient);
 

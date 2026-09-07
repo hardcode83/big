@@ -88,6 +88,76 @@ async def test_the_ceiling_does_not_move_between_two_and_ten(
     )
 
 
+# --- `/dashboard/occupancy-series` (`dashboard-occupancy-series` R3.2) --------------------
+
+SERIES = "/api/v1/dashboard/occupancy-series"
+
+#: The tables this route reads. `properties` and `reservations` cost one statement each
+#: (`PropertyRepository.list_by_status`, `ReservationRepository.list_for_properties`);
+#: `property_state_transitions` costs two — the entering-transition read and the in-window
+#: range scan `history_for_properties` issues (task 1.2's Implementation Note), portfolio-
+#: independent by the same design as the collection's own reader.
+SERIES_READ_TABLES = (
+    "from properties",
+    "from reservations",
+    "from property_state_transitions",
+)
+SERIES_CEILINGS = {
+    "from properties": 1,
+    "from reservations": 1,
+    "from property_state_transitions": 2,
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("property_count", [2, 10])
+async def test_the_series_costs_the_same_whatever_the_portfolio_size(
+    api, db_session, test_engine, tenant_a, users_by_role_a, property_count: int
+) -> None:
+    for index in range(property_count):
+        await insert_property(db_session, tenant_a, code=f"SERIES-{index}")
+    headers = auth_header(api, users_by_role_a[UserRole.TENANT_OWNER])
+
+    with count_statements(test_engine) as log:
+        response = await api.get(SERIES, headers=headers)
+
+    assert response.status_code == 200
+    assert len(response.json()["data"]) == 7
+
+    per_table = {table: len(log.matching(table)) for table in SERIES_READ_TABLES}
+    for table, count in per_table.items():
+        assert count <= SERIES_CEILINGS[table], (
+            f"{table} was queried {count} times for {property_count} properties; "
+            f"the series must batch. Full tally: {per_table}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_series_ceiling_does_not_move_between_two_and_ten(
+    api, db_session, test_engine, tenant_a, users_by_role_a
+) -> None:
+    """The assertion R3.2 actually asks for: not "few queries" but "the same number"."""
+    headers = auth_header(api, users_by_role_a[UserRole.TENANT_OWNER])
+
+    for index in range(2):
+        await insert_property(db_session, tenant_a, code=f"SERIES-SMALL-{index}")
+    with count_statements(test_engine) as small_log:
+        await api.get(SERIES, headers=headers)
+    small = {table: len(small_log.matching(table)) for table in SERIES_READ_TABLES}
+
+    for index in range(8):
+        await insert_property(db_session, tenant_a, code=f"SERIES-BIG-{index}")
+    with count_statements(test_engine) as big_log:
+        response = await api.get(SERIES, headers=headers)
+    big = {table: len(big_log.matching(table)) for table in SERIES_READ_TABLES}
+
+    assert len(response.json()["data"]) == 7
+    assert small == big, (
+        f"the query tally grew with the portfolio: 2 properties → {small}, "
+        f"10 properties → {big}"
+    )
+
+
 @pytest.mark.asyncio
 async def test_the_counter_would_notice_a_per_property_query(
     api, db_session, test_engine, tenant_a, users_by_role_a

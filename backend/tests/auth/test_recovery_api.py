@@ -11,8 +11,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 
+from app.auth.api.schemas import SESSION_REFRESH_COOKIE
 from app.auth.domain.enums import UserRole
 from app.auth.infrastructure.models import UserModel, UserSessionModel
+from app.core.config import settings
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.auth.conftest import PASSWORD, auth_header, insert_user
@@ -277,8 +279,8 @@ async def test_every_role_that_can_authenticate_may_change_its_own_password(
 async def test_the_previous_sessions_are_revoked(api, db_session, tenant_a) -> None:
     """R1.3 — including the family that made the call."""
     user = await insert_user(db_session, tenant=tenant_a)
-    logged_in = await _login(api, user.email, PASSWORD)
-    refresh_token = logged_in.json()["refresh_token"]
+    await _login(api, user.email, PASSWORD)
+    # `api`'s own cookie jar now carries the refresh cookie login set.
 
     await api.post(
         "/api/v1/auth/change-password",
@@ -286,9 +288,7 @@ async def test_the_previous_sessions_are_revoked(api, db_session, tenant_a) -> N
         headers=auth_header(api, user),
     )
 
-    refreshed = await api.post(
-        "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
-    )
+    refreshed = await api.post("/api/v1/auth/refresh", json={})
     assert refreshed.status_code == 401
 
 
@@ -311,13 +311,10 @@ async def test_the_calling_session_itself_is_revoked(api, db_session, tenant_a) 
     logged_in = (await _login(api, user.email, PASSWORD)).json()
 
     # Establish that this refresh token WORKS first, or the assertion below would also pass
-    # against a broken refresh endpoint. Rotation consumes it, so the token to kill later is
-    # the one this hands back.
-    rotated = await api.post(
-        "/api/v1/auth/refresh", json={"refresh_token": logged_in["refresh_token"]}
-    )
+    # against a broken refresh endpoint. Rotation consumes it (and rotates the cookie in
+    # `api`'s own jar), so the token to kill later is the one this hands back.
+    rotated = await api.post("/api/v1/auth/refresh", json={})
     assert rotated.status_code == 200
-    live_refresh_token = rotated.json()["refresh_token"]
 
     response = await api.post(
         "/api/v1/auth/change-password",
@@ -327,9 +324,7 @@ async def test_the_calling_session_itself_is_revoked(api, db_session, tenant_a) 
     )
     assert response.status_code == 204
 
-    refreshed = await api.post(
-        "/api/v1/auth/refresh", json={"refresh_token": live_refresh_token}
-    )
+    refreshed = await api.post("/api/v1/auth/refresh", json={})
     assert refreshed.status_code == 401, (
         "the family that made the call survived, so the change added a credential "
         "instead of rotating one"
@@ -448,6 +443,32 @@ async def test_only_the_resolvable_account_gets_a_row(api, db_session, tenant_a)
     assert tokens[0].user_id == known.id
     assert len(rows) == 1
     assert rows[0].recipient_user_id == known.id
+
+
+@pytest.mark.asyncio
+async def test_partial_smtp_config_answers_generic_500(
+    api, db_session, tenant_a, monkeypatch
+) -> None:
+    """R2.2's risk mitigation (design D2's "Risks & mitigations"): `SMTPConfigurationError`
+    must not leak a stack trace, a missing-field name, or any other config detail to the
+    anonymous caller — it falls to the same generic `NotificationDomainError` 500 envelope
+    every other unmapped notifications error gets (`register_notification_error_handlers`).
+    """
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(settings, "smtp_port", 0)
+    monkeypatch.setattr(settings, "smtp_from_email", "noreply@example.com")
+    monkeypatch.setattr(settings, "smtp_username", "relay-user")
+    monkeypatch.setattr(settings, "smtp_password", "relay-pass")
+    user = await insert_user(db_session, tenant=tenant_a)
+
+    response = await _forgot(api, user.email)
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["error"]["code"] == "INTERNAL_ERROR"
+    assert body["error"]["message"] == "Unexpected notification error"
+    assert "smtp_port" not in response.text
+    assert "SMTP_HOST" not in response.text
 
 
 @pytest.mark.asyncio
@@ -734,7 +755,8 @@ async def test_the_previous_sessions_die_and_the_login_after_a_lockout_works(
     a login refused with the same generic `401`.
     """
     user, cleartext = await _link_token_for(api, db_session, tenant_a)
-    logged_in = (await _login(api, user.email, PASSWORD)).json()
+    await _login(api, user.email, PASSWORD)
+    # `api`'s own cookie jar now carries the refresh cookie login set.
 
     reset = await api.post(
         "/api/v1/auth/reset-password",
@@ -742,9 +764,7 @@ async def test_the_previous_sessions_die_and_the_login_after_a_lockout_works(
     )
     assert reset.status_code == 204
 
-    refreshed = await api.post(
-        "/api/v1/auth/refresh", json={"refresh_token": logged_in["refresh_token"]}
-    )
+    refreshed = await api.post("/api/v1/auth/refresh", json={})
     assert refreshed.status_code == 401
     assert (await _login(api, user.email, NEW_PASSWORD)).status_code == 200
 
@@ -810,7 +830,7 @@ async def test_a_temporary_password_still_logs_in(api, db_session, tenant_a) -> 
 
     assert logged_in.status_code == 200
     assert logged_in.json()["access_token"]
-    assert logged_in.json()["refresh_token"]
+    assert logged_in.cookies.get(SESSION_REFRESH_COOKIE)
 
 
 @pytest.mark.asyncio
@@ -966,11 +986,10 @@ async def test_refresh_works_while_fenced(api, db_session, tenant_a) -> None:
     """R5.5 at the HTTP boundary: `refresh` does not pass through the gate, so a fenced
     account can still renew the session it needs to call `change-password`."""
     body, temporary = await _create_user_with_temporary_password(api, db_session, tenant_a)
-    tokens = (await _login(api, body["email"], temporary)).json()
+    await _login(api, body["email"], temporary)
+    # `api`'s own cookie jar now carries the refresh cookie login set.
 
-    refreshed = await api.post(
-        "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
-    )
+    refreshed = await api.post("/api/v1/auth/refresh", json={})
 
     assert refreshed.status_code == 200
 

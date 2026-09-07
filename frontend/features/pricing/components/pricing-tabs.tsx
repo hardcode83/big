@@ -76,7 +76,7 @@ export function PricingTabs({
       <div
         role="tablist"
         aria-label={t("tabs.label")}
-        className="flex gap-1 border-b px-4"
+        className="flex gap-1 border-b border-border px-4"
       >
         {TABS.map((tab) => {
           const selected = tab === activeTab;
@@ -96,7 +96,7 @@ export function PricingTabs({
               onClick={() => onTabChange(tab)}
               onKeyDown={onKeyDown}
               className={cn(
-                "tap-target -mb-px border-b-2 px-3 py-2 text-sm font-medium",
+                "tap-target -mb-px border-b-2 px-3 py-2 text-body-medium",
                 selected
                   ? "border-foreground text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground",

@@ -339,3 +339,63 @@ html {
 @utility pb-safe {
   padding-bottom: env(safe-area-inset-bottom);
 }
+
+/*
+ * Component-level effects (R5, design D4). Every colour here is built from the
+ * already-declared `--color-primary` via `color-mix()`/alpha — never a new hex
+ * literal, so `test/color-tokens.test.ts` never sees a new colour to reject
+ * (these live inside `@utility` bodies, which its class-name scan does not
+ * parse). Alpha steps (0.2 rest / 0.3 hover) are the reservations mockup's
+ * values (`reservas_executive_emerald_style/code.html:212-223`), standardized
+ * per D4 over the dashboard mockup's inconsistent alphas. The page-level
+ * ambient wash (`body::before`, a fixed radial-gradient) is explicitly
+ * rejected by D4 and is not ported here.
+ */
+
+/* Ambient glow for primary actions (design D3/D4): box-shadow at two alpha
+ * steps plus a subtle lift on hover. Layered onto `buttonVariants`'s `default`
+ * variant only, via `<Button glow>` — never onto `size: "sm"` (R5 AC3). */
+@utility btn-glow {
+  box-shadow: 0 8px 24px -8px color-mix(in oklab, var(--color-primary) 20%, transparent);
+  transition:
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+
+  &:hover {
+    box-shadow: 0 10px 28px -6px color-mix(in oklab, var(--color-primary) 30%, transparent);
+    transform: translateY(-1px);
+  }
+}
+
+/* Hover-revealed gradient top border for feature/stat cards (design D2/D4):
+ * a 1px `::before` bar that fades in on hover. The opacity transition is
+ * cosmetic only — nothing depends on it alone to communicate state, per R5
+ * AC2 — and `prefers-reduced-motion: reduce` (above) simply removes the fade,
+ * the bar still appears on hover. */
+@utility card-hover-gradient {
+  position: relative;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--color-primary),
+      transparent
+    );
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  &:hover::before {
+    opacity: 1;
+  }
+}
+
+/* Ambient text glow for page `<h1>`s only (design D4) — not applied globally. */
+@utility text-glow {
+  text-shadow: 0 0 16px color-mix(in oklab, var(--color-primary) 35%, transparent);
+}

@@ -131,7 +131,9 @@ async def test_the_whole_pipeline_lands_together(db_session, test_engine) -> Non
     tenant_id, conversation_id, actor_id = tenant.id, conversation.id, manager.id
     await db_session.commit()
 
-    pipeline = build_pipeline(db_session, channels=outbound_registry())
+    pipeline = build_pipeline(
+        db_session, channels=outbound_registry(SqlAlchemyMessageRepository(db_session))
+    )
     await pipeline.execute(
         tenant_id=tenant_id,
         conversation_id=conversation_id,
@@ -167,7 +169,9 @@ async def test_a_failure_part_way_through_leaves_nothing_behind(
     await db_session.commit()
 
     before = await count_rows(test_engine, MessageModel)
-    pipeline = build_pipeline(db_session, channels=outbound_registry())
+    pipeline = build_pipeline(
+        db_session, channels=outbound_registry(SqlAlchemyMessageRepository(db_session))
+    )
 
     with pytest.raises(PMSChannelUnavailableError):
         await pipeline.execute(
@@ -209,7 +213,9 @@ async def test_an_escalation_is_not_left_half_written_by_a_later_failure(
     await db_session.commit()
 
     pipeline = build_pipeline(
-        db_session, channels=outbound_registry(), incidents=ExplodingIncidentPort()
+        db_session,
+        channels=outbound_registry(SqlAlchemyMessageRepository(db_session)),
+        incidents=ExplodingIncidentPort(),
     )
     with pytest.raises(RuntimeError):
         await pipeline.execute(
@@ -250,7 +256,9 @@ async def test_the_escalation_path_really_does_write_all_three_rows(
     tenant_id, conversation_id, actor_id = tenant.id, conversation.id, manager.id
     await db_session.commit()
 
-    pipeline = build_pipeline(db_session, channels=outbound_registry())
+    pipeline = build_pipeline(
+        db_session, channels=outbound_registry(SqlAlchemyMessageRepository(db_session))
+    )
     await pipeline.execute(
         tenant_id=tenant_id,
         conversation_id=conversation_id,
@@ -283,7 +291,9 @@ async def test_the_conversation_is_not_left_half_moved_by_a_failure(
     tenant_id, conversation_id, actor_id = tenant.id, conversation.id, manager.id
     await db_session.commit()
 
-    pipeline = build_pipeline(db_session, channels=outbound_registry())
+    pipeline = build_pipeline(
+        db_session, channels=outbound_registry(SqlAlchemyMessageRepository(db_session))
+    )
     with pytest.raises(PMSChannelUnavailableError):
         await pipeline.execute(
             tenant_id=tenant_id,
@@ -345,7 +355,9 @@ async def test_a_token_bearer_drives_the_whole_pipeline_and_is_named_in_every_ro
     await db_session.commit()
 
     digest = "c" * 64
-    pipeline = build_pipeline(db_session, channels=outbound_registry())
+    pipeline = build_pipeline(
+        db_session, channels=outbound_registry(SqlAlchemyMessageRepository(db_session))
+    )
     await pipeline.execute(
         tenant_id=tenant_id,
         conversation_id=conversation_id,

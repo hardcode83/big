@@ -20,6 +20,7 @@ from app.cleaning.infrastructure.repositories import SqlAlchemyCleaningTaskRepos
 from app.core.db import get_db_session
 from app.dashboard.application.use_cases import (
     GetDashboardCardsUseCase,
+    GetOccupancySeriesUseCase,
     GetOperationalKpisUseCase,
     GetPropertyDashboardUseCase,
 )
@@ -28,7 +29,10 @@ from app.maintenance.infrastructure.repositories import (
     SqlAlchemyIncidentReader,
     SqlAlchemyOwnerApprovalReader,
 )
-from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
+from app.properties.infrastructure.repositories import (
+    SqlAlchemyPropertyRepository,
+    SqlAlchemyPropertyStateTransitionRepository,
+)
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
 from app.statements.infrastructure.repositories import SqlAlchemyExpenseReader
 from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventReader
@@ -64,4 +68,12 @@ def get_operational_kpis_use_case(session: SessionDep) -> GetOperationalKpisUseC
         cleaning=SqlAlchemyCleaningTaskRepository(session),
         reservations=SqlAlchemyReservationRepository(session),
         incidents=SqlAlchemyIncidentReader(session),
+    )
+
+
+def get_occupancy_series_use_case(session: SessionDep) -> GetOccupancySeriesUseCase:
+    return GetOccupancySeriesUseCase(
+        properties=SqlAlchemyPropertyRepository(session),
+        reservations=SqlAlchemyReservationRepository(session),
+        transitions=SqlAlchemyPropertyStateTransitionRepository(session),
     )

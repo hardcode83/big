@@ -27,7 +27,7 @@ export function RuleFilters({ properties }: RuleFiltersProps) {
   } = usePricingUiStore();
 
   return (
-    <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:flex-wrap sm:items-end">
+    <div className="m-4 flex flex-col gap-3 rounded-lg border border-border bg-surface/60 p-3 backdrop-blur-md sm:flex-row sm:flex-wrap sm:items-end">
       <div className="flex min-w-0 flex-col gap-1">
         <label
           className="text-xs font-medium text-muted-foreground"

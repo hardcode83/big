@@ -197,6 +197,61 @@ describe("WorkspaceShell (D3/D6/D9)", () => {
   });
 });
 
+describe("Sidebar compositional additions (visual-restyle-workspace R2 AC2)", () => {
+  // The QA panel found this untested: none of the three non-navigational
+  // additions to the sidebar sketch — brand subtitle, promoted CTA, help row
+  // — was asserted by a committed test, and the tablet `Sheet` path was only
+  // ever checked via a throwaway test file that was run once and deleted.
+  it("renders the brand block, promoted CTA, and a non-interactive help row in the desktop aside", async () => {
+    const { container } = await renderShell();
+    const aside = container.querySelector("aside")!;
+
+    expect(within(aside).getByText("Panel de Control")).toBeInTheDocument();
+
+    const dashboardLinks = within(aside).getAllByRole("link", {
+      name: "Panel",
+    });
+    const promotedCta = dashboardLinks.find((link) =>
+      link.className.includes("btn-glow"),
+    );
+    expect(promotedCta).toBeDefined();
+    expect(promotedCta).toHaveAttribute("href", "/dashboard");
+
+    expect(within(aside).getByText("Ayuda")).toBeInTheDocument();
+    expect(
+      within(aside).queryByRole("link", { name: "Ayuda" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(aside).queryByRole("button", { name: "Ayuda" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the same three additions inside the tablet drawer opened via the real trigger", async () => {
+    await renderShell();
+
+    const openMenu = screen.getByRole("button", { name: "Abrir menú" });
+    fireEvent.click(openMenu);
+
+    const dialog = await screen.findByRole("dialog");
+
+    expect(within(dialog).getByText("Panel de Control")).toBeInTheDocument();
+
+    const promotedCta = within(dialog)
+      .getAllByRole("link", { name: "Panel" })
+      .find((link) => link.className.includes("btn-glow"));
+    expect(promotedCta).toBeDefined();
+    expect(promotedCta).toHaveAttribute("href", "/dashboard");
+
+    expect(within(dialog).getByText("Ayuda")).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole("link", { name: "Ayuda" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole("button", { name: "Ayuda" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("WorkspaceShell notification bell (`notifications-inbox-web` R3.1)", () => {
   it("mounts the bell in the topbar's end slot", async () => {
     await renderShell();

@@ -1,7 +1,7 @@
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, Numeric, String, Uuid
+from sqlalchemy import Boolean, Enum, ForeignKey, Integer, Numeric, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -10,6 +10,18 @@ from app.tenants.domain.enums import StorageType, TenantStatus
 
 class TenantModel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "tenants"
+
+    # `platform-admin-api` (R-2, D2 enmendada): `tenants.name` is the only natural handle
+    # on the row the API exposes before its id is known, and the document search of D6 is
+    # keyed on the same column. The constraint is declared HERE, with the same name the
+    # migration `936fef5a01b1_tenants_name_unique.py` uses, and not as `unique=True`:
+    # `unique=True` lets the backend pick the name (Postgres derives `tenants_name_key`),
+    # which made the two schema paths disagree — the test database is built from this
+    # metadata via `create_all`, the deployed one by the migration — and forced the
+    # repository's `IntegrityError` translation to match a set of two spellings. One
+    # explicit name means both paths produce the same constraint and the translation has
+    # a single thing to look for.
+    __table_args__ = (UniqueConstraint("name", name="uq_tenants_name"),)
 
     name: Mapped[str] = mapped_column(String(200))
     billing_email: Mapped[str] = mapped_column(String(255))

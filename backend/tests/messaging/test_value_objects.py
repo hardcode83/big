@@ -7,6 +7,7 @@ nobody. R2.4, R2.1, R3.5, R6.5.
 """
 
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -26,6 +27,7 @@ from app.messaging.domain.value_objects import (
     ConversationContext,
     GeneratedResponse,
     InboundMessageActor,
+    InboundWhatsAppMessage,
     MessageClassification,
     MessageMetadata,
 )
@@ -354,10 +356,14 @@ def test_the_result_has_no_string_field() -> None:
 
 
 def test_channel_error_codes_are_the_three_of_the_design() -> None:
+    """Four now, not three: `whatsapp-cloud-adapter` R2.3/R2.4 (design D2) adds
+    `OUTSIDE_SESSION_WINDOW`, symmetric with `NotificationErrorCode`'s own member of the same
+    name."""
     assert tuple(member.name for member in ChannelErrorCode) == (
         "INVALID_RECIPIENT",
         "CHANNEL_INBOUND_ONLY",
         "ADAPTER_UNAVAILABLE",
+        "OUTSIDE_SESSION_WINDOW",
     )
 
 
@@ -481,7 +487,202 @@ def test_the_digest_refusal_quotes_neither_the_token_nor_the_value() -> None:
     assert token not in str(raised.value)
 
 
-def test_the_actor_carries_exactly_three_fields() -> None:
-    """R4.1 names the actor and where it acted from, and nothing else. A fourth field here is
-    a fourth thing that could reach `audit_logs` without passing `AuditLogFactory`."""
-    assert set(InboundMessageActor.__dataclass_fields__) == {"user_id", "token_hash", "ip"}
+def test_the_actor_carries_exactly_four_fields() -> None:
+    """R4.1 names the actor and where it acted from, and nothing else. A fifth field here is
+    a fifth thing that could reach `audit_logs` without passing `AuditLogFactory`.
+
+    Four rather than three since `whatsapp-cloud-adapter` D6 added the webhook's identity;
+    the count is pinned so a fourth *identity* cannot arrive without this test being read.
+    """
+    assert set(InboundMessageActor.__dataclass_fields__) == {
+        "user_id",
+        "token_hash",
+        "resolved_phone",
+        "ip",
+    }
+
+
+# --- `InboundMessageActor.resolved_phone` (`whatsapp-cloud-adapter` R4.2, D6) --------------
+
+PHONE = "+34612345678"
+
+
+def test_an_actor_can_be_a_resolved_phone_number() -> None:
+    """The third door: a WhatsApp webhook has no `User` and no portal link behind it, only the
+    E.164 number `PostWhatsAppInboundMessageUseCase` normalised (D6)."""
+    actor = InboundMessageActor(resolved_phone=PHONE)
+
+    assert actor.resolved_phone == PHONE
+    assert actor.user_id is None
+    assert actor.token_hash is None
+
+
+def test_a_resolved_phone_actor_may_still_carry_an_ip() -> None:
+    """`ip` says where, not who: it is outside the "exactly one" invariant for every identity,
+    which is what makes the count in `__post_init__` a count of three and not of four."""
+    actor = InboundMessageActor(resolved_phone=PHONE, ip="203.0.113.7")
+
+    assert actor.ip == "203.0.113.7"
+
+
+#: Every way of naming more than one actor, exhaustively — the three pairs and the triple.
+#: Pairwise, three identities have three pairs, and an `if` chain that checks only two of them
+#: leaves a real combination constructible; D6's invariant is "exactly one", so all four
+#: shapes are pinned rather than the two an old two-field check happened to cover.
+MORE_THAN_ONE_ACTOR = [
+    {"user_id": uuid.uuid4(), "token_hash": DIGEST},
+    {"user_id": uuid.uuid4(), "resolved_phone": PHONE},
+    {"token_hash": DIGEST, "resolved_phone": PHONE},
+    {"user_id": uuid.uuid4(), "token_hash": DIGEST, "resolved_phone": PHONE},
+]
+
+
+@pytest.mark.parametrize("kwargs", MORE_THAN_ONE_ACTOR)
+def test_an_actor_refuses_to_name_more_than_one_identity(kwargs: dict[str, object]) -> None:
+    with pytest.raises(MessagingValidationError):
+        InboundMessageActor(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("value", ["", "   ", "\t"])
+def test_a_blank_resolved_phone_names_nobody_and_is_refused(value: str) -> None:
+    """A blank string is not `None`, so the count reads it as an identity while it names
+    nobody — the one shape that could make "exactly one" true and empty at once."""
+    with pytest.raises(MessagingValidationError):
+        InboundMessageActor(resolved_phone=value)
+
+
+def test_the_multiple_identity_refusal_quotes_no_value() -> None:
+    """The module's standing rule reaches the third identity too: a guest's phone number in a
+    422 body or a log line is exactly the leak rule 11 of `steering/security.md` forbids."""
+    user_id = uuid.uuid4()
+
+    with pytest.raises(MessagingValidationError) as raised:
+        InboundMessageActor(user_id=user_id, resolved_phone=PHONE)
+
+    rendered = str(raised.value)
+    assert PHONE not in rendered
+    assert str(user_id) not in rendered
+
+
+def test_a_resolved_phone_is_not_checked_against_the_digest_predicate() -> None:
+    """D6: "not a token, so no digest-shape check applies to it". An E.164 number is 12
+    characters and not hex; were `is_guest_token_digest` applied to this field, every real
+    WhatsApp message would be refused at construction."""
+    assert InboundMessageActor(resolved_phone=PHONE).resolved_phone == PHONE
+
+
+# --- InboundWhatsAppMessage (`whatsapp-cloud-adapter` R3.5, R4.1; design D9) ---------------
+
+RECEIVED_AT = datetime(2023, 11, 14, 22, 13, 19, tzinfo=UTC)
+GUEST_WORDS = "Hola, tengo una pregunta sobre el check-in"
+GUEST_PHONE = "34600111222"
+
+
+def make_inbound(**overrides: object) -> InboundWhatsAppMessage:
+    fields: dict[str, object] = {
+        "sender_phone": GUEST_PHONE,
+        "provider_message_id": "wamid.HBgLMzQ2MDAxMTEyMjI",
+        "text": GUEST_WORDS,
+        "received_at": RECEIVED_AT,
+        "business_phone_number": "1234567890",
+    }
+    fields.update(overrides)
+    return InboundWhatsAppMessage(**fields)  # type: ignore[arg-type]
+
+
+def test_an_inbound_whatsapp_message_of_the_expected_shape_is_accepted() -> None:
+    """The guard on the negatives below: without it a class that refused *everything* would
+    make every refusal test pass and the type would be unusable."""
+    message = make_inbound()
+
+    assert message.sender_phone == GUEST_PHONE
+    assert message.text == GUEST_WORDS
+    assert message.received_at == RECEIVED_AT
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["sender_phone", "provider_message_id", "text", "business_phone_number"],
+)
+@pytest.mark.parametrize("blank", ["", "   ", "\n"])
+def test_no_string_field_of_an_inbound_message_may_be_blank(field: str, blank: str) -> None:
+    """Whitespace counts as blank, which is the part a `if not value` check would miss.
+
+    `provider_message_id` is the one that matters most: R3.5 deduplicates a provider's
+    delivery retry on it, so an empty id would collapse every distinct message onto the same
+    key — a missing field turning into silent data loss instead of a loud refusal.
+    """
+    with pytest.raises(MessagingValidationError):
+        make_inbound(**{field: blank})
+
+
+def test_an_inbound_message_refuses_a_naive_timestamp() -> None:
+    """`received_at` is compared against the 24h session window (design D2), where a naive
+    datetime is a `TypeError` from inside an adapter rather than an answer. The same guard
+    `Incident.eta_at` carries."""
+    with pytest.raises(MessagingValidationError):
+        make_inbound(received_at=datetime(2023, 11, 14, 22, 13, 19))
+
+
+def test_an_inbound_message_accepts_an_aware_timestamp_in_any_zone() -> None:
+    """Aware is the contract, not UTC specifically: `parse` builds UTC, and a future provider
+    adapter may hand over an offset."""
+    from datetime import timedelta, timezone
+
+    madrid = timezone(timedelta(hours=2))
+    assert make_inbound(received_at=RECEIVED_AT.astimezone(madrid)).received_at == RECEIVED_AT
+
+
+def test_the_inbound_message_refusals_quote_neither_the_words_nor_the_number() -> None:
+    """The module's standing rule, over the field that carries the guest's message.
+
+    `api/errors.py` renders `str(exc)` into a 422 body and every log line, and this value
+    object is built from an unauthenticated webhook — so a refusal that interpolated its own
+    input would push the guest's text into both.
+    """
+    for field in ("sender_phone", "provider_message_id", "business_phone_number"):
+        with pytest.raises(MessagingValidationError) as raised:
+            make_inbound(**{field: " "}, text=GUEST_WORDS)
+        assert GUEST_WORDS not in str(raised.value)
+        assert GUEST_PHONE not in str(raised.value)
+
+    with pytest.raises(MessagingValidationError) as raised:
+        make_inbound(text=" ")
+    assert GUEST_PHONE not in str(raised.value)
+
+
+def test_an_inbound_message_text_over_the_ceiling_is_truncated_not_refused() -> None:
+    """4000 mirrors `Message.MAX_MESSAGE_CONTENT_LENGTH`, but unlike that constructor this one
+    truncates rather than raises: Meta redelivers on any non-2xx, and a refusal here would
+    retry forever without ever becoming the row R3.5 deduplicates on."""
+    message = make_inbound(text="a" * 4001)
+
+    assert len(message.text) == 4000
+    assert message.text == "a" * 4000
+
+
+def test_an_inbound_message_text_at_the_ceiling_is_untouched() -> None:
+    message = make_inbound(text="a" * 4000)
+
+    assert message.text == "a" * 4000
+
+
+def test_an_inbound_message_is_frozen() -> None:
+    """It crosses a port and is read by the receiving use case, the deduplication check and
+    the pipeline; a mutable one lets any of them rewrite what the guest said."""
+    message = make_inbound()
+
+    with pytest.raises(Exception):
+        message.text = "something else"  # type: ignore[misc]
+
+
+def test_the_inbound_message_carries_exactly_the_five_fields_of_the_design() -> None:
+    """D9 lists them. A sixth would be a provider detail crossing the boundary this value
+    object exists to be — `type`, `wa_id`, the contact's profile name, the raw payload."""
+    assert set(InboundWhatsAppMessage.__dataclass_fields__) == {
+        "sender_phone",
+        "provider_message_id",
+        "text",
+        "received_at",
+        "business_phone_number",
+    }

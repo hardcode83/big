@@ -4,6 +4,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { ApiError } from "@/lib/api";
 import {
   useUploadIncidentPhoto,
@@ -70,61 +71,63 @@ export function TechPhotoUpload({ incidentId }: { incidentId: string }) {
   const message = errorMessage();
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="flex flex-col gap-3 rounded-lg border bg-surface p-4"
-    >
-      <h2 className="text-base font-semibold text-foreground">
-        {t("upload.title")}
-      </h2>
-      <p className="text-xs text-muted-foreground">{t("upload.optional")}</p>
+    <Card className="p-4">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+        <h2 className="text-body-lg font-semibold text-foreground">
+          {t("upload.title")}
+        </h2>
+        <p className="text-xs text-muted-foreground">{t("upload.optional")}</p>
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="tech-photo" className="text-sm text-muted-foreground">
-          {t("upload.file")}
-        </label>
-        <input
-          id="tech-photo"
-          ref={fileInput}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          capture="environment"
-          className="min-h-11 rounded-md border bg-background px-3 py-2 text-sm"
-        />
-      </div>
-
-      <fieldset className="flex flex-col gap-1">
-        <legend className="text-sm text-muted-foreground">
-          {t("upload.stage")}
-        </legend>
-        <div className="flex gap-2">
-          {STAGES.map((option) => (
-            <label
-              key={option}
-              className="flex min-h-11 items-center gap-2 text-sm"
-            >
-              <input
-                type="radio"
-                name="stage"
-                value={option}
-                checked={stage === option}
-                onChange={() => setStage(option)}
-              />
-              {t(`photos.stage.${option}`)}
-            </label>
-          ))}
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor="tech-photo"
+            className="mb-1 block text-xs font-medium text-muted-foreground"
+          >
+            {t("upload.file")}
+          </label>
+          <input
+            id="tech-photo"
+            ref={fileInput}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            capture="environment"
+            className="tap-target rounded-md border bg-background px-3 py-2 text-sm"
+          />
         </div>
-      </fieldset>
 
-      {message ? (
-        <p role="alert" className="text-sm text-state-error-text">
-          {message}
-        </p>
-      ) : null}
+        <fieldset className="flex flex-col gap-1">
+          <legend className="text-xs font-medium text-muted-foreground">
+            {t("upload.stage")}
+          </legend>
+          <div className="flex gap-2">
+            {STAGES.map((option) => (
+              <label
+                key={option}
+                className="tap-target flex items-center gap-2 text-sm"
+              >
+                <input
+                  type="radio"
+                  name="stage"
+                  value={option}
+                  checked={stage === option}
+                  onChange={() => setStage(option)}
+                />
+                {t(`photos.stage.${option}`)}
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
-      <Button type="submit" className="min-h-11" disabled={upload.isPending}>
-        {upload.isPending ? t("upload.uploading") : t("upload.submit")}
-      </Button>
-    </form>
+        {message ? (
+          <p role="alert" className="text-body-base text-state-error-text">
+            {message}
+          </p>
+        ) : null}
+
+        <Button type="submit" className="tap-target" disabled={upload.isPending}>
+          {upload.isPending ? t("upload.uploading") : t("upload.submit")}
+        </Button>
+      </form>
+    </Card>
   );
 }

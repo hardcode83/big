@@ -504,6 +504,24 @@ Su comportamiento completo —el sellado de `IncidentSource.CLEANER`, el víncul
 `incidents.cleaning_task_id`, las cotas del texto libre y lo que el acuse nunca lleva— vive en
 [`cleaner-incident-report.md`](cleaner-incident-report.md).
 
+### Hilo de mensajes de la tarea
+
+- THE SYSTEM SHALL ofrecer un hilo de mensajes acotado a la tarea por
+  `POST` y `GET /api/v1/cleaning-tasks/{task_id}/messages` — escribir bajo
+  `EXECUTE_CLEANING_TASKS` **o** `MANAGE_CLEANING_TASKS`, leer bajo `READ_CLEANING_TASKS` — con el
+  mismo acotamiento por fila que el resto de esta capacidad: una `CLEANER` solo alcanza el hilo de
+  su propia tarea asignada, y un `PROPERTY_MANAGER`/`TENANT_OWNER` cualquiera del tenant.
+- THE SYSTEM SHALL dejar el estado de la tarea **fuera** del acceso al hilo: se puede escribir y
+  leer sobre una tarea terminal, igual que hoy `_load_task` no filtra por estado (design D4 de
+  `staff-messaging`).
+- THE SYSTEM SHALL servirlo sin conceder ningún permiso nuevo: los cuatro permisos que gatean
+  lectura/escritura de este hilo y del gemelo de `maintenance` ya existían en `ROLE_PERMISSIONS`
+  antes de esta capacidad (design D3).
+
+Su comportamiento completo —el esquema de las dos tablas gemelas, la autoría congelada, el reparto
+de la notificación y el censo de la regla 11 del contenido— vive en
+[`staff-messaging.md`](staff-messaging.md).
+
 ### Aislamiento y autorización
 
 - THE SYSTEM SHALL devolver únicamente las tareas y plantillas del tenant del token, con el
@@ -559,13 +577,15 @@ Su comportamiento completo —el sellado de `IncidentSource.CLEANER`, el víncul
 ## Key files
 
 - `backend/app/cleaning/domain/` — `entities.py` (las tres cláusulas de PRD §11 en
-  `CleaningTask.complete`), `templates.py` (resolución y ambigüedad), `assignment.py`
-  (`resolve_auto_assignee` y `assignment_blocker`, las dos políticas puras de la asignación),
-  `enums.py` (`CleaningAssignmentBlocker`), `windows.py` (los dos extremos de la ventana de una limpieza, con
-  `process_checkouts` y la proyección de contexto como llamantes), `read_models.py`
-  (`CleaningTaskContext`), `value_objects.py` (validación del contenido de plantilla y
-  `CleaningCompletionEvidence`), `notifications.py`, `ports.py`, `repositories.py`
-  (`CleaningPhotoRepository` y la consulta sin scoping de la ruta anónima), `exceptions.py`.
+  `CleaningTask.complete`, más `CleaningTaskMessage` de
+  [`staff-messaging`](staff-messaging.md)), `templates.py` (resolución y ambigüedad),
+  `assignment.py` (`resolve_auto_assignee` y `assignment_blocker`, las dos políticas puras de la
+  asignación), `enums.py` (`CleaningAssignmentBlocker`), `windows.py` (los dos extremos de la
+  ventana de una limpieza, con `process_checkouts` y la proyección de contexto como llamantes),
+  `read_models.py` (`CleaningTaskContext`), `value_objects.py` (validación del contenido de
+  plantilla y `CleaningCompletionEvidence`), `notifications.py` (incluido
+  `staff_message_notification`), `ports.py`, `repositories.py` (`CleaningPhotoRepository`,
+  `CleaningTaskMessageRepository` y la consulta sin scoping de la ruta anónima), `exceptions.py`.
 - `backend/app/cleaning/application/use_cases.py` — provisión al checkout y los casos de uso del
   ciclo de vida, el checklist, las plantillas y las fotos (subida, listado y servido local), más
   `GetPhotoRequirementsUseCase` y su `PhotoRequirementView`, que enumeran las categorías de foto de
@@ -583,7 +603,8 @@ Su comportamiento completo —el sellado de `IncidentSource.CLEANER`, el víncul
 - `backend/app/cleaning/infrastructure/repositories.py` — adaptadores; los de completions y fotos
   son el único aislamiento de sus tablas.
 - `backend/app/cleaning/api/` — `tasks_router.py`, `templates_router.py`, `photos_router.py` (la
-  ruta anónima firmada, hoy construida con la factoría compartida), `schemas.py`
+  ruta anónima firmada, hoy construida con la factoría compartida), `messages_router.py` (el hilo
+  de mensajes de [`staff-messaging`](staff-messaging.md)), `schemas.py`
   (`CleaningTaskListItemResponse` y su `from_domain`, nunca `from_attributes`, para que `notes` no
   entre), `dependencies.py`, `errors.py` (la tabla que traduce cada excepción a su código, incluida
   la fila que separa `PropertyStateBlocksCleaningError` del `CONFLICT` del ciclo de vida).

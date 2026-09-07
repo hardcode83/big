@@ -79,7 +79,7 @@ vi.mock("@/lib/api/authenticated-client", () => ({
         };
       },
     },
-    refreshTokens: async () => ({ accessToken: "access", refreshToken: "refresh" }),
+    refreshTokens: async () => ({ accessToken: "access" }),
   }),
   notifySessionExpired: vi.fn(),
 }));

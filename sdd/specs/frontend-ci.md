@@ -22,12 +22,17 @@ sin duplicar la construcción de imágenes ni las responsabilidades de despliegu
 
 ### Entorno e instalación reproducible
 
-- WHEN comienza el job, THE SYSTEM SHALL ejecutarlo en `ubuntu-latest`, limitarlo a 15
-  minutos y conceder únicamente `contents: read`.
+- WHEN comienza el job, THE SYSTEM SHALL ejecutarlo en el runner self-hosted `[self-hosted, dev]`
+  (migrado desde `ubuntu-latest` por `ci-runner-oci`, 2026-09-04; ver `ci-runner-self-hosted.md`),
+  limitarlo a 15 minutos y conceder únicamente `contents: read`.
 - THE SYSTEM SHALL pinear por SHA de commit cada action utilizada y SHALL impedir que
   `actions/checkout` persista credenciales Git para los pasos posteriores.
 - WHEN prepara Node.js, THE SYSTEM SHALL seleccionar Node 22, la versión mayor declarada por
   `frontend/devops/Dockerfile`.
+- WHEN el job `provenance-contract` ejecuta `make check-version-parity`, THE SYSTEM SHALL preparar
+  antes `python3` con `actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0`
+  (`python-version: "3.12"`): el runner self-hosted trae `python3` 3.10 del sistema, insuficiente
+  para el `tomllib` que ese `make` usa (ver `ci-runner-self-hosted.md`).
 - THE SYSTEM SHALL cachear las descargas de npm usando `frontend/package-lock.json` como
   dependencia de la caché, pero SHALL NOT cachear `node_modules`.
 - WHEN instala dependencias, THE SYSTEM SHALL ejecutar una única vez `npm ci` desde

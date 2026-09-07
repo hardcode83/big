@@ -26,6 +26,12 @@ class GuestModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
     __tablename__ = "guests"
     __table_args__ = (
         Index("ix_guests_tenant_id_email", "tenant_id", "email"),
+        # `whatsapp-cloud-adapter` R4.2/R4.4: the webhook handler looks up guests by
+        # normalised phone, scoped to the tenant the route token already resolved. Same
+        # shape as the email index above, for the same reason — a plain per-tenant lookup
+        # index, not unique, since more than one guest legitimately sharing a phone is the
+        # signal `find_by_phone` returns a list for.
+        Index("ix_guests_tenant_id_phone", "tenant_id", "phone"),
         # Redundant as a constraint (`id` is already the primary key) and load-bearing as an
         # FK **target**: PostgreSQL only lets a composite foreign key reference a declared
         # unique key, and `reservations.guest_id` needs one so a stay cannot be linked to a

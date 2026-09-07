@@ -79,8 +79,12 @@ en CI y rojo en local, y el rojo le habría caído a la siguiente Pull Request q
   guardián usa `enum.StrEnum`, que no existe antes de esa versión, y es el único script de
   `scripts/` que lo hace. El suelo se declara aquí porque abajo de él la vía local no da veredicto
   —muere con un `ImportError` antes de llegar a `main()`—, así que la equivalencia con CI que pide
-  el punto anterior sólo se sostiene por encima de él. CI no está afectado: `ubuntu-latest` trae
-  3.12.
+  el punto anterior sólo se sostiene por encima de él. **En CI** (`.github/workflows/rule11-ownership.yml`),
+  THE SYSTEM SHALL preparar explícitamente `python3` 3.12 con
+  `actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0` antes de este paso:
+  desde `ci-runner-oci` (2026-09-04) el job corre en el runner self-hosted `[self-hosted, dev]`,
+  cuyo `python3` de sistema es 3.10 — a diferencia de `ubuntu-latest`, que traía 3.12 sin
+  declararlo. Ver `ci-runner-self-hosted.md`.
 
 **El coste declarado de vivir fuera de la suite.** El `pytest` del backend ya **no** ejecuta este
 guardián. Quien escriba una atribución en un docstring de `backend/app/**` la ve en CI y en

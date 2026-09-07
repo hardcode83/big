@@ -1,3 +1,6 @@
+# Runner self-hosted en la VM dev (label `[self-hosted, dev]`). Rollback: ver
+# docs/ci-runner-rollback.md (procedimiento + SHA del commit de migración).
+# Cambio: ci-runner-oci (PR <n>).
 name: frontend-api-contract
 
 # Comprueba que los tipos TypeScript versionados siguen siendo la salida del contrato OpenAPI.
@@ -18,7 +21,7 @@ permissions:
 
 jobs:
   frontend-api-contract:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 10
 
     steps:

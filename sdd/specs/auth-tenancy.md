@@ -71,7 +71,10 @@ tocar la base de datos a mano.
 
 - WHEN se envía a `POST /api/v1/auth/login` un email y una contraseña que corresponden a
   un usuario `ACTIVE` de un tenant `ACTIVE`, THE SYSTEM SHALL responder `200` con token de
-  acceso, token de refresh, tipo de token y la vida del token de acceso en segundos.
+  acceso, tipo de token y la vida del token de acceso en segundos en el cuerpo, y emitir el
+  token de refresh **exclusivamente** vía `Set-Cookie` (`auth-session-persistence`, ver
+  «Transporte del refresh token: cookie, no cuerpo» más abajo) — el cuerpo SHALL NOT llevar
+  nunca un campo `refresh_token`.
 - WHEN un login tiene éxito, THE SYSTEM SHALL actualizar `last_login_at` del usuario con
   el instante de la autenticación en UTC, mediante un `UPDATE` de esa única columna.
 - IF un login falla por cualquier motivo, THEN THE SYSTEM SHALL NOT modificar
@@ -121,9 +124,20 @@ tocar la base de datos a mano.
 
 ### Renovación con rotación, cierre de sesión y usuario actual
 
-- WHEN se presenta un token de refresh válido y utilizable a `POST /api/v1/auth/refresh`,
-  THE SYSTEM SHALL marcarlo como usado, emitir un par nuevo y persistir la sesión hija con
-  el mismo `family_id` y `parent_id` apuntando a la consumida.
+- WHEN se presenta a `POST /api/v1/auth/refresh` un token de refresh válido y utilizable —
+  leído **exclusivamente** de la cookie `autohostai.session.refresh`, nunca de un campo
+  `refresh_token` en el cuerpo, que si se envía se ignora en silencio
+  (`auth-session-persistence`) —, THE SYSTEM SHALL marcarlo como usado, emitir un par nuevo
+  y persistir la sesión hija con el mismo `family_id` y `parent_id` apuntando a la
+  consumida. La respuesta rota la cookie del mismo modo que el login.
+- IF `POST /api/v1/auth/refresh` no recibe la cookie `autohostai.session.refresh`, THEN THE
+  SYSTEM SHALL responder el mismo `401 INVALID_TOKEN` que un token de refresh inválido —sin
+  distinguir "no hay cookie" de "la cookie no decodifica".
+- WHEN el `Origin` de la petición a `POST /api/v1/auth/refresh` está presente pero no
+  pertenece al allowlist de CORS, THE SYSTEM SHALL responder `401 INVALID_TOKEN` sin
+  consumir el token (`enforce_same_origin`) — CORS y `SameSite` no bastan por sí solos
+  contra un origen hermano bajo el mismo dominio registrable, que es *same-site* aunque no
+  sea el frontend legítimo.
 - THE SYSTEM SHALL decidir quién consume una sesión con **una única sentencia condicional**
   (`UPDATE ... WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at > now`) y
   comprobando `rowcount`. Separar la comprobación de la escritura permitiría que dos
@@ -141,6 +155,18 @@ tocar la base de datos a mano.
   SHALL revocar la familia de refresh de esa sesión con razón `LOGOUT`. La familia viaja en
   el claim `fam` del token de acceso, porque el endpoint va autenticado con el access y su
   `jti` no guarda vínculo con la familia.
+- IF no se presenta un token de acceso válido (ausente, o presente pero que no autentica) a
+  `POST /api/v1/auth/logout`, THEN THE SYSTEM SHALL caer a la cookie
+  `autohostai.session.refresh` como credencial y revocar la familia que decodifica de ella
+  — la misma postura de "el token ES la credencial" que ya tiene `/auth/refresh`
+  (`auth-session-persistence`, `get_logout_subject`). Un `Origin` presente pero fuera del
+  allowlist de CORS hace que este camino se trate como "nada que revocar" en vez de
+  intentar la revocación (ver más abajo).
+- `POST /api/v1/auth/logout` SHALL NOT responder nunca `401` por un motivo de
+  autenticación: toda combinación de Bearer/cookie —incluidos un Bearer ausente, uno
+  presente pero inválido, una cookie ausente, una que no decodifica, o una con un `Origin`
+  fuera del allowlist— resuelve en un `204`, con revocación si había algo que revocar y sin
+  ella si no. El endpoint borra la cookie incondicionalmente en la respuesta.
 - Los tokens de acceso ya emitidos siguen siendo válidos hasta expirar (como máximo 15
   minutos) después de un logout: no existe lista de revocación de access tokens.
 - WHEN se llama a `GET /api/v1/auth/me` con un token de acceso válido, THE SYSTEM SHALL
@@ -153,6 +179,24 @@ tocar la base de datos a mano.
   sobre la cuenta de otra persona. Hacen falta porque `POST /api/v1/auth/refresh` no atraviesa
   `get_authenticated_request` y por tanto no revalida el estado de la cuenta — sin revocar, una
   cuenta desactivada seguiría emitiendo pares nuevos toda la vida del refresh.
+
+### Transporte del refresh token: cookie, no cuerpo (`auth-session-persistence`)
+
+- `POST /api/v1/auth/login` y `POST /api/v1/auth/refresh` SHALL emitir el token de refresh
+  **exclusivamente** vía `Set-Cookie: autohostai.session.refresh=<token>`; ninguno de los
+  dos SHALL leer ni escribir un campo `refresh_token` en el cuerpo — moverlo fuera del
+  alcance de JavaScript es la defensa contra su robo por XSS.
+- THE SYSTEM SHALL fijar el mismo juego de atributos en cada emisión de la cookie:
+  `HttpOnly` (siempre — el token nunca es legible desde JS); `SameSite=Strict`; `Path=/api/v1/auth`
+  (fuera de cualquier otra ruta); `Max-Age` igual a `JWT_REFRESH_TOKEN_DAYS × 86400`
+  segundos; y `Secure` decidido por petición según el esquema externo (`resolve_cookie_secure`,
+  ver la sección de `Secure` en `docs/auth-tenancy.md` para la resolución dev/producción).
+- `SameSite` por sí solo NO protege `/auth/refresh` ni la caída a cookie de `/auth/logout`
+  de un origen hermano bajo el mismo dominio registrable —es *same-site* aunque no sea el
+  frontend legítimo—, y `CORSMiddleware` solo decide si el navegador puede LEER la
+  respuesta, no si la petición ejecuta. Ver los dos requisitos de `enforce_same_origin` en
+  las secciones de arriba para la defensa real (`Origin` contra el mismo allowlist que usa
+  CORS).
 
 ### Tokens
 
@@ -188,9 +232,18 @@ tocar la base de datos a mano.
   (`READ_USERS`, `MANAGE_USERS`, `READ_TENANT_SETTINGS`, `MANAGE_TENANT_SETTINGS`), los dos de
   `properties-crud` (`READ_PROPERTIES`, `MANAGE_PROPERTIES`), los cinco de `cleaning`, los
   cuatro de `maintenance` (`READ_INCIDENTS`, `MANAGE_INCIDENTS`, `EXECUTE_INCIDENTS`,
-  `RESPOND_OWNER_APPROVALS`) y los cinco de `revenue-reviews` (`READ_REVIEWS`,
-  `CREATE_REVIEW`, `APPROVE_REVIEW`, `IGNORE_REVIEW`, `MARK_REVIEW_POSTED`), todos
-  diferenciados por rol.
+  `RESPOND_OWNER_APPROVALS`), los cinco de `revenue-reviews` (`READ_REVIEWS`,
+  `CREATE_REVIEW`, `APPROVE_REVIEW`, `IGNORE_REVIEW`, `MARK_REVIEW_POSTED`) y el que añadió
+  `platform-admin-api` (`MANAGE_PLATFORM`), todos diferenciados por rol.
+- `MANAGE_PLATFORM` lo sostiene `SUPER_ADMIN` y solo `SUPER_ADMIN` (cambio
+  `platform-admin-api`, R5.1/R5.2/D6). Vive en una entrada `_PLATFORM` del módulo
+  `app/auth/domain/policy.py`, sumada a `_SELF_SERVICE` para componer
+  `ROLE_PERMISSIONS[UserRole.SUPER_ADMIN]`; ningún `_SOMETHING_*` por rol de tenant
+  (`_OWNER_*`, `_MANAGER_*`, `_TECH_*`, `_CLEANING_*`) lo arrastra, y `is_allowed` lo
+  niega para los cuatro roles tenant-scoped. Sin esta concentración el permiso se
+  diluiría por el camino de cualquier cambio futuro al catálogo, y la guarda
+  estructural de `tests/test_route_authorization.py::test_manage_platform_only_lives_under_platform_prefix`
+  deja de ser el ancla que R-6 del diseño pide.
 - **`TECHNICIAN` dejó de ser un rol sin capacidades el 2026-08-15.** Hasta `maintenance` tenía
   autoservicio y nada más: existía y no podía hacer nada. Ahora suma `READ_INCIDENTS` y
   `EXECUTE_INCIDENTS` —exactamente lo que necesita el ciclo del técnico— y NEVER SHALL poder
@@ -267,6 +320,19 @@ tocar la base de datos a mano.
   el listener añade la cláusula de tenant también a `find_by_email_globally`); no protege INSERTs; no cubre el mapa de identidad; y no alcanza
   las tablas hijas sin `tenant_id` propio (`messages`, `cleaning_checklist_completions`,
   `cleaning_photos`), que deben unirse a su padre scopado y traer su propio test.
+- **Excepción adicional a la regla 1 introducida por `platform-admin-api` (R6.1/R6.2):** las
+  dos rutas del router de plataforma — `POST /api/v1/platform/tenants` y
+  `POST /api/v1/platform/tenants/{tenant_id}/users` — corren sobre sesiones
+  `SUPER_ADMIN` no marcadas (la enumeración anterior aplica, no se duplica), y la regla 1
+  se sostiene **en la entidad** aunque se haya saltado **en el actor**. Lo afirma
+  `CreateUserInTenantUseCase`, que toma el `tenant_id` del path y no del actor, y
+  `tests/platform/test_isolation.py::test_creating_a_user_in_tenant_a_does_not_leak_to_tenant_b`
+  lo pinea: el nuevo usuario aterriza bajo el tenant del path, no bajo el tenant del actor
+  ni bajo `NULL`. La guarda estructural
+  `tests/test_route_authorization.py::test_manage_platform_only_lives_under_platform_prefix`
+  cierra la otra mitad (R-6 del diseño): el permiso `MANAGE_PLATFORM` solo vive bajo
+  `/api/v1/platform/`, así que la excepción a la regla 1 que abre esta superficie
+  sigue siendo solo esta superficie.
 - WHEN un comando o job resuelve credenciales de PMS propiedad a propiedad, THE SYSTEM SHALL
   marcar la sesión con el tenant **antes** de la resolución y mantener una sesión por tenant.
   Es el mismo patrón que `celery-jobs` (sesión marcada por tenant, enumeración de tenants desde

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from app.auth.domain.enums import UserRole
 from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
 from app.cleaning.domain.exceptions import (
     BlockingIncidentError,
@@ -26,6 +27,13 @@ from app.cleaning.domain.exceptions import (
     PhotosIncompleteError,
 )
 from app.cleaning.domain.value_objects import CleaningCompletionEvidence
+
+#: `cleaning_task_messages.content` is `VARCHAR(2000)` (`staff-messaging` design D5), the
+#: same figure `incidents.materials` uses for a bounded note a person types. This module owns
+#: the column — the entity below and its DDL next door in `cleaning/infrastructure/models.py`
+#: — so this is where the width lives; `api/schemas.py` imports it rather than repeating a
+#: literal, the `MAX_MATERIALS` pattern.
+MAX_CLEANING_TASK_MESSAGE_LENGTH = 2000
 
 # A task that still counts as "this reservation is being taken care of".
 #
@@ -338,3 +346,29 @@ class CleaningPhoto:
     storage_key: str
     created_at: datetime
     ai_validation_result: dict[str, Any] | None = None
+
+
+@dataclass
+class CleaningTaskMessage:
+    """One staff-to-manager message on a cleaning task's thread (`staff-messaging` R1).
+
+    A plain dataclass with no `__post_init__` invariant of its own — the `CleaningPhoto`/
+    `IncidentPhoto` shape, not the `CleaningTask` one: nothing here is a state machine, so
+    there is no rule to enforce beyond what the constructor's types already say.
+
+    `author_role` is the persisted `UserRole` of the caller **frozen at the instant the
+    message was written** (design D2) — never derived by joining back to `users.role`,
+    which would answer "what is this person's role today" instead of "what were they
+    when they sent this". Reusing `MessageSenderType` (the guest-facing `Conversation`'s
+    enum) was rejected for the same reason `Conversation` itself is out of scope (R1.5/
+    R3.3): this thread is scoped by a persisted staff role, not by who originated a guest
+    message.
+    """
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    task_id: uuid.UUID
+    author_id: uuid.UUID
+    author_role: UserRole
+    content: str
+    created_at: datetime

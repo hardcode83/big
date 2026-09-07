@@ -13,7 +13,7 @@ keyed by tenant, so passing another tenant's id returns nothing without any spec
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
 from app.cleaning.domain.enums import CleaningTaskStatus
@@ -26,7 +26,7 @@ from app.maintenance.domain.value_objects import (
     OpenIncidentCounts,
     OwnerApprovalSummary,
 )
-from app.properties.domain.entities import Property
+from app.properties.domain.entities import Property, PropertyStateTransition
 from app.properties.domain.enums import PropertyOperationalState, PropertyStatus
 from app.properties.domain.repositories import Page as PropertyPage
 from app.reservations.domain.entities import Reservation
@@ -109,6 +109,21 @@ def make_guest(guest_id: uuid.UUID, *, name: str = "Marta García") -> GuestSumm
 @dataclass
 class FakePropertyRepository:
     by_tenant: dict[uuid.UUID, list[Property]] = field(default_factory=dict)
+    calls: list[tuple] = field(default_factory=list)
+
+    async def list_by_status(self, tenant_id, status: PropertyStatus) -> list[Property]:
+        """`dashboard-occupancy-series` R4.1's active-portfolio read.
+
+        Filters in memory by `status`, same as every other fake here — the real adapter's
+        `internal_code` ordering is not asserted by anything section 3 tests.
+
+        Defined **before** `list` below: this class defines a method named `list`, which
+        would shadow the builtin inside the class body and make a later `list[Property]`
+        annotation a `TypeError` at import time (same reason the real `PropertyRepository`
+        Protocol orders `list_by_status` ahead of `list`).
+        """
+        self.calls.append(("list_by_status", tenant_id, status))
+        return [item for item in self.by_tenant.get(tenant_id, []) if item.status == status]
 
     async def list(self, tenant_id, *, filters, page, per_page) -> PropertyPage:
         items = self.by_tenant.get(tenant_id, [])
@@ -148,6 +163,49 @@ class FakeReservationRepository:
             if date_from <= item.check_in_date <= date_to
             and item.status not in (ReservationStatus.CANCELLED, ReservationStatus.NO_SHOW)
         )
+
+
+@dataclass
+class FakePropertyStateTransitionRepository:
+    """Only `history_for_properties` — the one method `GetOccupancySeriesUseCase` calls.
+
+    Same precedent as `tests/properties/doubles.py`'s sibling fake, which omits
+    `last_for_property` for the same reason: a fake covers what its use case needs, not
+    the whole port.
+
+    Mirrors the adapter's contract (`app/properties/domain/repositories.py:458`) rather than
+    reading it verbatim: sparse result, and each present sequence holds the one transition
+    immediately before `start` (if any) followed by every transition inside
+    `[start, end]` — both resolved against the UTC calendar day, `end` inclusive.
+    """
+
+    by_tenant: dict[uuid.UUID, list[PropertyStateTransition]] = field(default_factory=dict)
+    calls: list[tuple] = field(default_factory=list)
+
+    async def history_for_properties(
+        self, tenant_id, property_ids, start: date, end: date
+    ) -> dict[uuid.UUID, list[PropertyStateTransition]]:
+        self.calls.append(("history_for_properties", tenant_id, tuple(property_ids), start, end))
+        wanted = set(property_ids)
+        if not wanted:
+            return {}
+        start_boundary = datetime.combine(start, time.min, tzinfo=UTC)
+        end_boundary = datetime.combine(end + timedelta(days=1), time.min, tzinfo=UTC)
+
+        by_property: dict[uuid.UUID, list[PropertyStateTransition]] = {}
+        for transition in self.by_tenant.get(tenant_id, []):
+            if transition.property_id in wanted:
+                by_property.setdefault(transition.property_id, []).append(transition)
+
+        result: dict[uuid.UUID, list[PropertyStateTransition]] = {}
+        for property_id, transitions in by_property.items():
+            ordered = sorted(transitions, key=lambda t: (t.created_at, t.id))
+            entering = [t for t in ordered if t.created_at < start_boundary]
+            within = [t for t in ordered if start_boundary <= t.created_at < end_boundary]
+            sequence = ([entering[-1]] if entering else []) + within
+            if sequence:
+                result[property_id] = sequence
+        return result
 
 
 @dataclass
@@ -304,6 +362,7 @@ __all__ = [
     "FakeIncidentReader",
     "FakeOwnerApprovalReader",
     "FakePropertyRepository",
+    "FakePropertyStateTransitionRepository",
     "FakeReservationRepository",
     "FakeTimelineReader",
     "make_approval",

@@ -34,7 +34,7 @@ export interface AuthenticatedClientOptions {
 
 export interface AuthenticatedClients {
   apiClient: ApiClient;
-  refreshTokens: (refreshToken: string) => Promise<SessionTokens>;
+  refreshTokens: () => Promise<SessionTokens>;
 }
 
 export function createAuthenticatedClients(
@@ -45,16 +45,16 @@ export function createAuthenticatedClients(
     fetchImpl: options.fetchImpl,
   });
 
-  const refreshTokens = async (refreshToken: string): Promise<SessionTokens> => {
+  const refreshTokens = async (): Promise<SessionTokens> => {
+    // The rotated refresh token travels exclusively via the `Set-Cookie`
+    // response header (browser-managed, `credentials: "include"` on this
+    // endpoint per D9) — the request body is empty and the response no
+    // longer carries a `refresh_token` field.
     const response = await authClient.request("/api/v1/auth/refresh", {
       method: "POST",
-      body: { refresh_token: refreshToken },
     });
     const tokenPair = response as TokenPairResponse;
-    return {
-      accessToken: tokenPair.access_token,
-      refreshToken: tokenPair.refresh_token,
-    };
+    return { accessToken: tokenPair.access_token };
   };
 
   const apiClient = createApiClient({
@@ -75,8 +75,14 @@ export function createAuthenticatedClients(
         options.onStatusChange?.("authenticated");
         return true;
       } catch {
+        // `onSessionExpired` runs the listener synchronously (R3.1-3): it clears tokens
+        // only when no newer session's tokens are live. Forcing "expired" unconditionally
+        // here would override a winning login's "authenticated" status a moment after the
+        // listener deliberately preserved it, so this mirrors the listener's own check.
         options.onSessionExpired?.();
-        options.onStatusChange?.("expired");
+        if (getSessionTokens() === null) {
+          options.onStatusChange?.("expired");
+        }
         return false;
       }
     },

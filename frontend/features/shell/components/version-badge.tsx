@@ -90,7 +90,7 @@ export function VersionBadge({ labels }: { labels: VersionBadgeLabels }) {
   return (
     <Badge
       variant="outline"
-      className="font-mono text-[0.6875rem] font-normal text-muted-foreground"
+      className="font-mono text-data-mono text-muted-foreground"
       aria-label={`${labels.label}: ${shown}`}
       data-testid="version-badge"
     >

@@ -86,15 +86,15 @@ export function ProvenancePanel() {
     <div className="relative">
       <button
         type="button"
-        className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+        className="tap-target inline-flex items-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
         aria-expanded={open}
         onClick={() => (open ? setOpen(false) : void openPanel())}
       >
         {t("provenance.open")}
       </button>
       {open && (
-        <div className="absolute bottom-8 right-0 z-10 w-72 rounded-md border bg-background p-3 text-xs shadow-md">
-          <p className="font-medium">{t("provenance.title")}</p>
+        <div className="absolute bottom-8 right-0 z-10 w-72 rounded-lg border border-border bg-surface/95 p-3 text-xs shadow-sm backdrop-blur-md">
+          <p className="text-body-medium text-foreground">{t("provenance.title")}</p>
           {state === "loading" && <p>{t("provenance.loading")}</p>}
           {state === "error" && <p>{t("provenance.error")}</p>}
           {state === "unknown" && (
@@ -109,7 +109,12 @@ export function ProvenancePanel() {
               <ul className="mt-2 space-y-1">
                 {links.map((link) => (
                   <li key={link.href}>
-                    <a className="underline" href={link.href} target="_blank" rel="noreferrer">
+                    <a
+                      className="text-primary underline underline-offset-4"
+                      href={link.href}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
                       {link.label}
                     </a>
                   </li>

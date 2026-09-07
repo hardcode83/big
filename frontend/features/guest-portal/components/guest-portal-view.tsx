@@ -1,7 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { ErrorState } from "@/components/states";
 import { LoadingState } from "@/components/states";
 import { ApiError } from "@/lib/api";
@@ -77,6 +78,39 @@ function OptionalValue({ value, fallback }: { value: string | null; fallback: st
   return <>{value ?? fallback}</>;
 }
 
+/**
+ * The "uppercase label + monospace value" `<dl>` pair (design D9), copied
+ * verbatim from `incident-detail-sections.tsx`'s `DetailField` rather than
+ * re-derived — the exact shape section 6 established for any `<dl>`-shaped
+ * data pattern in this change.
+ */
+function DetailField({
+  label,
+  children,
+  mono = true,
+}: {
+  label: string;
+  children: ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-label-caps uppercase text-muted-foreground">
+        {label}
+      </dt>
+      <dd
+        className={
+          mono
+            ? "font-mono text-data-mono text-foreground"
+            : "text-body-medium text-foreground"
+        }
+      >
+        {children}
+      </dd>
+    </div>
+  );
+}
+
 function StayInfoSection({ token }: { token: string }) {
   const { t } = useTranslation();
   const query = useStayInfo(token);
@@ -96,49 +130,35 @@ function StayInfoSection({ token }: { token: string }) {
     .filter(Boolean)
     .join(t("guest:listSeparator"));
   return (
-    <section aria-labelledby="stay-title" className="space-y-4">
-      <h2 id="stay-title" className="text-xl font-semibold">
-        {t("guest:stay.title")}
-      </h2>
-      <h3 className="text-lg">{stay.propertyName}</h3>
-      <dl className="grid gap-2 text-sm">
+    <section aria-labelledby="stay-title">
+      <Card className="flex flex-col gap-4 p-4">
         <div>
-          <dt className="font-medium">{t("guest:stay.dates")}</dt>
-          <dd>
+          <h2 id="stay-title" className="text-headline-md font-semibold text-foreground">
+            {t("guest:stay.title")}
+          </h2>
+          <h3 className="text-body-lg font-semibold text-foreground">{stay.propertyName}</h3>
+        </div>
+        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <DetailField label={t("guest:stay.dates")}>
             {stay.checkInDate} {stay.checkInTime} – {stay.checkOutDate} {stay.checkOutTime}
-          </dd>
-        </div>
-        <div>
-          <dt className="font-medium">{t("guest:stay.address")}</dt>
-          <dd>
+          </DetailField>
+          <DetailField label={t("guest:stay.address")}>
             <OptionalValue value={address || null} fallback={unavailable} />
-          </dd>
-        </div>
-        <div>
-          <dt className="font-medium">{t("guest:stay.wifi")}</dt>
-          <dd>
+          </DetailField>
+          <DetailField label={t("guest:stay.wifi")}>
             <OptionalValue value={stay.wifiName} fallback={unavailable} />
-          </dd>
-        </div>
-        <div>
-          <dt className="font-medium">{t("guest:stay.instructions")}</dt>
-          <dd>
+          </DetailField>
+          <DetailField label={t("guest:stay.instructions")} mono={false}>
             <OptionalValue value={stay.arrivalNotes} fallback={unavailable} />
-          </dd>
-        </div>
-        <div>
-          <dt className="font-medium">{t("guest:stay.accessCode")}</dt>
-          <dd>
+          </DetailField>
+          <DetailField label={t("guest:stay.accessCode")}>
             <OptionalValue value={stay.accessCodeMasked} fallback={unavailable} />
-          </dd>
-        </div>
-        <div>
-          <dt className="font-medium">{t("guest:stay.support")}</dt>
-          <dd>
+          </DetailField>
+          <DetailField label={t("guest:stay.support")}>
             <OptionalValue value={stay.supportChannel} fallback={unavailable} />
-          </dd>
-        </div>
-      </dl>
+          </DetailField>
+        </dl>
+      </Card>
     </section>
   );
 }
@@ -185,37 +205,41 @@ function CheckinSection({ token }: { token: string }) {
   const serverErrors = fieldErrorsFrom422(mutation.error, CHECKIN_FIELDS, t);
   const fieldError = (key: (typeof CHECKIN_FIELDS)[number]) => errors[key] ?? serverErrors[key];
   return (
-    <section aria-labelledby="checkin-title" className="space-y-4">
-      <h2 id="checkin-title" className="text-xl font-semibold">
-        {t("guest:checkin.title")}
-      </h2>
-      <p>{t("guest:checkin.missing", { fields: status.data.missingFields.join(t("guest:listSeparator")) || t("guest:checkin.none") })}</p>
-      <form noValidate onSubmit={submit} className="space-y-4">
-        <GuestField id="full_name" label={t("guest:fields.fullName")} value={values.full_name} error={fieldError("full_name")} onChange={update("full_name")} />
-        <GuestField id="nationality" label={t("guest:fields.nationality")} value={values.nationality} error={fieldError("nationality")} onChange={update("nationality")} />
-        <GuestField id="date_of_birth" type="date" label={t("guest:fields.birthDate")} value={values.date_of_birth} error={fieldError("date_of_birth")} onChange={update("date_of_birth")} />
-        <GuestField id="document_type" label={t("guest:fields.documentType")} value={values.document_type} error={fieldError("document_type")} onChange={update("document_type")} as="select">
-          <option value="DNI">{t("guest:documentTypes.DNI")}</option>
-          <option value="NIE">{t("guest:documentTypes.NIE")}</option>
-          <option value="PASSPORT">{t("guest:documentTypes.PASSPORT")}</option>
-          <option value="RESIDENCE_CARD">{t("guest:documentTypes.RESIDENCE_CARD")}</option>
-          <option value="OTHER">{t("guest:documentTypes.OTHER")}</option>
-        </GuestField>
-        <GuestField id="document_number" label={t("guest:fields.documentNumber")} value={values.document_number} error={fieldError("document_number")} onChange={update("document_number")} />
-        <GuestField id="document_expiry_date" type="date" label={t("guest:fields.expiryDate")} value={values.document_expiry_date} error={fieldError("document_expiry_date")} onChange={update("document_expiry_date")} />
-        <div role="alert" aria-live="polite">
-          {mutation.isPending
-            ? t("guest:checkin.sending")
-            : mutation.isError
-              ? errorText(mutation.error, t)
-              : mutation.isSuccess
-                ? `${t("guest:checkin.success")} ${t(`guest:status.${mutation.data.documentStatus}`)} / ${t(`guest:status.${mutation.data.legalRegistrationStatus}`)}`
-                : null}
-        </div>
-        <Button type="submit" disabled={mutation.isPending}>
-          {t("guest:checkin.submit")}
-        </Button>
-      </form>
+    <section aria-labelledby="checkin-title">
+      <Card className="flex flex-col gap-4 p-4">
+        <h2 id="checkin-title" className="text-headline-md font-semibold text-foreground">
+          {t("guest:checkin.title")}
+        </h2>
+        <p className="text-body-base text-muted-foreground">
+          {t("guest:checkin.missing", { fields: status.data.missingFields.join(t("guest:listSeparator")) || t("guest:checkin.none") })}
+        </p>
+        <form noValidate onSubmit={submit} className="space-y-4">
+          <GuestField id="full_name" label={t("guest:fields.fullName")} value={values.full_name} error={fieldError("full_name")} onChange={update("full_name")} />
+          <GuestField id="nationality" label={t("guest:fields.nationality")} value={values.nationality} error={fieldError("nationality")} onChange={update("nationality")} />
+          <GuestField id="date_of_birth" type="date" label={t("guest:fields.birthDate")} value={values.date_of_birth} error={fieldError("date_of_birth")} onChange={update("date_of_birth")} />
+          <GuestField id="document_type" label={t("guest:fields.documentType")} value={values.document_type} error={fieldError("document_type")} onChange={update("document_type")} as="select">
+            <option value="DNI">{t("guest:documentTypes.DNI")}</option>
+            <option value="NIE">{t("guest:documentTypes.NIE")}</option>
+            <option value="PASSPORT">{t("guest:documentTypes.PASSPORT")}</option>
+            <option value="RESIDENCE_CARD">{t("guest:documentTypes.RESIDENCE_CARD")}</option>
+            <option value="OTHER">{t("guest:documentTypes.OTHER")}</option>
+          </GuestField>
+          <GuestField id="document_number" label={t("guest:fields.documentNumber")} value={values.document_number} error={fieldError("document_number")} onChange={update("document_number")} />
+          <GuestField id="document_expiry_date" type="date" label={t("guest:fields.expiryDate")} value={values.document_expiry_date} error={fieldError("document_expiry_date")} onChange={update("document_expiry_date")} />
+          <div role="alert" aria-live="polite" className="text-body-base text-muted-foreground">
+            {mutation.isPending
+              ? t("guest:checkin.sending")
+              : mutation.isError
+                ? errorText(mutation.error, t)
+                : mutation.isSuccess
+                  ? `${t("guest:checkin.success")} ${t(`guest:status.${mutation.data.documentStatus}`)} / ${t(`guest:status.${mutation.data.legalRegistrationStatus}`)}`
+                  : null}
+          </div>
+          <Button type="submit" className="tap-target" disabled={mutation.isPending}>
+            {t("guest:checkin.submit")}
+          </Button>
+        </form>
+      </Card>
     </section>
   );
 }
@@ -237,26 +261,28 @@ function IncidentSection({ token }: { token: string }) {
   const descriptionError =
     (invalid && !description.trim() ? t("guest:errors.required") : undefined) ?? serverErrors.description;
   return (
-    <section aria-labelledby="incident-title" className="space-y-4">
-      <h2 id="incident-title" className="text-xl font-semibold">
-        {t("guest:incident.title")}
-      </h2>
-      <form noValidate onSubmit={submit} className="space-y-4">
-        <GuestField id="title" label={t("guest:incident.titleField")} value={title} error={titleError} onChange={(e) => setTitle(e.target.value)} />
-        <GuestField id="description" label={t("guest:incident.description")} value={description} error={descriptionError} onChange={(e) => setDescription(e.target.value)} as="textarea" />
-        <div role="alert" aria-live="polite">
-          {mutation.isPending
-            ? t("guest:incident.sending")
-            : mutation.isError
-              ? errorText(mutation.error, t)
-              : mutation.isSuccess
-                ? `${t("guest:incident.success")} ${t(`guest:incident.status.${mutation.data.status}`)}`
-                : null}
-        </div>
-        <Button type="submit" disabled={mutation.isPending}>
-          {t("guest:incident.submit")}
-        </Button>
-      </form>
+    <section aria-labelledby="incident-title">
+      <Card className="flex flex-col gap-4 p-4">
+        <h2 id="incident-title" className="text-headline-md font-semibold text-foreground">
+          {t("guest:incident.title")}
+        </h2>
+        <form noValidate onSubmit={submit} className="space-y-4">
+          <GuestField id="title" label={t("guest:incident.titleField")} value={title} error={titleError} onChange={(e) => setTitle(e.target.value)} />
+          <GuestField id="description" label={t("guest:incident.description")} value={description} error={descriptionError} onChange={(e) => setDescription(e.target.value)} as="textarea" />
+          <div role="alert" aria-live="polite" className="text-body-base text-muted-foreground">
+            {mutation.isPending
+              ? t("guest:incident.sending")
+              : mutation.isError
+                ? errorText(mutation.error, t)
+                : mutation.isSuccess
+                  ? `${t("guest:incident.success")} ${t(`guest:incident.status.${mutation.data.status}`)}`
+                  : null}
+          </div>
+          <Button type="submit" className="tap-target" disabled={mutation.isPending}>
+            {t("guest:incident.submit")}
+          </Button>
+        </form>
+      </Card>
     </section>
   );
 }
@@ -294,78 +320,91 @@ function ConversationSection({ token }: { token: string }) {
     );
   };
   return (
-    <section aria-labelledby="conversation-title" className="space-y-4">
-      <h2 id="conversation-title" className="text-xl font-semibold">
-        {t("guest:conversation.title")}
-      </h2>
+    <section aria-labelledby="conversation-title">
+      <Card className="flex flex-col gap-4 p-4">
+        <h2 id="conversation-title" className="text-headline-md font-semibold text-foreground">
+          {t("guest:conversation.title")}
+        </h2>
 
-      {thread.isPending ? (
-        <LoadingState label={t("guest:conversation.loading")} />
-      ) : thread.isError && !thread.data ? (
-        // Only when there is nothing to show. A poll that fails **after** the thread loaded must
-        // not replace it: TanStack Query flips `status` to `error` on any failed fetch, including
-        // a background `refetchInterval` tick, so branching on `isError` alone made a single
-        // `429` — plausible precisely because six routes share one budget — blank a conversation
-        // the guest was reading, and replace it with copy about a message they never sent. Found
-        // and reproduced by the QA panel of sections 9-10.
-        <ErrorState
-          title={t("guest:conversation.errorTitle")}
-          description={readErrorText(thread.error, t)}
-          onRetry={() => void thread.refetch()}
-          retryLabel={t("guest:retry")}
-        />
-      ) : (
-        <>
-          {/* A refresh failed while we still hold a thread: say so, keep the history, and do not
-              reuse the send-oriented copy — nothing was sent. */}
-          {thread.isError ? (
-            <p role="status">{t("guest:conversation.staleNotice")}</p>
-          ) : null}
-          {thread.data.items.length === 0 ? (
-            <p>{t("guest:conversation.empty")}</p>
-          ) : (
-            <ol className="space-y-3">
-              {thread.data.items.map((item) => (
-                <li key={item.id} className="space-y-1">
-                  <span className="block text-sm font-medium">
-                    {item.sender === "GUEST"
-                      ? t("guest:conversation.you")
-                      : t("guest:conversation.property")}
-                  </span>
-                  <p className="whitespace-pre-wrap break-words">{item.content}</p>
-                </li>
-              ))}
-            </ol>
-          )}
-          {/* R5.6: the closed state the API publishes, and never the reason behind it. */}
-          {thread.data.state === "AWAITING_HUMAN" ? (
-            <p>{t("guest:conversation.awaitingHuman")}</p>
-          ) : null}
-        </>
-      )}
+        {thread.isPending ? (
+          <LoadingState label={t("guest:conversation.loading")} />
+        ) : thread.isError && !thread.data ? (
+          // Only when there is nothing to show. A poll that fails **after** the thread loaded must
+          // not replace it: TanStack Query flips `status` to `error` on any failed fetch, including
+          // a background `refetchInterval` tick, so branching on `isError` alone made a single
+          // `429` — plausible precisely because six routes share one budget — blank a conversation
+          // the guest was reading, and replace it with copy about a message they never sent. Found
+          // and reproduced by the QA panel of sections 9-10.
+          <ErrorState
+            title={t("guest:conversation.errorTitle")}
+            description={readErrorText(thread.error, t)}
+            onRetry={() => void thread.refetch()}
+            retryLabel={t("guest:retry")}
+          />
+        ) : (
+          <>
+            {/* A refresh failed while we still hold a thread: say so, keep the history, and do not
+                reuse the send-oriented copy — nothing was sent. */}
+            {thread.isError ? (
+              <p role="status" className="text-body-base text-muted-foreground">
+                {t("guest:conversation.staleNotice")}
+              </p>
+            ) : null}
+            {thread.data.items.length === 0 ? (
+              <p className="text-body-base text-muted-foreground">{t("guest:conversation.empty")}</p>
+            ) : (
+              <ol className="flex flex-col gap-3">
+                {thread.data.items.map((item) => (
+                  <li key={item.id} className="list-none">
+                    <Card className="p-3">
+                      <header className="mb-1 flex items-center justify-between text-body-base text-muted-foreground">
+                        <span className="rounded bg-muted px-2 py-0.5 text-body-medium">
+                          {item.sender === "GUEST"
+                            ? t("guest:conversation.you")
+                            : t("guest:conversation.property")}
+                        </span>
+                        <time dateTime={item.createdAt} className="font-mono text-data-mono">
+                          {item.createdAt.slice(0, 16).replace("T", " ")}
+                        </time>
+                      </header>
+                      <p className="max-w-prose whitespace-pre-wrap break-words text-body-base text-foreground">
+                        {item.content}
+                      </p>
+                    </Card>
+                  </li>
+                ))}
+              </ol>
+            )}
+            {/* R5.6: the closed state the API publishes, and never the reason behind it. */}
+            {thread.data.state === "AWAITING_HUMAN" ? (
+              <p className="text-body-base text-muted-foreground">{t("guest:conversation.awaitingHuman")}</p>
+            ) : null}
+          </>
+        )}
 
-      <form noValidate onSubmit={submit} className="space-y-4">
-        <GuestField
-          id="content"
-          label={t("guest:conversation.field")}
-          value={draft}
-          error={invalid && !draft.trim() ? t("guest:errors.required") : undefined}
-          onChange={(e) => setDraft(e.target.value)}
-          as="textarea"
-        />
-        <div role="alert" aria-live="polite">
-          {mutation.isPending
-            ? t("guest:conversation.sending")
-            : mutation.isError
-              ? errorText(mutation.error, t)
-              : mutation.isSuccess
-                ? t("guest:conversation.sent")
-                : null}
-        </div>
-        <Button type="submit" disabled={mutation.isPending}>
-          {t("guest:conversation.send")}
-        </Button>
-      </form>
+        <form noValidate onSubmit={submit} className="space-y-4">
+          <GuestField
+            id="content"
+            label={t("guest:conversation.field")}
+            value={draft}
+            error={invalid && !draft.trim() ? t("guest:errors.required") : undefined}
+            onChange={(e) => setDraft(e.target.value)}
+            as="textarea"
+          />
+          <div role="alert" aria-live="polite" className="text-body-base text-muted-foreground">
+            {mutation.isPending
+              ? t("guest:conversation.sending")
+              : mutation.isError
+                ? errorText(mutation.error, t)
+                : mutation.isSuccess
+                  ? t("guest:conversation.sent")
+                  : null}
+          </div>
+          <Button type="submit" className="tap-target" disabled={mutation.isPending}>
+            {t("guest:conversation.send")}
+          </Button>
+        </form>
+      </Card>
     </section>
   );
 }

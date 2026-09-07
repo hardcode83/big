@@ -57,10 +57,10 @@ export function CleanerTaskStatusChips({
             aria-pressed={active}
             onClick={() => onChange(active ? {} : { status })}
             className={cn(
-              "min-h-11 rounded-full border px-4 py-2 text-sm",
+              "tap-target rounded-full border px-4 py-2 text-body-medium transition-colors",
               active
                 ? "border-primary bg-primary text-primary-foreground"
-                : "border-input bg-background text-foreground",
+                : "border-input bg-background text-foreground hover:bg-accent/50",
             )}
           >
             {t(`cleaning:status.${status}`)}

@@ -27,7 +27,9 @@ from app.integrations.infrastructure.storage import INCIDENT_PHOTO_URL_PREFIX
 from app.integrations.application.signed_serving import ServeSignedObjectUseCase
 from app.maintenance.application.use_cases import (
     AcceptIncidentUseCase,
+    ListIncidentMessagesUseCase,
     ListIncidentPhotosUseCase,
+    SendIncidentMessageUseCase,
     UploadIncidentPhotoUseCase,
     AssignIncidentUseCase,
     CancelIncidentUseCase,
@@ -45,6 +47,7 @@ from app.maintenance.application.use_cases import (
 )
 from app.maintenance.infrastructure.classifier import RuleBasedIncidentClassifier
 from app.maintenance.infrastructure.repositories import (
+    SqlAlchemyIncidentMessageRepository,
     SqlAlchemyIncidentPhotoRepository,
     SqlAlchemyIncidentReader,
     SqlAlchemyIncidentRepository,
@@ -272,4 +275,34 @@ def get_serve_incident_photo_use_case(
         configs=SqlAlchemyTenantConfigRepository(session),
         storage=storage,
         signing_key=signing_key,
+    )
+
+
+# --- incident messages (`staff-messaging`) ----------------------------------------
+
+
+def get_send_incident_message_use_case(
+    session: SessionDep,
+) -> SendIncidentMessageUseCase:
+    """`staff-messaging` R2, R4 — the message-thread write, plus the notification fan-out it
+    triggers. No `_flow_kwargs`: sending a message moves no property state, so it takes only
+    the repositories it actually reads and writes, the shape
+    `get_upload_incident_photo_use_case` already sets for a non-lifecycle mutation."""
+    return SendIncidentMessageUseCase(
+        incidents=SqlAlchemyIncidentRepository(session),
+        messages=SqlAlchemyIncidentMessageRepository(session),
+        users=SqlAlchemyUserRepository(session),
+        configs=SqlAlchemyTenantConfigRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+
+
+def get_list_incident_messages_use_case(
+    session: SessionDep,
+) -> ListIncidentMessagesUseCase:
+    """R2.2 — reads only, so no unit of work and no audit repository."""
+    return ListIncidentMessagesUseCase(
+        incidents=SqlAlchemyIncidentRepository(session),
+        messages=SqlAlchemyIncidentMessageRepository(session),
     )

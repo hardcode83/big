@@ -78,10 +78,10 @@ export function BlockedTransitionsSection({
   if (hasError) {
     return (
       <section aria-labelledby={headingId} className="min-w-0">
-        <h4 id={headingId} className="text-sm font-semibold text-foreground">
+        <h4 id={headingId} className="text-body-base text-muted-foreground">
           {t("card.blocked.title")}
         </h4>
-        <p role="alert" className="mt-2 text-xs text-destructive">
+        <p role="alert" className="mt-2 text-body-base text-destructive">
           {t("card.blocked.error.fetch")}
         </p>
       </section>
@@ -90,7 +90,7 @@ export function BlockedTransitionsSection({
 
   return (
     <section aria-labelledby={headingId} className="min-w-0">
-      <h4 id={headingId} className="text-sm font-semibold text-foreground">
+      <h4 id={headingId} className="text-body-base text-muted-foreground">
         {t("card.blocked.title")}
       </h4>
       <ul className="mt-2 flex min-w-0 flex-col gap-1.5 text-sm">
@@ -114,7 +114,7 @@ export function BlockedTransitionsSection({
                 *between* the rows, where no separator lives.
               */}
               <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                <code className="font-mono text-xs text-foreground">
+                <code className="font-mono text-data-mono text-foreground">
                   {stall.trigger}
                 </code>
                 {/*
@@ -124,13 +124,13 @@ export function BlockedTransitionsSection({
                 */}
                 <span className="inline-flex items-baseline gap-x-2">
                   <span aria-hidden="true">·</span>
-                  <code className="font-mono text-xs text-foreground">
+                  <code className="font-mono text-data-mono text-foreground">
                     {stall.blocking_state}
                   </code>
                 </span>
               </div>
               <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                <span className="text-xs">
+                <span className="text-body-base">
                   {formatDateTime(stall.due_since, locale)}
                 </span>
               {showCancel ? (
@@ -176,7 +176,7 @@ export function BlockedTransitionsSection({
         One row, body size, no new variants. Names the 30-day window the user is
         about to mistake for "the system forgot this" (R5.1, blocked-transitions-web).
       */}
-      <p className="mt-2 text-xs text-muted-foreground">
+      <p className="mt-2 text-body-base text-muted-foreground">
         {t("card.blocked.window")}
       </p>
 

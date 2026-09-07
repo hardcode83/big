@@ -126,6 +126,22 @@ USER_PASSWORD_RESET = "USER_PASSWORD_RESET"
 # the question it exists for.
 USER_PASSWORD_CHANGED = "USER_PASSWORD_CHANGED"
 USER_PASSWORD_RECOVERED = "USER_PASSWORD_RECOVERED"
+# `platform-admin-api` (R2.1, R2.2, design D1, D7). The counterpart of `TENANT_UPDATED` for the
+# row's birth: until this change a tenant could only arrive through `app/cli/bootstrap.py`, which
+# is not an API mutation and writes no audit row, so "who created this tenant" had no answer at
+# all. Now `POST /api/v1/platform/tenants` creates one, and rule 9 of `sdd/steering/security.md`
+# names `Tenant` in its enumeration — so the creation is audited on the same footing as the
+# update, on `ENTITY_TENANT`, in the same transaction as the two inserts.
+#
+# One action for the whole creation and not one per row, exactly as this module's docstring
+# prescribes ("one row per API mutation"): the tenant and its `tenant_configs` row are a single
+# operation with a single actor, and the config's defaults are not a separate decision anybody
+# audits. `TENANT_CONFIG_UPDATED` covers the later edits.
+#
+# There is no `TENANT_DELETED` and no `TENANT_SUSPENDED`: `domain-foundation-core` models
+# retirement through `status`, this change exposes no route that writes it, and an action for an
+# operation the API does not offer is the speculative vocabulary this module argues against.
+TENANT_CREATED = "TENANT_CREATED"
 TENANT_UPDATED = "TENANT_UPDATED"
 TENANT_CONFIG_UPDATED = "TENANT_CONFIG_UPDATED"
 
@@ -164,6 +180,21 @@ PMS_CREDENTIAL_ROTATED = "PMS_CREDENTIAL_ROTATED"
 # docstring argues against — the same reasoning rule 9 applies to `SCHEDULER`.
 WEBHOOK_ENDPOINT_CREATED = "WEBHOOK_ENDPOINT_CREATED"
 WEBHOOK_ENDPOINT_ROTATED = "WEBHOOK_ENDPOINT_ROTATED"
+
+# A row of `whatsapp_phone_numbers` (`whatsapp-cloud-adapter` section 6, design D3/D8). Its own
+# entity type rather than folded into `ENTITY_WEBHOOK_ENDPOINT`: the two hold opposite kinds of
+# fact — a webhook endpoint is material WE mint, this is an operator-supplied association with
+# no secret in it at all — and `ix_audit_logs_tenant_id_entity_type_entity_id` is what makes
+# "who associated this tenant's WhatsApp number" a lookup rather than a scan filtering `changes`.
+ENTITY_WHATSAPP_PHONE_NUMBER = "WHATSAPP_PHONE_NUMBER"
+
+# One action per operation, same reasoning `WEBHOOK_ENDPOINT_CREATED`/`_ROTATED` state: rule 9
+# is only auditable if the operation is findable by `action` rather than by a JSONB scan.
+# `AssociateWhatsAppPhoneNumberUseCase` writes the first for both a fresh association and a
+# replacement of the tenant's existing one — there is no separate "rotate" verb here the way
+# webhooks have one, because there is no secret whose lifetime that distinction protects (R6.3).
+WHATSAPP_PHONE_NUMBER_ASSOCIATED = "WHATSAPP_PHONE_NUMBER_ASSOCIATED"
+WHATSAPP_PHONE_NUMBER_RELEASED = "WHATSAPP_PHONE_NUMBER_RELEASED"
 
 # There is no `PROPERTY_DELETED`: retirement is `status = INACTIVE`, so it arrives as an update
 # (`properties-crud` R3.4, and `domain-foundation-core`: "el PRD modela el borrado vía `status`,
@@ -424,6 +455,7 @@ ENTITY_TYPES = frozenset(
         ENTITY_EXPENSE,
         ENTITY_REVIEW,
         ENTITY_REVIEW_RESPONSE_DRAFT,
+        ENTITY_WHATSAPP_PHONE_NUMBER,
     }
 )
 
@@ -436,6 +468,7 @@ ACTIONS = frozenset(
         USER_PASSWORD_RESET,
         USER_PASSWORD_CHANGED,
         USER_PASSWORD_RECOVERED,
+        TENANT_CREATED,
         TENANT_UPDATED,
         TENANT_CONFIG_UPDATED,
         PMS_CREDENTIAL_READ,
@@ -499,5 +532,7 @@ ACTIONS = frozenset(
         REVIEW_IGNORED,
         REVIEW_POSTED_MANUALLY,
         REVIEW_DRAFT_EDITED,
+        WHATSAPP_PHONE_NUMBER_ASSOCIATED,
+        WHATSAPP_PHONE_NUMBER_RELEASED,
     }
 )

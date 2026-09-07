@@ -19,7 +19,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.auth.domain.enums import UserRole
 from app.core.db import Base, TenantScopedMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.maintenance.domain.entities import MAX_INCIDENT_MESSAGE_LENGTH
 from app.maintenance.domain.enums import (
     IncidentCategory,
     IncidentPhotoStage,
@@ -230,4 +232,30 @@ class IncidentPhotoModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin):
     #: Internal, and never in a response body or header (R3.3). 500 chars matches
     #: `cleaning_photos.storage_key`; the keys this system builds are ~110.
     storage_key: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class IncidentMessageModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin):
+    """One staff-to-manager message on an incident's thread (`staff-messaging` design D1).
+
+    The mirror of `app.cleaning.infrastructure.models.CleaningTaskMessageModel` — see that
+    class for the reasoning behind `TenantScopedMixin`, the absence of `TimestampMixin`, the
+    lack of `server_default` on `created_at`, and the plain `VARCHAR` `author_role`.
+    """
+
+    __tablename__ = "incident_messages"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "incident_id"],
+            ["incidents.tenant_id", "incidents.id"],
+            ondelete="RESTRICT",
+            name="fk_incident_messages_incident_within_tenant",
+        ),
+        Index("ix_incident_messages_tenant_id_incident_id", "tenant_id", "incident_id"),
+    )
+
+    incident_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    author_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="RESTRICT"))
+    author_role: Mapped[UserRole] = mapped_column(Enum(UserRole, native_enum=False, length=32))
+    content: Mapped[str] = mapped_column(String(MAX_INCIDENT_MESSAGE_LENGTH))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

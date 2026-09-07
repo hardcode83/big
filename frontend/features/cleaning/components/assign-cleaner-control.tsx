@@ -137,7 +137,7 @@ export function AssignCleanerControl({
         announced as an empty description by a screen reader.
       */}
       {blockedBy !== null ? (
-        <p id={reasonId} className="text-xs text-muted-foreground">
+        <p id={reasonId} className="text-body-base text-muted-foreground">
           {t(BLOCKED_KEY[blockedBy])}
         </p>
       ) : null}

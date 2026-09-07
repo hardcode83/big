@@ -1,3 +1,6 @@
+# Runner self-hosted en la VM dev (label `[self-hosted, dev]`). Rollback: ver
+# docs/ci-runner-rollback.md (procedimiento + SHA del commit de migración).
+# Cambio: ci-runner-oci (PR <n>).
 name: backend-tests
 
 # Merge gate reproducible para el backend, pedido en la revisión del PR #25: hasta
@@ -104,7 +107,7 @@ jobs:
   # Sin `services:` ni dependencias: solo git. Es el job que hace que el camino corto
   # cueste segundos en vez de siete minutos.
   backend-tests-detect:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 5
     permissions:
       contents: read
@@ -264,7 +267,7 @@ jobs:
   backend-tests-suite:
     needs: backend-tests-detect
     if: needs.backend-tests-detect.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 20
     permissions:
       contents: read
@@ -278,6 +281,14 @@ jobs:
     # adaptador de Redis a propósito SIN skip (es la única implementación de
     # producción de R5.1-R5.4), así que sin este servicio esos tests van a rojo en vez
     # de desaparecer en el contador de skips.
+    # Puertos a loopback (127.0.0.1:<puerto>:<puerto>): en ubuntu-latest publicar a 0.0.0.0 no
+    # importaba (VM efímera, sin IP alcanzable). En el runner self-hosted persistente, con IP
+    # pública real (solo el security list de la VM lo protege, no el aislamiento del runner), un
+    # 0.0.0.0 innecesario amplía la superficie sin necesidad — nada fuera del propio job necesita
+    # alcanzar Postgres/Redis (enmienda del 2026-09-03 tras el panel de seguridad de `/sdd:review`,
+    # ver `design.md` D3 enmienda 5). Misma postura que `steering/security.md` regla 8 exige para el
+    # Postgres de dev local (`docker-compose.yml`) — no es la misma guardia (`compose-ports` no mira
+    # este fichero), pero es la misma razón: un dato sin sensibilidad real no justifica 0.0.0.0.
     services:
       postgres:
         image: postgres:16
@@ -286,7 +297,7 @@ jobs:
           POSTGRES_USER: autohostai
           POSTGRES_PASSWORD: ci-local-only
         ports:
-          - 5432:5432
+          - 127.0.0.1:5432:5432
         options: >-
           --health-cmd "pg_isready -U autohostai"
           --health-interval 5s
@@ -295,7 +306,7 @@ jobs:
       redis:
         image: redis:7
         ports:
-          - 6379:6379
+          - 127.0.0.1:6379:6379
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s
@@ -427,7 +438,7 @@ jobs:
   backend-tests:
     needs: [backend-tests-detect, backend-tests-suite]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dev]
     timeout-minutes: 5
     permissions:
       contents: read

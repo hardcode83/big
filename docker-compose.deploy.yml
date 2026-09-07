@@ -189,6 +189,14 @@ services:
       APP_PROVENANCE_PULL_REQUEST_NUMBER: ${APP_PROVENANCE_PULL_REQUEST_NUMBER:-}
       APP_PROVENANCE_COMMIT_SHA: ${APP_PROVENANCE_COMMIT_SHA:-}
       APP_PROVENANCE_ACTIONS_RUN_ID: ${APP_PROVENANCE_ACTIONS_RUN_ID:-}
+      # Base del link de recuperación de contraseña (fix post smtp-delivery-adapter, 2026-09-03):
+      # sin esto el backend usa su default http://localhost:3000 y el correo real llega con un
+      # link inservible. Solo `backend` — el link lo construye la petición de forgot-password,
+      # que corre aquí; `worker`/`beat` no envían correos de recuperación. El fallback repite el
+      # default de la app (NO cadena vacía: pydantic acepta "" para un `str` y el link quedaría
+      # sin host, peor que localhost) — misma forma que BACKEND_INTERNAL_URL arriba, y misma
+      # ventana merge→primer-render que las cinco de medios de abajo.
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
       # Almacén de objetos (change `object-storage-provisioning`). Las cinco **solo aquí**, como el
       # volumen de abajo y por el mismo motivo: `backend` es el único servicio que escribe y sirve
       # ficheros — `worker` y `beat` comparten imagen pero no tocan almacenamiento.
@@ -210,6 +218,17 @@ services:
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      # Relay SMTP (change `smtp-delivery-adapter`). Sin `:?`, mismo motivo que el bloque de
+      # medios de arriba: la ventana entre el merge y el primer "Render .env" no tiene ninguna
+      # de las seis, y el fail-fast de verdad ya vive en `adapter_registry()`
+      # (`SMTPConfigurationError`, no en el arranque del contenedor) — con `SMTP_HOST` vacío
+      # sigue registrando `ConsoleEmailAdapter`, exactamente como en dev local.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-}
     volumes:
       # Fotos de limpieza y demás ficheros subidos (change `cleaning-photos-storage`, R1.3).
       # Aquí la imagen no lleva bind mount del código, pero el volumen sigue siendo obligatorio
@@ -251,6 +270,17 @@ services:
       # And the worker is where credentials get read: a job that resolves a PMS adapter per
       # property decrypts them, so the key is not optional here either.
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
+      # Relay SMTP (change `smtp-delivery-adapter`). `worker`, no `beat`: beat solo programa
+      # (`celery -A app.worker beat`, sin `-B`, nunca ejecuta un cuerpo de tarea); el cuerpo de
+      # `dispatch_notifications` (`scheduler/tasks.py`, que llama `adapter_registry()` en
+      # `_dispatch`) lo EJECUTA el worker. Mismo `:-` sin fail-fast de arranque que en
+      # `backend`, por el mismo motivo.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-}
     depends_on:
       redis:
         condition: service_healthy

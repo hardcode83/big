@@ -17,7 +17,7 @@ export function ShellFooter({
   showProvenance?: boolean;
 }) {
   return (
-    <footer className="flex shrink-0 items-center border-t px-4 py-2">
+    <footer className="flex shrink-0 items-center border-t border-border bg-surface/80 px-4 py-2 backdrop-blur-md">
       <VersionBadge labels={versionLabels} />
       {showProvenance && <div className="ml-auto"><ProvenancePanel /></div>}
     </footer>

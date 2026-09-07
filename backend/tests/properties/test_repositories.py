@@ -7,8 +7,9 @@ instead of a leak, so each lookup has a neighbour it must fail to find.
 `celery-jobs` (its R2, R3), which is the first writer of operational state.
 """
 
+import inspect
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import select
@@ -22,6 +23,7 @@ from app.properties.domain.enums import (
     StateTransitionTriggeredBy,
 )
 from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
+from app.properties.domain.repositories import PropertyStateTransitionRepository
 
 from app.properties.infrastructure.models import PropertyModel, PropertyStateTransitionModel
 from app.properties.infrastructure.repositories import (
@@ -29,6 +31,7 @@ from app.properties.infrastructure.repositories import (
     SqlAlchemyPropertyStateTransitionRepository,
 )
 from app.tenants.infrastructure.models import TenantModel
+from tests.sql_counter import count_statements
 
 
 async def _tenant(db_session, name: str) -> TenantModel:
@@ -803,3 +806,364 @@ async def test_last_for_property_does_not_mix_in_a_sibling_property(db_session) 
     )
 
     assert found is not None and found.id == written.id
+
+
+# --- `history_for_properties` (`dashboard-occupancy-series` R3, tasks 1.1-1.3) ----------
+
+#: The ISO week the series is drawn over: Monday 2026-08-03 to Sunday 2026-08-09. `WEEK_END`
+#: is inclusive **as a calendar date** — the adapter turns it into the instant bound.
+WEEK_START = date(2026, 8, 3)
+WEEK_END = date(2026, 8, 9)
+
+#: The public surface of the transition repository, named exhaustively rather than as a list
+#: of forbidden words. A guard that banned `save`/`update`/`delete` by name would pass for a
+#: writer called `record` or `backfill`; pinning the whole set makes *any* new method a
+#: failure somebody has to look at.
+TRANSITION_REPOSITORY_SURFACE = {
+    "add",
+    "applied_clock_triggers",
+    "last_for_property",
+    "history_for_properties",
+}
+
+
+async def _history(db_session, tenant, property_ids, *, start=WEEK_START, end=WEEK_END):
+    return await SqlAlchemyPropertyStateTransitionRepository(db_session).history_for_properties(
+        tenant.id, property_ids, start, end
+    )
+
+
+@pytest.mark.asyncio
+async def test_history_includes_the_transition_the_window_was_entered_with(db_session) -> None:
+    """The state a flat carries into Monday has no transition inside the week.
+
+    R3.1: "incluida, si existe, la última transición anterior a `start`". A flat that became
+    `OCCUPIED_ESTIMATED` on the Saturday before and never moved again produces nothing at
+    all inside the window, and a reader that only saw it would report the flat vacant for
+    seven days.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    entering = await _add_transition(
+        db_session,
+        tenant,
+        model,
+        created_at=datetime(2026, 8, 1, 16, 0, tzinfo=UTC),
+        to_state=PropertyOperationalState.OCCUPIED_ESTIMATED,
+    )
+
+    history = await _history(db_session, tenant, [model.id])
+
+    assert [row.id for row in history[model.id]] == [entering.id]
+    assert history[model.id][0].to_state is PropertyOperationalState.OCCUPIED_ESTIMATED
+
+
+@pytest.mark.asyncio
+async def test_history_carries_only_the_last_transition_before_the_window(db_session) -> None:
+    """One row, not the whole past: the entering state is the *newest* thing before `start`."""
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    await _add_transition(db_session, tenant, model, created_at=datetime(2026, 7, 12, tzinfo=UTC))
+    await _add_transition(db_session, tenant, model, created_at=datetime(2026, 7, 26, tzinfo=UTC))
+    newest_before = await _add_transition(
+        db_session,
+        tenant,
+        model,
+        created_at=datetime(2026, 8, 2, 23, 0, tzinfo=UTC),
+        to_state=PropertyOperationalState.OCCUPIED_ESTIMATED,
+    )
+
+    history = await _history(db_session, tenant, [model.id])
+
+    assert [row.id for row in history[model.id]] == [newest_before.id]
+
+
+@pytest.mark.asyncio
+async def test_history_returns_the_windows_transitions_in_chronological_order(db_session) -> None:
+    """R3.1's "a lo largo de esa ventana": every row inside `[start, end]`, oldest first.
+
+    Inserted out of order on purpose — chronology must come from the `ORDER BY`, not from the
+    sequence the rows happened to be written in.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    friday = datetime(2026, 8, 7, 9, 0, tzinfo=UTC)
+    monday = datetime(2026, 8, 3, 11, 0, tzinfo=UTC)
+    wednesday = datetime(2026, 8, 5, 15, 0, tzinfo=UTC)
+    for instant in (friday, monday, wednesday):
+        await _add_transition(db_session, tenant, model, created_at=instant)
+
+    history = await _history(db_session, tenant, [model.id])
+
+    assert [row.created_at for row in history[model.id]] == [monday, wednesday, friday]
+
+
+@pytest.mark.asyncio
+async def test_history_puts_the_entering_transition_before_the_windows_own(db_session) -> None:
+    """The two statements come back as one chronological sequence, not as two lists a caller
+    has to splice."""
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    entering = await _add_transition(
+        db_session, tenant, model, created_at=datetime(2026, 8, 1, 16, 0, tzinfo=UTC)
+    )
+    inside = await _add_transition(
+        db_session, tenant, model, created_at=datetime(2026, 8, 6, 8, 0, tzinfo=UTC)
+    )
+
+    history = await _history(db_session, tenant, [model.id])
+
+    assert [row.id for row in history[model.id]] == [entering.id, inside.id]
+
+
+@pytest.mark.asyncio
+async def test_history_covers_the_whole_of_the_last_day_and_stops_there(db_session) -> None:
+    """`end` is inclusive as a calendar date (R2.4, and the adapter's conversion rule).
+
+    The last second of Sunday belongs to the week; midnight on Monday does not. Getting this
+    wrong by one day is invisible in every other test — both bounds still "work", the series
+    is just short or long by a day.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    last_moment = await _add_transition(
+        db_session, tenant, model, created_at=datetime(2026, 8, 9, 23, 59, 59, tzinfo=UTC)
+    )
+    await _add_transition(db_session, tenant, model, created_at=datetime(2026, 8, 10, tzinfo=UTC))
+
+    history = await _history(db_session, tenant, [model.id])
+
+    assert [row.id for row in history[model.id]] == [last_moment.id]
+
+
+@pytest.mark.asyncio
+async def test_history_starts_at_midnight_utc_of_the_first_day(db_session) -> None:
+    """The other bound: a transition exactly at `start` is inside the window, not the row
+    the property "entered" with."""
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    at_midnight = await _add_transition(
+        db_session, tenant, model, created_at=datetime(2026, 8, 3, 0, 0, tzinfo=UTC)
+    )
+
+    history = await _history(db_session, tenant, [model.id])
+
+    assert [row.id for row in history[model.id]] == [at_midnight.id]
+
+
+@pytest.mark.asyncio
+async def test_history_omits_a_property_with_nothing_before_or_during_the_window(
+    db_session,
+) -> None:
+    """Dispersed, per `sdd/specs/dashboard-api.md` "Composición por lotes": absent, not
+    mapped to an empty sequence.
+
+    Two ways to have no history in a week — never having transitioned at all, and having
+    transitioned only *after* it — and both must be absent, because a property whose only row
+    is in the future has no state to attribute to the week either.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    quiet = await _property(db_session, tenant, internal_code="QUIET")
+    future_only = await _property(db_session, tenant, internal_code="FUTURE")
+    moved = await _property(db_session, tenant, internal_code="MOVED")
+    await _add_transition(
+        db_session, tenant, future_only, created_at=datetime(2026, 8, 20, tzinfo=UTC)
+    )
+    await _add_transition(db_session, tenant, moved, created_at=datetime(2026, 8, 5, tzinfo=UTC))
+
+    history = await _history(db_session, tenant, [quiet.id, future_only.id, moved.id])
+
+    assert set(history) == {moved.id}
+
+
+@pytest.mark.asyncio
+async def test_history_never_reads_another_tenants_transitions(db_session) -> None:
+    """`steering/backend.md`: "No queries sin tenant scope." Both statements are scoped, so
+    neither the entering row nor the window's own can come from a neighbour.
+
+    Asked with the neighbour's own `property_id`, which is the only way the leak could
+    happen: the ids arrive already resolved, so a missing `tenant_id` predicate would answer
+    with their history in full.
+    """
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    theirs = await _property(db_session, tenant_b, internal_code="THEIRS")
+    await _add_transition(
+        db_session, tenant_b, theirs, created_at=datetime(2026, 8, 1, tzinfo=UTC)
+    )
+    await _add_transition(
+        db_session, tenant_b, theirs, created_at=datetime(2026, 8, 5, tzinfo=UTC)
+    )
+
+    history = await _history(db_session, tenant_a, [theirs.id])
+
+    assert history == {}
+
+
+@pytest.mark.asyncio
+async def test_history_does_not_mix_a_neighbours_rows_into_its_own_answer(db_session) -> None:
+    """The other direction of the same rule: TenantA's series must be exactly TenantA's."""
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    mine = await _property(db_session, tenant_a, internal_code="MINE")
+    theirs = await _property(db_session, tenant_b, internal_code="THEIRS")
+    await _add_transition(
+        db_session, tenant_b, theirs, created_at=datetime(2026, 8, 4, tzinfo=UTC)
+    )
+    written = await _add_transition(
+        db_session, tenant_a, mine, created_at=datetime(2026, 8, 6, tzinfo=UTC)
+    )
+
+    history = await _history(db_session, tenant_a, [mine.id, theirs.id])
+
+    assert set(history) == {mine.id}
+    assert [row.id for row in history[mine.id]] == [written.id]
+
+
+@pytest.mark.asyncio
+async def test_history_returns_domain_entities_with_every_field(db_session) -> None:
+    """`steering/backend-architecture.md`: the port "habla en términos de entidades de
+    dominio, nunca de modelos ORM" — so no `PropertyStateTransitionModel` reaches the
+    caller, and `metadata` arrives under its domain name."""
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    written = await _add_transition(db_session, tenant, model)
+
+    history = await _history(db_session, tenant, [model.id])
+
+    (found,) = history[model.id]
+    assert isinstance(found, PropertyStateTransition)
+    assert (found.id, found.property_id, found.tenant_id) == (
+        written.id,
+        model.id,
+        tenant.id,
+    )
+    assert (found.from_state, found.to_state) == (written.from_state, written.to_state)
+    assert found.triggered_by is written.triggered_by
+    assert found.triggered_by_user_id == written.triggered_by_user_id
+    assert found.reason == written.reason
+    assert found.metadata == {"trigger": "CHECKIN_WINDOW_OPENED"}
+
+
+@pytest.mark.asyncio
+async def test_history_of_no_properties_does_not_query(db_session, test_engine) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+
+    with count_statements(test_engine) as log:
+        history = await _history(db_session, tenant, [])
+
+    assert history == {}
+    assert log.matching("property_state_transitions") == []
+
+
+@pytest.mark.asyncio
+async def test_history_costs_two_statements_whatever_the_portfolio_size(
+    db_session, test_engine
+) -> None:
+    """R3.2: "un número fijo de consultas, independiente del número de viviendas".
+
+    Measured at two sizes in one test rather than against a constant, for the reason
+    `tests/dashboard/test_no_n_plus_one.py` records: a `for` calling `last_for_property` per
+    property is syntactically identical to the correct code, and only the count tells them
+    apart. Comparing the two counts to each other is what asserts "does not grow with N"
+    instead of "is under a number I picked" — the equality is asserted first, and the exact
+    two of design D2 after it.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    ids: list[uuid.UUID] = []
+    for index in range(5):
+        model = await _property(db_session, tenant, internal_code=f"FLAT-{index}")
+        # Rows on both sides of `start`, so both statements have something to return and
+        # neither can look cheap by finding nothing.
+        await _add_transition(
+            db_session, tenant, model, created_at=datetime(2026, 8, 1, tzinfo=UTC)
+        )
+        await _add_transition(
+            db_session, tenant, model, created_at=datetime(2026, 8, 5, tzinfo=UTC)
+        )
+        ids.append(model.id)
+
+    with count_statements(test_engine) as one_log:
+        one = await _history(db_session, tenant, ids[:1])
+    with count_statements(test_engine) as five_log:
+        five = await _history(db_session, tenant, ids)
+
+    assert len(one) == 1 and len(five) == 5
+    reads_for_one = len(one_log.matching("from property_state_transitions"))
+    reads_for_five = len(five_log.matching("from property_state_transitions"))
+    assert reads_for_one == reads_for_five, (
+        f"one property cost {reads_for_one} statements and five cost {reads_for_five}; "
+        "the reader must batch"
+    )
+    assert reads_for_five == 2
+
+
+@pytest.mark.asyncio
+async def test_history_writes_nothing_to_the_audit_record(db_session, test_engine) -> None:
+    """R3.3: the new method is "puramente de lectura".
+
+    `property_state_transitions` is the audit record of property state (rule 9 of
+    `sdd/steering/security.md`), so the series is *derived* from the rows and never repairs,
+    backfills or normalises them. Asserted on the SQL that reached the database and on the
+    rows afterwards, because a reader that quietly rewrote a row would leave the mapping it
+    returns looking perfectly correct.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    await _add_transition(db_session, tenant, model, created_at=datetime(2026, 8, 1, tzinfo=UTC))
+    await _add_transition(db_session, tenant, model, created_at=datetime(2026, 8, 5, tzinfo=UTC))
+    snapshot = await _stored_transitions(db_session)
+
+    with count_statements(test_engine) as log:
+        await _history(db_session, tenant, [model.id])
+
+    for verb in ("insert into property_state_transitions", "update property_state_transitions"):
+        assert log.matching(verb) == []
+    assert log.matching("delete from property_state_transitions") == []
+    assert await _stored_transitions(db_session) == snapshot
+
+
+async def _stored_transitions(db_session) -> list[tuple]:
+    rows = await db_session.execute(
+        select(PropertyStateTransitionModel).order_by(PropertyStateTransitionModel.id)
+    )
+    return [
+        (
+            model.id,
+            model.tenant_id,
+            model.property_id,
+            model.from_state,
+            model.to_state,
+            model.triggered_by,
+            model.triggered_by_user_id,
+            model.reason,
+            model.metadata_,
+            model.created_at,
+        )
+        for model in rows.scalars()
+    ]
+
+
+def test_the_transition_port_still_has_add_and_no_new_writer() -> None:
+    """R3.3: "SHALL NOT modificar `PropertyStateTransitionRepository.add`".
+
+    Two halves. `add`'s signature is pinned against the port's own, so a change to either
+    that did not reach the other shows up here; and the repository's public surface is pinned
+    exhaustively, so the next method — reader or writer — cannot arrive unnoticed. The
+    exhaustive form is deliberate: a guard listing `save`/`update`/`delete` by name would let
+    a writer called `backfill` straight through.
+    """
+    port = inspect.signature(PropertyStateTransitionRepository.add)
+    adapter = inspect.signature(SqlAlchemyPropertyStateTransitionRepository.add)
+    assert list(port.parameters) == ["self", "tenant_id", "transition"]
+    assert port == adapter
+
+    surface = {
+        name
+        for name in dir(SqlAlchemyPropertyStateTransitionRepository)
+        if not name.startswith("_")
+    }
+    assert surface == TRANSITION_REPOSITORY_SURFACE
+    assert surface == {
+        name for name in dir(PropertyStateTransitionRepository) if not name.startswith("_")
+    }

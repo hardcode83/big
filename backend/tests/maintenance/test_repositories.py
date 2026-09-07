@@ -1466,3 +1466,181 @@ async def test_the_unscoped_incident_photo_location_refuses_a_marked_session(
         await SqlAlchemyUnscopedIncidentPhotoLocationQuery(
             db_session
         ).locate_without_tenant_scoping(photo.id)
+
+
+# --- `incident_messages` -------------------------------------------------------------
+#
+# `staff-messaging` R2, R3.2, design D1. Like `incident_photos` above, this table carries
+# its own `tenant_id` and is a member of `tenant_scoped_classes()`, so
+# `SqlAlchemyIncidentMessageRepository` filters it directly instead of joining `incidents`
+# — the mirror of `SqlAlchemyCleaningTaskMessageRepository`'s tests in
+# `tests/cleaning/test_repositories.py`. `add` still guards explicitly (limit 3 of
+# `app/core/db.py`: the global filter never covers INSERTs), which is what these tests
+# exercise.
+
+
+def _message(incident, author, *, content="Falta la pieza de recambio", created_at=NOW):
+    from app.maintenance.domain.entities import IncidentMessage
+
+    return IncidentMessage(
+        id=uuid.uuid4(),
+        tenant_id=incident.tenant_id,
+        incident_id=incident.id,
+        author_id=author.id,
+        author_role=author.role,
+        content=content,
+        created_at=created_at,
+    )
+
+
+@pytest.mark.asyncio
+async def test_incident_message_add_and_list_round_trip(db_session, world):
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyIncidentMessageRepository,
+    )
+
+    incident = await make_incident(db_session, world, status=IncidentStatus.IN_PROGRESS)
+    repo = SqlAlchemyIncidentMessageRepository(db_session)
+    message = _message(incident, world.technician)
+
+    await repo.add(world.tenant.id, message)
+
+    page = await repo.list_for_incident(world.tenant.id, incident.id, page=1, per_page=20)
+    assert page.total == 1
+    assert page.items[0].id == message.id
+    assert page.items[0].content == message.content
+    assert page.items[0].author_id == world.technician.id
+    assert page.items[0].author_role is world.technician.role
+
+
+@pytest.mark.asyncio
+async def test_incident_message_list_is_chronological_and_paginated(db_session, world):
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyIncidentMessageRepository,
+    )
+
+    incident = await make_incident(db_session, world, status=IncidentStatus.IN_PROGRESS)
+    repo = SqlAlchemyIncidentMessageRepository(db_session)
+    messages = [
+        _message(incident, world.technician, content=f"mensaje {i}", created_at=NOW + timedelta(minutes=i))
+        for i in range(3)
+    ]
+    # Inserted out of order, so a bug that trusted insertion order rather than `created_at`
+    # would be caught.
+    for message in (messages[2], messages[0], messages[1]):
+        await repo.add(world.tenant.id, message)
+
+    first_page = await repo.list_for_incident(world.tenant.id, incident.id, page=1, per_page=2)
+    assert [m.id for m in first_page.items] == [messages[0].id, messages[1].id]
+    assert first_page.total == 3
+
+    second_page = await repo.list_for_incident(world.tenant.id, incident.id, page=2, per_page=2)
+    assert [m.id for m in second_page.items] == [messages[2].id]
+
+
+@pytest.mark.asyncio
+async def test_incident_message_order_ties_break_on_id_not_insertion_order(db_session, world):
+    """`ORDER BY created_at, id` (design D1) needs its own test: two messages sharing a
+    `created_at` (a burst written within the same clock tick) must still come back in a
+    stable order — by `id`, not by whichever happened to be inserted first."""
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyIncidentMessageRepository,
+    )
+
+    incident = await make_incident(db_session, world, status=IncidentStatus.IN_PROGRESS)
+    repo = SqlAlchemyIncidentMessageRepository(db_session)
+    messages = sorted(
+        (_message(incident, world.technician, content=f"mensaje {i}") for i in range(3)),
+        key=lambda m: m.id,
+    )
+    # Inserted in the reverse of id order, so a bug that fell back to insertion order for
+    # the tie would be caught.
+    for message in reversed(messages):
+        await repo.add(world.tenant.id, message)
+
+    page = await repo.list_for_incident(world.tenant.id, incident.id, page=1, per_page=20)
+
+    assert [m.id for m in page.items] == [m.id for m in messages]
+
+
+@pytest.mark.asyncio
+async def test_incident_message_add_refuses_an_entity_of_another_tenant(db_session, world):
+    """R3.2 — the write-side guard: limit 3 of `app/core/db.py` says INSERTs are not covered
+    by the session's global filter, so this explicit check is the only thing standing between
+    a wiring mistake and a row of another tenant."""
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyIncidentMessageRepository,
+    )
+
+    incident = await make_incident(db_session, world, status=IncidentStatus.IN_PROGRESS)
+    message = _message(incident, world.technician)
+    repo = SqlAlchemyIncidentMessageRepository(db_session)
+
+    with pytest.raises(CrossTenantWriteError):
+        await repo.add(uuid.uuid4(), message)
+
+
+@pytest.mark.asyncio
+async def test_incident_messages_of_another_tenant_are_invisible_to_list_for_incident(
+    db_session,
+) -> None:
+    """R3.2/steering-security rule 1 — a tenant cannot read another tenant's thread, even
+    when it names the neighbour's real incident id.
+
+    This is the isolation test the module's DoD (`steering/testing.md` §28.18) requires: a
+    new one, not a variant of an existing table's, because `incident_messages` is scoped by
+    its own `tenant_id` column rather than by a join, and nothing above exercises that.
+    Deliberately against the real database rather than a fake, mirroring
+    `tests/cleaning/test_repositories.py`'s `cleaning_task_messages` section.
+    """
+    from app.auth.domain.enums import UserRole
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyIncidentMessageRepository,
+    )
+
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    property_b = await _property(db_session, tenant_b, "THEIRS")
+    neighbour_incident = await _incident(db_session, tenant_b, property_b)
+    technician_b = UserModel(
+        tenant_id=tenant_b.id,
+        name="Tech B",
+        email=f"{uuid.uuid4().hex[:12]}@example.com",
+        password_hash="hash",
+        role=UserRole.TECHNICIAN,
+    )
+    db_session.add(technician_b)
+    await db_session.flush()
+
+    repo = SqlAlchemyIncidentMessageRepository(db_session)
+    await repo.add(tenant_b.id, _message(neighbour_incident, technician_b))
+
+    leaked = await repo.list_for_incident(tenant_a.id, neighbour_incident.id, page=1, per_page=20)
+    assert leaked.items == ()
+    assert leaked.total == 0
+
+    # And it is still there for its owner — the test would also pass if nothing was written.
+    owned = await repo.list_for_incident(tenant_b.id, neighbour_incident.id, page=1, per_page=20)
+    assert owned.total == 1
+
+
+@pytest.mark.asyncio
+async def test_incident_message_created_at_is_written_and_not_left_to_the_transaction_clock(
+    db_session, world
+):
+    """`incident_messages.created_at` has no `server_default` (design D1): a burst of
+    messages inserted together would otherwise share one Postgres `now()` and collapse the
+    chronological order the thread is read in."""
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyIncidentMessageRepository,
+    )
+
+    incident = await make_incident(db_session, world, status=IncidentStatus.IN_PROGRESS)
+    repo = SqlAlchemyIncidentMessageRepository(db_session)
+    sent_at = NOW - timedelta(days=1)
+    message = _message(incident, world.technician, created_at=sent_at)
+
+    await repo.add(world.tenant.id, message)
+
+    page = await repo.list_for_incident(world.tenant.id, incident.id, page=1, per_page=10)
+    assert page.items[0].created_at == sent_at

@@ -20,6 +20,7 @@ from app.cleaning.domain.entities import (
     CleaningChecklistCompletion,
     CleaningPhoto,
     CleaningTask,
+    CleaningTaskMessage,
 )
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.cleaning.domain.exceptions import (
@@ -31,6 +32,7 @@ from app.cleaning.infrastructure.repositories import (
     SqlAlchemyCleaningChecklistCompletionRepository,
     SqlAlchemyCleaningChecklistTemplateRepository,
     SqlAlchemyCleaningPhotoRepository,
+    SqlAlchemyCleaningTaskMessageRepository,
     SqlAlchemyCleaningTaskRepository,
     SqlAlchemyUnscopedCleaningPhotoLocationQuery,
 )
@@ -837,3 +839,161 @@ async def test_the_unscoped_photo_location_refuses_a_marked_session(
         await SqlAlchemyUnscopedCleaningPhotoLocationQuery(
             db_session
         ).locate_without_tenant_scoping(photo.id)
+
+
+# --- `cleaning_task_messages` -------------------------------------------------------
+#
+# `staff-messaging` R1, R3.2, design D1. Unlike `cleaning_photos`/`cleaning_checklist_
+# completions` above, this table carries its own `tenant_id` and is a member of
+# `tenant_scoped_classes()`, so `SqlAlchemyCleaningTaskMessageRepository` filters it
+# directly instead of joining `cleaning_tasks` — the `SqlAlchemyIncidentPhotoRepository`
+# shape. `add` still guards explicitly (limit 3 of `app/core/db.py`: the global filter
+# never covers INSERTs), which is what these tests exercise.
+
+
+def _message(task, author, *, content="Falta detergente en el 3ºB", created_at=NOW):
+    return CleaningTaskMessage(
+        id=uuid.uuid4(),
+        tenant_id=task.tenant_id,
+        task_id=task.id,
+        author_id=author.id,
+        author_role=author.role,
+        content=content,
+        created_at=created_at,
+    )
+
+
+@pytest.mark.asyncio
+async def test_message_add_and_list_round_trip(
+    db_session, tenant_a, property_a, template_a, users_by_role_a
+):
+    from app.auth.domain.enums import UserRole
+
+    task = await insert_task(db_session, tenant_a, property_a, template_a)
+    cleaner = users_by_role_a[UserRole.CLEANER]
+    repo = SqlAlchemyCleaningTaskMessageRepository(db_session)
+    message = _message(task, cleaner)
+
+    await repo.add(tenant_a.id, message)
+
+    page = await repo.list_for_task(tenant_a.id, task.id, page=1, per_page=20)
+    assert page.total == 1
+    assert page.items[0].id == message.id
+    assert page.items[0].content == message.content
+    assert page.items[0].author_id == cleaner.id
+    assert page.items[0].author_role is UserRole.CLEANER
+
+
+@pytest.mark.asyncio
+async def test_message_list_is_chronological_and_paginated(
+    db_session, tenant_a, property_a, template_a, users_by_role_a
+):
+    from app.auth.domain.enums import UserRole
+
+    task = await insert_task(db_session, tenant_a, property_a, template_a)
+    cleaner = users_by_role_a[UserRole.CLEANER]
+    repo = SqlAlchemyCleaningTaskMessageRepository(db_session)
+    messages = [
+        _message(task, cleaner, content=f"mensaje {i}", created_at=NOW + timedelta(minutes=i))
+        for i in range(3)
+    ]
+    # Inserted out of order, so a bug that trusted insertion order rather than `created_at`
+    # would be caught.
+    for message in (messages[2], messages[0], messages[1]):
+        await repo.add(tenant_a.id, message)
+
+    first_page = await repo.list_for_task(tenant_a.id, task.id, page=1, per_page=2)
+    assert [m.id for m in first_page.items] == [messages[0].id, messages[1].id]
+    assert first_page.total == 3
+
+    second_page = await repo.list_for_task(tenant_a.id, task.id, page=2, per_page=2)
+    assert [m.id for m in second_page.items] == [messages[2].id]
+
+
+@pytest.mark.asyncio
+async def test_message_order_ties_break_on_id_not_insertion_order(
+    db_session, tenant_a, property_a, template_a, users_by_role_a
+):
+    """`ORDER BY created_at, id` (design D1) needs its own test: two messages sharing a
+    `created_at` (a burst written within the same clock tick) must still come back in a
+    stable order — by `id`, not by whichever happened to be inserted first."""
+    from app.auth.domain.enums import UserRole
+
+    task = await insert_task(db_session, tenant_a, property_a, template_a)
+    cleaner = users_by_role_a[UserRole.CLEANER]
+    repo = SqlAlchemyCleaningTaskMessageRepository(db_session)
+    messages = sorted(
+        (_message(task, cleaner, content=f"mensaje {i}") for i in range(3)),
+        key=lambda m: m.id,
+    )
+    # Inserted in the reverse of id order, so a bug that fell back to insertion order for
+    # the tie would be caught.
+    for message in reversed(messages):
+        await repo.add(tenant_a.id, message)
+
+    page = await repo.list_for_task(tenant_a.id, task.id, page=1, per_page=20)
+
+    assert [m.id for m in page.items] == [m.id for m in messages]
+
+
+@pytest.mark.asyncio
+async def test_message_add_refuses_an_entity_of_another_tenant(
+    db_session, tenant_a, tenant_b, property_a, template_a, users_by_role_a
+):
+    """R3.2 — the write-side guard: limit 3 of `app/core/db.py` says INSERTs are not covered
+    by the session's global filter, so this explicit check is the only thing standing between
+    a wiring mistake and a row of another tenant."""
+    task = await insert_task(db_session, tenant_a, property_a, template_a)
+    from app.auth.domain.enums import UserRole
+
+    message = _message(task, users_by_role_a[UserRole.CLEANER])
+    repo = SqlAlchemyCleaningTaskMessageRepository(db_session)
+
+    with pytest.raises(CrossTenantWriteError):
+        await repo.add(tenant_b.id, message)
+
+
+@pytest.mark.asyncio
+async def test_messages_of_another_tenant_are_invisible_to_list_for_task(
+    db_session, tenant_a, tenant_b, property_b, template_b, users_by_role_b
+):
+    """R3.2/steering-security rule 1 — a tenant cannot read another tenant's thread, even
+    when it names the neighbour's real task id.
+
+    This is the isolation test the module's DoD (`steering/testing.md` §28.18) requires: a
+    new one, not a variant of an existing table's, because `cleaning_task_messages` is scoped
+    by its own `tenant_id` column rather than by a join, and nothing above exercises that.
+    """
+    from app.auth.domain.enums import UserRole
+
+    neighbour_task = await insert_task(db_session, tenant_b, property_b, template_b)
+    repo = SqlAlchemyCleaningTaskMessageRepository(db_session)
+    await repo.add(tenant_b.id, _message(neighbour_task, users_by_role_b[UserRole.CLEANER]))
+
+    leaked = await repo.list_for_task(tenant_a.id, neighbour_task.id, page=1, per_page=20)
+    assert leaked.items == ()
+    assert leaked.total == 0
+
+    # And it is still there for its owner — the test would also pass if nothing was written.
+    owned = await repo.list_for_task(tenant_b.id, neighbour_task.id, page=1, per_page=20)
+    assert owned.total == 1
+
+
+@pytest.mark.asyncio
+async def test_message_created_at_is_written_and_not_left_to_the_transaction_clock(
+    db_session, tenant_a, property_a, template_a, users_by_role_a
+):
+    """`cleaning_task_messages.created_at` has no `server_default` (design D1): a burst of
+    messages inserted together would otherwise share one Postgres `now()` and collapse the
+    chronological order the thread is read in."""
+    from app.auth.domain.enums import UserRole
+
+    task = await insert_task(db_session, tenant_a, property_a, template_a)
+    repo = SqlAlchemyCleaningTaskMessageRepository(db_session)
+    sent_at = NOW - timedelta(days=1)
+    message = _message(task, users_by_role_a[UserRole.CLEANER], created_at=sent_at)
+
+    await repo.add(tenant_a.id, message)
+
+    page = await repo.list_for_task(tenant_a.id, task.id, page=1, per_page=10)
+    assert page.items[0].created_at == sent_at

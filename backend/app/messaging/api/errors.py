@@ -24,7 +24,11 @@ from app.messaging.domain.exceptions import (
     InvalidConversationTransitionError,
     MessagingDomainError,
     MessagingValidationError,
+    NoInboundMessageError,
     PMSChannelUnavailableError,
+    WhatsAppPhoneNumberAlreadyAssociatedError,
+    WhatsAppPhoneNumberNotFoundError,
+    WhatsAppWebhookAuthenticationError,
 )
 
 # Order matters: the first matching entry wins. The hierarchy is flat by design (see the
@@ -36,6 +40,19 @@ _MAPPING: tuple[tuple[type[MessagingDomainError], int, ErrorCode], ...] = (
     (ConversationClosedError, 409, ErrorCode.CONFLICT),
     (PMSChannelUnavailableError, 422, ErrorCode.VALIDATION_ERROR),
     (MessagingValidationError, 422, ErrorCode.VALIDATION_ERROR),
+    # The second net, not the plan: `whatsapp-cloud-adapter` section 7 catches this one and
+    # answers `202`, because Meta redelivers on any non-2xx and a delivery receipt is not a
+    # failure. The row is here so an escape is a named 422 instead of an unmapped 500 — see
+    # the error's own docstring.
+    (NoInboundMessageError, 422, ErrorCode.VALIDATION_ERROR),
+    # Section 6 (R6.2, R6.3): the two outcomes of provisioning a tenant's WhatsApp number.
+    (WhatsAppPhoneNumberAlreadyAssociatedError, 409, ErrorCode.CONFLICT),
+    (WhatsAppPhoneNumberNotFoundError, 404, ErrorCode.NOT_FOUND),
+    # Section 7 (R3.2, R3.3): the inbound webhook's one refusal. The router answers it
+    # itself with a constant `403` and an empty body, so this row is the net behind an
+    # escape — and it answers the same status, because a mapped 500 here would tell an
+    # unauthenticated caller that it reached something.
+    (WhatsAppWebhookAuthenticationError, 403, ErrorCode.FORBIDDEN),
 )
 
 

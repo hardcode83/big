@@ -28,6 +28,7 @@ from app.cleaning.domain.entities import (
     CleaningChecklistTemplate,
     CleaningPhoto,
     CleaningTask,
+    CleaningTaskMessage,
 )
 from app.cleaning.domain.enums import (
     CleaningAssignmentBlocker,
@@ -40,6 +41,7 @@ from app.cleaning.domain.notifications import (
     RELATED_TYPE_CLEANING_TASK,
     assignment_notification,
     no_cleaner_available_notification,
+    staff_message_notification,
 )
 from app.cleaning.domain.exceptions import (
     AmbiguousChecklistTemplateError,
@@ -62,6 +64,8 @@ from app.cleaning.domain.repositories import (
     CleaningChecklistTemplateRepository,
     CleaningPhotoRepository,
     CleaningTaskFilters,
+    CleaningTaskMessagePage,
+    CleaningTaskMessageRepository,
     CleaningTaskRepository,
     Page,
     TemplatePage,
@@ -128,6 +132,11 @@ _CLEANER_PROBE_PAGE = 2
 # `_MAX_RECIPIENTS` in `app/notifications/application/use_cases.py`: a tenant's roster of
 # managers is small, and an unbounded fan-out would be a write amplification per checkout.
 _MAX_MANAGER_RECIPIENTS = 20
+
+# Batch size for paging through every active PROPERTY_MANAGER when notifying a staff message
+# (R4.2 promises **all** of them, unlike the capped alert above, so this bounds one round-trip
+# rather than the recipient count).
+_MANAGER_PAGE_SIZE = 20
 
 
 @dataclass(frozen=True)
@@ -2302,6 +2311,194 @@ class ListCleaningPhotosUseCase(_TaskTransitionMixin):
         return tuple(
             UploadedCleaningPhoto(photo=photo, url=storage.signed_url(photo.storage_key))
             for photo in photos
+        )
+
+
+class SendCleaningTaskMessageUseCase(_TaskTransitionMixin):
+    """One message on a task's staff thread, plus the notification it triggers
+    (`staff-messaging` R1, R3.3, R4).
+
+    Inherits `_TaskTransitionMixin` for `_load_task` alone, exactly as `UploadCleaningPhotoUseCase`
+    does and for the same two rules: the task is resolved **inside the tenant**, and a `CLEANER`
+    only reaches the tasks assigned to them (R1.3) — both answered with the shared,
+    byte-identical `CleaningTaskNotFoundError` so another tenant's task and an unowned one of
+    this tenant are indistinguishable from an id that never existed.
+
+    `author_id`/`author_role` come from `actor` alone, **never from a request field** (R1.5):
+    `author_role` is the persisted `UserRole` frozen at the instant of writing (design D2), not
+    a value the client could pick, and not `MessageSenderType` — reusing that enum, or touching
+    `Conversation`/`READ_CONVERSATIONS`/`MANAGE_CONVERSATIONS`, is exactly what R3.3 forbids.
+
+    The message row and every notification row it fans out are one transaction (design D9):
+    `uow.commit()` is called once, after all of them are staged.
+    """
+
+    def __init__(
+        self,
+        *,
+        tasks: CleaningTaskRepository,
+        messages: CleaningTaskMessageRepository,
+        users: UserRepository,
+        configs: TenantConfigRepository,
+        notifications: NotificationLogRepository,
+        uow: UnitOfWork,
+    ) -> None:
+        self._tasks = tasks
+        self._messages = messages
+        self._users = users
+        self._configs = configs
+        self._notifications = notifications
+        self._uow = uow
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        task_id: uuid.UUID,
+        actor: CleaningActor,
+        content: str,
+        now: datetime,
+    ) -> CleaningTaskMessage:
+        task = await self._load_task(tenant_id, task_id, actor)
+
+        message = CleaningTaskMessage(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            task_id=task.id,
+            author_id=actor.user_id,
+            author_role=actor.role,
+            content=content,
+            created_at=now,
+        )
+        await self._messages.add(tenant_id, message)
+
+        if actor.role is UserRole.CLEANER:
+            # R4.2/D9 — every active manager of the tenant, one row each. No owner fallback,
+            # unlike `_notify_manager_unassigned`: R4.2 names `PROPERTY_MANAGER` alone, and
+            # D9 rejects introducing an "assigned manager" concept this thread has no use for.
+            await self._notify_managers(tenant_id=tenant_id, task=task, message=message, now=now)
+        elif task.assigned_cleaner_id is not None:
+            # R4.3 — the assigned cleaner alone. A task with no assignee has nobody to tell.
+            await self._notify_cleaner(tenant_id=tenant_id, task=task, message=message, now=now)
+
+        await self._uow.commit()
+        return message
+
+    async def _notify_managers(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        task: CleaningTask,
+        message: CleaningTaskMessage,
+        now: datetime,
+    ) -> None:
+        managers = []
+        page_number = 1
+        while True:
+            page = await self._users.list(
+                tenant_id,
+                UserFilters(role=UserRole.PROPERTY_MANAGER, status=UserStatus.ACTIVE),
+                page=page_number,
+                per_page=_MANAGER_PAGE_SIZE,
+            )
+            managers.extend(page.items)
+            if not page.items or len(managers) >= page.total:
+                break
+            page_number += 1
+
+        if not managers:
+            # Not a failure (R4.2 does not promise a recipient exists): the message is still
+            # persisted, and this is the observable trace that nobody was told.
+            logger.info(
+                "cleaning.staff_message_without_manager",
+                extra={"tenant_id": str(tenant_id), "cleaning_task_id": str(task.id)},
+            )
+            return
+
+        config = await self._configs.get_or_create(tenant_id, now)
+        for manager in managers:
+            await dispatch_and_persist(
+                notifications=self._notifications,
+                tenant_id=tenant_id,
+                recipient=manager,
+                config=config,
+                notification_type=NotificationType.CLEANING_TASK_MESSAGE.value,
+                recipient_role=manager.role.value,
+                log_builder=staff_message_notification,
+                task_id=task.id,
+                message_id=message.id,
+                recipient_id=manager.id,
+                now=now,
+            )
+
+    async def _notify_cleaner(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        task: CleaningTask,
+        message: CleaningTaskMessage,
+        now: datetime,
+    ) -> None:
+        cleaner = await self._users.get_active_by_id(tenant_id, task.assigned_cleaner_id)
+        if cleaner is None:
+            logger.info(
+                "cleaning.staff_message_without_cleaner",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "cleaning_task_id": str(task.id),
+                    "reason": "inactive",
+                },
+            )
+            return
+
+        config = await self._configs.get_or_create(tenant_id, now)
+        await dispatch_and_persist(
+            notifications=self._notifications,
+            tenant_id=tenant_id,
+            recipient=cleaner,
+            config=config,
+            notification_type=NotificationType.CLEANING_TASK_MESSAGE.value,
+            recipient_role=cleaner.role.value,
+            log_builder=staff_message_notification,
+            task_id=task.id,
+            message_id=message.id,
+            recipient_id=cleaner.id,
+            now=now,
+        )
+
+
+class ListCleaningTaskMessagesUseCase(_TaskTransitionMixin):
+    """R1.2 — a task's message thread, chronological, paginated.
+
+    Inherits `_TaskTransitionMixin` for `_load_task` alone, mirroring `ListCleaningPhotosUseCase`:
+    the task is resolved **inside the tenant** first, so an unowned task's 404 is the shared,
+    byte-identical `CleaningTaskNotFoundError` and not an empty page (R1.3) — reading
+    `list_for_task` directly would answer an empty page for both a neighbour's task and one
+    that plain does not exist, which tells an unauthorised caller that the id resolves to
+    *something*.
+    """
+
+    def __init__(
+        self,
+        *,
+        tasks: CleaningTaskRepository,
+        messages: CleaningTaskMessageRepository,
+    ) -> None:
+        self._tasks = tasks
+        self._messages = messages
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        task_id: uuid.UUID,
+        actor: CleaningActor,
+        page: int,
+        per_page: int,
+    ) -> CleaningTaskMessagePage:
+        task = await self._load_task(tenant_id, task_id, actor)
+        return await self._messages.list_for_task(
+            tenant_id, task.id, page=page, per_page=per_page
         )
 
 

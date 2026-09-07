@@ -1,3 +1,12 @@
+# Excepción deliberada de la migración ci-runner-oci (R4.2/D5):
+# este workflow queda en `runs-on: ubuntu-latest` porque la
+# verificación de QEMU en el runner (vm dev) no se ejecutó en §1
+# (VM IP no reachable desde este worktree). El runbook
+# `docs/ci-runner-rollback.md` §2 declara esta fila como
+# "9 de 10 migrados, 1 excepción deliberada — QEMU no verificado".
+# Si en el futuro el operador verifica QEMU en la VM, este workflow
+# puede migrarse en un change posterior; la columna Excepción de la
+# fila del runbook se actualiza entonces. Cambio: ci-runner-oci.
 name: multiarch-build-check
 
 # Verifica que backend/frontend construyen para linux/arm64 (instancia Ampere A1 del

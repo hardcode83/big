@@ -90,6 +90,7 @@ export function CleanerTaskPhotoUploadButton({
       <Button
         type="button"
         variant="outline"
+        className="tap-target"
         onClick={onButtonClick}
         disabled={mutation.isPending}
       >

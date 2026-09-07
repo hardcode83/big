@@ -1,0 +1,79 @@
+{
+  "list": {
+    "heading": "Tenants",
+    "label": "Lista de tenants",
+    "columns": {
+      "name": "Nombre",
+      "status": "Estado",
+      "createdAt": "Fecha de alta"
+    },
+    "empty": {
+      "title": "Sin tenants",
+      "description": "Todavía no se ha creado ningún tenant."
+    },
+    "error": {
+      "title": "No se pudo cargar la lista de tenants",
+      "description": "Vuelve a intentarlo en unos segundos."
+    },
+    "addStaff": "Añadir personal",
+    "newTenant": "Nuevo tenant"
+  },
+  "status": {
+    "ACTIVE": "Activo",
+    "SUSPENDED": "Suspendido",
+    "CANCELLED": "Cancelado"
+  },
+  "pagination": {
+    "label": "Paginación de tenants",
+    "previous": "Página anterior",
+    "next": "Página siguiente",
+    "pageOfTotal": "Página {{page}} de {{totalPages}}",
+    "totalItems": "{{total}} tenants en total"
+  },
+  "sheet": {
+    "close": "Cerrar",
+    "createTenantTitle": "Nuevo tenant",
+    "createUserTitle": "Añadir personal"
+  },
+  "createTenant": {
+    "fields": {
+      "name": "Nombre",
+      "billingEmail": "Email de facturación",
+      "country": "País (código ISO de 2 letras)",
+      "timezone": "Zona horaria",
+      "defaultLanguage": "Idioma por defecto",
+      "languageOptions": {
+        "es": "Español",
+        "en": "English"
+      }
+    },
+    "submit": "Crear tenant",
+    "submitting": "Creando…",
+    "success": "Tenant «{{name}}» creado.",
+    "addStaff": "Añadir personal",
+    "genericError": "No se pudo crear el tenant. Vuelve a intentarlo."
+  },
+  "createUser": {
+    "fields": {
+      "fullName": "Nombre completo",
+      "email": "Email",
+      "phone": "Teléfono",
+      "role": "Rol"
+    },
+    "roles": {
+      "TENANT_OWNER": "Propietaria",
+      "PROPERTY_MANAGER": "Gestora",
+      "CLEANER": "Limpiadora",
+      "TECHNICIAN": "Técnico"
+    },
+    "submit": "Crear cuenta",
+    "submitting": "Creando…",
+    "genericError": "No se pudo crear la cuenta. Vuelve a intentarlo."
+  },
+  "temporaryPassword": {
+    "created": "Cuenta de {{name}} creada.",
+    "copy": "Copiar",
+    "copied": "Copiada",
+    "warning": "Esta contraseña temporal no volverá a mostrarse. Cópiala ahora."
+  }
+}

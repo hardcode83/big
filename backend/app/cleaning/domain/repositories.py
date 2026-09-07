@@ -33,6 +33,7 @@ from app.cleaning.domain.entities import (
     CleaningChecklistTemplate,
     CleaningPhoto,
     CleaningTask,
+    CleaningTaskMessage,
 )
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.cleaning.domain.value_objects import CleaningTaskSummary
@@ -288,5 +289,39 @@ class CleaningPhotoRepository(Protocol):
 
         An empty set when the task is not this tenant's — which is the safe direction: it
         blocks a completion rather than granting one.
+        """
+        ...
+
+
+@dataclass(frozen=True)
+class CleaningTaskMessagePage:
+    """One page of a task's message thread plus the total (`staff-messaging` R1)."""
+
+    items: tuple[CleaningTaskMessage, ...]
+    total: int
+
+
+class CleaningTaskMessageRepository(Protocol):
+    """The staff-to-manager thread of one cleaning task (`staff-messaging` design D1).
+
+    `tenant_id` first on every method, the house contract: `cleaning_task_messages` carries
+    its own `tenant_id` column (unlike `cleaning_photos`) and a composite `(tenant_id,
+    task_id)` foreign key into `cleaning_tasks`, so the isolation the global loader criteria
+    of `app/core/db.py` already give this table is backed by the schema as well.
+    """
+
+    async def add(self, tenant_id: uuid.UUID, message: CleaningTaskMessage) -> None:
+        """Append a message whose parent task belongs to `tenant_id`. Never commits — the
+        use case owns the transaction alongside the notification rows it fans out."""
+        ...
+
+    async def list_for_task(
+        self, tenant_id: uuid.UUID, task_id: uuid.UUID, *, page: int, per_page: int
+    ) -> CleaningTaskMessagePage:
+        """That task's messages, chronologically ascending.
+
+        Ordered by `created_at`, `id` for tie-break — the same stability rule
+        `CleaningTaskRepository.list`'s docstring states, needed here because several
+        messages of one burst can share a timestamp.
         """
         ...

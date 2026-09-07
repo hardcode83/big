@@ -39,18 +39,24 @@ from app.maintenance.domain.entities import (
     CLOSED_INCIDENT_STATUSES,
     OPEN_INCIDENT_STATUSES,
     Incident,
+    IncidentMessage,
     IncidentPhoto,
     OwnerApproval,
 )
 from app.maintenance.domain.enums import IncidentSeverity, IncidentStatus, OwnerApprovalStatus
 from app.maintenance.domain.exceptions import MaintenanceValidationError
-from app.maintenance.domain.repositories import IncidentFilters, IncidentPage
+from app.maintenance.domain.repositories import (
+    IncidentFilters,
+    IncidentMessagePage,
+    IncidentPage,
+)
 from app.maintenance.domain.value_objects import (
     IncidentSummary,
     OpenIncidentCounts,
     OwnerApprovalSummary,
 )
 from app.maintenance.infrastructure.models import (
+    IncidentMessageModel,
     IncidentModel,
     IncidentPhotoModel,
     OwnerApprovalModel,
@@ -733,3 +739,92 @@ class SqlAlchemyUnscopedIncidentPhotoLocationQuery:
         if row is None:
             return None
         return ObjectLocation(storage_key=row.storage_key, tenant_id=row.tenant_id)
+
+
+def _to_message(model: IncidentMessageModel) -> IncidentMessage:
+    return IncidentMessage(
+        id=model.id,
+        tenant_id=model.tenant_id,
+        incident_id=model.incident_id,
+        author_id=model.author_id,
+        author_role=model.author_role,
+        content=model.content,
+        created_at=model.created_at,
+    )
+
+
+class SqlAlchemyIncidentMessageRepository:
+    """`IncidentMessageRepository` — the writer and reader of `incident_messages`
+    (`staff-messaging` R2, R3.2).
+
+    The mirror of `app.cleaning.infrastructure.repositories.SqlAlchemyCleaningTaskMessageRepository`.
+    **Like `SqlAlchemyIncidentPhotoRepository`, this needs no join to be scoped** —
+    `incident_messages` carries its own `tenant_id` (design D1), so every statement here
+    filters the column directly. Unlike `cleaning_task_messages`'s cousin `cleaning_photos`
+    (which has no `tenant_id`), `maintenance`'s photo table already had one — this is the one
+    place `cleaning`/`maintenance` diverge in shape here.
+
+    Never commits: the use case owns the transaction alongside the notification rows it fans
+    out (design D9).
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, tenant_id: uuid.UUID, message: IncidentMessage) -> None:
+        """Insert one message, refusing a row that belongs to another tenant.
+
+        The explicit check is the mechanism, not belt-and-braces: limit 3 of `app/core/db.py`
+        says the session's global filter does **not** cover INSERTs, so for a write this is
+        the only thing between a wiring mistake and a row of another tenant —
+        `SqlAlchemyIncidentPhotoRepository.add`'s reasoning, verbatim. The composite foreign
+        key on `(tenant_id, incident_id)` is the second line of defence, and catches a
+        different error: it compares the message's tenant against the *incident's*, while
+        this compares it against the *acting* tenant.
+        """
+        if message.tenant_id != tenant_id:
+            raise CrossTenantWriteError(
+                entity="incident_message",
+                entity_tenant_id=message.tenant_id,
+                acting_tenant_id=tenant_id,
+            )
+        self._session.add(
+            IncidentMessageModel(
+                id=message.id,
+                tenant_id=message.tenant_id,
+                incident_id=message.incident_id,
+                author_id=message.author_id,
+                author_role=message.author_role,
+                content=message.content,
+                # Written, never left to a default — the column has none (design D1): a
+                # burst of messages inserted together would otherwise share one Postgres
+                # `now()` and `list_for_incident`'s ordering would fall through to a random
+                # `uuid4`, not the order they were sent in.
+                created_at=message.created_at,
+            )
+        )
+        await self._session.flush()
+
+    async def list_for_incident(
+        self, tenant_id: uuid.UUID, incident_id: uuid.UUID, *, page: int, per_page: int
+    ) -> IncidentMessagePage:
+        """That incident's thread, oldest first (R2.2), through the `(tenant_id, incident_id)`
+        index."""
+        conditions = (
+            IncidentMessageModel.tenant_id == tenant_id,
+            IncidentMessageModel.incident_id == incident_id,
+        )
+        total = await self._session.scalar(
+            select(func.count()).select_from(IncidentMessageModel).where(*conditions)
+        )
+        rows = await self._session.execute(
+            select(IncidentMessageModel)
+            .where(*conditions)
+            .order_by(IncidentMessageModel.created_at, IncidentMessageModel.id)
+            .limit(per_page)
+            .offset((page - 1) * per_page)
+        )
+        return IncidentMessagePage(
+            items=tuple(_to_message(model) for model in rows.scalars()),
+            total=int(total or 0),
+        )

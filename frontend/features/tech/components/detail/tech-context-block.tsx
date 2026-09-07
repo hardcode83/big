@@ -2,6 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 
+import { Card } from "@/components/ui/card";
 import type { IncidentContextDto } from "@/features/incidents";
 
 /**
@@ -27,58 +28,60 @@ export function TechContextBlock({ context }: { context: IncidentContextDto }) {
   ].filter((line): line is string => Boolean(line));
 
   return (
-    <section className="flex flex-col gap-2 rounded-lg border bg-surface p-4">
-      <h2 className="text-base font-semibold text-foreground">
-        {t("context.title")}
-      </h2>
+    <section>
+      <Card className="flex flex-col gap-2 p-4">
+        <h2 className="text-body-lg font-semibold text-foreground">
+          {t("context.title")}
+        </h2>
 
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-        <dt className="text-muted-foreground">{t("context.propertyName")}</dt>
-        <dd className="text-foreground">{context.propertyName}</dd>
-        <dt className="text-muted-foreground">
-          {t("context.propertyInternalCode")}
-        </dt>
-        <dd className="text-foreground">{context.propertyInternalCode}</dd>
-        <dt className="text-muted-foreground">{t("context.timezone")}</dt>
-        <dd className="text-foreground">{context.timezone}</dd>
-      </dl>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-body-base">
+          <dt className="text-muted-foreground">{t("context.propertyName")}</dt>
+          <dd className="text-foreground">{context.propertyName}</dd>
+          <dt className="text-muted-foreground">
+            {t("context.propertyInternalCode")}
+          </dt>
+          <dd className="text-foreground">{context.propertyInternalCode}</dd>
+          <dt className="text-muted-foreground">{t("context.timezone")}</dt>
+          <dd className="text-foreground">{context.timezone}</dd>
+        </dl>
 
-      {addressLines.length > 0 ? (
-        <div>
-          <h3 className="text-sm text-muted-foreground">
-            {t("context.address")}
-          </h3>
-          <address className="not-italic text-sm text-foreground">
-            {addressLines.map((line) => (
-              <span key={line} className="block">
-                {line}
-              </span>
-            ))}
-          </address>
-        </div>
-      ) : null}
+        {addressLines.length > 0 ? (
+          <div>
+            <h3 className="text-body-base text-muted-foreground">
+              {t("context.address")}
+            </h3>
+            <address className="not-italic text-body-base text-foreground">
+              {addressLines.map((line) => (
+                <span key={line} className="block">
+                  {line}
+                </span>
+              ))}
+            </address>
+          </div>
+        ) : null}
 
-      {context.accessNotes ? (
-        <div>
-          <h3 className="text-sm text-muted-foreground">
-            {t("context.accessNotes")}
-          </h3>
-          <p className="whitespace-pre-wrap text-sm text-foreground">
-            {context.accessNotes}
-          </p>
-        </div>
-      ) : null}
+        {context.accessNotes ? (
+          <div>
+            <h3 className="text-body-base text-muted-foreground">
+              {t("context.accessNotes")}
+            </h3>
+            <p className="whitespace-pre-wrap text-body-base text-foreground">
+              {context.accessNotes}
+            </p>
+          </div>
+        ) : null}
 
-      {context.assignmentNote ? (
-        <div>
-          <h3 className="text-sm text-muted-foreground">
-            {t("context.assignmentNote")}
-          </h3>
-          <p className="whitespace-pre-wrap text-sm text-foreground">
-            {context.assignmentNote}
-          </p>
-        </div>
-      ) : null}
+        {context.assignmentNote ? (
+          <div>
+            <h3 className="text-body-base text-muted-foreground">
+              {t("context.assignmentNote")}
+            </h3>
+            <p className="whitespace-pre-wrap text-body-base text-foreground">
+              {context.assignmentNote}
+            </p>
+          </div>
+        ) : null}
+      </Card>
     </section>
   );
 }

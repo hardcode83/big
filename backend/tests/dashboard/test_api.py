@@ -1,17 +1,24 @@
 """The dashboard endpoints over the real app (`dashboard-api` R1, R2; `dashboard-operational-
-kpis` R1-R4, task 6.4)."""
+kpis` R1-R4, task 6.4; `dashboard-occupancy-series` R1, R4)."""
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
+from app.auth.domain import policy
 from app.auth.domain.enums import UserRole
+from app.auth.domain.policy import Permission
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.cleaning.infrastructure.models import CleaningTaskModel
 from app.maintenance.domain.enums import IncidentSeverity, IncidentSource, IncidentStatus
 from app.maintenance.infrastructure.models import IncidentModel
+from app.properties.domain.entities import PropertyStateTransition
+from app.properties.domain.enums import PropertyOperationalState, StateTransitionTriggeredBy
 from app.properties.infrastructure.models import PropertyModel
+from app.properties.infrastructure.repositories import (
+    SqlAlchemyPropertyStateTransitionRepository,
+)
 from app.reservations.domain.enums import ReservationChannel, ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 from tests.cleaning.conftest import insert_template
@@ -19,7 +26,12 @@ from tests.dashboard.conftest import TODAY, auth_header, insert_property
 
 COLLECTION = "/api/v1/dashboard/properties"
 OPERATIONAL_KPIS = "/api/v1/dashboard/operational-kpis"
+OCCUPANCY_SERIES = "/api/v1/dashboard/occupancy-series"
 READERS = {UserRole.PROPERTY_MANAGER, UserRole.TENANT_OWNER}
+
+# `TODAY` is a Sunday (2026-08-09); the ISO week it closes runs Monday to Sunday.
+WEEK_START = date(2026, 8, 3)
+WEEK_END = date(2026, 8, 9)
 
 
 def _detail_url(prop: PropertyModel) -> str:
@@ -338,3 +350,147 @@ async def test_only_property_readers_may_call_the_operational_kpis(
     response = await api.get(OPERATIONAL_KPIS, headers=auth_header(api, users_by_role_a[role]))
 
     assert response.status_code == (200 if role in READERS else 403)
+
+
+# --- occupancy series (`dashboard-occupancy-series` R1, R4) --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_series_is_seven_points_monday_to_sunday_with_exact_fields(
+    api, db_session, tenant_a, property_a, users_by_role_a
+) -> None:
+    """R1.2, R1.4: the fields on the wire are exactly the four the domain carries — no
+    colour, no weekday label — and the week runs Monday (`WEEK_START`) to Sunday
+    (`TODAY`), whichever day of the week `TODAY` itself falls on."""
+    await insert_property(db_session, tenant_a, code="FLAT-2")
+    db_session.add(
+        ReservationModel(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            property_id=property_a.id,
+            channel=ReservationChannel.DIRECT,
+            status=ReservationStatus.CONFIRMED,
+            check_in_date=WEEK_START,
+            check_out_date=WEEK_START + timedelta(days=2),
+            nights=2,
+            adults=2,
+        )
+    )
+    await db_session.flush()
+
+    response = await api.get(OCCUPANCY_SERIES, headers=_owner(api, users_by_role_a))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"data"}
+    points = body["data"]
+    assert points is not None
+    assert len(points) == 7
+    assert [point["date"] for point in points] == [
+        (WEEK_START + timedelta(days=offset)).isoformat() for offset in range(7)
+    ]
+    for point in points:
+        assert set(point) == {
+            "date",
+            "occupied_properties",
+            "total_properties",
+            "occupancy_pct",
+        }
+        assert point["total_properties"] == 2
+
+    # `property_a`'s stay covers Monday and Tuesday nights; Wednesday is checkout day, so
+    # only two of the seven points are occupied.
+    occupied_dates = {point["date"] for point in points if point["occupied_properties"] == 1}
+    assert occupied_dates == {WEEK_START.isoformat(), (WEEK_START + timedelta(days=1)).isoformat()}
+    for point in points:
+        expected_pct = 50.0 if point["date"] in occupied_dates else 0.0
+        assert point["occupancy_pct"] == expected_pct
+
+
+@pytest.mark.asyncio
+async def test_an_empty_portfolio_answers_null_percentage_on_every_point(
+    api, users_by_role_a
+) -> None:
+    """R1.3: a tenant with no active properties cannot answer a division by zero."""
+    response = await api.get(OCCUPANCY_SERIES, headers=_owner(api, users_by_role_a))
+
+    assert response.status_code == 200
+    points = response.json()["data"]
+    assert len(points) == 7
+    assert all(point["total_properties"] == 0 for point in points)
+    assert all(point["occupancy_pct"] is None for point in points)
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_property_counts_as_occupied_through_the_days_it_stays_blocked(
+    api, db_session, tenant_a, property_a, users_by_role_a
+) -> None:
+    """R2.1's second condition, exercised through the real route rather than the unit
+    fixtures of `test_occupancy_series.py`: a property blocked by its owner before the week
+    and never released counts as occupied on every one of the seven points."""
+    await SqlAlchemyPropertyStateTransitionRepository(db_session).add(
+        tenant_a.id,
+        PropertyStateTransition(
+            id=uuid.uuid4(),
+            tenant_id=tenant_a.id,
+            property_id=property_a.id,
+            from_state=PropertyOperationalState.VACANT_READY,
+            to_state=PropertyOperationalState.BLOCKED_BY_OWNER,
+            triggered_by=StateTransitionTriggeredBy.SYSTEM,
+            created_at=datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
+            reason="owner blocked the flat",
+        ),
+    )
+
+    response = await api.get(OCCUPANCY_SERIES, headers=_owner(api, users_by_role_a))
+
+    assert response.status_code == 200
+    points = response.json()["data"]
+    assert all(point["occupied_properties"] == 1 for point in points)
+    assert all(point["total_properties"] == 1 for point in points)
+    assert all(point["occupancy_pct"] == 100.0 for point in points)
+
+
+@pytest.mark.asyncio
+async def test_an_anonymous_request_is_refused_for_the_occupancy_series(api) -> None:
+    assert (await api.get(OCCUPANCY_SERIES)).status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", list(UserRole))
+async def test_only_property_readers_may_call_the_occupancy_series(
+    api, users_by_role_a, role: UserRole
+) -> None:
+    response = await api.get(
+        OCCUPANCY_SERIES, headers=auth_header(api, users_by_role_a[role])
+    )
+
+    assert response.status_code == (200 if role in READERS else 403)
+
+
+@pytest.mark.asyncio
+async def test_the_data_key_is_null_for_a_role_without_read_reservations(
+    api, db_session, tenant_a, property_a, users_by_role_a, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R4.3, surfaced through the real route.
+
+    No seeded role holds `READ_PROPERTIES` without also holding `READ_RESERVATIONS` — the
+    same situation `test_the_three_keys_are_always_present_null_included` above records for
+    `operational-kpis` — so the door-gate role's permissions are stripped down to exactly
+    `READ_PROPERTIES` for this one request. The redaction path itself (zero domain queries
+    when the check fails) is proven in `tests/dashboard/test_use_cases.py`; this test is
+    only responsible for the wire shape: `data: null`, not an omitted key, not a 403.
+    """
+    monkeypatch.setattr(
+        policy,
+        "ROLE_PERMISSIONS",
+        {
+            **policy.ROLE_PERMISSIONS,
+            UserRole.TENANT_OWNER: frozenset({Permission.READ_PROPERTIES}),
+        },
+    )
+
+    response = await api.get(OCCUPANCY_SERIES, headers=_owner(api, users_by_role_a))
+
+    assert response.status_code == 200
+    assert response.json() == {"data": None}

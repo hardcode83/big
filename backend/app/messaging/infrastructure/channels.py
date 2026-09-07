@@ -4,7 +4,7 @@
 |---|---|---|
 | `MANUAL` | `PanelOutboundAdapter` | no-op: the row **is** the delivery |
 | `PORTAL` | `PortalOutboundAdapter` | no-op: the row **is** the delivery, read by the guest |
-| `WHATSAPP` | delegates to `MockWhatsAppAdapter` | the mock `access-notifications` governs |
+| `WHATSAPP` | delegates to `WhatsAppCloudAdapter`/`MockWhatsAppAdapter` | selected by `settings.whatsapp_provider`, `access-notifications`/`whatsapp-cloud-adapter` |
 | `EMAIL` | delegates to `ConsoleEmailAdapter` | ditto |
 | `PHONE_TRANSCRIPT` | `InboundOnlyAdapter` | returns `CHANNEL_INBOUND_ONLY` |
 | `AIRBNB_MSG`, `BOOKING_MSG` | — | **absent on purpose** (R6.3) |
@@ -13,7 +13,8 @@
 discipline for free: they log neither `subject`, nor `body`, nor `recipient_contact` — only
 lengths — which is exactly what rule 11 of `sdd/steering/security.md` wants for this content.
 Writing two console adapters would have meant writing that discipline twice and keeping it
-true in both.
+true in both. `whatsapp-cloud-adapter` R1.2/R5.3 extends this to the real provider: the same
+delegation means `DelegatingOutboundAdapter` never talks to Meta's Graph API itself.
 
 **The two OTA channels are absent, and that absence is the mechanism of R6.3**: there is no
 key in the registry with which to fall back to a console adapter in silence, so
@@ -25,15 +26,20 @@ method-less (R6.4).
 """
 
 import uuid
+from datetime import datetime
 
+from app.core.config import settings
 from app.messaging.domain.enums import ConversationChannel
 from app.messaging.domain.ports import OutboundMessagePort
+from app.messaging.domain.repositories import MessageRepository
 from app.messaging.domain.value_objects import ChannelErrorCode, ChannelSendResult
 from app.notifications.domain.enums import NotificationChannel
+from app.notifications.domain.ports import NotificationAdapter
 from app.notifications.domain.results import NotificationResult
 from app.notifications.infrastructure.adapters import (
     ConsoleEmailAdapter,
     MockWhatsAppAdapter,
+    WhatsAppCloudAdapter,
 )
 
 #: How a `NotificationResult` from a delegated adapter becomes a `ChannelSendResult`.
@@ -47,6 +53,9 @@ _ERROR_TRANSLATION = {
     "TIMEOUT": ChannelErrorCode.ADAPTER_UNAVAILABLE,
     "NO_ADAPTER_FOR_CHANNEL": ChannelErrorCode.ADAPTER_UNAVAILABLE,
     "MAX_ATTEMPTS_EXCEEDED": ChannelErrorCode.ADAPTER_UNAVAILABLE,
+    #: `whatsapp-cloud-adapter` R2.3/R2.4, design D2 — symmetric with the code's own name, no
+    #: reason to fall it back to `ADAPTER_UNAVAILABLE` the way an unclassified failure does.
+    "OUTSIDE_SESSION_WINDOW": ChannelErrorCode.OUTSIDE_SESSION_WINDOW,
 }
 
 
@@ -84,6 +93,10 @@ class PanelOutboundAdapter:
         recipient_contact: str | None,
         content: str,
         language: str,
+        tenant_id: uuid.UUID,
+        last_inbound_at: datetime | None = None,
+        template_id: str | None = None,
+        phone_number_id: str | None = None,
     ) -> ChannelSendResult:
         return ChannelSendResult.ok()
 
@@ -109,6 +122,10 @@ class PortalOutboundAdapter:
         recipient_contact: str | None,
         content: str,
         language: str,
+        tenant_id: uuid.UUID,
+        last_inbound_at: datetime | None = None,
+        template_id: str | None = None,
+        phone_number_id: str | None = None,
     ) -> ChannelSendResult:
         return ChannelSendResult.ok()
 
@@ -130,6 +147,10 @@ class InboundOnlyAdapter:
         recipient_contact: str | None,
         content: str,
         language: str,
+        tenant_id: uuid.UUID,
+        last_inbound_at: datetime | None = None,
+        template_id: str | None = None,
+        phone_number_id: str | None = None,
     ) -> ChannelSendResult:
         return ChannelSendResult.failure(ChannelErrorCode.CHANNEL_INBOUND_ONLY)
 
@@ -143,10 +164,18 @@ class DelegatingOutboundAdapter:
     """
 
     def __init__(
-        self, delegate: ConsoleEmailAdapter | MockWhatsAppAdapter, channel: NotificationChannel
+        self,
+        delegate: NotificationAdapter,
+        channel: NotificationChannel,
+        messages: MessageRepository,
     ) -> None:
         self._delegate = delegate
         self._channel = channel
+        # `whatsapp-cloud-adapter` R2.4, design D2 — the new dependency that lets `send`
+        # resolve `last_inbound_at` itself for `WHATSAPP` instead of trusting the caller not
+        # to say otherwise (R2.4's own "no SHALL asumir... solo porque el llamante no dijo lo
+        # contrario"). `EMAIL` never touches it: `ConsoleEmailAdapter` has no window.
+        self._messages = messages
 
     async def send(
         self,
@@ -156,21 +185,46 @@ class DelegatingOutboundAdapter:
         recipient_contact: str | None,
         content: str,
         language: str,
+        tenant_id: uuid.UUID,
+        last_inbound_at: datetime | None = None,
+        template_id: str | None = None,
+        phone_number_id: str | None = None,
     ) -> ChannelSendResult:
         if recipient_contact is None or not recipient_contact.strip():
             # Checked here rather than handed to the delegate as `""`: the delegate would
             # reach the same verdict, but only by accident of it also refusing blanks.
             return ChannelSendResult.failure(ChannelErrorCode.INVALID_RECIPIENT)
+        if self._channel != NotificationChannel.WHATSAPP:
+            # `EMAIL`'s delegate, `ConsoleEmailAdapter`, declares `last_inbound_at`/
+            # `template_id`/`phone_number_id` too (section 8's pyright fix widened every
+            # `NotificationAdapter` implementer), so passing them here would be a harmless
+            # no-op rather than a `TypeError` — they are omitted anyway because `EMAIL` has no
+            # 24h session window, so resolving `last_guest_message_at` for it would be a query
+            # with no reader.
+            result = await self._delegate.send(
+                recipient_contact=recipient_contact,
+                subject=None,
+                body=content,
+                channel=self._channel,
+            )
+            return _translate(result)
+        # Resolved here rather than trusted from the caller (R2.4, D2): the objective signal
+        # is the guest's own last message, not whatever the caller happened to pass — and
+        # today nothing upstream of this adapter passes anything at all.
+        last_inbound_at = await self._messages.last_guest_message_at(tenant_id, conversation_id)
         result = await self._delegate.send(
             recipient_contact=recipient_contact,
             subject=None,
             body=content,
             channel=self._channel,
+            last_inbound_at=last_inbound_at,
+            template_id=template_id,
+            phone_number_id=phone_number_id,
         )
         return _translate(result)
 
 
-def outbound_registry() -> dict[ConversationChannel, OutboundMessagePort]:
+def outbound_registry(messages: MessageRepository) -> dict[ConversationChannel, OutboundMessagePort]:
     """The channels this deployment can reply on.
 
     A plain dict built eagerly, rather than dynamic dispatch by channel name: the mapping is
@@ -180,15 +234,36 @@ def outbound_registry() -> dict[ConversationChannel, OutboundMessagePort]:
     as `notifications.adapter_registry`.
 
     `AIRBNB_MSG` and `BOOKING_MSG` are absent on purpose; see the module docstring.
+
+    `messages` is `whatsapp-cloud-adapter` R2.4/D2's new dependency: `DelegatingOutboundAdapter`
+    needs a `MessageRepository` to resolve `last_inbound_at` for `WHATSAPP`, so this function
+    stops being no-argument — its two current callers (`messaging/api/dependencies.py`,
+    `cli/seed_demo.py::_messaging_pipeline_kwargs`) already build a `SqlAlchemyMessageRepository`
+    for their own `messages=` kwarg right next to this call, so passing that same instance
+    through is not new plumbing.
+
+    `WHATSAPP` selects the real adapter or the mock the same way `notifications.adapter_registry`
+    does (section 1): `settings.whatsapp_provider == "meta"` builds `WhatsAppCloudAdapter` from
+    `settings.whatsapp_access_token`/`settings.whatsapp_phone_number_id`; anything else builds
+    `MockWhatsAppAdapter()` — safe without a further check because `Settings`' own field
+    validator already rejects any value outside `{"mock", "meta"}` at boot.
     """
+    whatsapp_delegate: ConsoleEmailAdapter | MockWhatsAppAdapter | WhatsAppCloudAdapter
+    if settings.whatsapp_provider == "meta":
+        whatsapp_delegate = WhatsAppCloudAdapter(
+            access_token=settings.whatsapp_access_token or "",
+            phone_number_id=settings.whatsapp_phone_number_id or "",
+        )
+    else:
+        whatsapp_delegate = MockWhatsAppAdapter()
     return {
         ConversationChannel.MANUAL: PanelOutboundAdapter(),
         ConversationChannel.PORTAL: PortalOutboundAdapter(),
         ConversationChannel.WHATSAPP: DelegatingOutboundAdapter(
-            MockWhatsAppAdapter(), NotificationChannel.WHATSAPP
+            whatsapp_delegate, NotificationChannel.WHATSAPP, messages
         ),
         ConversationChannel.EMAIL: DelegatingOutboundAdapter(
-            ConsoleEmailAdapter(), NotificationChannel.EMAIL
+            ConsoleEmailAdapter(), NotificationChannel.EMAIL, messages
         ),
         ConversationChannel.PHONE_TRANSCRIPT: InboundOnlyAdapter(),
     }

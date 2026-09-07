@@ -2,8 +2,8 @@
 
     python -m app.cli.reset_password --email <address>
 
-**Why this exists at all.** The recovery mail reaches nobody until a real SMTP adapter
-arrives with `hardening-release`: `EMAIL` resolves to `ConsoleEmailAdapter`, which
+**Why this exists at all.** Without a real SMTP relay configured (`smtp-delivery-adapter`),
+the recovery mail reaches nobody: `EMAIL` resolves to `ConsoleEmailAdapter`, which
 `specs/access-notifications.md` forbids from logging content or recipient, so not even a
 developer can read the link out of the log (R6.4, EXTERNAL_DEPENDENCY). And the only
 `TENANT_OWNER` of a tenant has no other way back — only `TENANT_OWNER` holds `MANAGE_USERS`,

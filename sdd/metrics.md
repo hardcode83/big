@@ -92,3 +92,16 @@
 | cleaner-app | new, tasks, run, review, ship, archive | 1913125 | 420916 | 113055583 | 70.1061 | 2026-08-18 | 2026-08-31 |
 | revenue-statements | design, new, run, tasks, review, archive | 6370569 | 987638 | 228543231 | 170.2758 | 2026-08-26 | 2026-09-02 |
 | revenue-reviews | new, design, tasks, run, review, ship, archive | 13772896 | 653169 | 267912705 | 222.0495 | 2026-09-01 | 2026-09-02 |
+| smtp-delivery-adapter | new, design, tasks, run, review, ship, archive | 395682 | 761863 | 316877001 | 174.2510 | 2026-08-31 | 2026-09-03 |
+| staff-messaging | new, design, run, review, ship, archive | 607829 | 1326230 | 450441958 | 134.6256 | 2026-09-02 | 2026-09-03 |
+| dashboard-occupancy-series | new, design, tasks, run, review, ship, archive | 258320 | 726628 | 176527278 | 67.5233 | 2026-09-02 | 2026-09-03 |
+| platform-admin-api | new, design, tasks, run, review, ship, archive | 17025653 | 861740 | 200581612 | 212.4330 | 2026-09-02 | 2026-09-03 |
+| visual-restyle-workspace | new, design, tasks, run, review, ship, archive | 1905107 | 1612648 | 393212107 | 137.9674 | 2026-09-02 | 2026-09-04 |
+| ci-runner-oci | new, design, tasks, run, review, ship, archive | 2789110 | 1732666 | 406634427 | 169.0519 | 2026-09-03 | 2026-09-04 |
+| whatsapp-cloud-adapter | new, design, tasks, run, review, ship, archive | 798550 | 2240656 | 842604336 | 293.2080 | 2026-09-02 | 2026-09-04 |
+| dashboard-activity-feed | new, design, tasks, run, review, ship, archive | 258346 | 560776 | 121062862 | 43.3162 | 2026-09-03 | 2026-09-04 |
+| super-admin-console | new, design, tasks, run, review, ship, archive | 322498 | 899352 | 350676804 | 97.9082 | 2026-08-31 | 2026-09-04 |
+| ci-runner-pool-oci | new, design, tasks, run, review, ship, archive | 5629817 | 729863 | 170285694 | 104.3322 | 2026-09-04 | 2026-09-04 |
+| auth-session-generation-semantics | new, design, tasks, run, review, ship, archive | 2973295 | 1216003 | 208191958 | 98.3603 | 2026-09-04 | 2026-09-05 |
+| reservations-identity-web | new, tasks, run, review, ship, archive | 48198 | 268325 | 60302554 | 18.8499 | 2026-09-05 | 2026-09-05 |
+| auth-session-persistence | new, design, tasks, run, review, ship, archive | 2036009 | 2628069 | 677762862 | 233.9513 | 2026-09-04 | 2026-09-06 |

@@ -338,7 +338,10 @@ export function applyDirectives(css: string): string {
  */
 export const NON_COLOR: Record<string, RegExp> = {
   bg: /^(none|inherit|current|transparent|auto|cover|contain|center|top|bottom|left|right|repeat|repeat-x|repeat-y|no-repeat|repeat-round|repeat-space|fixed|local|scroll|clip-\w+|origin-\w+|blend-[\w-]+|gradient-to-[a-z]+|linear-[\w-]+|radial-[\w-]+|conic-[\w-]+)$/,
-  text: /^(inherit|current|transparent|xs|sm|base|lg|xl|\d?xl|left|center|right|justify|start|end|ellipsis|clip|wrap|nowrap|balance|pretty)$/,
+  // `glow` is `@utility text-glow` (design D4) — a hand-authored text-shadow
+  // effect keyed off `--color-primary`, not a `text-<color>` utility naming a
+  // colour of its own.
+  text: /^(inherit|current|transparent|xs|sm|base|lg|xl|\d?xl|left|center|right|justify|start|end|ellipsis|clip|wrap|nowrap|balance|pretty|glow)$/,
   // `s`/`e` are the logical (start/end) sides, absent from the tree today but a
   // one-keystroke neighbour of `l`/`r` — flagged by the section-8 QA reviewer.
   border: /^(inherit|current|transparent|none|solid|dashed|dotted|double|hidden|collapse|separate|spacing-[\w.]+|[xytrblse](-\d+)?|\d+)$/,

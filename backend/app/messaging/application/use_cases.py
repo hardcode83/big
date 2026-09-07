@@ -545,6 +545,8 @@ class ProcessInboundGuestMessageUseCase:
             recipient_contact=await self._recipient_contact(tenant_id, conversation),
             content=generated.content,
             language=language,
+            tenant_id=tenant_id,
+            phone_number_id=conversation.business_phone_number,
         )
 
         reply = Message(

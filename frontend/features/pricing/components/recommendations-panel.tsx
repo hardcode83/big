@@ -137,7 +137,7 @@ export function RecommendationsPanel({
       <>
         <ul
           aria-label={t("recommendations.list.label")}
-          className="grid grid-cols-1 gap-4 p-4 xl:grid-cols-2"
+          className="grid grid-cols-1 items-stretch gap-4 p-4 xl:grid-cols-2"
         >
           {items.map((recommendation) => (
             <RecommendationRow
@@ -169,7 +169,7 @@ export function RecommendationsPanel({
       <RecommendationFilters properties={propertyList} />
 
       {canDecide ? (
-        <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <Button
             type="button"
             variant="outline"
@@ -182,7 +182,11 @@ export function RecommendationsPanel({
       ) : null}
 
       {/* The single live region of design D8. */}
-      <div role="status" aria-live="polite" className="px-4 empty:hidden">
+      <div
+        role="status"
+        aria-live="polite"
+        className="px-4 py-2 text-body-base text-muted-foreground empty:hidden"
+      >
         {announcement()}
       </div>
 

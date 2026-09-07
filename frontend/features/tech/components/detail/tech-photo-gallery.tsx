@@ -56,7 +56,7 @@ export function TechPhotoGallery({ incidentId }: { incidentId: string }) {
 
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-base font-semibold text-foreground">
+      <h2 className="text-body-lg font-semibold text-foreground">
         {t("photos.title")}
       </h2>
 
@@ -82,7 +82,7 @@ export function TechPhotoGallery({ incidentId }: { incidentId: string }) {
           if (ofStage.length === 0) return null;
           return (
             <div key={stage} className="flex flex-col gap-2">
-              <h3 className="text-sm text-muted-foreground">
+              <h3 className="text-body-base text-muted-foreground">
                 {t(`photos.stage.${stage}`)}
               </h3>
               <ul className="grid grid-cols-2 gap-2">
@@ -92,7 +92,7 @@ export function TechPhotoGallery({ incidentId }: { incidentId: string }) {
                     <img
                       src={photo.url}
                       alt={t("photos.alt")}
-                      className="w-full rounded-md border object-cover"
+                      className="w-full rounded-md border border-border object-cover"
                       onError={() => onImageError(photo.id)}
                     />
                   </li>

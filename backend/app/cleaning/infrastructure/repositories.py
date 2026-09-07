@@ -38,6 +38,7 @@ from app.cleaning.domain.entities import (
     CleaningChecklistTemplate,
     CleaningPhoto,
     CleaningTask,
+    CleaningTaskMessage,
 )
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.cleaning.domain.exceptions import (
@@ -46,6 +47,7 @@ from app.cleaning.domain.exceptions import (
 )
 from app.cleaning.domain.repositories import (
     CleaningTaskFilters,
+    CleaningTaskMessagePage,
     Page,
     TemplatePage,
 )
@@ -54,6 +56,7 @@ from app.cleaning.infrastructure.models import (
     CleaningChecklistCompletionModel,
     CleaningChecklistTemplateModel,
     CleaningPhotoModel,
+    CleaningTaskMessageModel,
     CleaningTaskModel,
 )
 from app.core.db import require_unmarked_session
@@ -538,6 +541,80 @@ class SqlAlchemyCleaningPhotoRepository:
         return frozenset(rows.scalars())
 
 
+class SqlAlchemyCleaningTaskMessageRepository:
+    """`CleaningTaskMessageRepository` — the writer and reader of `cleaning_task_messages`
+    (`staff-messaging` R1, R3.2).
+
+    **Unlike `SqlAlchemyCleaningPhotoRepository`, this one needs no join to be scoped.**
+    `cleaning_task_messages` carries its own `tenant_id` (design D1, the same departure
+    `IncidentPhotoModel` took from `CleaningPhotoModel`), so every statement here filters the
+    column directly, the `SqlAlchemyIncidentPhotoRepository` shape.
+
+    Never commits: the use case owns the transaction alongside the notification rows it fans
+    out (design D9).
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, tenant_id: uuid.UUID, message: CleaningTaskMessage) -> None:
+        """Insert one message, refusing a row that belongs to another tenant.
+
+        The explicit check is the mechanism, not belt-and-braces: limit 3 of `app/core/db.py`
+        says the session's global filter does **not** cover INSERTs, so for a write this is
+        the only thing between a wiring mistake and a row of another tenant —
+        `SqlAlchemyIncidentPhotoRepository.add`'s reasoning, verbatim. The composite foreign
+        key on `(tenant_id, task_id)` is the second line of defence, and catches a different
+        error: it compares the message's tenant against the *task's*, while this compares it
+        against the *acting* tenant.
+        """
+        if message.tenant_id != tenant_id:
+            raise CrossTenantWriteError(
+                entity="cleaning_task_message",
+                entity_tenant_id=message.tenant_id,
+                acting_tenant_id=tenant_id,
+            )
+        self._session.add(
+            CleaningTaskMessageModel(
+                id=message.id,
+                tenant_id=message.tenant_id,
+                task_id=message.task_id,
+                author_id=message.author_id,
+                author_role=message.author_role,
+                content=message.content,
+                # Written, never left to a default — the column has none (design D1): a
+                # burst of messages inserted together would otherwise share one Postgres
+                # `now()` and `list_for_task`'s ordering would fall through to a random
+                # `uuid4`, not the order they were sent in.
+                created_at=message.created_at,
+            )
+        )
+        await self._session.flush()
+
+    async def list_for_task(
+        self, tenant_id: uuid.UUID, task_id: uuid.UUID, *, page: int, per_page: int
+    ) -> CleaningTaskMessagePage:
+        """That task's thread, oldest first (R1.2), through the `(tenant_id, task_id)` index."""
+        conditions = (
+            CleaningTaskMessageModel.tenant_id == tenant_id,
+            CleaningTaskMessageModel.task_id == task_id,
+        )
+        total = await self._session.scalar(
+            select(func.count()).select_from(CleaningTaskMessageModel).where(*conditions)
+        )
+        rows = await self._session.execute(
+            select(CleaningTaskMessageModel)
+            .where(*conditions)
+            .order_by(CleaningTaskMessageModel.created_at, CleaningTaskMessageModel.id)
+            .limit(per_page)
+            .offset((page - 1) * per_page)
+        )
+        return CleaningTaskMessagePage(
+            items=tuple(_to_message(model) for model in rows.scalars()),
+            total=int(total or 0),
+        )
+
+
 class SqlAlchemyUnscopedCleaningPhotoLocationQuery:
     """Implements `UnscopedObjectLocationQuery` for `cleaning_photos` — the one read here that
     does **not** take a tenant.
@@ -766,4 +843,16 @@ def _to_photo(model: CleaningPhotoModel) -> CleaningPhoto:
         storage_key=model.storage_key,
         created_at=model.created_at,
         ai_validation_result=model.ai_validation_result,
+    )
+
+
+def _to_message(model: CleaningTaskMessageModel) -> CleaningTaskMessage:
+    return CleaningTaskMessage(
+        id=model.id,
+        tenant_id=model.tenant_id,
+        task_id=model.task_id,
+        author_id=model.author_id,
+        author_role=model.author_role,
+        content=model.content,
+        created_at=model.created_at,
     )

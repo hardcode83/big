@@ -77,7 +77,7 @@ export function TimelineView() {
 
       <div>
         <label
-          className="mb-1 block text-xs font-medium text-muted-foreground"
+          className="mb-1 block text-body-base font-medium text-muted-foreground"
           htmlFor="timeline-property"
         >
           {t("timeline.picker.label")}

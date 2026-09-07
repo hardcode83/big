@@ -110,6 +110,27 @@ variable "media_user_email" {
   }
 }
 
+variable "smtp_user_email" {
+  description = <<-EOT
+    Email primario del usuario de servicio del relay SMTP (change `smtp-delivery-adapter`).
+    Mismo motivo que `media_user_email`: esta tenancy usa Identity Domains (IDCS), que rechaza
+    crear un usuario sin email primario aunque sea de servicio y no vaya a iniciar sesión nunca.
+
+    No es un secreto y por eso lleva default versionado. Mismo patrón de plus-addressing sobre
+    un buzón que ya existe, con una dirección propia y distinta de `media_user_email`: son dos
+    usuarios de servicio separados a propósito (tasks.md 5.3 de `smtp-delivery-adapter` — que un
+    Customer Secret Key de medios filtrado no conceda también envío de correo, y viceversa), así
+    que sus emails primarios tampoco coinciden.
+  EOT
+  type        = string
+  default     = "josegascon+autohostai-smtp@gmail.com"
+
+  validation {
+    condition     = can(regex("^[^@[:space:]]+@[^@[:space:]]+$", var.smtp_user_email))
+    error_message = "smtp_user_email debe ser una dirección de correo válida."
+  }
+}
+
 variable "ssh_authorized_keys" {
   description = "Lista de claves públicas SSH autorizadas (una por operador), inyectadas vía cloud-init al usuario por defecto de la imagen (ubuntu). Cada par dedicado a esta VM — distinto de la API key de OCI del provider/backend, nunca reutilizar. Por ahora solo la de Jose; añadir más no requiere recrear."
   type        = list(string)
@@ -151,6 +172,25 @@ variable "env" {
   description = "Nombre del entorno (dev/test/staging/prod). Se interpola en los nombres de los recursos de CD para que el código sea reutilizable por entorno sin tocar nada a mano. Default dev → los nombres coinciden con los existentes (cero drift)."
   type        = string
   default     = "dev"
+}
+
+variable "runner_count" {
+  description = <<-EOT
+    Número de agentes self-hosted registrados en la VM con label = env (change ci-runner-pool-oci).
+    Default 4: cuatro agentes absorben la coincidencia de PRs + push a main sin serializar la cola
+    de GitHub Actions (R1, R6.2; decisión de producto 2026-09-04). Rango 1..4: 1 es el estado de
+    rollback post-ci-runner-oci (R5.2); 4 es el techo operativo por encima del cual la contención
+    con la app empieza a degradar el servicio público (R6.1). Subir N por encima del default
+    exige nota de medición previa documentada en `infra/environments/dev/RUNBOOK.md §6`
+    (R6.3, amend 2026-09-04). Subir N no es auto-escalado (R6.2).
+  EOT
+  type        = number
+  default     = 4
+
+  validation {
+    condition     = var.runner_count >= 1 && var.runner_count <= 4
+    error_message = "runner_count debe estar entre 1 y 4 — 1 es el estado de rollback válido (R5.2) y 4 es el techo operativo antes de que la contención degrade el servicio público (R6.1)."
+  }
 }
 
 variable "github_app_id" {

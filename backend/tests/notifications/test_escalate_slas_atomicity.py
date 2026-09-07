@@ -50,7 +50,12 @@ class ExplodingOnSecondMark(SqlAlchemyNotificationLogRepository):
 async def _seed(db_session):
     from app.tenants.infrastructure.models import TenantConfigModel
 
-    tenant = TenantModel(name="TenantA", billing_email="a@example.com")
+    # The name is uniquified per call because two of the tests below seed TWO tenants to
+    # prove cross-tenant isolation, and `tenants.name` is unique since `platform-admin-api`
+    # (`uq_tenants_name`). The email on the user below was already uniquified this way.
+    tenant = TenantModel(
+        name=f"TenantA-{uuid.uuid4().hex[:8]}", billing_email="a@example.com"
+    )
     db_session.add(tenant)
     await db_session.flush()
     # Pin the channel flags so the resolver returns `{IN_APP}` only — same shape the

@@ -20,13 +20,20 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.auth.domain.enums import UserRole
 from app.cleaning.application.use_cases import CleaningTaskListView, UploadedCleaningPhoto
-from app.cleaning.domain.entities import CleaningChecklistTemplate, CleaningTask
+from app.cleaning.domain.entities import (
+    MAX_CLEANING_TASK_MESSAGE_LENGTH,
+    CleaningChecklistTemplate,
+    CleaningTask,
+    CleaningTaskMessage,
+)
 from app.cleaning.domain.enums import (
     CleaningAssignmentBlocker,
     CleaningTaskStatus,
     CleaningValidationStatus,
 )
+from app.cleaning.domain.repositories import CleaningTaskMessagePage
 from app.cleaning.domain.ports import (
     IncidentReport,
     IncidentReportedAcknowledgement,
@@ -576,4 +583,77 @@ class TaskIncidentReportedResponse(BaseModel):
             id=acknowledgement.id,
             status=acknowledgement.status,
             created_at=acknowledgement.created_at,
+        )
+
+
+# --- cleaning task messages (`staff-messaging`) -----------------------------------
+
+
+class SendCleaningTaskMessageRequest(BaseModel):
+    """`POST /cleaning-tasks/{task_id}/messages` (R1.1, R5.1, R5.2).
+
+    The exact shape of `CompleteIncidentRequest.materials` (design D5): `storable_text` guards
+    against a value asyncpg cannot store, `Field(min_length=1, max_length=...)` rejects an
+    empty or oversized body as a `422` before anything reaches the use case, and
+    `str_strip_whitespace=True` means the maximum counts characters *after* stripping — so a
+    whitespace-only message is refused rather than persisted.
+
+    **The bound is imported, never re-derived**: `MAX_CLEANING_TASK_MESSAGE_LENGTH` lives in
+    `app/cleaning/domain/entities.py`, the module that owns the column — its DDL is next door
+    in that module's `infrastructure/models.py`.
+
+    `MultiLineText` rather than `SingleLineText`: a staff message can span more than one line,
+    the same choice `ReportTaskIncidentRequest.description` makes.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    content: Annotated[
+        MultiLineText, Field(min_length=1, max_length=MAX_CLEANING_TASK_MESSAGE_LENGTH)
+    ]
+
+
+class CleaningTaskMessageResponse(BaseModel):
+    """One message of a task's staff thread. **An allowlist, never a dump of the entity**
+    (the rule this module opens with) — even though `CleaningTaskMessage` has no field this
+    change needs to exclude, `from_domain` is the only way in, the `CleaningPhotoResponse`
+    discipline and not an accident.
+    """
+
+    id: uuid.UUID
+    author_id: uuid.UUID
+    author_role: UserRole
+    content: str
+    created_at: datetime
+
+    @classmethod
+    def from_domain(cls, message: CleaningTaskMessage) -> "CleaningTaskMessageResponse":
+        return cls(
+            id=message.id,
+            author_id=message.author_id,
+            author_role=message.author_role,
+            content=message.content,
+            created_at=message.created_at,
+        )
+
+
+class CleaningTaskMessagePageResponse(BaseModel):
+    """The envelope of PRD §23, the `CleaningTaskPageResponse` pattern."""
+
+    data: list[CleaningTaskMessageResponse]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
+
+    @classmethod
+    def build(
+        cls, page: CleaningTaskMessagePage, *, page_number: int, per_page: int
+    ) -> "CleaningTaskMessagePageResponse":
+        return cls(
+            data=[CleaningTaskMessageResponse.from_domain(item) for item in page.items],
+            total=page.total,
+            page=page_number,
+            per_page=per_page,
+            total_pages=(page.total + per_page - 1) // per_page if per_page else 0,
         )

@@ -1,8 +1,10 @@
 "use client";
 
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 
 import type { IncidentSeverity, PropertyDetail } from "../../data";
 import { formatDate } from "../../lib/format";
@@ -19,11 +21,18 @@ function Section({
   title: string;
   children: React.ReactNode;
 }) {
+  const headingId = useId();
   return (
-    <section className="flex flex-col gap-2 rounded-lg border bg-surface p-4">
-      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-      <div className="text-sm text-muted-foreground">{children}</div>
-    </section>
+    <Card
+      role="region"
+      aria-labelledby={headingId}
+      className="flex flex-col gap-2 p-4"
+    >
+      <h2 id={headingId} className="text-body-base text-muted-foreground">
+        {title}
+      </h2>
+      <div className="text-body-base text-muted-foreground">{children}</div>
+    </Card>
   );
 }
 
@@ -31,7 +40,9 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
       <span>{label}</span>
-      <span className="text-right font-medium text-foreground">{value}</span>
+      <span className="text-right font-mono text-data-mono text-foreground">
+        {value}
+      </span>
     </div>
   );
 }

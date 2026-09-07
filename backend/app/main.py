@@ -2,6 +2,7 @@ import tomllib
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 # Imported for its side effect: every domain's models must be registered before the
 # first request, or the global tenant filter (design D16) silently covers fewer
@@ -12,13 +13,21 @@ from app.access.api.router import router as access_router
 from app.auth.api.errors import register_auth_error_handlers
 from app.auth.api.router import router as auth_router
 from app.auth.api.users_router import router as users_router
+from app.platform.api.errors import register_platform_error_handlers
+from app.platform.api.router import router as platform_router
 from app.cleaning.api.errors import register_cleaning_error_handlers
 from app.maintenance.api.approvals_router import router as owner_approvals_router
 from app.maintenance.api.errors import register_maintenance_error_handlers
 from app.maintenance.api.incidents_router import router as incidents_router
+from app.maintenance.api.messages_router import router as incident_messages_router
 from app.messaging.api.errors import register_messaging_error_handlers
 from app.notifications.api.errors import register_notification_error_handlers
 from app.messaging.api.router import router as conversations_router
+from app.messaging.api.router import (
+    whatsapp_provisioning_router as messaging_whatsapp_provisioning_router,
+)
+from app.messaging.api.whatsapp_webhook_router import router as whatsapp_webhook_router
+from app.cleaning.api.messages_router import router as cleaning_task_messages_router
 from app.cleaning.api.photos_router import router as cleaning_photos_router
 from app.maintenance.api.photos_router import router as incident_photos_router
 from app.cleaning.api.tasks_router import router as cleaning_tasks_router
@@ -100,6 +109,7 @@ def create_app() -> FastAPI:
     register_statements_error_handlers(app)
     register_notification_error_handlers(app)
     register_reviews_error_handlers(app)
+    register_platform_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -129,6 +139,10 @@ def create_app() -> FastAPI:
     # its own than buried among the task routes (proposal R1, `ASSUMPTION`).
     app.include_router(cleaning_templates_router, prefix=API_V1_PREFIX)
     app.include_router(cleaning_tasks_router, prefix=API_V1_PREFIX)
+    # `staff-messaging`: the cleaning task's staff-to-manager thread, its own router the
+    # `cleaning_photos_router` precedent (a sub-resource of the task, split out rather than
+    # grown onto `cleaning_tasks_router`'s twelve routes).
+    app.include_router(cleaning_task_messages_router, prefix=API_V1_PREFIX)
     # `cleaning-photos-storage`: the **first of the two anonymous routes that serve tenant
     # data** (design D7); `incident-photos` mounted the second below, and its D5 moved the
     # machinery both share into `app/integrations/`. Its own router because sharing
@@ -145,6 +159,10 @@ def create_app() -> FastAPI:
     # its R4.6; nothing here opens one, and the one surface that creates an incident
     # anonymously is the guest portal's, mounted further down.
     app.include_router(incidents_router, prefix=API_V1_PREFIX)
+    # `staff-messaging`: the incident's staff-to-manager thread, its own router the
+    # `incident_photos_router`/`cleaning_task_messages_router` precedent (a sub-resource of
+    # the incident, split out rather than grown onto `incidents_router`'s existing routes).
+    app.include_router(incident_messages_router, prefix=API_V1_PREFIX)
     # Its own router and NOT part of `incidents_router` (R4.6): that one's every path carries
     # a `require(...)`, and this is the module's only anonymous door. The second route in the
     # application that serves object bytes against an HMAC signature, after
@@ -157,6 +175,20 @@ def create_app() -> FastAPI:
     # fixed. Registered after `maintenance` because a guest message can open an incident, and
     # reading the two in this order is how that dependency reads in the code.
     app.include_router(conversations_router, prefix=API_V1_PREFIX)
+    # `whatsapp-cloud-adapter` section 6: a second router of `messaging`, under `/messaging`
+    # rather than `/conversations` — provisioning a tenant's WhatsApp `phone_number_id` is
+    # tenant configuration, not a conversation endpoint, the same split `integrations` makes
+    # between `/pms/import-csv` and `/webhook-endpoints`.
+    app.include_router(messaging_whatsapp_provisioning_router, prefix=API_V1_PREFIX)
+    # `whatsapp-cloud-adapter` section 7: a THIRD router of `messaging`, and the only
+    # anonymous one — a sibling of `webhooks_router` above, under the same `/webhooks/`
+    # prefix and separate from the two routers just registered for the same reason that one
+    # is separate from `integrations_router`: those declare `AUTHENTICATED_RESPONSES` and a
+    # permission per route, and these two do not authenticate a person at all. Meta's
+    # `X-Hub-Signature-256` over the raw body is the credential (design D3a), and one fixed
+    # path serves the whole platform because Meta admits a single webhook subscription per
+    # App (R3.1 as amended, design D3).
+    app.include_router(whatsapp_webhook_router, prefix=API_V1_PREFIX)
     # `access-notifications`: the read side of the in-app channel. Without it the dispatcher
     # would mark `IN_APP` rows `SENT` with nothing able to show them to their recipient
     # (design D5/D6).
@@ -210,6 +242,12 @@ def create_app() -> FastAPI:
     # in the code.
     app.include_router(reviews_router, prefix=API_V1_PREFIX)
     app.include_router(reviews_summary_router, prefix=API_V1_PREFIX)
+    # `platform-admin-api` (R6.1, D5): the cross-tenant surface, mounted LAST so a load
+    # failure here does not break the routers that already registered. The order of the
+    # error-handler registrations above follows the same rule: auth first, then platform,
+    # so a `TenantAlreadyExistsError` raised inside the platform router reaches the
+    # platform-specific handler rather than any generic 500.
+    app.include_router(platform_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late.
@@ -320,6 +358,36 @@ def create_app() -> FastAPI:
     # route or handler. Reordering these two calls is not a style question; the test that fails
     # when somebody does is `tests/test_response_headers.py`.
     app.add_middleware(NoSniffMiddleware)
+
+    # `auth-session-persistence` R7, design D1. Mounted AFTER `MaxBodySizeMiddleware` and
+    # `NoSniffMiddleware` above, and that position is the mechanism, same rule as the
+    # `NoSniffMiddleware` comment above spells out: `add_middleware` inserts at position 0
+    # and `build_middleware_stack` wraps the list in reverse, so the LAST call added ends up
+    # OUTERMOST. **Corrected 2026-09-04** (the run panel's `sdd-architect` found the original
+    # placement — CORS mounted first, hence innermost of the three — left
+    # `MaxBodySizeMiddleware._refuse()`'s self-generated `413` without any
+    # `Access-Control-Allow-*` headers, because `_refuse` answers via the raw ASGI `send`
+    # without ever calling `self._app(...)`, so an inner CORSMiddleware never got a chance to
+    # see that response and decorate it. Mounting CORS last here makes it the OUTERMOST of
+    # the three, so it wraps every response the two below (and everything they wrap in turn:
+    # the router and the exception handling `app.include_router` above registered) can
+    # produce, self-generated error responses included — which is the "whole app" design D1
+    # actually asks CORS to wrap.
+    #
+    # `allow_origins=[]` + `allow_origin_regex` is the only shape that coexists with
+    # `allow_credentials=True`: a static `allow_origins` list forces `*` semantics once
+    # credentials are on, which browsers reject, and R7.1 demands an explicit
+    # `Access-Control-Allow-Origin` that is never `*`. Reflecting an allowlisted origin
+    # (regex match on `Origin` if present, else no CORS headers) meets that without
+    # enumerating every dev worktree's `PORT_OFFSET`-shifted port.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[],
+        allow_origin_regex=settings.backend_cors_allowed_origin_regex,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # Deliberately NOT under API_V1_PREFIX (design D2): the container healthcheck
     # in docker-compose.yml and docker-compose.deploy.yml probes /health, and the

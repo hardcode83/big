@@ -96,6 +96,8 @@ y el técnico repite el cierre. Cerrarla por él haría que `resolved_at` dejara
 | Aceptar, empezar, esperar piezas, reanudar, resolver | — | ✔ | ✔ sólo las suyas | — |
 | Ver las fotos de una incidencia | ✔ | ✔ | ✔ sólo las suyas | — |
 | Subir fotos a una incidencia (antes / después) | — | ✔ | ✔ sólo las suyas | — |
+| Leer el hilo de mensajes de una incidencia | ✔ | ✔ | ✔ sólo las suyas | — |
+| Escribir en el hilo de mensajes de una incidencia | — | ✔ | ✔ sólo las suyas | — |
 | Responder una aprobación | ✔ | — | — | — |
 | Abrir una incidencia desde su propia limpieza | — | — | — | ✔ |
 
@@ -107,7 +109,8 @@ Tres cosas que no se ven en la tabla y conviene saber:
 - **El manager también puede conducir el ciclo del técnico**, para desatascar. Es la única
   diferencia con limpieza, donde ejecutar es sólo de la limpiadora.
 - **La limpiadora abre incidencias y no lee ninguna**, y esa fila de la tabla es toda su
-  relación con este módulo. Las quince rutas de `/api/v1/incidents` le siguen respondiendo `403`;
+  relación con este módulo. Las diecisiete rutas de `/api/v1/incidents` le siguen respondiendo
+  `403`;
   lo que puede hacer vive en otro sitio y se describe abajo. **Con una señal indirecta que
   conviene no negar**: al cerrar su limpieza puede recibir un `409` que le dice que en esa
   vivienda hay una incidencia `CRITICAL` sin resolver. Es un bit —existe o no—, sin id, sin
@@ -194,6 +197,37 @@ Dos avisos para quien opera:
 Cada subida deja su fila en `audit_logs` con actor e IP, contra la **propia foto** y no contra la
 incidencia — y **sin** la clave de almacenamiento. No genera evento de timeline: el vocabulario de
 PRD §10 no tiene un tipo para una foto de incidencia, y la subida de limpieza tampoco escribe uno.
+
+## El hilo de mensajes de la incidencia
+
+`POST` y `GET /api/v1/incidents/{incident_id}/messages`. Canal de respuesta entre el técnico y el
+manager, acotado a la incidencia — no es el chat del huésped (`Conversation`), y no lo toca. El
+*qué hace*, con sus criterios EARS, está en
+[`sdd/specs/staff-messaging.md`](../sdd/specs/staff-messaging.md) (compartido con el hilo gemelo
+de `cleaning`).
+
+```bash
+curl -X POST .../api/v1/incidents/<incident_id>/messages \
+  -H 'Authorization: Bearer <token del técnico asignado, o del manager>' \
+  -d '{"content": "Necesito la referencia de la pieza antes de pedirla."}'
+
+curl .../api/v1/incidents/<incident_id>/messages \
+  -H 'Authorization: Bearer <token>'
+```
+
+- El técnico solo escribe y lee el hilo de **su propia** incidencia asignada; el manager (y la
+  propietaria, en lectura), el de cualquier incidencia del tenant. Una incidencia ajena o
+  inexistente responde el mismo `404` — nunca `403`.
+- No hace falta ningún permiso nuevo: las dos rutas usan `EXECUTE_INCIDENTS` para escribir y
+  `READ_INCIDENTS` para leer — los mismos que ya gatean el resto del ciclo del técnico.
+- Cada mensaje nuevo avisa al otro lado por la campana de notificaciones (in-app): si escribe el
+  técnico, avisa a todos los managers activos del tenant; si escribe el manager, avisa al técnico
+  asignado. El aviso lleva solo identificadores, nunca el texto del mensaje.
+- Se puede escribir y leer aunque la incidencia ya esté resuelta o cancelada — a diferencia de la
+  subida de fotos, el hilo no exige un estado concreto.
+- El listado es paginado y cronológico (el más antiguo primero), con el mismo envelope del resto
+  del API.
+- No genera entrada de timeline ni de auditoría.
 
 ## El job de clasificación
 

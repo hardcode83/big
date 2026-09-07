@@ -3,13 +3,15 @@
 Every method takes `tenant_id` explicitly and speaks in domain entities, never ORM models —
 the same contract every other port in this codebase follows.
 
-There is no `list` and no `add`: creating and listing tenants is out of scope (the MVP has one
-tenant, created by the bootstrap) and PRD §23 defines neither. A speculative method here would
-be surface nobody has reasoned about.
+`list_page` (`super-admin-console` R2) is the first method with no `tenant_id` at all: it is
+reached only through `SUPER_ADMIN`/`MANAGE_PLATFORM` (`app.platform.api.dependencies`), the
+one caller for whom "every tenant" is the correct scope rather than a leak. `add` was the
+prior deliberate exception, added by `platform-admin-api` (R1.2) for the API that introduced
+it.
 """
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Protocol
 
@@ -36,6 +38,48 @@ class TenantRepository(Protocol):
         Partial by the same reasoning as `UserRepository.apply_changes` (design D21): a write
         that names only what changed cannot revert a concurrent change to a column it does not
         name. `status` and `id` are never writable through here.
+        """
+
+    async def add(self, tenant: Tenant, config: TenantConfig) -> None:
+        """Persist a brand-new tenant and its default configuration in one call (R1.2).
+
+        The repository is the one place that knows the two rows are inseparable: a `tenants`
+        row without a `tenant_configs` row is the broken half-state `bootstrap.py` documents
+        and that the cross-checks of `auth-tenancy` reject (R5.7). One call, one flush, one
+        place to translate the unique-constraint violation that the migration
+        `936fef5a01b1_tenants_name_unique.py` introduces (R-2).
+
+        `tenant.id` and `config.id` are taken as-is — the entity is the source of truth for
+        the pair, and the use case that builds them is the one that also writes the audit
+        row pointing at the same ids. No method commits: the use case is the transactional
+        boundary, exactly as `apply_changes` above.
+        """
+        ...
+
+    async def list_page(
+        self, page: int, per_page: int
+    ) -> tuple[Sequence[tuple[Tenant, TenantConfig]], int]:
+        """Every tenant, one page, each paired with its configuration (R2.1, R2.2, R2.3).
+
+        Ordered `created_at DESC`, no filter and no `tenant_id` argument: `SUPER_ADMIN` has
+        no tenant of its own, so there is nothing to scope by — every tenant is
+        platform-visible to the one caller allowed to reach this method.
+
+        Paired with its `TenantConfig` in the same query rather than returning a bare
+        `Tenant`: a `tenants` row without a `tenant_configs` row cannot exist (`add` always
+        writes both in the same transaction), so the join costs nothing and the caller does
+        not need a `get_or_create` per row just to build the response the platform API
+        returns (`TenantResponse` nests the configuration). The pair is a plain `tuple` and
+        not the application layer's `TenantSettings` — a domain port must not import
+        `app.tenants.application.use_cases` (`tests/test_layering.py`); the use case that
+        calls this method is what wraps each pair into one.
+
+        Returns `(rows, total)`, the same shape `ConversationRepository.list` returns.
+
+        The adapter guards this query with `require_unmarked_session` (`app/core/db.py`):
+        `TenantConfig`'s table carries a `tenant_id` column, so a marked session would
+        silently narrow the join to one tenant instead of raising — the same silent-wrong-
+        answer shape the guard exists to convert into a loud failure.
         """
         ...
 

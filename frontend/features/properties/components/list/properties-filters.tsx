@@ -71,7 +71,7 @@ export function PropertiesFilters({
   }
 
   return (
-    <div className="flex flex-wrap items-end gap-3">
+    <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface/60 p-3 backdrop-blur-md">
       <div>
         <label
           className="mb-1 block text-xs font-medium text-muted-foreground"

@@ -1,28 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  advanceSessionGeneration,
   clearSessionTokens,
   getSessionTokens,
+  getTokenGeneration,
   setSessionTokens,
 } from "@/lib/auth/session-store";
 
 describe("session store", () => {
   afterEach(() => clearSessionTokens());
 
-  it("stores and returns a defensive copy of the JWT pair in memory", () => {
-    const tokens = { accessToken: "access", refreshToken: "refresh" };
+  it("stores and returns a defensive copy of the access token in memory", () => {
+    const tokens = { accessToken: "access" };
 
     setSessionTokens(tokens);
     tokens.accessToken = "mutated";
 
-    expect(getSessionTokens()).toEqual({
-      accessToken: "access",
-      refreshToken: "refresh",
-    });
+    expect(getSessionTokens()).toEqual({ accessToken: "access" });
   });
 
   it("clears the pair idempotently", () => {
-    setSessionTokens({ accessToken: "access", refreshToken: "refresh" });
+    setSessionTokens({ accessToken: "access" });
 
     clearSessionTokens();
     clearSessionTokens();
@@ -42,8 +41,8 @@ describe("session store", () => {
     });
     const cookieWrite = vi.spyOn(Document.prototype, "cookie", "set");
 
-    setSessionTokens({ accessToken: "access", refreshToken: "refresh" });
-    expect(getSessionTokens()).toEqual({ accessToken: "access", refreshToken: "refresh" });
+    setSessionTokens({ accessToken: "access" });
+    expect(getSessionTokens()).toEqual({ accessToken: "access" });
     clearSessionTokens();
 
     expect(localStorageWrite).not.toHaveBeenCalled();
@@ -62,5 +61,18 @@ describe("session store", () => {
     } else {
       Reflect.deleteProperty(window, "indexedDB");
     }
+  });
+
+  it("moves tokenGeneration on a token write or clear, but not on a bare cache purge", () => {
+    const initial = getTokenGeneration();
+
+    setSessionTokens({ accessToken: "access" });
+    expect(getTokenGeneration()).toBe(initial + 1);
+
+    advanceSessionGeneration(); // simulates purgeSessionCache()'s own bump — identity-unrelated
+    expect(getTokenGeneration()).toBe(initial + 1);
+
+    clearSessionTokens();
+    expect(getTokenGeneration()).toBe(initial + 2);
   });
 });

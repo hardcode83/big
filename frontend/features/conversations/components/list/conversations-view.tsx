@@ -38,18 +38,19 @@ export function ConversationsView() {
     return <LoadingState label={t("states:loading.label", { ns: "states" })} />;
   }
   if (state.kind === "forbidden") {
-    return <p>{t("conversations:fields.forbidden")}</p>;
+    return <p className="p-4 text-body-base text-muted-foreground">{t("conversations:fields.forbidden")}</p>;
   }
   if (state.kind === "validation") {
-    return <p>{t("conversations:fields.validation")}</p>;
+    return <p className="p-4 text-body-base text-muted-foreground">{t("conversations:fields.validation")}</p>;
   }
   if (state.kind === "not-found" || state.kind === "error") {
     return (
-      <div role="alert">
-        <p>{t("states:error.title", { ns: "states" })}</p>
-        <p>{t("states:error.description", { ns: "states" })}</p>
+      <div role="alert" className="flex flex-col gap-2 p-4">
+        <p className="text-body-lg font-semibold text-foreground">{t("states:error.title", { ns: "states" })}</p>
+        <p className="text-body-base text-muted-foreground">{t("states:error.description", { ns: "states" })}</p>
         <button
           type="button"
+          className="tap-target self-start rounded-md border bg-background px-3 py-1 text-body-base transition-colors hover:bg-accent hover:text-accent-foreground"
           onClick={() => {
             void query.refetch();
           }}
@@ -73,55 +74,73 @@ export function ConversationsView() {
   };
 
   return (
-    <section aria-labelledby="conversations-heading">
-      <h1 id="conversations-heading">
+    <section aria-labelledby="conversations-heading" className="flex flex-col gap-4 p-4">
+      <h1 id="conversations-heading" className="text-xl font-semibold text-foreground">
         {t("navigation:routes.conversations.title", { ns: "navigation" })}
       </h1>
       <ConversationsFilters value={filters} onChange={setFilters} />
       {state.data.items.length === 0 ? (
         <>
-          <p>{t("states:empty.title", { ns: "states" })}</p>
-          <p>{t("states:empty.description", { ns: "states" })}</p>
+          <p className="text-body-lg font-semibold text-foreground">{t("states:empty.title", { ns: "states" })}</p>
+          <p className="text-body-base text-muted-foreground">{t("states:empty.description", { ns: "states" })}</p>
         </>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">{t("conversations:fields.channel")}</th>
-              <th scope="col">{t("conversations:fields.status")}</th>
-              <th scope="col">{t("conversations:fields.escalationStatus")}</th>
-              <th scope="col">{t("conversations:fields.lastMessageAt")}</th>
-              <th scope="col">{t("conversations:fields.createdAt")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {state.data.items.map((row) => (
-              <tr key={row.id}>
-                <td>
-                  <Link href={`/conversations/${row.id}`}>
-                    {t(`conversations:channel.${row.channel}`)}
-                  </Link>
-                </td>
-                <td>{t(`conversations:status.${row.status}`)}</td>
-                <td>
-                  <span
-                    className={TONE_BADGE_CLASS[escalationTone(row.escalationStatus)]}
-                  >
-                    {t(
-                      `conversations:escalationStatus.${row.escalationStatus}`,
-                    )}
-                  </span>
-                </td>
-                <td>{formatDateTime(row.lastMessageAt)}</td>
-                <td>{formatDateTime(row.createdAt)}</td>
+        <div className="bg-surface border border-border rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-left">
+            <thead>
+              <tr className="border-b border-border">
+                <th scope="col" className="whitespace-nowrap px-4 py-3 text-body-medium text-muted-foreground">
+                  {t("conversations:fields.channel")}
+                </th>
+                <th scope="col" className="whitespace-nowrap px-4 py-3 text-body-medium text-muted-foreground">
+                  {t("conversations:fields.status")}
+                </th>
+                <th scope="col" className="whitespace-nowrap px-4 py-3 text-body-medium text-muted-foreground">
+                  {t("conversations:fields.escalationStatus")}
+                </th>
+                <th scope="col" className="whitespace-nowrap px-4 py-3 text-body-medium text-muted-foreground">
+                  {t("conversations:fields.lastMessageAt")}
+                </th>
+                <th scope="col" className="whitespace-nowrap px-4 py-3 text-body-medium text-muted-foreground">
+                  {t("conversations:fields.createdAt")}
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="font-mono text-data-mono">
+              {state.data.items.map((row) => (
+                <tr key={row.id} className="border-b border-border last:border-b-0 hover:bg-accent/50 transition-colors">
+                  <td className="px-4 py-3 font-sans text-body-base">
+                    <Link
+                      href={`/conversations/${row.id}`}
+                      className="text-primary underline-offset-4 hover:underline"
+                    >
+                      {t(`conversations:channel.${row.channel}`)}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-3 font-sans text-body-base">{t(`conversations:status.${row.status}`)}</td>
+                  <td className="px-4 py-3 font-sans text-body-base">
+                    <span
+                      className={TONE_BADGE_CLASS[escalationTone(row.escalationStatus)]}
+                    >
+                      {t(
+                        `conversations:escalationStatus.${row.escalationStatus}`,
+                      )}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">{formatDateTime(row.lastMessageAt)}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">{formatDateTime(row.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+        </div>
       )}
-      <nav aria-label={t("conversations:fields.status")}>
+      <nav aria-label={t("conversations:fields.status")} className="flex items-center gap-2">
         <button
           type="button"
+          className="tap-target rounded-md border bg-background px-3 py-1 text-body-base transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
           onClick={onPrev}
           disabled={isFirstPage}
           aria-label={t("conversations:fields.prevPage")}
@@ -130,6 +149,7 @@ export function ConversationsView() {
         </button>
         <button
           type="button"
+          className="tap-target rounded-md border bg-background px-3 py-1 text-body-base transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
           onClick={onNext}
           disabled={isLastPage}
           aria-label={t("conversations:fields.nextPage")}

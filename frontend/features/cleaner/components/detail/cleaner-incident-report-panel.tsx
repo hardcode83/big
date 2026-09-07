@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 import { useCleanerTaskCycleAction } from "../../hooks/use-cleaner-cycle";
 import { mapCleanerError } from "../../lib/error-mapping";
@@ -21,6 +22,38 @@ const INCIDENT_REPORTABLE_STATUSES = new Set<ReportableStatus>([
   "ACCEPTED",
   "IN_PROGRESS",
 ]);
+
+/**
+ * The "uppercase label + monospace value" `<dl>` pair (design D9), copied
+ * verbatim from `incident-detail-sections.tsx`'s `DetailField` rather than
+ * re-derived.
+ */
+function DetailField({
+  label,
+  children,
+  mono = true,
+}: {
+  label: string;
+  children: ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-label-caps uppercase text-muted-foreground">
+        {label}
+      </dt>
+      <dd
+        className={
+          mono
+            ? "font-mono text-data-mono text-foreground"
+            : "text-body-medium text-foreground"
+        }
+      >
+        {children}
+      </dd>
+    </div>
+  );
+}
 
 /**
  * The inline two-field incident report panel (R6.1, R6.2, R6.3, R6.5, D11).
@@ -123,41 +156,29 @@ export function CleanerIncidentReportPanel({
 
   if (ack) {
     return (
-      <section
-        aria-labelledby="cleaner-incident-ack-heading"
-        className="flex flex-col gap-3 rounded-lg border bg-surface p-4"
-      >
-        <h2
-          id="cleaner-incident-ack-heading"
-          className="text-sm font-semibold text-foreground"
-        >
-          {t("incidentReport.ack.title")}
-        </h2>
-        <dl className="grid grid-cols-1 gap-2 text-sm">
-          <div className="flex flex-col gap-0.5">
-            <dt className="text-xs text-muted-foreground">
-              {t("incidentReport.ack.id")}
-            </dt>
-            <dd className="font-mono text-xs">{ack.id}</dd>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <dt className="text-xs text-muted-foreground">
-              {t("incidentReport.ack.status")}
-            </dt>
-            <dd>{ack.status}</dd>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <dt className="text-xs text-muted-foreground">
-              {t("incidentReport.ack.createdAt")}
-            </dt>
-            <dd>
+      <section aria-labelledby="cleaner-incident-ack-heading">
+        <Card className="flex flex-col gap-3 p-4">
+          <h2
+            id="cleaner-incident-ack-heading"
+            className="text-body-lg font-semibold text-foreground"
+          >
+            {t("incidentReport.ack.title")}
+          </h2>
+          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <DetailField label={t("incidentReport.ack.id")}>
+              {ack.id}
+            </DetailField>
+            <DetailField label={t("incidentReport.ack.status")} mono={false}>
+              {ack.status}
+            </DetailField>
+            <DetailField label={t("incidentReport.ack.createdAt")}>
               {new Intl.DateTimeFormat(locale, {
                 dateStyle: "medium",
                 timeStyle: "short",
               }).format(new Date(ack.createdAt))}
-            </dd>
-          </div>
-        </dl>
+            </DetailField>
+          </dl>
+        </Card>
       </section>
     );
   }
@@ -167,6 +188,7 @@ export function CleanerIncidentReportPanel({
       <Button
         type="button"
         variant="outline"
+        className="tap-target"
         onClick={() => setOpen(true)}
         data-testid="cleaner-incident-report-trigger"
       >
@@ -176,78 +198,81 @@ export function CleanerIncidentReportPanel({
   }
 
   return (
-    <form
-      onSubmit={onSubmit}
-      aria-labelledby="cleaner-incident-report-heading"
-      className="flex flex-col gap-3 rounded-lg border bg-surface p-4"
-    >
-      <h2
-        id="cleaner-incident-report-heading"
-        className="text-sm font-semibold text-foreground"
+    <Card className="p-4">
+      <form
+        onSubmit={onSubmit}
+        aria-labelledby="cleaner-incident-report-heading"
+        className="flex flex-col gap-3"
       >
-        {t("incidentReport.title")}
-      </h2>
-      <div className="flex flex-col gap-1">
-        <label
-          htmlFor="cleaner-incident-title"
-          className="text-xs font-medium text-muted-foreground"
+        <h2
+          id="cleaner-incident-report-heading"
+          className="text-body-lg font-semibold text-foreground"
         >
-          {t("incidentReport.titleField")}
-        </label>
-        <input
-          id="cleaner-incident-title"
-          type="text"
-          maxLength={MAX_TITLE}
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          className="rounded-md border bg-background px-2 py-1 text-sm"
-        />
-        {titleError ? (
+          {t("incidentReport.title")}
+        </h2>
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor="cleaner-incident-title"
+            className="mb-1 block text-xs font-medium text-muted-foreground"
+          >
+            {t("incidentReport.titleField")}
+          </label>
+          <input
+            id="cleaner-incident-title"
+            type="text"
+            maxLength={MAX_TITLE}
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            className="rounded-md border bg-background px-2 py-1 text-sm"
+          />
+          {titleError ? (
+            <span role="alert" className="text-xs text-destructive">
+              {t(titleError)}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor="cleaner-incident-description"
+            className="mb-1 block text-xs font-medium text-muted-foreground"
+          >
+            {t("incidentReport.descriptionField")}
+          </label>
+          <textarea
+            id="cleaner-incident-description"
+            rows={4}
+            maxLength={MAX_DESCRIPTION}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            className="rounded-md border bg-background px-2 py-1 text-sm"
+          />
+          {descriptionError ? (
+            <span role="alert" className="text-xs text-destructive">
+              {t(descriptionError)}
+            </span>
+          ) : null}
+        </div>
+        {submitError ? (
           <span role="alert" className="text-xs text-destructive">
-            {t(titleError)}
+            {t(submitError)}
           </span>
         ) : null}
-      </div>
-      <div className="flex flex-col gap-1">
-        <label
-          htmlFor="cleaner-incident-description"
-          className="text-xs font-medium text-muted-foreground"
-        >
-          {t("incidentReport.descriptionField")}
-        </label>
-        <textarea
-          id="cleaner-incident-description"
-          rows={4}
-          maxLength={MAX_DESCRIPTION}
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          className="rounded-md border bg-background px-2 py-1 text-sm"
-        />
-        {descriptionError ? (
-          <span role="alert" className="text-xs text-destructive">
-            {t(descriptionError)}
-          </span>
-        ) : null}
-      </div>
-      {submitError ? (
-        <span role="alert" className="text-xs text-destructive">
-          {t(submitError)}
-        </span>
-      ) : null}
-      <div className="flex items-center justify-end gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => setOpen(false)}
-        >
-          {t("actions.reject")}
-        </Button>
-        <Button type="submit" disabled={mutation.isPending}>
-          {mutation.isPending
-            ? t("incidentReport.submitting")
-            : t("incidentReport.submit")}
-        </Button>
-      </div>
-    </form>
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            className="tap-target"
+            onClick={() => setOpen(false)}
+          >
+            {t("actions.reject")}
+          </Button>
+          <Button type="submit" className="tap-target" disabled={mutation.isPending}>
+            {mutation.isPending
+              ? t("incidentReport.submitting")
+              : t("incidentReport.submit")}
+          </Button>
+        </div>
+      </form>
+    </Card>
   );
 }

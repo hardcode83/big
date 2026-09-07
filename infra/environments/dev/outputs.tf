@@ -75,3 +75,28 @@ output "cloudflare_tunnel_token_secret_name" {
   description = "Nombre del secreto del Vault que guarda el token del túnel. El job de deploy lo resuelve POR NOMBRE (get-secret-bundle-by-name), no por OCID, porque cloud-init no puede reescribir /etc/autohostai-deploy.env en la VM viva (design D3). Se expone como output para que el workflow y el RUNBOOK citen una única fuente de verdad."
   value       = oci_vault_secret.cloudflare_tunnel_token.secret_name
 }
+
+# --- OCIDs para el "arranque en frío" a mano (RUNBOOK §6.2/§6.3) ---
+# /etc/autohostai-deploy.env se rellena con estos cuatro cuando el cloud-init de la VM viva quedó
+# congelado por `ignore_changes = [metadata]` y no lo escribió (recreación de la instancia, o la
+# primera vez). Son OCIDs, no valores — igual de seguros que los `*_secret_name` de arriba, y
+# evita ir a copiarlos a mano de la consola del Vault cada vez.
+output "postgres_password_secret_ocid" {
+  description = "OCID del secreto del Vault con POSTGRES_PASSWORD. Para PG_PASSWORD_SECRET_OCID en /etc/autohostai-deploy.env (RUNBOOK §6.2)."
+  value       = oci_vault_secret.postgres_password.id
+}
+
+output "jwt_secret_key_secret_ocid" {
+  description = "OCID del secreto del Vault con JWT_SECRET_KEY. Para JWT_SECRET_OCID en /etc/autohostai-deploy.env (RUNBOOK §6.2)."
+  value       = oci_vault_secret.jwt_secret_key.id
+}
+
+output "encryption_key_secret_ocid" {
+  description = "OCID del secreto del Vault con ENCRYPTION_KEY. Para ENCRYPTION_KEY_SECRET_OCID en /etc/autohostai-deploy.env (RUNBOOK §6.2)."
+  value       = oci_vault_secret.encryption_key.id
+}
+
+output "github_app_key_secret_ocid" {
+  description = "OCID del secreto del Vault con la clave privada de la GitHub App. Para APP_KEY_SECRET_OCID en /etc/autohostai-deploy.env (RUNBOOK §6.2)."
+  value       = oci_vault_secret.github_app_key.id
+}

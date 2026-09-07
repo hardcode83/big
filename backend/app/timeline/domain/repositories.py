@@ -124,6 +124,29 @@ class TimelineEventReader(Protocol):
         """
         ...
 
+    async def list_for_tenant(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        filters: TimelineFilters,
+        page: int,
+        per_page: int,
+    ) -> Page:
+        """One page of a tenant's events across **all** its properties, newest first
+        (`dashboard-activity-feed` R1.1, R1.4).
+
+        Same order as `list_for_property`: `created_at DESC` with `id DESC` as the
+        tiebreaker, for the same reason — several events of one business operation share
+        the instant the use case decided on, and without the second key paging through a
+        burst repeats rows and skips others.
+
+        `total` counts the same filtered set as `items`, never the tenant's whole history.
+
+        There is no `property_id` parameter — that is the entire difference from
+        `list_for_property` (R1.4).
+        """
+        ...
+
     async def last_for_properties(
         self, tenant_id: uuid.UUID, property_ids: Sequence[uuid.UUID]
     ) -> dict[uuid.UUID, TimelineEvent]:

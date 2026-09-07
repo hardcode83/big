@@ -3,6 +3,8 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
+import { Card } from "@/components/ui/card";
+
 import type { CleaningTask, CleaningTaskContext } from "../../data";
 import { formatDateTime } from "../../lib/format";
 
@@ -25,21 +27,35 @@ export interface CleanerTaskContextBlockProps {
   context: CleaningTaskContext;
 }
 
-function Field({
+/**
+ * The "uppercase label + monospace value" `<dl>` pair (design D9), copied
+ * verbatim from `incident-detail-sections.tsx`'s `DetailField` rather than
+ * re-derived — the exact shape section 6 established for any `<dl>`-shaped
+ * data pattern in this change.
+ */
+function DetailField({
   label,
   children,
-  className,
+  mono = true,
 }: {
   label: string;
   children: ReactNode;
-  className?: string;
+  mono?: boolean;
 }) {
   return (
-    <div className={`flex min-w-0 flex-col gap-0.5 ${className ?? ""}`}>
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="min-w-0 break-words text-sm font-medium text-foreground">
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <dt className="text-label-caps uppercase text-muted-foreground">
+        {label}
+      </dt>
+      <dd
+        className={
+          mono
+            ? "min-w-0 break-words font-mono text-data-mono text-foreground"
+            : "min-w-0 break-words text-body-medium text-foreground"
+        }
+      >
         {children}
-      </span>
+      </dd>
     </div>
   );
 }
@@ -65,39 +81,40 @@ export function CleanerTaskContextBlock({
   const address = addressParts.length === 0 ? empty : addressParts.join(", ");
 
   return (
-    <section
-      aria-labelledby="cleaner-context-heading"
-      className="flex flex-col gap-3 rounded-lg border bg-surface p-4"
-    >
-      <h2
-        id="cleaner-context-heading"
-        className="text-sm font-semibold text-foreground"
-      >
-        {t("context.title")}
-      </h2>
+    <section aria-labelledby="cleaner-context-heading">
+      <Card className="flex flex-col gap-3 p-4">
+        <h2
+          id="cleaner-context-heading"
+          className="text-body-lg font-semibold text-foreground"
+        >
+          {t("context.title")}
+        </h2>
 
-      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label={t("context.propertyName")}>
-          {context.propertyInternalCode} · {context.propertyName}
-        </Field>
-        <Field label={t("context.propertyInternalCode")}>
-          {context.propertyInternalCode}
-        </Field>
-        <Field label={t("context.address")} className="sm:col-span-2">
-          {address}
-        </Field>
-        <Field label={t("context.timezone")}>{context.timezone}</Field>
-        <Field label={t("context.checkoutAt")}>
-          {formatDateTime(context.checkoutAt, locale)}
-        </Field>
-        <Field label={t("context.nextCheckinDeadline")}>
-          {formatDateTime(context.nextCheckinDeadline, locale)}
-        </Field>
-      </div>
-      {/* Reserved for an upcoming task id display; the cleaner cannot see the
-          reservation id (no READ_RESERVATIONS), and the task id lives on the
-          page heading the orchestrator paints, not here. */}
-      <span className="sr-only">{task.id}</span>
+        <dl className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+          <DetailField label={t("context.propertyName")}>
+            {context.propertyInternalCode} · {context.propertyName}
+          </DetailField>
+          <DetailField label={t("context.propertyInternalCode")}>
+            {context.propertyInternalCode}
+          </DetailField>
+          <div className="sm:col-span-2">
+            <DetailField label={t("context.address")}>{address}</DetailField>
+          </div>
+          <DetailField label={t("context.timezone")}>
+            {context.timezone}
+          </DetailField>
+          <DetailField label={t("context.checkoutAt")}>
+            {formatDateTime(context.checkoutAt, locale)}
+          </DetailField>
+          <DetailField label={t("context.nextCheckinDeadline")}>
+            {formatDateTime(context.nextCheckinDeadline, locale)}
+          </DetailField>
+        </dl>
+        {/* Reserved for an upcoming task id display; the cleaner cannot see the
+            reservation id (no READ_RESERVATIONS), and the task id lives on the
+            page heading the orchestrator paints, not here. */}
+        <span className="sr-only">{task.id}</span>
+      </Card>
     </section>
   );
 }

@@ -14,6 +14,7 @@ shared module is a candidate for the change that next touches `auth` (design D3 
 the same debt for the unit of work).
 """
 
+import re
 import uuid
 from dataclasses import dataclass
 
@@ -53,3 +54,56 @@ def normalize_email(value: str) -> str:
     `app/auth/domain/value_objects.py`.
     """
     return value.strip().lower()
+
+
+# `whatsapp-cloud-adapter` design D5 / R4.2, and its risk note on normalisation: a hand-
+# rolled parser that guesses at an unfamiliar national format can either miss a real guest
+# match or, worse, collide two different numbers. These bounds and the two shapes below are
+# deliberately the whole of it — no general international parser.
+_E164_MIN_DIGITS = 8
+_E164_MAX_DIGITS = 15
+_ES_NATIONAL_LENGTH = 9
+_ES_COUNTRY_CODE = "+34"
+
+# Formatting a human (or a copy-pasted contact card) might add around digits — not a
+# character class phone numbers use, so stripping it can never turn one number into another.
+_FORMATTING_CHARS = re.compile(r"[\s\-().]")
+
+
+def normalize_phone_e164(value: str) -> str | None:
+    """Best-effort E.164 normalisation, narrow on purpose (design D5, its risk note).
+
+    Recognises exactly two shapes and fails closed — returns `None`, never a guess — for
+    everything else (R4.3's "sin adivinar"):
+
+    - **Already E.164**: `+` followed by 8-15 digits. Covers `+34612345678` and any other
+      country's number a guest's phone happens to already be stored/typed in.
+    - **Spanish national**: a bare 9-digit number with no leading `+`/`00`, which defaults
+      to `+34` — the pilot properties are in Madrid (PRD context), so this is the one
+      "guess" allowed by design, and only for the one market it is safe to assume.
+
+    Formatting characters (spaces, hyphens, dots, parentheses) are stripped before either
+    shape is checked. A bare number of any other length, a `00`-prefixed international
+    number, or anything containing letters returns `None` rather than a misparse — the
+    risk this function exists to avoid is a false *match* (colliding two guests), which is
+    worse than a false negative (escalating one message a smarter parser would have
+    resolved).
+
+    Idempotent: normalising an already-normalised value returns it unchanged.
+    """
+    if not value:
+        return None
+    cleaned = _FORMATTING_CHARS.sub("", value.strip())
+    if not cleaned:
+        return None
+
+    if cleaned.startswith("+"):
+        digits = cleaned[1:]
+        if digits.isdigit() and _E164_MIN_DIGITS <= len(digits) <= _E164_MAX_DIGITS:
+            return "+" + digits
+        return None
+
+    if cleaned.isdigit() and len(cleaned) == _ES_NATIONAL_LENGTH:
+        return _ES_COUNTRY_CODE + cleaned
+
+    return None

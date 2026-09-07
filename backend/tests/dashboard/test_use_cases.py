@@ -6,6 +6,7 @@ which do not because the calling role may not read their source (design D10).
 """
 
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -16,9 +17,11 @@ from app.cleaning.domain.enums import CleaningTaskStatus
 from app.core.i18n import Locale
 from app.dashboard.application.use_cases import (
     GetDashboardCardsUseCase,
+    GetOccupancySeriesUseCase,
     GetPropertyDashboardUseCase,
 )
-from app.properties.domain.enums import PropertyOperationalState
+from app.dashboard.domain.occupancy import week_bounds
+from app.properties.domain.enums import PropertyOperationalState, PropertyStatus
 from app.properties.domain.exceptions import PropertyNotFoundError
 from tests.dashboard.doubles import (
     TODAY,
@@ -28,6 +31,7 @@ from tests.dashboard.doubles import (
     FakeIncidentReader,
     FakeOwnerApprovalReader,
     FakePropertyRepository,
+    FakePropertyStateTransitionRepository,
     FakeReservationRepository,
     FakeTimelineReader,
     make_approval,
@@ -591,3 +595,107 @@ async def test_two_currencies_report_no_total_rather_than_a_meaningless_sum(worl
 
     assert detail.financial is not None
     assert detail.financial.pending_expenses is None
+
+
+# --- the occupancy series (`dashboard-occupancy-series` R1, R4.1, R4.3, D5) --------------
+
+
+def _occupancy_use_case(*, properties, reservations, transitions) -> GetOccupancySeriesUseCase:
+    return GetOccupancySeriesUseCase(
+        properties=properties, reservations=reservations, transitions=transitions
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_role_without_read_reservations_gets_a_null_series_and_costs_zero_queries() -> (
+    None
+):
+    """D5: the whole series is redacted as one boundary check, not built from
+    blocks/out-of-service days alone (R4.3) — and the check happens before any port is
+    touched, unlike `PropertyDashboardCard`'s per-block gating above."""
+    prop = make_property(TENANT)
+    properties = FakePropertyRepository({TENANT: [prop]})
+    reservations = FakeReservationRepository({TENANT: [make_reservation(TENANT, prop.id)]})
+    transitions = FakePropertyStateTransitionRepository()
+    use_case = _occupancy_use_case(
+        properties=properties, reservations=reservations, transitions=transitions
+    )
+
+    series = await use_case.execute(tenant_id=TENANT, role=UserRole.CLEANER, today=TODAY)
+
+    assert series is None
+    assert properties.calls == []
+    assert reservations.calls == []
+    assert transitions.calls == []
+
+
+@pytest.mark.asyncio
+async def test_an_empty_portfolio_gets_seven_points_of_zero_total() -> None:
+    """R1: still seven points, ordered Monday to Sunday, `total_properties == 0` on all —
+    never an empty tuple, never a division by zero (R1.3, delegated to `occupancy_series`)."""
+    properties = FakePropertyRepository({TENANT: []})
+    reservations = FakeReservationRepository({TENANT: []})
+    transitions = FakePropertyStateTransitionRepository()
+    use_case = _occupancy_use_case(
+        properties=properties, reservations=reservations, transitions=transitions
+    )
+
+    series = await use_case.execute(tenant_id=TENANT, role=UserRole.TENANT_OWNER, today=TODAY)
+
+    assert series is not None
+    assert len(series) == 7
+    assert all(point.total_properties == 0 for point in series)
+    assert all(point.occupied_properties == 0 for point in series)
+    assert all(point.occupancy_pct is None for point in series)
+    week_start, _ = week_bounds(TODAY)
+    assert [point.date for point in series] == [
+        week_start + timedelta(days=offset) for offset in range(7)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tenant_id_is_sourced_from_the_caller_and_passed_to_every_port_call() -> None:
+    """R4.1: never a request parameter. Proven by recording what each fake actually
+    received, not merely what the use case's own signature accepts."""
+    prop = make_property(TENANT)
+    properties = FakePropertyRepository({TENANT: [prop]})
+    reservations = FakeReservationRepository({TENANT: [make_reservation(TENANT, prop.id)]})
+    transitions = FakePropertyStateTransitionRepository()
+    use_case = _occupancy_use_case(
+        properties=properties, reservations=reservations, transitions=transitions
+    )
+    week_start, week_end = week_bounds(TODAY)
+
+    await use_case.execute(tenant_id=TENANT, role=UserRole.TENANT_OWNER, today=TODAY)
+
+    assert properties.calls == [("list_by_status", TENANT, PropertyStatus.ACTIVE)]
+    assert reservations.calls == [(TENANT, (prop.id,), week_start, week_end)]
+    assert transitions.calls == [
+        ("history_for_properties", TENANT, (prop.id,), week_start, week_end)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_reservation_produces_an_occupied_night_in_the_series() -> None:
+    """Composition, end to end over the fakes: a stay covering the week's Monday shows up
+    as one occupied property on that day and nowhere else, with the right denominator."""
+    week_start, _ = week_bounds(TODAY)
+    prop = make_property(TENANT)
+    stay = make_reservation(
+        TENANT, prop.id, check_in=week_start, check_out=week_start + timedelta(days=1)
+    )
+    properties = FakePropertyRepository({TENANT: [prop]})
+    reservations = FakeReservationRepository({TENANT: [stay]})
+    transitions = FakePropertyStateTransitionRepository()
+    use_case = _occupancy_use_case(
+        properties=properties, reservations=reservations, transitions=transitions
+    )
+
+    series = await use_case.execute(tenant_id=TENANT, role=UserRole.TENANT_OWNER, today=TODAY)
+
+    assert series is not None
+    assert len(series) == 7
+    assert series[0].date == week_start
+    assert series[0].occupied_properties == 1
+    assert series[0].total_properties == 1
+    assert series[1].occupied_properties == 0

@@ -29,11 +29,11 @@ export function ConversationThreadSenderMeta({
   return (
     <section
       aria-label={t("fields.senderUserIdSection")}
-      className="border-t pt-2 text-xs text-muted-foreground"
+      className="border-t border-border pt-2 text-body-base text-muted-foreground"
     >
       <p>
         <strong>{t("fields.senderUserIdSection")}:</strong>{" "}
-        <code className="font-mono">{senderUserId}</code>
+        <code className="font-mono text-data-mono">{senderUserId}</code>
       </p>
       <p>{t("fields.senderUserIdNote")}</p>
     </section>

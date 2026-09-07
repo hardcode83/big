@@ -37,7 +37,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.maintenance.domain.entities import Incident, IncidentPhoto, OwnerApproval
+from app.maintenance.domain.entities import (
+    Incident,
+    IncidentMessage,
+    IncidentPhoto,
+    OwnerApproval,
+)
 from app.maintenance.domain.enums import IncidentSeverity, IncidentStatus
 from app.maintenance.domain.value_objects import (
     IncidentSummary,
@@ -403,4 +408,32 @@ class IncidentPhotoRepository(Protocol):
         `_load_incident_in_scope` first, which is what makes the `404` of R3.4
         indistinguishable across its three cases.
         """
+        ...
+
+
+@dataclass(frozen=True)
+class IncidentMessagePage:
+    """One page of an incident's message thread plus the total (`staff-messaging` R2)."""
+
+    items: tuple[IncidentMessage, ...]
+    total: int
+
+
+class IncidentMessageRepository(Protocol):
+    """The staff-to-manager thread of one incident (`staff-messaging` design D1).
+
+    The mirror of `app.cleaning.domain.repositories.CleaningTaskMessageRepository` — see
+    that Protocol for the reasoning. `incident_messages` carries its own `tenant_id` and a
+    composite `(tenant_id, incident_id)` foreign key into `incidents`.
+    """
+
+    async def add(self, tenant_id: uuid.UUID, message: IncidentMessage) -> None:
+        """Append a message whose parent incident belongs to `tenant_id`. Never commits —
+        the use case owns the transaction alongside the notification rows it fans out."""
+        ...
+
+    async def list_for_incident(
+        self, tenant_id: uuid.UUID, incident_id: uuid.UUID, *, page: int, per_page: int
+    ) -> IncidentMessagePage:
+        """That incident's messages, chronologically ascending (`created_at`, `id` tie-break)."""
         ...

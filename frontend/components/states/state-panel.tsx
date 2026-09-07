@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 type HeadingTag = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
@@ -9,6 +10,12 @@ type HeadingTag = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
  * layout, spacing, and iconography; each state (loading/error/empty/planned)
  * composes it but keeps its own semantics and API. No "use client": renderable
  * in Server Components.
+ *
+ * Sits on the Tier-1 `Card` (visual-restyle-workspace R2/D6) so every loading,
+ * error, empty and planned-module surface shares the same `bg-surface`/border/
+ * shadow/hover-gradient treatment instead of a bare `<section>`. `Card` forwards
+ * `role`/`aria-*` straight to its root `div`, so the alert/status semantics each
+ * state relies on are unaffected by swapping the element.
  */
 export interface StatePanelProps {
   icon?: ReactNode;
@@ -35,7 +42,7 @@ export function StatePanel({
 }: StatePanelProps) {
   const Heading: HeadingTag = `h${headingLevel}`;
   return (
-    <section
+    <Card
       role={role}
       className={cn(
         "flex flex-col items-center justify-center gap-3 px-6 py-12 text-center",
@@ -48,11 +55,15 @@ export function StatePanel({
           {icon}
         </div>
       ) : null}
-      <Heading className="text-lg font-semibold text-foreground">{title}</Heading>
+      <Heading className="text-headline-md font-semibold text-foreground">
+        {title}
+      </Heading>
       {description ? (
-        <p className="max-w-prose text-sm text-muted-foreground">{description}</p>
+        <p className="max-w-prose text-body-base text-muted-foreground">
+          {description}
+        </p>
       ) : null}
       {children}
-    </section>
+    </Card>
   );
 }

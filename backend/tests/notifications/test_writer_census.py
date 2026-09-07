@@ -56,11 +56,17 @@ EXCLUDED = {"notifications/domain/enums.py"}
 #: `Escalation(...)` built somewhere else from silently joining the census.
 ESCALATION_MODULE = "notifications/domain/escalation.py"
 
-#: Types with a production writer, as of `notification-writers-gap`. Thirteen.
+#: Types with a production writer, as of `staff-messaging` section 4. Fifteen.
 #:
-#: Seven predate this change — `CLEANING_TASK_ASSIGNED`, `CLEANING_NO_RESPONSE`,
+#: Seven predate `notification-writers-gap` — `CLEANING_TASK_ASSIGNED`, `CLEANING_NO_RESPONSE`,
 #: `TECHNICIAN_ASSIGNED`, `OWNER_APPROVAL_REQUIRED`, `GUEST_ESCALATION`,
-#: `PASSWORD_RESET_REQUESTED` and `SLA_BREACH` — and six are its own.
+#: `PASSWORD_RESET_REQUESTED` and `SLA_BREACH` — six are that change's own, and the last two
+#: are `staff-messaging`'s: `SendCleaningTaskMessageUseCase` (`cleaning/application/use_cases.py`)
+#: fans `CLEANING_TASK_MESSAGE` out via `staff_message_notification` to every active
+#: `PROPERTY_MANAGER` (R4.2) or to the assigned cleaner (R4.3); `SendIncidentMessageUseCase`
+#: (`maintenance/application/use_cases.py`) does the same for `INCIDENT_MESSAGE` via that
+#: module's own `staff_message_notification`, to every active `PROPERTY_MANAGER` or to the
+#: assigned technician.
 WITH_WRITER = frozenset(
     {
         "CLEANING_TASK_ASSIGNED",
@@ -80,6 +86,8 @@ WITH_WRITER = frozenset(
         # manager+owner recipient via `build_review_response_approved_log` in
         # `app/reviews/domain/notifications.py`.
         "REVIEW_RESPONSE_APPROVED",
+        "CLEANING_TASK_MESSAGE",
+        "INCIDENT_MESSAGE",
     }
 )
 
@@ -161,7 +169,14 @@ def test_the_two_lists_partition_the_enum() -> None:
 
 
 def test_exactly_four_types_have_no_writer() -> None:
-    """R6.2 — the list is literal, so shrinking it requires saying which type gained a writer."""
+    """R6.2 — the list is literal, so shrinking it requires saying which type gained a writer.
+
+    Four as of `staff-messaging` section 4: both `CLEANING_TASK_MESSAGE` (section 2) and
+    `INCIDENT_MESSAGE` (this section) have now gained their writers
+    (`staff_message_notification` in `cleaning`/`maintenance` and their `dispatch_and_persist`
+    call sites), leaving only the pre-existing four — `LOCK_ALERT` and the three
+    `guest-scheduled-comms` reminders — without one.
+    """
     assert WITHOUT_WRITER == {
         "LOCK_ALERT",
         "CHECKIN_REMINDER_24H",
