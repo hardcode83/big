@@ -78,6 +78,17 @@ jobs:
           # Los pasos posteriores no necesitan Git autenticado.
           persist-credentials: false
 
+      # D11 (mirror del que ya existe en `rule11-ownership-suite` línea 255-257): el runner
+      # self-hosted trae Python 3.10; el step always-run `check-detect-surface.py rule11`
+      # importa transitivamente `scripts/rule11-ownership.py`, que hace `from enum import
+      # StrEnum` (stdlib Python 3.11+, PEP 663). Sin este setup el step falla con
+      # `ImportError: cannot import name 'StrEnum' from 'enum'`, el detect termina en
+      # `failure`, y el consolidador lee `DETECT_RESULT != success` y reporta fail-closed.
+      # Mismo SHA pinneado y misma acción que la suite del guard.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
       # Invariante temporal (design D1.1.c): la superficie de detección de ESTE job debe cubrir
       # toda la superficie que la guardia recorre (`SCOPE`) más lo que la suite ejecuta. Corre
       # SIEMPRE y ANTES de `decide` (fuera de su `set +e`, bajo el `bash -e` por defecto), así que

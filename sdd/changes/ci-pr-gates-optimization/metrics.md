@@ -114,3 +114,4 @@ Muestra de 5 runs con `conclusion=success` (ids `33788109370`, `33788076721`, `3
 | Fecha | Fase | Modelos | Tokens in | Tokens out | Cache | Coste (USD) | Nota |
 |---|---|---|---|---|---|---|---|
 | 2026-09-07 | run | claude-haiku-4-5-20251001 claude-opus-4-8 claude-opus-5 claude-sonnet-5 | 581501 | 939181 | 116619598 | 87.2357 | incl. subagents |
+| 2026-09-07 | ship | claude-opus-4-8 claude-sonnet-5 | 34 | 13835 | 1861788 | 0.9545 | incl. subagents |
