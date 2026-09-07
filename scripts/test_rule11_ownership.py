@@ -652,3 +652,92 @@ def test_the_authority_names_exactly_the_paths_in_scope() -> None:
         "`SCOPE` is the source; the sentence is what a reader of the rule is entitled to "
         "believe. Whichever is wrong, they cannot disagree."
     )
+
+
+# ── `rule11-ownership-detect` does not fall behind `SCOPE` (design D1.1.a) ─────────────────
+
+DETECT_WORKFLOW = ROOT / ".github/workflows/rule11-ownership.yml"
+
+#: Anchor-parsing and the coverage matcher live in `scripts/check-detect-surface.py` — the one
+#: source of truth the always-run CLI (`check-detect-surface.py <wf>`) and every surface test
+#: share (design D1.1.c). Loaded via `importlib` because the filename is hyphenated.
+_CDS_SPEC = importlib.util.spec_from_file_location(
+    "check_detect_surface", Path(__file__).with_name("check-detect-surface.py")
+)
+check_detect_surface = importlib.util.module_from_spec(_CDS_SPEC)
+assert _CDS_SPEC.loader is not None
+_CDS_SPEC.loader.exec_module(check_detect_surface)
+
+
+def _rule11_detect_anchors() -> list[str]:
+    """The `case "$f" in … )` anchors of the `rule11-ownership-detect` job."""
+    return check_detect_surface.detect_anchors(DETECT_WORKFLOW)
+
+
+def _uncovered(relatives: list[str], anchors: list[str]) -> list[str]:
+    """`relatives` not matched by any `anchors` entry (shared `fnmatch.fnmatchcase` semantics)."""
+    return check_detect_surface.uncovered(relatives, anchors)
+
+
+def test_rule11_detect_surface_covers_walked_scope() -> None:
+    """D1.1.a, machine-checked: `relevant-SCOPE-walked-surface(rule11) ⊆ detect-anchor-surface(rule11)`.
+
+    Every file the guard would actually walk (`SCOPE`, with the `OUT_OF_CENSUS` exclusions and
+    the authority already applied by `prose_files`/`code_files`) must match at least one anchor
+    of `rule11-ownership-detect`'s `case "$f" in`. A green here means the detector's surface is
+    not a strict subset of what the guard inspects — the same guarantee §9 restored for the
+    other two detectors.
+
+    If this reddens, the assertion message lists exactly which walked paths the detector would
+    miss. The fix is to add the missing anchor (or, if the path belongs to a deliberate
+    exclusion, declare it `OUT_OF_CENSUS` in `SCOPE`) — never to broaden the detector to `sdd/*`
+    recursive, and never to shrink `SCOPE` to make the red disappear.
+    """
+    walked = [
+        relative
+        for relative, _ in module.prose_files(SCOPE, ROOT) + module.code_files(SCOPE, ROOT)
+    ]
+    uncovered = _uncovered(walked, _rule11_detect_anchors())
+    assert uncovered == [], (
+        "the detect anchors do not cover every file the guard would walk — a PR touching only "
+        "one of these paths would get a green **OMITIDA** without the guard ever running:\n"
+        + "\n".join(f"  {relative}" for relative in uncovered)
+    )
+
+
+def test_rule11_detect_surface_invariant_catches_a_new_sdd_subtree() -> None:
+    """The invariant above is not vacuous: prove it would actually catch a real gap.
+
+    `SCOPE` declares `sdd` as a *recursive* census-prose root — the guard walks every `.md`
+    under `sdd/` except the declared `OUT_OF_CENSUS` exclusions. The detector, instead,
+    *enumerates* today's known paths under `sdd/` (`sdd/steering/*`, `sdd/specs/*`, the three
+    loose top-level `.md` files) — deliberately, per design D1.1.a: anchoring `sdd/*` recursive
+    would fire the suite on every `sdd/changes/**` commit, the shape of nearly every SDD-flow
+    commit, which is exactly the cost R7 removes. That leaves a latent gap: a brand-new subtree
+    added directly under `sdd/` (e.g. `sdd/adr/`) that the guard would walk but that no current
+    anchor names.
+
+    This is that synthetic case, as a string literal only — no file is created on disk anywhere
+    in this test. It asserts two things: (1) the guard WOULD walk it — `_is_excluded` says
+    `False`, because it is under `sdd/` and matches none of the `OUT_OF_CENSUS` entries — and
+    (2) no current anchor matches it. Together: if `sdd/adr/example.md` existed today,
+    `test_rule11_detect_surface_covers_walked_scope` would fail on it.
+
+    The correct resolution to that red is to add the explicit anchor for the new subtree (or
+    declare it `OUT_OF_CENSUS` in `SCOPE`, if it turns out to belong to the exclusions) — never
+    to broaden the detector to `sdd/*` recursive, and never to shrink `SCOPE` to make the
+    assertion pass. Both of those would silently reopen the fail-open §9 closed for the other
+    two detectors, one layer down.
+    """
+    candidate = "sdd/adr/example.md"
+    assert module._is_excluded(candidate, SCOPE) is False, (
+        f"{candidate} is unexpectedly excluded from the walk — this test assumes the guard "
+        "would inspect it (under sdd/, not OUT_OF_CENSUS); if `SCOPE` changed to exclude it, "
+        "this synthetic path no longer demonstrates the gap and needs replacing with one that "
+        "still does"
+    )
+    assert _uncovered([candidate], _rule11_detect_anchors()) == [candidate], (
+        f"{candidate} unexpectedly matched a current detect anchor — this synthetic example no "
+        "longer proves the invariant is non-vacuous and needs replacing with a path that still "
+        "misses every anchor"
+    )

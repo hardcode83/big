@@ -31,6 +31,8 @@ jobs:
           target: prod
           platforms: linux/amd64,linux/arm64
           push: false
+          cache-from: type=gha,scope=multiarch-backend
+          cache-to: type=gha,mode=max,scope=multiarch-backend
 
   build-frontend:
     runs-on: ubuntu-latest
@@ -46,3 +48,5 @@ jobs:
           target: prod
           platforms: linux/amd64,linux/arm64
           push: false
+          cache-from: type=gha,scope=multiarch-frontend
+          cache-to: type=gha,mode=max,scope=multiarch-frontend

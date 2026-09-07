@@ -87,6 +87,8 @@ jobs:
           target: prod
           platforms: linux/arm64
           push: true
+          cache-from: type=gha,scope=deploy-backend
+          cache-to: type=gha,mode=max,scope=deploy-backend
           # Labels OCI (R1.5): la identidad de la imagen legible con `docker inspect` en la
           # VM y en la página del package de GHCR, sin variables de runtime.
           labels: |
@@ -126,6 +128,8 @@ jobs:
           target: prod
           platforms: linux/arm64
           push: true
+          cache-from: type=gha,scope=deploy-frontend
+          cache-to: type=gha,mode=max,scope=deploy-frontend
           # NEXT_PUBLIC_* se hornean en build (Next standalone) → build-args, no runtime. [R1]
           #
           # Solo las dos que pinta el badge. Son públicas por decisión: el snapshot de
