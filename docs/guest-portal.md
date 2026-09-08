@@ -29,16 +29,35 @@ De ahí las tres propiedades que conviene tener presentes al operarlo:
 En reposo solo se guarda su SHA-256. No existe ninguna ruta que lo lea de vuelta: si se
 pierde, se emite otro.
 
-## Emitir y revocar (ruta de operador, con JWT)
+## Emitir, enviar y revocar (ruta de operador, con JWT)
 
 Requiere el permiso `MANAGE_GUEST_ACCESS_TOKENS`, que tienen `TENANT_OWNER` y
 `PROPERTY_MANAGER`.
 
+**Desde `guest-link-delivery`, la vía normal es la UI.** `/reservations/[id]` muestra una
+tarjeta "Enlace del portal del huésped" (`frontend/features/reservations/components/detail/
+guest-portal-link-card.tsx`) con cuatro acciones — Generar enlace, Copiar, Enviar por correo,
+Revocar enlace — y el estado vivo (si hay token y desde cuándo, sin exponer nunca su valor). Un
+operador sin `MANAGE_GUEST_ACCESS_TOKENS` no ve la tarjeta. Los `curl` de abajo son la misma API
+que la tarjeta consume, y siguen sirviendo para operar y diagnosticar desde la línea de
+comandos.
+
 ```bash
+# Ver si hay un token vivo y desde cuándo, sin exponer el valor.
+curl http://localhost:8000/api/v1/reservations/$RESERVATION_ID/guest-access-token \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+# → 200 {"is_live": true, "issued_at": "…"} (issued_at es null cuando is_live es false)
+
 # Acuñar el token de una estancia. Devuelve el valor EN CLARO, una sola vez.
 curl -X POST http://localhost:8000/api/v1/reservations/$RESERVATION_ID/guest-access-token \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 # → 201 {"token":"kR8x…"}
+
+# Acuñar (o sustituir) el token y enviarlo por email a Guest.email en la misma petición.
+# 422 si la reserva no tiene un email de huésped al que mandarlo.
+curl -X POST http://localhost:8000/api/v1/reservations/$RESERVATION_ID/guest-access-token/send \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+# → 200 {"delivered": true}  (nunca el token en claro)
 
 # Revocarlo. Idempotente: dos veces responde 204 las dos.
 curl -X DELETE http://localhost:8000/api/v1/reservations/$RESERVATION_ID/guest-access-token \
@@ -46,18 +65,24 @@ curl -X DELETE http://localhost:8000/api/v1/reservations/$RESERVATION_ID/guest-a
 # → 204
 ```
 
-**El `201` es la única vez que el valor existe fuera del sistema.** Cópialo en ese momento;
-después solo queda su hash. Es la excepción nombrada de la regla 3(a) de
+**El `201` del `POST` de acuñar es la única vez que el valor existe fuera del sistema** (fuera
+del `/send`, que no lo devuelve: viaja solo dentro del email). Cópialo en ese momento; después
+solo queda su hash. Es la excepción nombrada de la regla 3(a) de
 [`sdd/steering/security.md`](../sdd/steering/security.md) y no se ensancha.
 
-**Re-emitir sustituye, no acumula.** Si la estancia ya tenía un token vivo, el `POST` lo revoca
-y devuelve el nuevo en la misma transacción: el huésped que tuviera el enlace anterior deja de
-entrar en cuanto se acuña el siguiente. Nunca hay dos tokens vivos para una estancia.
+**Re-emitir sustituye, no acumula**, tanto si es el `POST` plano como el `/send`: si la estancia
+ya tenía un token vivo, se revoca y se devuelve/envía el nuevo en la misma transacción — el
+huésped que tuviera el enlace anterior deja de entrar en cuanto se acuña el siguiente. Nunca hay
+dos tokens vivos para una estancia.
 
-**Entregar el enlace es manual, hoy.** Ningún adapter de envío puede hacerlo todavía
-(`ConsoleEmailAdapter` y `MockWhatsAppAdapter` son los únicos, y sus plantillas no llevan
-enlace de portal), así que el operador construye la URL y la manda por su cuenta. La emisión
-automática llega con el change que traiga un adapter real — la costura ya está hecha.
+**El envío por email ya es automático.** `/send` invoca el adapter `EMAIL`
+(`smtp-delivery-adapter`; `ConsoleEmailAdapter` si no hay relay SMTP configurado) de forma
+síncrona dentro de la petición y escribe su fila en `notification_logs` ya `SENT`/`FAILED` —
+nunca `PENDING` — porque la regla 11 de `steering/security.md` prohíbe un cuerpo que lleve un
+enlace acuñado en el `dispatch_notifications` asíncrono, que solo relee `subject`/`body`. Es el
+primer escritor de `notification_logs` dirigido a un huésped. Construir la URL a mano y mandarla
+por otra vía sigue siendo válido (el `POST` plano sin `/send` no cambia), pero ya no es la única
+opción.
 
 ## Qué ve el huésped
 
