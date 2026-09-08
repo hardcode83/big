@@ -30,6 +30,7 @@ from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
 
 from app.auth.api.dependencies import get_login_throttle, get_password_hasher
+from app.auth.api.schemas import SESSION_REFRESH_COOKIE
 from app.auth.infrastructure.password_hasher import BcryptPasswordHasher
 from app.auth.infrastructure.throttle import RedisLoginThrottle
 from app.core.config import settings
@@ -100,9 +101,15 @@ async def stack(db_session, redis_client):
             async with AsyncClient(
                 transport=transport, base_url="http://test"
             ) as client:
+                # The invalid value travels as the cookie (`auth-session-persistence`
+                # R2.3), not the body, so it still reaches the throttle inside
+                # `execute()` — a missing cookie would 401 in the router before the
+                # throttle is ever consulted, which is not what R8 pins here. Set on
+                # the client instance, not per-request: httpx deprecates the latter.
+                client.cookies.set(SESSION_REFRESH_COOKIE, "not-a-real-token")
                 return await client.post(
                     "/api/v1/auth/refresh",
-                    json={"refresh_token": "not-a-real-token"},
+                    json={},
                     headers={"x-forwarded-for": forwarded_for},
                 )
 

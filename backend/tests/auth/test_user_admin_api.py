@@ -422,15 +422,13 @@ async def test_deactivating_a_user_stops_it_from_refreshing(
         "/api/v1/auth/login", json={"email": target.email, "password": PASSWORD}
     )
     assert login.status_code == 200
-    refresh_token = login.json()["refresh_token"]
+    # `api`'s own cookie jar now carries the refresh cookie login set.
 
     await api.delete(
         f"/api/v1/users/{target.id}", headers=auth_header(api, users_by_role_a[OWNER])
     )
 
-    refreshed = await api.post(
-        "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
-    )
+    refreshed = await api.post("/api/v1/auth/refresh", json={})
     assert refreshed.status_code == 401
     revoked = (
         await db_session.execute(
