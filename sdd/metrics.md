@@ -106,4 +106,4 @@
 | reservations-identity-web | new, tasks, run, review, ship, archive | 48198 | 268325 | 60302554 | 18.8499 | 2026-09-05 | 2026-09-05 |
 | auth-session-persistence | new, design, tasks, run, review, ship, archive | 2036009 | 2628069 | 677762862 | 233.9513 | 2026-09-04 | 2026-09-06 |
 | ci-pr-gates-optimization | run, review, ship | 1061619 | 1619015 | 207998434 | 141.5796 | 2026-09-03 | 2026-09-08 |
-| guest-link-delivery | new, design, tasks, run, review | 264807 | 796596 | 332530565 | 108.2930 | 2026-09-06 | — |
+| guest-link-delivery | new, design, tasks, run, review, ship, archive | 268830 | 956450 | 397869574 | 130.7355 | 2026-09-06 | 2026-09-08 |
