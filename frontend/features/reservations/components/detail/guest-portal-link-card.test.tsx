@@ -96,7 +96,7 @@ describe("GuestPortalLinkCard (R1, R3, design D7)", () => {
     expect(screen.queryByText(/token/i)).not.toBeInTheDocument();
   });
 
-  it("reveals a minted token exactly once, in a copy-to-clipboard control with a persistent warning (R1.2)", async () => {
+  it("reveals a minted token as the full portal URL exactly once, in a copy-to-clipboard control with a persistent warning (R1.2)", async () => {
     issueGuestAccessToken.mockResolvedValue("clear-token-abc");
     renderCard(makeClient());
 
@@ -104,16 +104,15 @@ describe("GuestPortalLinkCard (R1, R3, design D7)", () => {
       await screen.findByRole("button", { name: strings.actions.mint }),
     );
 
+    const portalUrl = `${window.location.origin}/guest/clear-token-abc`;
     await waitFor(() =>
-      expect(screen.getByText("clear-token-abc")).toBeInTheDocument(),
+      expect(screen.getByText(portalUrl)).toBeInTheDocument(),
     );
     expect(screen.getByText(strings.reveal.warning)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: strings.reveal.copy }));
     await waitFor(() =>
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        "clear-token-abc",
-      ),
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(portalUrl),
     );
     await waitFor(() =>
       expect(
@@ -122,7 +121,7 @@ describe("GuestPortalLinkCard (R1, R3, design D7)", () => {
     );
   });
 
-  it("never re-displays the minted token after the component unmounts and remounts (R1.2)", async () => {
+  it("never re-displays the minted token's URL after the component unmounts and remounts (R1.2)", async () => {
     issueGuestAccessToken.mockResolvedValue("clear-token-abc");
     const client = makeClient();
     const { unmount } = renderCard(client);
@@ -130,8 +129,9 @@ describe("GuestPortalLinkCard (R1, R3, design D7)", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: strings.actions.mint }),
     );
+    const portalUrl = `${window.location.origin}/guest/clear-token-abc`;
     await waitFor(() =>
-      expect(screen.getByText("clear-token-abc")).toBeInTheDocument(),
+      expect(screen.getByText(portalUrl)).toBeInTheDocument(),
     );
 
     unmount();
@@ -144,7 +144,7 @@ describe("GuestPortalLinkCard (R1, R3, design D7)", () => {
     await waitFor(() =>
       expect(screen.getByText(strings.status.none)).toBeInTheDocument(),
     );
-    expect(screen.queryByText("clear-token-abc")).not.toBeInTheDocument();
+    expect(screen.queryByText(portalUrl)).not.toBeInTheDocument();
   });
 
   it("disables the mint button while its own mutation is pending (R1.5)", async () => {

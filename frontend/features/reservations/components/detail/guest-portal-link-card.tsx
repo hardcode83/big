@@ -41,6 +41,15 @@ import {
  * so remounting (leaving the screen and returning to it) starts from a fresh
  * mutation with no data.
  *
+ * The reveal shows the full portal URL, not the bare token — built from
+ * `window.location.origin`, never from a fetched config value. The backend
+ * builds its own copy of this same URL from `FRONTEND_BASE_URL` for the
+ * emailed link (`guests/application/portal.py`); the two are independent by
+ * design; so a manager comparing "what I just copied" against "what the
+ * guest received" is what surfaces a `FRONTEND_BASE_URL` misconfiguration
+ * (admin host vs. guest-facing host) instead of silently mailing a broken
+ * link.
+ *
  * **Revoke (R1.3)** and **send (R3)** both invalidate the status query on
  * success (inside their own hooks), so the visible status updates without a
  * page reload.
@@ -67,11 +76,15 @@ export function GuestPortalLinkCard({
     return null;
   }
 
+  const portalUrl = issueMutation.data
+    ? `${window.location.origin}/guest/${issueMutation.data}`
+    : undefined;
+
   async function handleCopy() {
-    if (!issueMutation.data) {
+    if (!portalUrl) {
       return;
     }
-    await navigator.clipboard.writeText(issueMutation.data);
+    await navigator.clipboard.writeText(portalUrl);
     setCopied(true);
   }
 
@@ -131,11 +144,11 @@ export function GuestPortalLinkCard({
         <p role="alert">{t("guestPortalLink.feedback.error")}</p>
       ) : null}
 
-      {issueMutation.data ? (
+      {portalUrl ? (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <code className="flex-1 rounded-md border bg-muted px-3 py-2 font-mono text-sm">
-              {issueMutation.data}
+            <code className="flex-1 rounded-md border bg-muted px-3 py-2 font-mono text-sm break-all">
+              {portalUrl}
             </code>
             <Button type="button" variant="outline" onClick={() => void handleCopy()}>
               {copied
