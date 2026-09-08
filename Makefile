@@ -122,7 +122,7 @@ COMPOSE_ARGS := $(if $(OFFSET),-f docker-compose.yml -f $(OFFSET_FILE),$(if $(IS
 COMPOSE := $(strip docker compose $(COMPOSE_ARGS))
 
 
-.PHONY: up down logs ps sh ports bootstrap seed-demo demo-reset openapi check-version-parity check-frontend-build compose-stacks check-compose-ports check-rule11-ownership db-clean-test
+.PHONY: up down logs ps sh ports bootstrap seed-demo demo-reset openapi check-version-parity check-frontend-build compose-stacks check-compose-ports check-rule11-ownership check-detect-surface db-clean-test
 
 # El guard del overlay de worktree queda acotado a la rama SIN desplazamiento, y no por higiene:
 # con desplazamiento ese fichero no se carga (lo sustituye el overlay generado, ver COMPOSE_ARGS),
@@ -374,6 +374,22 @@ check-compose-ports:
 # specs/rule11-ownership-guard.md § Independencia del entorno. En CI da igual: ubuntu-latest trae 3.12.
 check-rule11-ownership:
 	python3 scripts/rule11-ownership.py
+
+# Comprueba la invariante `detect-surface ⊇ suite-input-surface` de los tres gates condicionales
+# (`frontend-tests`, `compose-ports`, `rule11-ownership`): que el `case "$f" in` de cada
+# `*-detect` ancle toda la superficie que su suite consume. Si una suite crece un input que su
+# detector no ancla, un PR que toque solo ese input recibiría un `**OMITIDA**` verde sin ejecutar
+# la suite (el fail-open que §9/§11 de `ci-pr-gates-optimization` cierran). En CI corre además
+# **always-run dentro de cada `*-detect`** (design D1.1.c); este target agrega los tres para uso
+# local.
+#
+# Fuera de $(COMPOSE) y stdlib puro, como los otros targets host-side: `check-detect-surface.py`
+# solo lee ficheros del árbol y corre con el `python3` del host (>= 3.11 por `enum.StrEnum` de la
+# guardia de rule11 que importa).
+check-detect-surface:
+	python3 scripts/check-detect-surface.py rule11
+	python3 scripts/check-detect-surface.py compose
+	python3 scripts/check-detect-surface.py frontend
 
 # Cada ejecución de pytest crea su propia base (`<db>_test_<pid>`, o
 # `<db>_test_<pid>_gw0` por worker si se corre con `-n`; ver backend/tests/db_names.py) y
