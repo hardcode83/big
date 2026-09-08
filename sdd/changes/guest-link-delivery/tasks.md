@@ -151,10 +151,22 @@
       on; both are rendering-timing assertions (`Unable to find role="heading"`) consistent
       with the same host contention that slowed every other command this session, not a
       logic regression in this change's code.
-- [ ] 6.5 <!-- manual --> Manual end-to-end pass: from `/reservations/[id]`, mint the link and copy it; open
+- [x] 6.5 <!-- manual --> Manual end-to-end pass: from `/reservations/[id]`, mint the link and copy it; open
       `/guest/[token]` in a second browser context and confirm the portal loads; trigger
       "send" and confirm the email arrives (dev SMTP relay or `ConsoleEmailAdapter` log line);
-      revoke and confirm the previously-copied link no longer authorizes the portal.
+      revoke and confirm the previously-copied link no longer authorizes the portal. **Result:
+      run post-merge (2026-09-08) against the `guest-link-delivery` worktree's live dev stack
+      (backend :9000, frontend :4000) as `manager@devtenant.local`, reservation
+      `cdedfe28-4e96-4e04-b360-53b3a2c34fd6` (Redes 11, guest John Smith). Minted a link
+      (`POST .../guest-access-token` → 201); opened `http://localhost:4000/guest/<token>` in a
+      separate unauthenticated browser context — portal loaded guest info, check-in form and
+      messages (`GET /api/v1/guest/info|checkin|messages/*** ` → 200). Clicked "Enviar por
+      correo" (`POST .../guest-access-token/send` → 200); confirmed delivery via
+      `notification_logs` row `81826e65-fb85-4df0-9e8b-d2b2ec3b9e08` (channel `EMAIL`, status
+      `SENT`, recipient `john.smith@example.com`). Clicked "Revocar enlace" (`DELETE
+      .../guest-access-token` → 204); reloaded the still-open guest portal tab — it now showed
+      "Este enlace no es válido" and `GET /api/v1/guest/info/***` returned 404, confirming the
+      previously-copied link no longer authorizes the portal.
 
 ## Implementation Notes
 
