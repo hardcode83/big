@@ -19,6 +19,7 @@ a loophole is that there is no second path: the repository stores only a digest,
 return it even by mistake.
 """
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -36,11 +37,16 @@ from app.guests.application.use_cases import (
 from app.guests.domain.entities import Guest
 from app.guests.domain.enums import GuestDocumentStatus, LegalRegistrationStatus
 from app.guests.domain.exceptions import (
+    GuestContactMissingError,
     GuestNotFoundError,
     GuestPortalUnauthorised,
     ReservationNotFoundError,
 )
 from app.guests.domain.legal_registration import LegalRegistrationSubject, missing_fields
+from app.guests.domain.notifications import (
+    render_guest_link_delivery_email,
+    render_stored_guest_link_notice,
+)
 from app.guests.domain.portal_authorisation import token_still_authorises
 from app.guests.domain.portal_ports import (
     GuestAccessToken,
@@ -55,10 +61,21 @@ from app.guests.domain.portal_ports import (
 from app.guests.domain.portal_token import generate_guest_token, hash_guest_token
 from app.guests.domain.ports import LegalRegistrationStayStore
 from app.guests.domain.repositories import GuestRepository
+from app.notifications.domain.entities import NotificationLog
+from app.notifications.domain.enums import (
+    NotificationChannel,
+    NotificationStatus,
+    NotificationType,
+)
+from app.notifications.domain.ports import NotificationAdapter
+from app.notifications.domain.repositories import NotificationLogRepository
+from app.notifications.domain.results import NotificationErrorCode, NotificationResult
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType
 from app.timeline.domain.repositories import TimelineEventRepository
 from app.timeline.domain.services import TimelineEventFactory
 from app.timeline.domain.value_objects import TimelineEventData
+
+logger = logging.getLogger(__name__)
 
 
 class GuestPortalAuthenticator:
@@ -523,6 +540,13 @@ class IssueGuestAccessTokenUseCase:
             tenant_id=tenant_id,
             reservation_id=reservation_id,
             token_hash=hash_guest_token(token),
+            # The same `now` the revoke above stamped and the audit row below carries, so a
+            # status read's "since when" (R2.1) cannot disagree with the audit trail by the
+            # width of a clock read. `GuestAccessTokenModel.created_at` is what actually
+            # persists it — `TimestampMixin` stamps the row — so this value is what the
+            # *entity* claims rather than what the database will store; they differ only by
+            # the microseconds between here and `flush`, and nothing compares them.
+            issued_at=now,
         )
         await self._tokens.add(tenant_id, minted)
 
@@ -611,3 +635,360 @@ class RevokeGuestAccessTokenUseCase:
         )
         await self._uow.commit()
         return True
+
+
+@dataclass(frozen=True)
+class GuestAccessTokenStatus:
+    """Whether the stay has a live portal link, and since when (`guest-link-delivery` R2).
+
+    **Two fields, and the absence of a third is the requirement.** R2.2 forbids this surface
+    from carrying the token or its hash, and the way that is kept true is the same way
+    `StayInfo` and `GuestSummary` keep their own promises: there is no field to leak. A caller
+    holding this object cannot reach `token_hash` even by mistake, so R2.2 does not depend on
+    every future serialiser of a `GuestAccessToken` remembering to exclude it.
+
+    `issued_at` is `None` exactly when `is_live` is `False` — one nullable field rather than
+    two independent ones, because "not live but issued at 10:04" describes nothing.
+    """
+
+    is_live: bool
+    issued_at: datetime | None
+
+
+class GetGuestAccessTokenStatusUseCase:
+    """Does this stay have a live portal link, and since when (R2.1, R2.2, R2.3)?
+
+    The read that `GuestAccessTokenRepository`'s own docstring spent a paragraph refusing to
+    allow, and it is allowed now for the reason that docstring anticipated: what comes back is
+    presence and an instant, never the credential. Minting is how an operator gets a link;
+    this is how they find out they already have one — which is what stops "is there a link?"
+    from being answered by pressing the button that replaces it.
+
+    **The 404 comes from the stay, not from the token.** `find_live_for_reservation` collapses
+    "no token", "only a revoked token" and "another tenant's token" into the same `None`, so it
+    cannot distinguish a foreign reservation from an unminted one — which is correct for a
+    repository and useless for tenant isolation, because `False` would then be the answer for a
+    neighbour's stay as well as for your own. `PortalStayLocator.find` runs first and refuses
+    with `ReservationNotFoundError` (security rule 1), exactly as
+    `Issue`/`RevokeGuestAccessTokenUseCase` already do, so a foreign reservation is a `404` here
+    and not a truthful-looking `is_live: false`.
+    """
+
+    def __init__(
+        self,
+        *,
+        tokens: GuestAccessTokenRepository,
+        stays: PortalStayLocator,
+    ) -> None:
+        self._tokens = tokens
+        self._stays = stays
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, reservation_id: uuid.UUID
+    ) -> GuestAccessTokenStatus:
+        """Presence and issuance instant. No `actor`, no `now`, and nothing is written."""
+        stay = await self._stays.find(tenant_id, reservation_id)
+        if stay is None:
+            raise ReservationNotFoundError()
+
+        live = await self._tokens.find_live_for_reservation(tenant_id, reservation_id)
+        if live is None:
+            return GuestAccessTokenStatus(is_live=False, issued_at=None)
+        return GuestAccessTokenStatus(is_live=True, issued_at=live.issued_at)
+
+
+class SendGuestAccessTokenUseCase:
+    """Mint a portal link and email it to the guest, in one transaction (R3, design D4).
+
+    **One transaction, one commit, and the composition is what makes that hard.** This use case
+    reuses `IssueGuestAccessTokenUseCase` rather than reimplementing revoke-and-replace, so
+    there are two use cases over one session and exactly one of them may end it. The wiring says
+    which: the composed mint is constructed with `CallerOwnedUnitOfWork`
+    (`app/core/unit_of_work.py`), whose `commit()` does nothing, and the only real
+    `SqlAlchemyUnitOfWork` is this class's — committed once, at the end, after the token, its
+    issue audit row, the `NotificationLog` and the send audit row have all been written.
+
+    An earlier draft of this design let the mint commit on its own and opened a second
+    transaction for the notification row. That is the exact shape `CallerOwnedUnitOfWork` was
+    built to prevent — a crash between the two commits leaves a live token with no
+    `notification_logs` row and no `GUEST_ACCESS_TOKEN_SENT` audit row, so R3.3 and R3.6 would
+    hold only for requests that happened not to be interrupted. It is written here as well as in
+    the design because the wiring is what enforces it, and a reader of this class alone would
+    otherwise not know that `self._issue`'s unit of work is a no-op by construction and not by
+    luck.
+
+    **The adapter is called mid-transaction, before the commit**, mirroring
+    `RequestPasswordResetUseCase` (`auth/application/recovery.py`) field for field. That is not
+    an oversight: the row's `status` has to be the adapter's real answer (R3.3 forbids
+    `PENDING`, because a `PENDING` row is the dispatcher's queue and it would re-send using the
+    *stored*, link-free body), so the answer must arrive while the transaction is still open.
+
+    **What that costs, stated rather than discovered**: if the commit fails after a successful
+    send, the guest holds a link to a token that was rolled back. The link then simply does not
+    authorise, and the operator sees an error and can retry — the failure is visible and
+    recoverable. The opposite arrangement (commit, then send) trades that for an invisible one:
+    a committed live token with no record of whether anybody was ever told about it. R3.5 picks
+    this side explicitly — a delivery failure must not roll the mint back — and it is the same
+    choice `auth-account-recovery` made for the same reason.
+
+    **Two texts, from two functions, and mixing them up is the failure mode.**
+    `render_guest_link_delivery_email` builds what the guest receives, with the real portal URL
+    in it. `render_stored_guest_link_notice` builds what the row keeps: fixed prose, no link, no
+    token, no identifiers — rule 11 of `steering/security.md` gives
+    `notification_logs.subject`/`body` one exception in the whole codebase and a live portal URL
+    is not it. What identifies the stay travels on the row itself, as
+    `related_type`/`related_id`.
+    """
+
+    def __init__(
+        self,
+        *,
+        issue: IssueGuestAccessTokenUseCase,
+        tokens: GuestAccessTokenRepository,
+        stays: PortalStayLocator,
+        guests: GuestRepository,
+        notifications: NotificationLogRepository,
+        adapters: dict[NotificationChannel, NotificationAdapter],
+        audit: AuditLogRepository,
+        uow: UnitOfWork,
+        frontend_base_url: str,
+    ) -> None:
+        self._issue = issue
+        self._tokens = tokens
+        self._stays = stays
+        self._guests = guests
+        self._notifications = notifications
+        self._adapters = adapters
+        self._audit = GuestAuditWriter(audit)
+        self._uow = uow
+        self._frontend_base_url = frontend_base_url
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        reservation_id: uuid.UUID,
+        actor: GuestActor,
+        now: datetime,
+    ) -> bool:
+        """Whether the adapter accepted the mail. The token is minted either way (R3.5).
+
+        The cleartext token is **not** returned. R1 keeps the two operator actions distinct —
+        "copy it yourself" is the existing `POST`, "email it to the guest" is this one — and an
+        operator who chose to send has no reason to also hold the value in their own browser.
+        """
+        stay = await self._stays.find(tenant_id, reservation_id)
+        if stay is None:
+            # Same refusal as the mint and revoke siblings: a stay of another tenant is
+            # indistinguishable from one that does not exist (security rule 1).
+            raise ReservationNotFoundError()
+
+        # R3.2, and it is checked **here** rather than inside the mint. Two reasons: the mint
+        # has no business knowing what a guest or an email is (that is why this is a
+        # composition and not a `deliver: bool` flag on it), and the refusal must land before
+        # anything is written — a `422` that had already replaced the stay's live token would
+        # cut off a guest mid-session to tell the operator to go and fill in an address.
+        recipient = await self._recipient(tenant_id, stay)
+
+        # Nothing is durable yet: `self._issue`'s unit of work is a `CallerOwnedUnitOfWork`.
+        token = await self._issue.execute(
+            tenant_id=tenant_id,
+            reservation_id=reservation_id,
+            actor=actor,
+            now=now,
+        )
+        # The audit row below needs the new token's **id**, and `execute` returns the cleartext
+        # value and nothing else. Reading it back through this class's own port is the cheap
+        # answer; the alternative — widening the mint's return to a `(token, id)` pair — would
+        # put the credential and its identifier in one tuple for every caller of that use case,
+        # the existing `POST` route included, to serialise.
+        #
+        # The read runs on the same still-open session, so it sees the row the mint just added:
+        # the `SELECT` autoflushes the pending `INSERT` first. And the digest is compared rather
+        # than trusted, because `find_live_for_reservation`'s predicate is "the live one for
+        # this stay" — under a concurrent issue that is not necessarily *ours*, and an audit row
+        # naming somebody else's credential would be worse than no audit row at all. A mismatch
+        # (or a miss) is a broken invariant, so it raises before the commit and the whole
+        # operation — token included — rolls back rather than landing half-recorded.
+        minted = await self._tokens.find_live_for_reservation(tenant_id, reservation_id)
+        if minted is None or minted.token_hash != hash_guest_token(token):
+            raise RuntimeError(
+                "the token just minted for this reservation is not the live one; "
+                "refusing to audit a credential this request did not create"
+            )
+
+        portal_url = f"{self._frontend_base_url.rstrip('/')}/guest/{token}"
+        subject, body = render_guest_link_delivery_email(
+            recipient.preferred_language, portal_url
+        )
+        result = await self._deliver(recipient.email, subject, body)
+
+        stored_subject, stored_body = render_stored_guest_link_notice(
+            recipient.preferred_language
+        )
+        await self._notifications.add(
+            tenant_id,
+            NotificationLog(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                # `None`, and the column allows it: the recipient is a guest, not a `User`.
+                # Pointing this at the operator who pressed the button would say the platform
+                # emailed them.
+                recipient_user_id=None,
+                recipient_contact=recipient.email,
+                channel=NotificationChannel.EMAIL,
+                notification_type=NotificationType.GUEST_PORTAL_LINK_DELIVERED.value,
+                created_at=now,
+                updated_at=now,
+                # The STORED texts (R3.4): constants, no link, no token, no identifiers.
+                subject=stored_subject,
+                body=stored_body,
+                # Never `PENDING` (R3.3). The adapter has already answered, and a `PENDING`
+                # row would be picked up by the dispatcher on the next tick and delivered
+                # using the *stored* body — mailing the guest a notice with no link in it.
+                status=(
+                    NotificationStatus.SENT if result.delivered else NotificationStatus.FAILED
+                ),
+                attempts=1,
+                sent_at=now if result.delivered else None,
+                # R3.5's "structured error code": a `NotificationErrorCode`, never provider
+                # text, which is what the return type already guarantees.
+                last_error=(
+                    None if result.delivered else result.error_code.value  # type: ignore[union-attr]
+                ),
+                # R4.2 — no SLA. A link the operator chose to send has no promise to breach,
+                # so `escalation_for` returns `None` and the SLA job leaves the row alone.
+                sla_deadline_at=None,
+                # R3.4: what identifies the stay lives here, not in the rendered text.
+                related_type="reservation",
+                related_id=reservation_id,
+            ),
+        )
+
+        await self._audit.record(
+            tenant_id=tenant_id,
+            action=audit_actions.GUEST_ACCESS_TOKEN_SENT,
+            entity_type=audit_actions.ENTITY_GUEST_ACCESS_TOKEN,
+            # The **new** token, matching what the issue row this same request wrote already
+            # names, so `ix_audit_logs_tenant_id_entity_type_entity_id` still answers
+            # "everything that happened to this credential" — now including the fact that it
+            # was mailed to somebody. Pointing it at the reservation would mix two kinds of id
+            # under one `entity_type` and make that index useless.
+            entity_id=minted.id,
+            actor=actor,
+            # **Empty, and that is the whole diff.** `AuditLogFactory.build` turns an empty
+            # change set into `changes = NULL`, which is the honest record here: a send moves
+            # no column of `guest_access_tokens`, so there is nothing to diff. The two fields
+            # `AUDITABLE_FIELDS["GUEST_ACCESS_TOKEN"]` allows — `token_hash` and `revoked_at` —
+            # would both be lies (`redacted("token_hash")` claims the digest changed), and an
+            # invented `"delivered"` key is exactly what the allowlist refuses: an audited
+            # field must be a real column of the entity, or the column becomes a free-form
+            # payload slot.
+            #
+            # R3.6 is still satisfied, because it asks for the **attempt** to be audited, not
+            # for a diff: `action` says what happened, `entity_id` says to which credential,
+            # `actor`/`actor_ip` say by whom (rule 9 — an authenticated operator, not one of
+            # the documented no-actor exceptions), and `now` says when. Whether the mail
+            # actually left is on the `NotificationLog` this same transaction wrote, keyed to
+            # the same reservation — one fact, one row, and no second copy to drift.
+            changes=ChangeSet(audit_actions.ENTITY_GUEST_ACCESS_TOKEN),
+            now=now,
+        )
+
+        # The one commit of the operation. Everything above — the revoked predecessor, the new
+        # token, its issue audit row, the notification row and the row just above — lands
+        # together or not at all.
+        await self._uow.commit()
+
+        logger.info(
+            "guests.portal_link_sent",
+            extra={
+                "delivered": result.delivered,
+                # No address, no token, no URL: an application log is one more place rule 3's
+                # values must not appear, and the reservation id is what an operator needs to
+                # find the row anyway.
+                "reservation_id": str(reservation_id),
+            },
+        )
+        return result.delivered
+
+    async def _recipient(self, tenant_id: uuid.UUID, stay: PortalStay) -> "_Recipient":
+        """The guest to mail, or `GuestContactMissingError` — **before** anything is minted.
+
+        Both refusals are `422` and they carry different messages, because the operator's next
+        action differs: link a guest, or give the linked guest an address. That is safe to
+        distinguish here in a way it would not be one layer out — the stay has already resolved
+        inside the acting tenant, so neither message describes a row the caller may not read.
+        """
+        if stay.guest_id is None:
+            raise GuestContactMissingError(GuestContactMissingError.NO_GUEST)
+
+        guest = await self._guests.get(tenant_id, stay.guest_id)
+        if guest is None:
+            # `reservations.guest_id` is a composite foreign key into this tenant's guests, so
+            # this is unreachable short of a broken invariant. It answers `422` rather than
+            # `GuestNotFoundError`'s `404` on purpose: on this route a `404` means "this
+            # reservation is not yours", and it is — saying so would send the operator looking
+            # for a permissions problem that does not exist.
+            raise GuestContactMissingError(GuestContactMissingError.NO_EMAIL)
+
+        email = (guest.email or "").strip()
+        if not email:
+            raise GuestContactMissingError(GuestContactMissingError.NO_EMAIL)
+
+        # Stripped, because a stored address with surrounding whitespace is the same address
+        # and the adapter should not be the one to find out.
+        return _Recipient(email=email, preferred_language=guest.preferred_language)
+
+    async def _deliver(
+        self, recipient: str, subject: str, body: str
+    ) -> NotificationResult:
+        """Hand the mail to the `EMAIL` adapter, and ALWAYS come back with a result.
+
+        The same two collapses `RequestPasswordResetUseCase._deliver` makes, for the same
+        reasons — a missing adapter is `NO_ADAPTER_FOR_CHANNEL` rather than a `FAILED` row with
+        no reason, and an adapter that raises (breaking its own "never raise for a delivery
+        failure" contract) becomes a value here rather than a `500`.
+
+        The `500` matters more on this route than on the anonymous one: an exception escaping
+        past this point would abandon the transaction, so a mint the operator has already been
+        charged for would silently vanish along with every record that it happened — which is
+        precisely the state R3.5 exists to forbid.
+
+        **No `exc_info`.** The exception's text on this path carries the recipient by
+        construction (`smtplib.SMTPRecipientsRefused` is keyed by address), and a guest's email
+        is rule 4 PII; the class name and the error code are what an operator needs.
+        """
+        adapter = self._adapters.get(NotificationChannel.EMAIL)
+        if adapter is None:
+            logger.warning(
+                "guests.portal_link_no_email_adapter",
+                extra={"channel": NotificationChannel.EMAIL.value},
+            )
+            return NotificationResult.failure(NotificationErrorCode.NO_ADAPTER_FOR_CHANNEL)
+        try:
+            return await adapter.send(
+                recipient_contact=recipient,
+                subject=subject,
+                body=body,
+                channel=NotificationChannel.EMAIL,
+            )
+        except Exception as exc:
+            logger.warning(
+                "guests.portal_link_adapter_raised",
+                extra={"adapter_error": type(exc).__name__},
+            )
+            return NotificationResult.failure(NotificationErrorCode.ADAPTER_ERROR)
+
+
+@dataclass(frozen=True)
+class _Recipient:
+    """The two things a send needs about the guest: where to write, and in which language.
+
+    Private and narrow rather than passing `GuestSummary` around, so the branch that resolved
+    the address is the only place a `None`/blank `email` can exist — past `_recipient`, the
+    type says there is one.
+    """
+
+    email: str
+    preferred_language: str

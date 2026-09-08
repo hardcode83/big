@@ -209,16 +209,25 @@ def test_the_token_row_has_no_expiry_column() -> None:
 # --- The ports themselves -------------------------------------------------------------
 
 
-def test_the_token_repository_offers_no_way_to_list_or_read_tokens() -> None:
-    """Interface segregation, and a security boundary (D2, D14).
+def test_the_token_repository_offers_no_way_to_list_tokens() -> None:
+    """Interface segregation, and a security boundary (D2, D14) — narrowed by
+    `guest-link-delivery` D3, which is the change this port's own docstring anticipated.
 
-    An operator has no read to perform: the row holds only a digest, and rule 3(a)'s named
-    exception returns the cleartext exactly once at issue time. A port with a listing would
-    be the open door for whichever change comes next.
+    Still no `list`: an operator has no way to enumerate every token that ever existed, and
+    rule 3(a)'s named exception still returns the cleartext exactly once, at issue time. What
+    changed is that the operator surface may now also ask "does this stay have a live token,
+    and since when" via `find_live_for_reservation` — a presence question, not a listing, and
+    one that never returns `token_hash` (D3).
     """
     methods = {name for name in vars(GuestAccessTokenRepository) if not name.startswith("_")}
 
-    assert methods == {"find_live_by_token_hash", "add", "revoke_live_for_reservation"}
+    assert methods == {
+        "find_live_by_token_hash",
+        "add",
+        "revoke_live_for_reservation",
+        "find_live_for_reservation",
+    }
+    assert "list" not in methods
 
 
 def test_the_stay_reader_offers_exactly_one_read() -> None:

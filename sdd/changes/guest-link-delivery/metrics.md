@@ -1,0 +1,10 @@
+# Metrics: guest-link-delivery
+
+| date | phase | models | tokens in | tokens out | tokens cache | cost USD (est) | notes |
+|---|---|---|---|---|---|---|---|
+| 2026-09-06 | new | claude-sonnet-5 | 44 | 15106 | 3263396 | 1.0815 |  |
+| 2026-09-06 | design | claude-opus-5 claude-sonnet-5 | 15410 | 61904 | 13669021 | 6.5247 | incl. subagents |
+| 2026-09-06 | tasks | claude-sonnet-5 | 22 | 11817 | 3142513 | 0.8278 |  |
+| 2026-09-06 | run | claude-haiku-4-5-20251001 claude-opus-5[1m] claude-sonnet-5 | 248551 | 579002 | 300014839 | 94.4656 | incl. subagents |
+| 2026-09-06 | review | claude-haiku-4-5-20251001 claude-opus-5[1m] claude-sonnet-5 | 780 | 128767 | 12440796 | 5.3934 | incl. subagents |
+| 2026-09-08 | ship | claude-fable-5-1 claude-sonnet-5 | 276 | 23641 | 9809956 | 8.5386 | incl. subagents |

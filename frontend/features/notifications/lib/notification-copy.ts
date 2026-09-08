@@ -34,6 +34,7 @@ export const NOTIFICATION_COPY_KEYS: Record<NotificationType, string> = {
   REVIEW_RESPONSE_APPROVED: "notifications:types.REVIEW_RESPONSE_APPROVED",
   CLEANING_TASK_MESSAGE: "notifications:types.CLEANING_TASK_MESSAGE",
   INCIDENT_MESSAGE: "notifications:types.INCIDENT_MESSAGE",
+  GUEST_PORTAL_LINK_DELIVERED: "notifications:types.GUEST_PORTAL_LINK_DELIVERED",
 };
 
 /** The translated generic of R4.3, for a value the interface does not know. */
