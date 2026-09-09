@@ -2,6 +2,7 @@ import type { ApiClient } from "@/lib/api";
 import type { components } from "@/lib/api/generated/openapi";
 
 import type {
+  GuestAccessTokenStatusDto,
   GuestSummaryDto,
   ReservationDetailDto,
   ReservationFilters,
@@ -12,6 +13,12 @@ import type {
 type ReservationResponse = components["schemas"]["ReservationResponse"];
 type ReservationDetailResponse = components["schemas"]["ReservationDetailResponse"];
 type GuestSummaryResponse = components["schemas"]["GuestSummaryResponse"];
+type GuestAccessTokenStatusResponse =
+  components["schemas"]["GuestAccessTokenStatusResponse"];
+type GuestAccessTokenIssuedResponse =
+  components["schemas"]["GuestAccessTokenIssuedResponse"];
+type GuestAccessTokenSentResponse =
+  components["schemas"]["GuestAccessTokenSentResponse"];
 
 /** Map `GuestSummaryResponse` (snake_case, no PII) to the UI DTO (camelCase). */
 function mapGuestSummary(value: GuestSummaryResponse): GuestSummaryDto {
@@ -41,6 +48,9 @@ function mapReservationSummary(value: ReservationResponse): ReservationSummaryDt
     currency: value.currency,
     grossAmount: value.gross_amount,
     paymentStatus: value.payment_status,
+    propertyName: value.property_name ?? null,
+    propertyInternalCode: value.property_internal_code ?? null,
+    guestFullName: value.guest_full_name ?? null,
   };
 }
 
@@ -49,18 +59,7 @@ function mapReservationDetail(
   value: ReservationDetailResponse,
 ): ReservationDetailDto {
   return {
-    id: value.id,
-    propertyId: value.property_id,
-    status: value.status,
-    checkInDate: value.check_in_date,
-    checkOutDate: value.check_out_date,
-    nights: value.nights,
-    totalGuests: value.total_guests,
-    guestId: value.guest_id,
-    channel: value.channel,
-    currency: value.currency,
-    grossAmount: value.gross_amount,
-    paymentStatus: value.payment_status,
+    ...mapReservationSummary(value),
     checkInTime: value.check_in_time,
     checkOutTime: value.check_out_time,
     adults: value.adults,
@@ -146,5 +145,67 @@ export class HttpReservationsSource {
       { pathParams: { reservation_id: reservationId } },
     );
     return mapReservationDetail(response as ReservationDetailResponse);
+  }
+
+  /**
+   * Read whether the stay currently has a live guest portal token, and since
+   * when (proposal R1.1, R2). Never returns the token or its digest — only
+   * presence and issuance instant, mirroring the backend response one-to-one.
+   */
+  async getGuestAccessTokenStatus(
+    _tenantId: string,
+    reservationId: string,
+  ): Promise<GuestAccessTokenStatusDto> {
+    const response = await this.client.request(
+      "/api/v1/reservations/{reservation_id}/guest-access-token",
+      { pathParams: { reservation_id: reservationId } },
+    );
+    const status = response as GuestAccessTokenStatusResponse;
+    return { isLive: status.is_live, issuedAt: status.issued_at };
+  }
+
+  /**
+   * Mint a fresh portal token for the stay (proposal R1.2). Replaces any live
+   * token, same as the backend's own issuance contract. Returns the cleartext
+   * value exactly once — the caller (`useIssueGuestAccessToken`) is
+   * responsible for never persisting it beyond the one-time reveal.
+   */
+  async issueGuestAccessToken(
+    _tenantId: string,
+    reservationId: string,
+  ): Promise<string> {
+    const response = await this.client.request(
+      "/api/v1/reservations/{reservation_id}/guest-access-token",
+      { method: "POST", pathParams: { reservation_id: reservationId } },
+    );
+    return (response as GuestAccessTokenIssuedResponse).token;
+  }
+
+  /** Revoke the stay's live portal token, if any (proposal R1.3). Idempotent. */
+  async revokeGuestAccessToken(
+    _tenantId: string,
+    reservationId: string,
+  ): Promise<void> {
+    await this.client.request(
+      "/api/v1/reservations/{reservation_id}/guest-access-token",
+      { method: "DELETE", pathParams: { reservation_id: reservationId } },
+    );
+  }
+
+  /**
+   * Mint a fresh token and email the portal link to the guest (proposal R3).
+   * Returns `delivered` — the adapter's acceptance, never the cleartext token
+   * (design D5): "copy it yourself" and "email it to the guest" stay two
+   * distinct operator actions.
+   */
+  async sendGuestAccessTokenEmail(
+    _tenantId: string,
+    reservationId: string,
+  ): Promise<boolean> {
+    const response = await this.client.request(
+      "/api/v1/reservations/{reservation_id}/guest-access-token/send",
+      { method: "POST", pathParams: { reservation_id: reservationId } },
+    );
+    return (response as GuestAccessTokenSentResponse).delivered;
   }
 }

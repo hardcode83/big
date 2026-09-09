@@ -52,6 +52,44 @@ class ReservationNotFoundError(GuestDomainError):
         super().__init__("Reservation does not exist")
 
 
+class GuestContactMissingError(GuestDomainError):
+    """There is nobody to email the portal link to (`guest-link-delivery` R3.2).
+
+    Two causes, **told apart on purpose**, which is the opposite of what `GuestNotFoundError`
+    one class up does — and the difference is the whole reason this is a separate exception.
+    That one collapses "absent" and "belongs to a neighbour" because separating them would
+    answer a question about another tenant's data. This one is raised only *after* the stay has
+    already resolved inside the acting tenant, so both messages describe rows the caller is
+    entitled to read, and R3.2 asks for a refusal the operator can act on: "link this stay to a
+    guest" and "put an address on the guest you already linked" are two different chores.
+
+    It is not `GuestNotFoundError` for the same reason it is not `ReservationNotFoundError`:
+    both of those mean `404`, and on the send route a `404` means "this reservation is not
+    yours". Nothing here is missing in that sense — the reservation is there and is the
+    caller's; it is simply not yet in a state that can receive a link. That is a `422`.
+
+    Raised **before anything is minted** (design D4 step 2). A caller that sees it has changed
+    no state at all, so fixing the guest and retrying is a clean operation rather than a
+    second token on top of an orphaned first one.
+    """
+
+    #: The stay has no `guest_id` yet — legal before check-in, since `POST /reservations`
+    #: allows a booking without a guest (`guest-portal-api` OQ3).
+    NO_GUEST = (
+        "This reservation has no guest linked yet, so there is no address to send the "
+        "portal link to. Link a guest with an email address and try again."
+    )
+    #: The guest exists and has no usable address. Also covers a `guest_id` that resolves to
+    #: nothing — see `SendGuestAccessTokenUseCase` for why that folds in here.
+    NO_EMAIL = (
+        "The guest linked to this reservation has no email address on file, so the portal "
+        "link cannot be delivered. Add an email address to the guest and try again."
+    )
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
 class GuestPortalUnauthorised(GuestDomainError):
     """The presented portal token does not authorise anything (`guest-portal-api` R2.2, D5).
 

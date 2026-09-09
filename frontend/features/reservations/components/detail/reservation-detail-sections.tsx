@@ -10,6 +10,7 @@ import type {
   ReservationDetailDto,
   ReservationStatus,
 } from "../../data";
+import { GuestPortalLinkCard } from "./guest-portal-link-card";
 
 /**
  * Pure presentational sub-components for the detail view. They receive the
@@ -40,6 +41,30 @@ export function DetailHeader({
       <span className="text-sm font-medium">{t(`status.${status}`)}</span>
       <span className="text-xs text-muted-foreground">{channel}</span>
     </header>
+  );
+}
+
+export function DetailPropertyBlock({
+  propertyInternalCode,
+  propertyName,
+}: {
+  propertyInternalCode: string | null;
+  propertyName: string | null;
+}) {
+  const { t } = useTranslation("reservations");
+  return (
+    <section aria-label={t("fields.property")}>
+      <dl className="grid grid-cols-2 gap-2 text-sm">
+        <div>
+          <dt className="text-muted-foreground">{t("fields.propertyCode")}</dt>
+          <dd>{propertyInternalCode ?? "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">{t("fields.propertyName")}</dt>
+          <dd>{propertyName ?? "—"}</dd>
+        </div>
+      </dl>
+    </section>
   );
 }
 
@@ -246,6 +271,12 @@ export function DetailNotesBlock({
 export function composeDetailSections(detail: ReservationDetailDto) {
   return {
     header: <DetailHeader id={detail.id} status={detail.status} channel={detail.channel} />,
+    property: (
+      <DetailPropertyBlock
+        propertyInternalCode={detail.propertyInternalCode}
+        propertyName={detail.propertyName}
+      />
+    ),
     stay: (
       <DetailStayBlock
         checkInDate={detail.checkInDate}
@@ -276,6 +307,10 @@ export function composeDetailSections(detail: ReservationDetailDto) {
       />
     ),
     guest: <DetailGuestBlock guest={detail.guest} />,
+    // Rendered after `sections.guest` in `ReservationDetailView` (proposal
+    // R1.1, design D7). `GuestPortalLinkCard` owns its own permission gate
+    // and data fetching; this composition point only threads the id.
+    guestPortalLink: <GuestPortalLinkCard reservationId={detail.id} />,
     notes: (
       <DetailNotesBlock
         internalNotes={detail.internalNotes}

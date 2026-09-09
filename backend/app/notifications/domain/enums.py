@@ -66,6 +66,12 @@ class NotificationType(str, enum.Enum):
     # policy would mark the row breached and escalate to nobody.
     OWNER_APPROVAL_APPROVED = "OWNER_APPROVAL_APPROVED"
     OWNER_APPROVAL_REJECTED = "OWNER_APPROVAL_REJECTED"
+    # `guest-link-delivery` R4.1. The same kind of divergence as the three above: an operator
+    # choosing to send the guest their portal link is not one of PRD §14's sixteen operational
+    # events (cleanings, incidents, technicians, guests-as-recipients-of-price-or-SLA-events,
+    # prices, SLA). No `escalation_for` entry (R4.2) — a link the operator chose to send has no
+    # SLA to breach, unlike the cleaning/technician events the catalogue was built around.
+    GUEST_PORTAL_LINK_DELIVERED = "GUEST_PORTAL_LINK_DELIVERED"
 
 
 class NotificationChannel(str, enum.Enum):

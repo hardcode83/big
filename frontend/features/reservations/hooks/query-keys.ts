@@ -9,7 +9,9 @@ import type { ReservationFilters } from "../data";
  * accident.
  *
  * The list key takes the filters object directly (precedent:
- * `dashboardKeys.propertyTimeline(tenantId, propertyId, filters)`). The
+ * `dashboardKeys.propertyTimeline(tenantId, propertyId, filters, locale)` —
+ * the filters-object part of that shape; this resource has no locale
+ * argument to carry). The
  * caller is responsible for passing an object whose key order is stable across
  * renders — that is what guarantees two equivalent renders produce the same
  * key and TanStack Query does not invalidate.
@@ -19,4 +21,12 @@ export const reservationsKeys = {
     tenantScopedKey(tenantId, "reservations-list", filters),
   detail: (tenantId: string, reservationId: string): QueryKey =>
     tenantScopedKey(tenantId, "reservations-detail", reservationId),
+  /**
+   * The guest portal token's live status for one reservation (proposal R1.1 /
+   * R2, design D7). Every mint/revoke/send mutation invalidates exactly this
+   * key on success — never a broader prefix, since the status of one
+   * reservation's token has no bearing on any other reservation's.
+   */
+  guestAccessTokenStatus: (tenantId: string, reservationId: string): QueryKey =>
+    tenantScopedKey(tenantId, "guest-access-token-status", reservationId),
 } as const;

@@ -30,6 +30,11 @@ import type { components } from "@/lib/api/generated/openapi";
  * sees the `/approvals` queue (gated by the backend's own `READ_OWNER_APPROVALS`,
  * held by both roles) but never the approve/reject controls, mirroring
  * `policy.py`'s `RESPOND_OWNER_APPROVALS` bundle (owner-only there too).
+ *
+ * `guest-link-delivery` D7 adds `MANAGE_GUEST_ACCESS_TOKENS`, gating
+ * `GuestPortalLinkCard` on `/reservations/[id]`: the same two roles the
+ * backend policy already grants it (`guest-portal-api` D14 — `TENANT_OWNER`
+ * and `PROPERTY_MANAGER`, nobody else).
  */
 type UserRole = components["schemas"]["UserRole"];
 
@@ -38,7 +43,8 @@ export type Permission =
   | "MANAGE_PRICE_RECOMMENDATIONS"
   | "EXECUTE_INCIDENTS"
   | "MANAGE_CONVERSATIONS"
-  | "RESPOND_OWNER_APPROVALS";
+  | "RESPOND_OWNER_APPROVALS"
+  | "MANAGE_GUEST_ACCESS_TOKENS";
 
 export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [],
@@ -52,12 +58,17 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   // backend was granting them.
   // `MANAGE_CONVERSATIONS` is the other side of that rule (messaging-ai D17):
   // the owner reads but does not write, so she is intentionally absent here.
-  TENANT_OWNER: ["MANAGE_PRICE_RECOMMENDATIONS", "RESPOND_OWNER_APPROVALS"],
+  TENANT_OWNER: [
+    "MANAGE_PRICE_RECOMMENDATIONS",
+    "RESPOND_OWNER_APPROVALS",
+    "MANAGE_GUEST_ACCESS_TOKENS",
+  ],
   PROPERTY_MANAGER: [
     "MANAGE_CLEANING_TASKS",
     "MANAGE_PRICE_RECOMMENDATIONS",
     "EXECUTE_INCIDENTS",
     "MANAGE_CONVERSATIONS",
+    "MANAGE_GUEST_ACCESS_TOKENS",
   ],
   CLEANER: [],
   TECHNICIAN: [],

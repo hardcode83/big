@@ -1,0 +1,47 @@
+name: version-parity
+
+# La paridad de versión entre `VERSION`, `backend/pyproject.toml` y `frontend/package.json`,
+# comprobada en cada Pull Request SIN filtro de área. Antes de `ci-pr-gates-optimization` esta
+# comprobación corría siempre dentro de `frontend-tests` (job `provenance-contract`); cuando ese
+# workflow pasó a ser condicional por área (`frontend-tests-detect`), sus inputs `VERSION` y
+# `backend/pyproject.toml` dejaron de estar cubiertos por ningún gate always-run —un bump de
+# versión que no tocara `frontend/**` recibía un `**OMITIDA**` verde sin comprobar la paridad
+# (design D1.1 SEC-2, proposal R1.8)—. Este gate propio, always-run y sin `paths:`, cierra ese
+# fail-open. La copia dentro de `frontend-tests-suite` se conserva como belt-and-suspenders.
+#
+# **Sin `paths:` en `on:`** (mismo motivo que el resto de required checks del repo,
+# `specs/backend-ci.md`): un required check con filtro de rutas no produce check alguno en los PR
+# que no las tocan, y GitHub deja esos PR esperando para siempre uno que no llegará. Aquí, además,
+# el punto entero es correr SIEMPRE.
+#
+# **Sin `uv`/`setup-uv`, sin servicios, sin secrets**: `scripts/check-version-parity.py` es stdlib
+# puro (`json`, `tomllib`, `pathlib`) y corre con el `python3` del runner de `ubuntu-latest`.
+#
+# El check run toma el nombre del JOB. `version-parity` es por tanto el contexto estable marcable
+# como obligatorio; no se renombra sin romper cualquier selección de required check.
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: version-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  version-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Paridad de versión (VERSION ↔ pyproject ↔ package.json)
+        run: make check-version-parity

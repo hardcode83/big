@@ -89,7 +89,7 @@ export SEED_TECHNICIAN_EMAIL='josegascon+technician@gmail.com'
 export SEED_TECHNICIAN_PASSWORD="$PW"
 
 cd /opt/actions-runner/_work/AutoHostAI/AutoHostAI
-docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml exec -T \
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml exec -T \
   -e BOOTSTRAP_TENANT_NAME \
   -e SEED_CLEANER_NAME -e SEED_CLEANER_EMAIL -e SEED_CLEANER_PASSWORD \
   -e SEED_TECHNICIAN_NAME -e SEED_TECHNICIAN_EMAIL -e SEED_TECHNICIAN_PASSWORD \
@@ -234,9 +234,9 @@ paz. El registro de auditoría es justamente lo que no se borra para dejar limpi
 Si el entorno no tiene nada que salvar, sale más barato y más seguro tirar la base y rehacerla:
 
 ```bash
-docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml down
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml down
 docker volume rm <proyecto>_postgres_data
-docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml up -d
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml up -d
 # y después: alembic upgrade head, bootstrap, seed-demo
 ```
 
@@ -313,7 +313,7 @@ síncrona, así que se invocan directamente y además devuelven su informe, que 
 transición se rechazó y por qué.
 
 ```bash
-docker compose --env-file "$HOME/.autohostai-dev-runtime.env" -f docker-compose.deploy.yml exec -T backend python - <<'JOBS'
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml exec -T backend python - <<'JOBS'
 from app.scheduler.tasks import check_checkin_windows, mark_occupied_estimated, process_checkouts
 print(check_checkin_windows())
 print(mark_occupied_estimated())

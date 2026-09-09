@@ -39,6 +39,7 @@ export const NOTIFICATION_COPY_KEYS: Record<NotificationType, string> = {
   INCIDENT_MESSAGE: "notifications:types.INCIDENT_MESSAGE",
   OWNER_APPROVAL_APPROVED: "notifications:types.OWNER_APPROVAL_APPROVED",
   OWNER_APPROVAL_REJECTED: "notifications:types.OWNER_APPROVAL_REJECTED",
+  GUEST_PORTAL_LINK_DELIVERED: "notifications:types.GUEST_PORTAL_LINK_DELIVERED",
 };
 
 /** The translated generic of R4.3, for a value the interface does not know. */

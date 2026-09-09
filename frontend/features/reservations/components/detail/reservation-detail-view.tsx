@@ -84,9 +84,11 @@ export function ReservationDetailView({
         {tNav("routes.reservation-detail.title")}
       </h1>
       {sections.header}
+      {sections.property}
       {sections.stay}
       {sections.party}
       {sections.guest}
+      {sections.guestPortalLink}
       {sections.financial}
       {sections.payment}
       {sections.notes}

@@ -71,7 +71,10 @@ tocar la base de datos a mano.
 
 - WHEN se envía a `POST /api/v1/auth/login` un email y una contraseña que corresponden a
   un usuario `ACTIVE` de un tenant `ACTIVE`, THE SYSTEM SHALL responder `200` con token de
-  acceso, token de refresh, tipo de token y la vida del token de acceso en segundos.
+  acceso, tipo de token y la vida del token de acceso en segundos en el cuerpo, y emitir el
+  token de refresh **exclusivamente** vía `Set-Cookie` (`auth-session-persistence`, ver
+  «Transporte del refresh token: cookie, no cuerpo» más abajo) — el cuerpo SHALL NOT llevar
+  nunca un campo `refresh_token`.
 - WHEN un login tiene éxito, THE SYSTEM SHALL actualizar `last_login_at` del usuario con
   el instante de la autenticación en UTC, mediante un `UPDATE` de esa única columna.
 - IF un login falla por cualquier motivo, THEN THE SYSTEM SHALL NOT modificar
@@ -121,9 +124,20 @@ tocar la base de datos a mano.
 
 ### Renovación con rotación, cierre de sesión y usuario actual
 
-- WHEN se presenta un token de refresh válido y utilizable a `POST /api/v1/auth/refresh`,
-  THE SYSTEM SHALL marcarlo como usado, emitir un par nuevo y persistir la sesión hija con
-  el mismo `family_id` y `parent_id` apuntando a la consumida.
+- WHEN se presenta a `POST /api/v1/auth/refresh` un token de refresh válido y utilizable —
+  leído **exclusivamente** de la cookie `autohostai.session.refresh`, nunca de un campo
+  `refresh_token` en el cuerpo, que si se envía se ignora en silencio
+  (`auth-session-persistence`) —, THE SYSTEM SHALL marcarlo como usado, emitir un par nuevo
+  y persistir la sesión hija con el mismo `family_id` y `parent_id` apuntando a la
+  consumida. La respuesta rota la cookie del mismo modo que el login.
+- IF `POST /api/v1/auth/refresh` no recibe la cookie `autohostai.session.refresh`, THEN THE
+  SYSTEM SHALL responder el mismo `401 INVALID_TOKEN` que un token de refresh inválido —sin
+  distinguir "no hay cookie" de "la cookie no decodifica".
+- WHEN el `Origin` de la petición a `POST /api/v1/auth/refresh` está presente pero no
+  pertenece al allowlist de CORS, THE SYSTEM SHALL responder `401 INVALID_TOKEN` sin
+  consumir el token (`enforce_same_origin`) — CORS y `SameSite` no bastan por sí solos
+  contra un origen hermano bajo el mismo dominio registrable, que es *same-site* aunque no
+  sea el frontend legítimo.
 - THE SYSTEM SHALL decidir quién consume una sesión con **una única sentencia condicional**
   (`UPDATE ... WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at > now`) y
   comprobando `rowcount`. Separar la comprobación de la escritura permitiría que dos
@@ -141,6 +155,18 @@ tocar la base de datos a mano.
   SHALL revocar la familia de refresh de esa sesión con razón `LOGOUT`. La familia viaja en
   el claim `fam` del token de acceso, porque el endpoint va autenticado con el access y su
   `jti` no guarda vínculo con la familia.
+- IF no se presenta un token de acceso válido (ausente, o presente pero que no autentica) a
+  `POST /api/v1/auth/logout`, THEN THE SYSTEM SHALL caer a la cookie
+  `autohostai.session.refresh` como credencial y revocar la familia que decodifica de ella
+  — la misma postura de "el token ES la credencial" que ya tiene `/auth/refresh`
+  (`auth-session-persistence`, `get_logout_subject`). Un `Origin` presente pero fuera del
+  allowlist de CORS hace que este camino se trate como "nada que revocar" en vez de
+  intentar la revocación (ver más abajo).
+- `POST /api/v1/auth/logout` SHALL NOT responder nunca `401` por un motivo de
+  autenticación: toda combinación de Bearer/cookie —incluidos un Bearer ausente, uno
+  presente pero inválido, una cookie ausente, una que no decodifica, o una con un `Origin`
+  fuera del allowlist— resuelve en un `204`, con revocación si había algo que revocar y sin
+  ella si no. El endpoint borra la cookie incondicionalmente en la respuesta.
 - Los tokens de acceso ya emitidos siguen siendo válidos hasta expirar (como máximo 15
   minutos) después de un logout: no existe lista de revocación de access tokens.
 - WHEN se llama a `GET /api/v1/auth/me` con un token de acceso válido, THE SYSTEM SHALL
@@ -153,6 +179,24 @@ tocar la base de datos a mano.
   sobre la cuenta de otra persona. Hacen falta porque `POST /api/v1/auth/refresh` no atraviesa
   `get_authenticated_request` y por tanto no revalida el estado de la cuenta — sin revocar, una
   cuenta desactivada seguiría emitiendo pares nuevos toda la vida del refresh.
+
+### Transporte del refresh token: cookie, no cuerpo (`auth-session-persistence`)
+
+- `POST /api/v1/auth/login` y `POST /api/v1/auth/refresh` SHALL emitir el token de refresh
+  **exclusivamente** vía `Set-Cookie: autohostai.session.refresh=<token>`; ninguno de los
+  dos SHALL leer ni escribir un campo `refresh_token` en el cuerpo — moverlo fuera del
+  alcance de JavaScript es la defensa contra su robo por XSS.
+- THE SYSTEM SHALL fijar el mismo juego de atributos en cada emisión de la cookie:
+  `HttpOnly` (siempre — el token nunca es legible desde JS); `SameSite=Strict`; `Path=/api/v1/auth`
+  (fuera de cualquier otra ruta); `Max-Age` igual a `JWT_REFRESH_TOKEN_DAYS × 86400`
+  segundos; y `Secure` decidido por petición según el esquema externo (`resolve_cookie_secure`,
+  ver la sección de `Secure` en `docs/auth-tenancy.md` para la resolución dev/producción).
+- `SameSite` por sí solo NO protege `/auth/refresh` ni la caída a cookie de `/auth/logout`
+  de un origen hermano bajo el mismo dominio registrable —es *same-site* aunque no sea el
+  frontend legítimo—, y `CORSMiddleware` solo decide si el navegador puede LEER la
+  respuesta, no si la petición ejecuta. Ver los dos requisitos de `enforce_same_origin` en
+  las secciones de arriba para la defensa real (`Origin` contra el mismo allowlist que usa
+  CORS).
 
 ### Tokens
 
@@ -243,9 +287,15 @@ tocar la base de datos a mano.
 - WHEN se construye el `RequestContext` de una petición autenticada, THE SYSTEM SHALL incluir
   el `preferred_language` del usuario como un `Locale` ya resuelto, tomado de la **misma fila
   que la revalidación acaba de releer**, de modo que no cueste ninguna consulta adicional. Lo
-  añadió `dashboard-api` (su diseño D3) para que la capa de lectura pueda localizar textos sin
-  releer el usuario ni depender de `Accept-Language`: PRD:205 fija el idioma en la preferencia
-  del usuario autenticado, que es la fila y no el navegador.
+  añadió `dashboard-api` (su diseño D3) sin depender de `Accept-Language`: PRD:205 fija el
+  idioma en la preferencia del usuario autenticado, que es la fila y no el navegador.
+  **Corrección (`frontend-verification-fixes`, su diseño D3):** este campo ya no es lo que una
+  ruta renderiza — es el escalón de degradación de `RequestLocaleDep`
+  (`backend/app/auth/api/dependencies.py`), que resuelve primero la cabecera `X-Locale` de la
+  petición y sólo cae a esta fila si la petición no declara un idioma que `Locale` reconozca.
+  El valor no fiable de la cabecera se queda fuera de `RequestContext` a propósito — ver
+  `sdd/specs/dashboard-api.md`, sección «Textos legibles en el idioma del usuario» — para que
+  la invariante de este documento («never from request input») siga siendo cierta.
 - IF `users.preferred_language` contiene un valor que no corresponde a ningún `Locale`
   soportado —la columna es `String(5)` y no lo restringe—, THEN THE SYSTEM SHALL degradar al
   idioma por defecto en vez de fallar la petición.
@@ -539,7 +589,9 @@ tocar la base de datos a mano.
 ## Key files
 
 - Dominio: `backend/app/auth/domain/` — `context.py` (`RequestContext` inmutable, con
-  `preferred_language: Locale` desde `dashboard-api`),
+  `preferred_language: Locale` desde `dashboard-api`; `frontend-verification-fixes` añadió
+  `RequestLocaleDep` en la API, no en este objeto, para preservar la invariante
+  «never from request input»),
   `policy.py` (`Permission`, `ROLE_PERMISSIONS`, `is_allowed`), `ports.py`, `entities.py`
   (`User`, `UserSession` con `is_usable`/`rotate`), `enums.py`, `value_objects.py`
   (`normalize_email`), `exceptions.py`.
@@ -551,9 +603,13 @@ tocar la base de datos a mano.
   Protocol `UnitOfWork` sigue declarado en `app/auth/domain/ports.py` a propósito, para que
   `auth/application/` importe sus puertos de su propio `domain/`.
 - API: `backend/app/auth/api/` — `router.py`, `schemas.py`, `dependencies.py`
-  (`get_authenticated_request`, `require(permission)`, `get_client_ip`).
+  (`get_authenticated_request`, `require(permission)`, `get_client_ip`,
+  `RequestLocaleDep` y la constante `LOCALE_HEADER = "X-Locale"` desde
+  `frontend-verification-fixes`).
 - Núcleo compartido: `backend/app/core/` — `config.py`, `db.py` (filtro global por tenant),
-  `errors.py` (sobre de error), `redis.py`, `models_registry.py`.
+  `errors.py` (sobre de error), `redis.py`, `models_registry.py`, `i18n.py`
+  (`Locale`, `Catalog`, `resolve_locale` desde `dashboard-api`, este último ampliado
+  por `frontend-verification-fixes` para aceptar el idioma pedido por la petición).
 - Bootstrap: `backend/app/cli/bootstrap.py`. El seed que lo completa vive en
   `backend/app/cli/seed_demo.py` y es capacidad aparte (`specs/seed-data-demo.md`).
 - Migraciones: `backend/alembic/versions/8ff62a7cb50c_auth_sessions.py`,

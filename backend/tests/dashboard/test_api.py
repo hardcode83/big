@@ -3,16 +3,23 @@ kpis` R1-R4, task 6.4; `dashboard-occupancy-series` R1, R4)."""
 
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
 from app.auth.domain import policy
 from app.auth.domain.enums import UserRole
 from app.auth.domain.policy import Permission
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.cleaning.infrastructure.models import CleaningTaskModel
-from app.maintenance.domain.enums import IncidentSeverity, IncidentSource, IncidentStatus
-from app.maintenance.infrastructure.models import IncidentModel
+from app.maintenance.domain.enums import (
+    IncidentSeverity,
+    IncidentSource,
+    IncidentStatus,
+    OwnerApprovalRelatedType,
+)
+from app.maintenance.infrastructure.models import IncidentModel, OwnerApprovalModel
 from app.properties.domain.entities import PropertyStateTransition
 from app.properties.domain.enums import PropertyOperationalState, StateTransitionTriggeredBy
 from app.properties.infrastructure.models import PropertyModel
@@ -21,6 +28,9 @@ from app.properties.infrastructure.repositories import (
 )
 from app.reservations.domain.enums import ReservationChannel, ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
+from app.timeline.domain.enums import TimelineActorType, TimelineEventType, TimelineSeverity
+from app.timeline.infrastructure.models import TimelineEventModel
+from tests.auth.conftest import insert_user
 from tests.cleaning.conftest import insert_template
 from tests.dashboard.conftest import TODAY, auth_header, insert_property
 
@@ -55,6 +65,21 @@ async def test_the_collection_answers_the_prd_pagination_envelope(
     body = response.json()
     assert set(body) == {"data", "total", "page", "per_page", "total_pages"}
     assert (body["total"], body["page"], body["per_page"], body["total_pages"]) == (1, 1, 20, 1)
+
+
+@pytest.mark.asyncio
+async def test_the_collection_and_the_aggregate_are_not_cacheable_by_a_shared_cache(
+    api, users_by_role_a, property_a
+) -> None:
+    """Composed text varies on `X-Locale`, a request header no shared cache keys on
+    (security review, round 6): a stale response for one reader's locale must never be
+    served to another from a cache. `private, no-store` on both routes, matching the
+    existing `app/provenance/api/router.py` precedent."""
+    collection = await api.get(COLLECTION, headers=_owner(api, users_by_role_a))
+    aggregate = await api.get(_detail_url(property_a), headers=_owner(api, users_by_role_a))
+
+    assert collection.headers["cache-control"] == "private, no-store"
+    assert aggregate.headers["cache-control"] == "private, no-store"
 
 
 @pytest.mark.asyncio
@@ -247,6 +272,219 @@ async def test_only_property_readers_may_call_the_aggregate(
     )
 
     assert response.status_code == (200 if role in READERS else 403)
+
+
+# --- language (`frontend-verification-fixes` R1.1, R1.6, R1.7, R1.8) ----------------------
+
+#: The four combinations R1.8 names: language the request asks for x language stored on the
+#: row. A list of pairs and not a product over sets — `steering/testing.md` forbids a test
+#: that depends on the order it runs in, and set iteration order would hand pytest-xdist
+#: workers different parametrised ids for the same case.
+LOCALE_MATRIX = [("es", "es"), ("es", "en"), ("en", "es"), ("en", "en")]
+LOCALE_MATRIX_IDS = [f"asks-{asked}-row-{stored}" for asked, stored in LOCALE_MATRIX]
+
+#: Keyed by the language **asked for**, never by the row's: that is the whole assertion.
+EXPECTED_LABELS = {
+    "es": {
+        "cleaning_status": "Limpieza en curso",
+        "next_action_label": "Asignar limpiadora",
+        "responsible": "Gestor",
+        "last_event_label": "Limpieza completada",
+        # `access.label` (`ACCESS_STATUS_LABELS[ReservationAccessStatus.PENDING]`),
+        # `open_incidents[0].title` (`INCIDENT_TITLE_LABELS[IncidentCategory.OTHER]`, the
+        # column's own default) and `pending_approvals[0].label`
+        # (`APPROVAL_LABELS[OwnerApprovalRelatedType.OTHER]`) — R1.8's three fields the
+        # aggregate composes besides `cleaning_status`, seeded by `_seed_composed_text`.
+        "access_label": "Acceso pendiente",
+        "incident_title": "Otra incidencia",
+        "approval_label": "Aprobación pendiente",
+    },
+    "en": {
+        "cleaning_status": "Cleaning in progress",
+        "next_action_label": "Assign a cleaner",
+        "responsible": "Manager",
+        "last_event_label": "Cleaning completed",
+        "access_label": "Access pending",
+        "incident_title": "Other incident",
+        "approval_label": "Pending approval",
+    },
+}
+
+#: What the operator typed, in the language they typed it. R1.6 keeps it out of the
+#: translation, so it must read the same whatever the request asks for.
+STORED_INCIDENT_TITLE = "Boiler is dead"
+
+
+async def _seed_composed_text(db_session, tenant, prop) -> None:
+    """Puts a value behind every composed label on both routes, so a matrix row that
+    silently produced `null` could not pass by asserting `None == None`."""
+    prop.current_operational_state = PropertyOperationalState.AWAITING_CLEANING
+    template = await insert_template(db_session, tenant, name="Estándar")
+    db_session.add(
+        CleaningTaskModel(
+            id=uuid.uuid4(),
+            tenant_id=tenant.id,
+            property_id=prop.id,
+            checklist_template_id=template.id,
+            status=CleaningTaskStatus.IN_PROGRESS,
+            scheduled_start=datetime.combine(TODAY, datetime.min.time(), tzinfo=UTC),
+        )
+    )
+    db_session.add(
+        TimelineEventModel(
+            id=uuid.uuid4(),
+            tenant_id=tenant.id,
+            property_id=prop.id,
+            actor_type=TimelineActorType.SYSTEM,
+            event_type=TimelineEventType.CLEANING_COMPLETED,
+            severity=TimelineSeverity.INFO,
+            title="Stored English title",
+            description="Stored description",
+            created_at=datetime.combine(TODAY, datetime.min.time(), tzinfo=UTC),
+        )
+    )
+    db_session.add(
+        IncidentModel(
+            id=uuid.uuid4(),
+            tenant_id=tenant.id,
+            property_id=prop.id,
+            source=IncidentSource.GUEST,
+            title=STORED_INCIDENT_TITLE,
+            description="No hot water.",
+            status=IncidentStatus.OPEN,
+            severity=IncidentSeverity.CRITICAL,
+            # No explicit `category=`: it defaults to `IncidentCategory.OTHER`, which is what
+            # `EXPECTED_LABELS[...]["incident_title"]` is keyed to render.
+        )
+    )
+    # A live stay, so `access` resolves instead of coming back `null` (R1.8's second
+    # composed-text field on this route). `access_status` stays at its column default
+    # (`ReservationAccessStatus.PENDING`), which is what `EXPECTED_LABELS[...]["access_label"]`
+    # renders.
+    db_session.add(
+        ReservationModel(
+            id=uuid.uuid4(),
+            tenant_id=tenant.id,
+            property_id=prop.id,
+            guest_id=None,
+            channel=ReservationChannel.DIRECT,
+            external_pms_id=f"LOCALE-SEED-{uuid.uuid4().hex[:8]}",
+            status=ReservationStatus.CONFIRMED,
+            check_in_date=TODAY,
+            check_out_date=TODAY + timedelta(days=1),
+            nights=1,
+            adults=2,
+        )
+    )
+    # A pending approval, so `pending_approvals` is non-empty (R1.8's third composed-text
+    # field on this route). `related_type=OTHER` keeps the label generic and matches
+    # `EXPECTED_LABELS[...]["approval_label"]`.
+    db_session.add(
+        OwnerApprovalModel(
+            id=uuid.uuid4(),
+            tenant_id=tenant.id,
+            property_id=prop.id,
+            related_type=OwnerApprovalRelatedType.OTHER,
+            related_id=uuid.uuid4(),
+            amount=Decimal("42.00"),
+            reason="Seeded for R1.8 locale coverage.",
+        )
+    )
+    await db_session.flush()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("asked", "stored_language"), LOCALE_MATRIX, ids=LOCALE_MATRIX_IDS)
+async def test_the_collection_composes_in_the_language_the_request_asked_for(
+    api, db_session, tenant_a, property_a, asked: str, stored_language: str
+) -> None:
+    """R1.1/R1.8 on `GET /dashboard/properties`.
+
+    The two mixed rows are the ones that carry the requirement: before this change the row
+    won, so `asks-en-row-es` served a Spanish card to an English screen.
+    """
+    user = await insert_user(db_session, tenant=tenant_a, preferred_language=stored_language)
+    await _seed_composed_text(db_session, tenant_a, property_a)
+    expected = EXPECTED_LABELS[asked]
+
+    response = await api.get(
+        COLLECTION, headers={**auth_header(api, user), "X-Locale": asked}
+    )
+
+    assert response.status_code == 200
+    card = response.json()["data"][0]
+    assert card["cleaning_status"] == expected["cleaning_status"]
+    assert card["next_action"]["label"] == expected["next_action_label"]
+    assert card["next_action"]["responsible"] == expected["responsible"]
+    assert card["last_event_label"] == expected["last_event_label"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("asked", "stored_language"), LOCALE_MATRIX, ids=LOCALE_MATRIX_IDS)
+async def test_the_aggregate_composes_in_the_language_the_request_asked_for(
+    api, db_session, tenant_a, property_a, asked: str, stored_language: str
+) -> None:
+    """R1.1/R1.8 on `GET /properties/{id}/dashboard`."""
+    user = await insert_user(db_session, tenant=tenant_a, preferred_language=stored_language)
+    await _seed_composed_text(db_session, tenant_a, property_a)
+    expected = EXPECTED_LABELS[asked]
+
+    response = await api.get(
+        _detail_url(property_a), headers={**auth_header(api, user), "X-Locale": asked}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cleaning_status"] == expected["cleaning_status"]
+    # The three other independent text fields this route composes through the same
+    # `locale` parameter (R1.8): a regression that hardcodes any one of them would leave
+    # `cleaning_status` alone green and go undetected without these.
+    assert body["access"]["label"] == expected["access_label"]
+    assert body["open_incidents"][0]["title"] == expected["incident_title"]
+    assert body["pending_approvals"][0]["label"] == expected["approval_label"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("asked", "stored_language"), LOCALE_MATRIX, ids=LOCALE_MATRIX_IDS)
+async def test_the_requested_language_translates_no_canonical_literal(
+    api, db_session, tenant_a, property_a, asked: str, stored_language: str
+) -> None:
+    """R1.6/R1.7: R1 moves where the locale comes from, not what gets translated.
+
+    `operational_state` is a contract literal, the incident's stored `title` is
+    operator-written text, and the timeline's stored `title` column stays the English audit
+    copy — none of the three moves with the language.
+    """
+    user = await insert_user(db_session, tenant=tenant_a, preferred_language=stored_language)
+    await _seed_composed_text(db_session, tenant_a, property_a)
+
+    collection = await api.get(
+        COLLECTION, headers={**auth_header(api, user), "X-Locale": asked}
+    )
+    detail = await api.get(
+        _detail_url(property_a), headers={**auth_header(api, user), "X-Locale": asked}
+    )
+
+    card = collection.json()["data"][0]
+    assert card["cleaning_status"] == EXPECTED_LABELS[asked]["cleaning_status"], (
+        "sanity: the matrix row must actually have taken effect"
+    )
+    assert card["operational_state"] == "AWAITING_CLEANING"
+    assert detail.json()["operational_state"] == "AWAITING_CLEANING"
+
+    stored_event = (
+        await db_session.execute(select(TimelineEventModel).where(
+            TimelineEventModel.property_id == property_a.id
+        ))
+    ).scalar_one()
+    assert stored_event.title == "Stored English title"
+
+    stored_incident = (
+        await db_session.execute(select(IncidentModel).where(
+            IncidentModel.property_id == property_a.id
+        ))
+    ).scalar_one()
+    assert stored_incident.title == STORED_INCIDENT_TITLE
 
 
 # --- operational KPIs (`dashboard-operational-kpis` R1, R2, R3, R4) ------------------------

@@ -45,6 +45,31 @@
     "email": "Email",
     "phone": "Phone",
     "preferredLanguage": "Language",
-    "openReservation": "Open reservation"
+    "openReservation": "Open reservation",
+    "propertyCode": "Internal code",
+    "propertyName": "Property name"
+  },
+  "guestPortalLink": {
+    "title": "Guest portal link",
+    "status": {
+      "loading": "Checking link status…",
+      "live": "Link active since {{issuedAt}}",
+      "none": "No active link"
+    },
+    "actions": {
+      "mint": "Generate link",
+      "revoke": "Revoke link",
+      "send": "Send by email"
+    },
+    "reveal": {
+      "copy": "Copy",
+      "copied": "Copied",
+      "warning": "This link will not be shown again. Copy it now."
+    },
+    "feedback": {
+      "delivered": "Email sent to the guest",
+      "notDelivered": "The link was created, but could not be delivered by email",
+      "error": "Could not complete the action. Please try again."
+    }
   }
 }

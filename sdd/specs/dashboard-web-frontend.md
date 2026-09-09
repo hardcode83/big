@@ -219,7 +219,12 @@ stalled property stayed stalled until a guest wrote.
   localized actor and severity labels.
 - THE SYSTEM SHALL offer filtering by event type, actor, severity and date range;
   the selected filters are threaded into the tenant-scoped query key so each
-  combination is cached distinctly.
+  combination is cached distinctly. El locale activo SHALL añadirse también al
+  `scope` de la clave (`[..., "property-timeline", propertyId, filters, locale]`,
+  ver `frontend-foundation.md` §Internationalization y §Remote state) para que
+  un cambio de idioma re-pida el `title` compuesto por el backend en el idioma
+  nuevo en lugar de servir el del caché anterior; la misma regla se aplica al
+  par `dashboard-cards` y `property-detail`.
 - THE SYSTEM SHALL populate the event-type filter from the closed 47-value
   vocabulary `TIMELINE_EVENT_TYPES`, typed off the generated
   `components["schemas"]["TimelineEventType"]` union, and SHALL NOT derive the

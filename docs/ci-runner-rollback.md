@@ -134,7 +134,7 @@ Si algún workflow sigue apareciendo en `autohostai-dev-vm` tras el revert, abre
 
 Si la VM se recrea (cambio de `source_id` o rebuild completo, ver `oci-source-id-update-replaces-boot-volume`), el runner se vuelve a provisionar al reaplicar `infra/environments/dev/`. El `cloud-init` del módulo Terraform ejecuta `runner-bootstrap.sh` con `--replace`, que es idempotente: el runner se registra de nuevo con el mismo label (`dev`) y los workflows reanudan solos en cuanto Actions detecta el runner online.
 
-**`$HOME/.autohostai-dev-runtime.env` no sobrevive a un rebuild** (vive en el `$HOME` del usuario del runner, fuera de todo lo que Terraform o cloud-init gestionan): tras reaprovisionar, `demo-reset.yml` fallará su precondición hasta que el próximo `deploy-dev.yml` lo re-renderice desde el OCI Vault — es el comportamiento esperado, no un bloqueo (ver `deploy-dev.yml`, paso "Render .env").
+**`/opt/autohostai-dev-runtime/dev-runtime.env` no sobrevive a un rebuild** (fuera de todo lo que Terraform o cloud-init gestionan — fix 2026-09-05: movido de `$HOME` del agente a esta ruta compartida por grupo `ci-agents` precisamente porque `$HOME` es por-agente y GitHub reparte `deploy`/`demo-reset` entre los N agentes del pool sin garantizar que caigan en el mismo): tras reaprovisionar, `demo-reset.yml` fallará su precondición hasta que el próximo `deploy-dev.yml` lo re-renderice desde el OCI Vault — es el comportamiento esperado, no un bloqueo (ver `deploy-dev.yml`, paso "Render .env").
 
 ```bash
 # En la VM (post-rebuild), reaprovisionar el runner:

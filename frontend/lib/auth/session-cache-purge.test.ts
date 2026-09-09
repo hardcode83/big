@@ -72,7 +72,7 @@ describe("session cache purge", () => {
   });
 
   it("does not touch getSessionTokens() before or after the purge", () => {
-    const tokens = { accessToken: "access", refreshToken: "refresh" };
+    const tokens = { accessToken: "access" };
     setSessionTokens(tokens);
 
     expect(getSessionTokens()).toEqual(tokens);
@@ -83,7 +83,7 @@ describe("session cache purge", () => {
   });
 
   it("does not advance getSessionGeneration() when clearSessionTokens() is called alone", () => {
-    setSessionTokens({ accessToken: "access", refreshToken: "refresh" });
+    setSessionTokens({ accessToken: "access" });
 
     const generationAfterSet = getSessionGeneration();
 

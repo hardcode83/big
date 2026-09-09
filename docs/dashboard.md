@@ -41,11 +41,14 @@ Lo que conviene saber al operarlas:
 - **La colección no hace N+1.** Resuelve la página entera con un número fijo de
   consultas, sea cual sea el tamaño de la cartera; hay un test que cuenta sentencias
   y compara 2 propiedades contra 10.
-- **El idioma sale del usuario, no de `Accept-Language`.** `title`,
-  `cleaning_status`, `next_action.label` y las etiquetas de incidencia y aprobación
-  llegan ya compuestos en el `preferred_language` de quien llama (`es`/`en`, con
-  degradación a `es` ante cualquier otro valor). Los literales canónicos
-  (`operational_state`, `event_type`, `actor_type`, `severity`) **no se traducen**.
+- **El idioma sale de lo que declara la petición, no de `preferred_language` a
+  secas.** `title`, `cleaning_status`, `next_action.label` y las etiquetas de
+  incidencia y aprobación llegan ya compuestos en el idioma que declara la
+  cabecera `X-Locale` (que el frontend rellena con el idioma resuelto de
+  i18next), con degradación al `preferred_language` guardado del usuario si la
+  petición no declara uno soportado, y a `es` si tampoco ese lo es. Los
+  literales canónicos (`operational_state`, `event_type`, `actor_type`,
+  `severity`) **no se traducen**.
 - **`description` es la excepción: llega sin traducir, y a propósito.** Lo que hay en
   ese campo lo escribió una persona —el motivo que `PropertyStateMachine` exige para
   bloquear una vivienda o ponerla fuera de servicio—, así que no se compone desde el

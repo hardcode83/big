@@ -63,8 +63,8 @@ export interface paths {
   };
   "/api/v1/auth/logout": {
     /**
-     * End the session this access token belongs to
-     * @description Revokes the refresh family named by the token. Access tokens already issued keep working until they expire — at most their configured lifetime.
+     * End the session this access token or refresh cookie belongs to
+     * @description Revokes the refresh family named by a valid access token, or by the refresh cookie itself when there is no access token, or the one presented does not authenticate — the cookie is as much a credential here as it already is for /auth/refresh (review: sdd-security, R3.1/R6.2), so a caller with no valid access token can still end its own session without minting a new one first. Never answers 401 for an authentication reason: idempotent, nothing to revoke answers the same 204 — including a cookie presented by a cross-origin caller outside the CORS allowlist (CSRF finding), which is treated as nothing to revoke rather than raised.
      */
     post: operations["logout_api_v1_auth_logout_post"];
   };
@@ -78,7 +78,7 @@ export interface paths {
   "/api/v1/auth/refresh": {
     /**
      * Rotate a refresh token
-     * @description Anonymous: the refresh token itself is the credential. The presented token is invalidated. Presenting an already-used one revokes the whole session family.
+     * @description Anonymous: the refresh token itself is the credential. The presented token is invalidated. Presenting an already-used one revokes the whole session family. Rejects a cross-origin caller outside the CORS allowlist with the same 401 a missing/invalid cookie gets (review: sdd-security, CSRF finding) — SameSite alone does not cover a same-site sibling origin.
      */
     post: operations["refresh_api_v1_auth_refresh_post"];
   };
@@ -349,7 +349,7 @@ export interface paths {
   "/api/v1/dashboard/properties": {
     /**
      * The dashboard card of every property
-     * @description One card per property of the caller's tenant (PRD §9.1), in the pagination envelope of PRD §23, with the same `page`/`per_page` bounds as `GET /api/v1/properties`. Resolved in a fixed number of queries whatever the page size — never one per property. `operational_state` is the canonical literal and carries no colour: the colour mapping belongs to the client. `cleaning_status`, `next_action.label` and `last_event_label` arrive already composed in the authenticated user's language. A block whose source the caller's role may not read comes back `null`, indistinguishable from having none — `current_or_next_reservation` is always present as a key, `null` included. Amounts are decimal strings so no cent is lost to a float. This route is not in PRD §23; it is an explicit extension, which is why it sits under `/dashboard` rather than under `/properties`.
+     * @description One card per property of the caller's tenant (PRD §9.1), in the pagination envelope of PRD §23, with the same `page`/`per_page` bounds as `GET /api/v1/properties`. Resolved in a fixed number of queries whatever the page size — never one per property. `operational_state` is the canonical literal and carries no colour: the colour mapping belongs to the client. `cleaning_status`, `next_action.label` and `last_event_label` arrive already composed in the language the request states in its `X-Locale` header, falling back to the authenticated user's stored preference and then to Spanish. A block whose source the caller's role may not read comes back `null`, indistinguishable from having none — `current_or_next_reservation` is always present as a key, `null` included. Amounts are decimal strings so no cent is lost to a float. This route is not in PRD §23; it is an explicit extension, which is why it sits under `/dashboard` rather than under `/properties`.
      */
     get: operations["list_dashboard_cards_api_v1_dashboard_properties_get"];
   };
@@ -834,7 +834,7 @@ export interface paths {
   "/api/v1/properties/{property_id}/dashboard": {
     /**
      * Everything happening on one property
-     * @description The aggregate of PRD §9.2: reservation, guest, access, cleaning, incidents, financial, notes and pending approvals in one call. The guest is a name and the access a status label — never a document number, never an access code in any form, masked included. `last_cleaning_photos` is always empty until signed URLs exist; the blocks whose writing domain has not shipped yet (`incidents`, `owner_approvals`, `expenses`) query their real tables and come back empty, so the contract will not change when those changes land. `notes` is always `null` for now and deliberately so — no column owns it, and the candidates are free text an operator can paste a door code into. A property of another tenant answers `404`, indistinguishable from one that does not exist.
+     * @description The aggregate of PRD §9.2: reservation, guest, access, cleaning, incidents, financial, notes and pending approvals in one call. The guest is a name and the access a status label — never a document number, never an access code in any form, masked included. Every composed label in the aggregate arrives in the language the request states in its `X-Locale` header, falling back to the authenticated user's stored preference and then to Spanish. `last_cleaning_photos` is always empty until signed URLs exist; the blocks whose writing domain has not shipped yet (`incidents`, `owner_approvals`, `expenses`) query their real tables and come back empty, so the contract will not change when those changes land. `notes` is always `null` for now and deliberately so — no column owns it, and the candidates are free text an operator can paste a door code into. A property of another tenant answers `404`, indistinguishable from one that does not exist.
      */
     get: operations["get_property_dashboard_api_v1_properties__property_id__dashboard_get"];
   };
@@ -890,6 +890,11 @@ export interface paths {
   };
   "/api/v1/reservations/{reservation_id}/guest-access-token": {
     /**
+     * Read whether a stay's guest portal token is live
+     * @description Presence and issuance instant only — never the token or its digest (R2.2). This is how an operator finds out a link already exists without pressing the button that replaces it. Same permission and same `404`-for-foreign-tenant behavior as the two routes above.
+     */
+    get: operations["get_guest_access_token_status_api_v1_reservations__reservation_id__guest_access_token_get"];
+    /**
      * Mint the guest's portal token for a stay
      * @description Returns the token **in clear, once and only once** — the single named exception of rule 3(a) of the security steering, because an operator has to be able to hand the link to the guest and only its digest is stored. No later call returns it, and no endpoint reads it back. If the stay already had a live token this **replaces** it: the previous one is revoked in the same transaction, so a guest holding the old link stops being authorised the moment the new one is minted. Responds `404` for a stay of another tenant with a body identical to the one for an id that does not exist.
      */
@@ -899,6 +904,13 @@ export interface paths {
      * @description Withdraws the stay's live token, if it has one. Idempotent: revoking twice answers `204` both times and leaves the first revocation's instant untouched, because that timestamp is what records *when* access was withdrawn. Always permitted — a withdrawal does not depend on the stay's state. Responds `404` for a stay of another tenant.
      */
     delete: operations["revoke_guest_access_token_api_v1_reservations__reservation_id__guest_access_token_delete"];
+  };
+  "/api/v1/reservations/{reservation_id}/guest-access-token/send": {
+    /**
+     * Mint the guest's portal token and email it
+     * @description Mints a fresh token for the stay (replacing any live one, exactly like the plain `POST` above) and, within the same request, emails the portal URL to the reservation's `Guest.email`. Returns whether the adapter accepted delivery — **never the cleartext token itself**: an operator who triggers a send has no reason to also see the value in their own browser. A delivery failure does not roll the mint back (R3.5); `422` if the stay has no linked `Guest` or that guest has no email on file, and nothing is minted in that case. Responds `404` for a stay of another tenant, same as its two siblings.
+     */
+    post: operations["send_guest_access_token_api_v1_reservations__reservation_id__guest_access_token_send_post"];
   };
   "/api/v1/reservations/{reservation_id}/legal-registration/submit": {
     /**
@@ -958,14 +970,14 @@ export interface paths {
   "/api/v1/timeline": {
     /**
      * The tenant's activity across every property
-     * @description The tenant-wide feed of `dashboard-activity-feed`: every property's events merged into one page (PRD §23:1951), paginated with `page`/`per_page` and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. Each entry additionally carries `property_id`, `property_name` and `property_internal_code` — the latter two are `null` on the rare event whose `property_id` does not resolve within the tenant, which is a valid shape and never a reason to drop the entry or fail the request. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A tenant with no properties, or with properties that have no events, answers `200` with an empty page — never `404`.
+     * @description The tenant-wide feed of `dashboard-activity-feed`: every property's events merged into one page (PRD §23:1951), paginated with `page`/`per_page` and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. Each entry additionally carries `property_id`, `property_name` and `property_internal_code` — the latter two are `null` on the rare event whose `property_id` does not resolve within the tenant, which is a valid shape and never a reason to drop the entry or fail the request. `title` arrives already composed in the language the request states in its `X-Locale` header, falling back to the authenticated user's stored preference and then to Spanish (PRD §10); `description` does not — it carries operator-written text and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A tenant with no properties, or with properties that have no events, answers `200` with an empty page — never `404`.
      */
     get: operations["list_tenant_activity_api_v1_timeline_get"];
   };
   "/api/v1/timeline/{property_id}": {
     /**
      * A property's timeline
-     * @description Paginated with `page`/`per_page` (PRD §23) and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text, such as the reason a property was blocked, and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A property of another tenant answers `404`, with a body indistinguishable from one that does not exist.
+     * @description Paginated with `page`/`per_page` (PRD §23) and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. `title` arrives already composed in the language the request states in its `X-Locale` header, falling back to the authenticated user's stored preference and then to Spanish (PRD §10); `description` does not — it carries operator-written text, such as the reason a property was blocked, and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A property of another tenant answers `404`, with a body indistinguishable from one that does not exist.
      */
     get: operations["get_property_timeline_api_v1_timeline__property_id__get"];
   };
@@ -2476,6 +2488,34 @@ export interface components {
       /** Token */
       token: string;
     };
+    /**
+     * GuestAccessTokenSentResponse
+     * @description Whether the email adapter accepted the delivery (`guest-link-delivery` R3.5, D5).
+     *
+     * **Never** the cleartext token — R1 keeps "copy it yourself" (the existing `POST`) and
+     * "email it to the guest" (this route) as two distinct operator actions, and an operator who
+     * triggered a send has no reason to also see the value in their own browser.
+     */
+    GuestAccessTokenSentResponse: {
+      /** Delivered */
+      delivered: boolean;
+    };
+    /**
+     * GuestAccessTokenStatusResponse
+     * @description Presence and issuance instant of a stay's live portal token (`guest-link-delivery` R2).
+     *
+     * Deliberately **not** `token_hash` or anything that could reconstruct it: this is the
+     * surface R2.2 asks for precisely so a frontend need not mint a token merely to learn
+     * whether one already exists. `issued_at` is `None` exactly when `is_live` is `False`,
+     * mirroring `GuestAccessTokenStatus` (`application/portal.py`) field for field — this class
+     * exists only to give that dataclass a JSON shape, not to widen it.
+     */
+    GuestAccessTokenStatusResponse: {
+      /** Is Live */
+      is_live: boolean;
+      /** Issued At */
+      issued_at: string | null;
+    };
     /** GuestDocumentResponse */
     GuestDocumentResponse: {
       /** Date Of Birth */
@@ -3105,7 +3145,7 @@ export interface components {
      * inherits these names.
      * @enum {string}
      */
-    NotificationType: "CLEANING_TASK_ASSIGNED" | "CLEANING_NO_RESPONSE" | "CLEANING_COMPLETED" | "CLEANING_FAILED" | "INCIDENT_CREATED_CRITICAL" | "INCIDENT_CREATED_HIGH" | "OWNER_APPROVAL_REQUIRED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_NO_RESPONSE" | "GUEST_ESCALATION" | "LOCK_ALERT" | "CHECKIN_REMINDER_24H" | "CHECKIN_REMINDER_2H" | "CHECKOUT_REMINDER" | "PRICE_RECOMMENDATION" | "SLA_BREACH" | "REVIEW_RESPONSE_APPROVED" | "PASSWORD_RESET_REQUESTED" | "CLEANING_TASK_MESSAGE" | "INCIDENT_MESSAGE" | "OWNER_APPROVAL_APPROVED" | "OWNER_APPROVAL_REJECTED";
+    NotificationType: "CLEANING_TASK_ASSIGNED" | "CLEANING_NO_RESPONSE" | "CLEANING_COMPLETED" | "CLEANING_FAILED" | "INCIDENT_CREATED_CRITICAL" | "INCIDENT_CREATED_HIGH" | "OWNER_APPROVAL_REQUIRED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_NO_RESPONSE" | "GUEST_ESCALATION" | "LOCK_ALERT" | "CHECKIN_REMINDER_24H" | "CHECKIN_REMINDER_2H" | "CHECKOUT_REMINDER" | "PRICE_RECOMMENDATION" | "SLA_BREACH" | "REVIEW_RESPONSE_APPROVED" | "PASSWORD_RESET_REQUESTED" | "CLEANING_TASK_MESSAGE" | "INCIDENT_MESSAGE" | "OWNER_APPROVAL_APPROVED" | "OWNER_APPROVAL_REJECTED" | "GUEST_PORTAL_LINK_DELIVERED";
     /**
      * OccupancyPointResponse
      * @description One day of the weekly occupancy series (`dashboard-occupancy-series` R1.2, R1.4).
@@ -4041,11 +4081,6 @@ export interface components {
      * @enum {string}
      */
     RecurringIssueTag: "WIFI" | "NOISE" | "CLEANLINESS" | "ACCESS" | "COMMUNICATION" | "LOCATION" | "VALUE" | "AMENITIES" | "OTHER";
-    /** RefreshRequest */
-    RefreshRequest: {
-      /** Refresh Token */
-      refresh_token: string;
-    };
     /**
      * RegenerateReviewDraftRequest
      * @description R3.5 — the body of `POST /reviews/{id}/response` (regenerate the draft).
@@ -4986,8 +5021,6 @@ export interface components {
       access_token: string;
       /** Expires In */
       expires_in: number;
-      /** Refresh Token */
-      refresh_token: string;
       /** Token Type */
       token_type: string;
     };
@@ -5607,8 +5640,8 @@ export interface operations {
     };
   };
   /**
-   * End the session this access token belongs to
-   * @description Revokes the refresh family named by the token. Access tokens already issued keep working until they expire — at most their configured lifetime.
+   * End the session this access token or refresh cookie belongs to
+   * @description Revokes the refresh family named by a valid access token, or by the refresh cookie itself when there is no access token, or the one presented does not authenticate — the cookie is as much a credential here as it already is for /auth/refresh (review: sdd-security, R3.1/R6.2), so a caller with no valid access token can still end its own session without minting a new one first. Never answers 401 for an authentication reason: idempotent, nothing to revoke answers the same 204 — including a cookie presented by a cross-origin caller outside the CORS allowlist (CSRF finding), which is treated as nothing to revoke rather than raised.
    */
   logout_api_v1_auth_logout_post: {
     responses: {
@@ -5658,25 +5691,14 @@ export interface operations {
   };
   /**
    * Rotate a refresh token
-   * @description Anonymous: the refresh token itself is the credential. The presented token is invalidated. Presenting an already-used one revokes the whole session family.
+   * @description Anonymous: the refresh token itself is the credential. The presented token is invalidated. Presenting an already-used one revokes the whole session family. Rejects a cross-origin caller outside the CORS allowlist with the same 401 a missing/invalid cookie gets (review: sdd-security, CSRF finding) — SameSite alone does not cover a same-site sibling origin.
    */
   refresh_api_v1_auth_refresh_post: {
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["RefreshRequest"];
-      };
-    };
     responses: {
       /** @description Successful Response */
       200: {
         content: {
           "application/json": components["schemas"]["TokenPairResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["ErrorEnvelope"];
         };
       };
     };
@@ -7046,7 +7068,7 @@ export interface operations {
   };
   /**
    * The dashboard card of every property
-   * @description One card per property of the caller's tenant (PRD §9.1), in the pagination envelope of PRD §23, with the same `page`/`per_page` bounds as `GET /api/v1/properties`. Resolved in a fixed number of queries whatever the page size — never one per property. `operational_state` is the canonical literal and carries no colour: the colour mapping belongs to the client. `cleaning_status`, `next_action.label` and `last_event_label` arrive already composed in the authenticated user's language. A block whose source the caller's role may not read comes back `null`, indistinguishable from having none — `current_or_next_reservation` is always present as a key, `null` included. Amounts are decimal strings so no cent is lost to a float. This route is not in PRD §23; it is an explicit extension, which is why it sits under `/dashboard` rather than under `/properties`.
+   * @description One card per property of the caller's tenant (PRD §9.1), in the pagination envelope of PRD §23, with the same `page`/`per_page` bounds as `GET /api/v1/properties`. Resolved in a fixed number of queries whatever the page size — never one per property. `operational_state` is the canonical literal and carries no colour: the colour mapping belongs to the client. `cleaning_status`, `next_action.label` and `last_event_label` arrive already composed in the language the request states in its `X-Locale` header, falling back to the authenticated user's stored preference and then to Spanish. A block whose source the caller's role may not read comes back `null`, indistinguishable from having none — `current_or_next_reservation` is always present as a key, `null` included. Amounts are decimal strings so no cent is lost to a float. This route is not in PRD §23; it is an explicit extension, which is why it sits under `/dashboard` rather than under `/properties`.
    */
   list_dashboard_cards_api_v1_dashboard_properties_get: {
     parameters: {
@@ -9621,7 +9643,7 @@ export interface operations {
   };
   /**
    * Everything happening on one property
-   * @description The aggregate of PRD §9.2: reservation, guest, access, cleaning, incidents, financial, notes and pending approvals in one call. The guest is a name and the access a status label — never a document number, never an access code in any form, masked included. `last_cleaning_photos` is always empty until signed URLs exist; the blocks whose writing domain has not shipped yet (`incidents`, `owner_approvals`, `expenses`) query their real tables and come back empty, so the contract will not change when those changes land. `notes` is always `null` for now and deliberately so — no column owns it, and the candidates are free text an operator can paste a door code into. A property of another tenant answers `404`, indistinguishable from one that does not exist.
+   * @description The aggregate of PRD §9.2: reservation, guest, access, cleaning, incidents, financial, notes and pending approvals in one call. The guest is a name and the access a status label — never a document number, never an access code in any form, masked included. Every composed label in the aggregate arrives in the language the request states in its `X-Locale` header, falling back to the authenticated user's stored preference and then to Spanish. `last_cleaning_photos` is always empty until signed URLs exist; the blocks whose writing domain has not shipped yet (`incidents`, `owner_approvals`, `expenses`) query their real tables and come back empty, so the contract will not change when those changes land. `notes` is always `null` for now and deliberately so — no column owns it, and the candidates are free text an operator can paste a door code into. A property of another tenant answers `404`, indistinguishable from one that does not exist.
    */
   get_property_dashboard_api_v1_properties__property_id__dashboard_get: {
     parameters: {
@@ -9953,6 +9975,43 @@ export interface operations {
     };
   };
   /**
+   * Read whether a stay's guest portal token is live
+   * @description Presence and issuance instant only — never the token or its digest (R2.2). This is how an operator finds out a link already exists without pressing the button that replaces it. Same permission and same `404`-for-foreign-tenant behavior as the two routes above.
+   */
+  get_guest_access_token_status_api_v1_reservations__reservation_id__guest_access_token_get: {
+    parameters: {
+      path: {
+        reservation_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["GuestAccessTokenStatusResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * Mint the guest's portal token for a stay
    * @description Returns the token **in clear, once and only once** — the single named exception of rule 3(a) of the security steering, because an operator has to be able to hand the link to the guest and only its digest is stored. No later call returns it, and no endpoint reads it back. If the stay already had a live token this **replaces** it: the previous one is revoked in the same transaction, so a guest holding the old link stops being authorised the moment the new one is minted. Responds `404` for a stay of another tenant with a body identical to the one for an id that does not exist.
    */
@@ -10003,6 +10062,43 @@ export interface operations {
       /** @description Successful Response */
       204: {
         content: never;
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Mint the guest's portal token and email it
+   * @description Mints a fresh token for the stay (replacing any live one, exactly like the plain `POST` above) and, within the same request, emails the portal URL to the reservation's `Guest.email`. Returns whether the adapter accepted delivery — **never the cleartext token itself**: an operator who triggers a send has no reason to also see the value in their own browser. A delivery failure does not roll the mint back (R3.5); `422` if the stay has no linked `Guest` or that guest has no email on file, and nothing is minted in that case. Responds `404` for a stay of another tenant, same as its two siblings.
+   */
+  send_guest_access_token_api_v1_reservations__reservation_id__guest_access_token_send_post: {
+    parameters: {
+      path: {
+        reservation_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["GuestAccessTokenSentResponse"];
+        };
       };
       /** @description Missing, malformed or expired credentials. */
       401: {
@@ -10383,7 +10479,7 @@ export interface operations {
   };
   /**
    * The tenant's activity across every property
-   * @description The tenant-wide feed of `dashboard-activity-feed`: every property's events merged into one page (PRD §23:1951), paginated with `page`/`per_page` and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. Each entry additionally carries `property_id`, `property_name` and `property_internal_code` — the latter two are `null` on the rare event whose `property_id` does not resolve within the tenant, which is a valid shape and never a reason to drop the entry or fail the request. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A tenant with no properties, or with properties that have no events, answers `200` with an empty page — never `404`.
+   * @description The tenant-wide feed of `dashboard-activity-feed`: every property's events merged into one page (PRD §23:1951), paginated with `page`/`per_page` and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. Each entry additionally carries `property_id`, `property_name` and `property_internal_code` — the latter two are `null` on the rare event whose `property_id` does not resolve within the tenant, which is a valid shape and never a reason to drop the entry or fail the request. `title` arrives already composed in the language the request states in its `X-Locale` header, falling back to the authenticated user's stored preference and then to Spanish (PRD §10); `description` does not — it carries operator-written text and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A tenant with no properties, or with properties that have no events, answers `200` with an empty page — never `404`.
    */
   list_tenant_activity_api_v1_timeline_get: {
     parameters: {
@@ -10426,7 +10522,7 @@ export interface operations {
   };
   /**
    * A property's timeline
-   * @description Paginated with `page`/`per_page` (PRD §23) and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text, such as the reason a property was blocked, and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A property of another tenant answers `404`, with a body indistinguishable from one that does not exist.
+   * @description Paginated with `page`/`per_page` (PRD §23) and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. `title` arrives already composed in the language the request states in its `X-Locale` header, falling back to the authenticated user's stored preference and then to Spanish (PRD §10); `description` does not — it carries operator-written text, such as the reason a property was blocked, and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A property of another tenant answers `404`, with a body indistinguishable from one that does not exist.
    */
   get_property_timeline_api_v1_timeline__property_id__get: {
     parameters: {

@@ -312,17 +312,24 @@ hacer una por una.
   explícitamente en la consulta de eventos y en la de identidad de propiedad (convención D2 de
   este documento), de modo que ningún evento ni ninguna identidad de otro tenant aparezca en la
   respuesta.
-- THE SYSTEM SHALL componer `title` en el idioma de `preferred_language` del usuario
-  autenticado contra el mismo catálogo de la sección «Textos legibles en el idioma del
+- THE SYSTEM SHALL componer `title` en el idioma que declara la petición vía la cabecera
+  `X-Locale` (`RequestLocaleDep`), degradando a `preferred_language` del usuario autenticado
+  y luego a `es`, contra el mismo catálogo de la sección «Textos legibles en el idioma del
   usuario», y SHALL devolver `description` verbatim, sin traducir, y SHALL NOT traducir los
-  literales canónicos — mismas reglas que la ruta por propiedad, misma función `render()`.
+  literales canónicos — mismas reglas que la ruta por propiedad, misma función `render()`
+  (corregido por `frontend-verification-fixes`, que cerró aquí el mismo defecto que arregló en
+  las otras tres rutas: esta ruta se sumó a `main` con la redacción vieja después de que ese
+  change bifurcara).
 
 ### Textos legibles en el idioma del usuario
 
 - WHEN el sistema compone una entrada de timeline o una etiqueta de card, THE SYSTEM SHALL
-  renderizarla en el idioma de `preferred_language` del usuario autenticado, que viaja ya
-  resuelto en el `RequestContext` (ver [`auth-tenancy.md`](auth-tenancy.md)) y no cuesta
-  ninguna consulta adicional.
+  renderizarla en el idioma que declara la petición vía la cabecera `X-Locale`
+  (`RequestLocaleDep`, `backend/app/auth/api/dependencies.py`), degradando a
+  `preferred_language` del usuario autenticado —que viaja ya resuelto en el `RequestContext`
+  (ver [`auth-tenancy.md`](auth-tenancy.md)) y no cuesta ninguna consulta adicional— si la
+  petición no declara un idioma que `Locale` reconozca, y a `es` si tampoco `preferred_language`
+  lo es (`resolve_locale`, `backend/app/core/i18n.py`).
 - THE SYSTEM SHALL derivar el `title` de cada entrada de su `event_type` y de su `metadata`
   contra un catálogo que cubre **los 47 valores de `TimelineEventType` en ambos idiomas**, y un
   test SHALL fallar si el enum crece sin que el catálogo lo siga.

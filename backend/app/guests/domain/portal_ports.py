@@ -29,12 +29,19 @@ class GuestAccessToken:
     Carries the hash and never the token: past the authoriser, the cleartext value does not
     exist anywhere in the system (R1.2). `tenant_id` is here because this row is what
     *resolves* it — the lookup runs before any tenant is known (D4).
+
+    `issued_at` (`guest-link-delivery` R2, design D2) is `GuestAccessTokenModel.created_at`,
+    already stamped by `TimestampMixin` on every row — no new column, no migration. It travels
+    so a status read can answer "since when" without ever exposing `token_hash`: the entity
+    still carries exactly the two facts D1's caller needs (`id`/`revoked_at`) plus this one, and
+    the cleartext value remains nowhere in the type.
     """
 
     id: uuid.UUID
     tenant_id: uuid.UUID
     reservation_id: uuid.UUID
     token_hash: str
+    issued_at: datetime
     revoked_at: datetime | None = None
 
 
@@ -311,12 +318,21 @@ class TenantBinder(Protocol):
 
 
 class GuestAccessTokenRepository(Protocol):
-    """Mint, revoke and resolve the portal credential (D2, D14).
+    """Mint, revoke and resolve the portal credential (D2, D14); now also reports its status
+    by reservation (`guest-link-delivery` R2, design D3).
 
-    Deliberately three methods and no `list`, no `get_by_reservation`: an operator has no
-    read to perform — the row holds only a digest, and rule 3(a)'s named exception returns
-    the cleartext exactly once at issue time. A port that offered a listing would be the open
-    door for the change that comes next.
+    This docstring used to end by reasoning that *no* read-by-reservation should exist yet —
+    "a port that offered a listing would be the open door for the change that comes next". This
+    is that change, and `find_live_for_reservation` below is what its own last sentence
+    anticipated: not a listing, and not a second way to obtain the credential. It reports
+    **presence**, `revoked_at` and `issued_at` for the stay's live token, and never
+    `token_hash` — the same operator surface that mints and revokes may now also see whether a
+    link already exists, without that surface ever holding what would authorise the portal.
+    Rule 3(a)'s "returned once" is still true: the cleartext is handed back exactly once, at
+    issue time, by `add`'s caller; this method cannot return it because the type it returns
+    never carries anywhere the cleartext could hide, and callers reading it are still the same
+    `MANAGE_GUEST_ACCESS_TOKENS`-gated operator surface as the other two methods, never the
+    anonymous portal.
     """
 
     async def find_live_by_token_hash(self, token_hash: str) -> GuestAccessToken | None:
@@ -362,6 +378,23 @@ class GuestAccessTokenRepository(Protocol):
 
         `None` when the stay had no live token — which is not an error: revoking twice is
         allowed and leaves the first `revoked_at` intact.
+        """
+        ...
+
+    async def find_live_for_reservation(
+        self, tenant_id: uuid.UUID, reservation_id: uuid.UUID
+    ) -> GuestAccessToken | None:
+        """The stay's live token, or `None` if it has none (`guest-link-delivery` R2, D3).
+
+        Same predicate `revoke_live_for_reservation` writes against and the partial unique
+        index enforces (`WHERE reservation_id = … AND revoked_at IS NULL`), so "live" cannot
+        mean two different things across this port. Answers a presence question for the
+        operator surface — never resolves a bearer's token, which stays
+        `find_live_by_token_hash`'s job on its own unmarked-session path.
+
+        The caller sees only `id`, `revoked_at` and `issued_at` off the returned entity;
+        `token_hash` exists on the type but this method's contract is that nothing built on top
+        of it ever serialises that field, which is what keeps rule 3(a)'s "returned once" true.
         """
         ...
 

@@ -72,6 +72,7 @@ def _token(tenant, reservation, token_hash: str) -> GuestAccessToken:
         tenant_id=tenant.id,
         reservation_id=reservation.id,
         token_hash=token_hash,
+        issued_at=datetime.now(UTC),
     )
 
 
@@ -289,6 +290,70 @@ async def test_a_marked_session_cannot_see_another_tenants_token(db_session) -> 
     visible = (await db_session.execute(select(GuestAccessTokenModel))).scalars().all()
 
     assert [row.tenant_id for row in visible] == [tenant_a.id]
+
+
+# --- `SqlAlchemyGuestAccessTokenRepository.find_live_for_reservation` (`guest-link-delivery`
+# R2.1, R2.3, D3) -----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_find_live_for_reservation_returns_the_live_token(db_session) -> None:
+    """The straightforward case: one live token, found by tenant and reservation."""
+    tenant, _, reservation = await _stay(db_session, "status-live")
+    repository = SqlAlchemyGuestAccessTokenRepository(db_session)
+    token = _token(tenant, reservation, hash_guest_token("live"))
+    await repository.add(tenant.id, token)
+    await db_session.flush()
+
+    found = await repository.find_live_for_reservation(tenant.id, reservation.id)
+
+    assert found is not None
+    assert found.id == token.id
+    assert found.reservation_id == reservation.id
+    assert found.revoked_at is None
+    assert found.issued_at is not None
+
+
+@pytest.mark.asyncio
+async def test_find_live_for_reservation_reports_nothing_when_there_is_no_token(
+    db_session,
+) -> None:
+    tenant, _, reservation = await _stay(db_session, "status-none")
+    repository = SqlAlchemyGuestAccessTokenRepository(db_session)
+
+    assert await repository.find_live_for_reservation(tenant.id, reservation.id) is None
+
+
+@pytest.mark.asyncio
+async def test_find_live_for_reservation_ignores_a_revoked_token(db_session) -> None:
+    """Only `revoked_at IS NULL` counts as live — same predicate as the revoke method."""
+    tenant, _, reservation = await _stay(db_session, "status-revoked")
+    repository = SqlAlchemyGuestAccessTokenRepository(db_session)
+    await repository.add(tenant.id, _token(tenant, reservation, hash_guest_token("dead")))
+    await db_session.flush()
+    await repository.revoke_live_for_reservation(
+        tenant.id, reservation.id, now=datetime(2026, 8, 10, tzinfo=UTC)
+    )
+    await db_session.flush()
+
+    assert await repository.find_live_for_reservation(tenant.id, reservation.id) is None
+
+
+@pytest.mark.asyncio
+async def test_find_live_for_reservation_does_not_see_another_tenants_token(
+    db_session,
+) -> None:
+    """Rule 1 of `steering/security.md`: tenant isolation on the new read."""
+    tenant_a, _, reservation_a = await _stay(db_session, "status-a")
+    tenant_b, _, reservation_b = await _stay(db_session, "status-b")
+    repository = SqlAlchemyGuestAccessTokenRepository(db_session)
+    await repository.add(tenant_b.id, _token(tenant_b, reservation_b, hash_guest_token("b-live")))
+    await db_session.flush()
+
+    assert await repository.find_live_for_reservation(tenant_a.id, reservation_b.id) is None
+    # Sanity: the same token is found under its own tenant.
+    assert await repository.find_live_for_reservation(tenant_b.id, reservation_b.id) is not None
+    assert reservation_a.id != reservation_b.id
 
 
 # --- `SqlAlchemyGuestPortalStayReader` (D9) -------------------------------------------

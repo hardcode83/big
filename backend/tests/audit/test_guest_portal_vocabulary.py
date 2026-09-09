@@ -32,10 +32,13 @@ def _now() -> datetime:
 # --- The token (D11, D14) --------------------------------------------------------------
 
 
-def test_the_token_entity_type_and_its_two_actions_are_in_the_vocabulary() -> None:
+def test_the_token_entity_type_and_its_three_actions_are_in_the_vocabulary() -> None:
+    """`GUEST_ACCESS_TOKEN_SENT` joined the other two in `guest-link-delivery` (R3.6): the
+    send is a second write path onto the same credential, not a new entity type."""
     assert actions.ENTITY_GUEST_ACCESS_TOKEN in actions.ENTITY_TYPES
     assert actions.GUEST_ACCESS_TOKEN_ISSUED in actions.ACTIONS
     assert actions.GUEST_ACCESS_TOKEN_REVOKED in actions.ACTIONS
+    assert actions.GUEST_ACCESS_TOKEN_SENT in actions.ACTIONS
 
 
 def test_the_factory_builds_an_issue_row() -> None:

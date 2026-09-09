@@ -351,6 +351,26 @@ servicio del compose local publique un puerto en el host fuera de `127.0.0.1`. C
 Pull Request (`.github/workflows/compose-ports.yml`). A diferencia del diagnóstico de stacks, **esto
 sí es una guardia de CI**: sale con código distinto de cero cuando hay hallazgo.
 
+**Tres jobs, no uno** (change `ci-pr-gates-optimization`). `compose-ports.yml` sigue sin
+`paths:` en `on:` — mismo motivo que fija `specs/backend-ci.md`: un filtro de rutas a nivel de
+disparador no produce check alguno en los PR que no lo tocan. El filtrado ocurre dentro del
+workflow, en tres jobs: `compose-ports-detect` decide si el diff toca la configuración de
+compose o el código que la suite ejecuta (la familia de descubrimiento de Compose —`compose.yaml`,
+`compose.yml`, `compose.override.yaml`, `compose.override.yml`, `docker-compose*.yml`,
+`docker-compose*.yaml`, `docker-compose.worktree.yml`—, `scripts/*`, `Makefile` o el propio
+workflow), verifica su superficie always-run (`check-detect-surface.py compose`) y corre siempre
+en segundos; `compose-ports-suite` ejecuta `make check-compose-ports` y la suite de pytest solo
+si la detección dice que hace falta; `compose-ports` consolida y reporta con `if: always()`, así
+que el check existe siempre aunque la suite se salte. Las anclas `scripts/*` y `Makefile`
+cubren la superficie de dependencias de la suite (`design.md` D1.1 del change
+`ci-pr-gates-optimization`: `detect surface ⊇ suite dependency surface`) — `compose-ports-suite`
+corre `pytest scripts/ -q` sobre el árbol de `scripts/` entero, no solo el guard de compose. La
+detección resuelve su propia área — deliberadamente **no** reutiliza la de
+`backend-tests-detect` (`backend/**`): un PR que solo toca `docker-compose.yml` no la tocaría, y
+es justo el PR donde esta guardia tiene que hablar. Ante diff ambiguo o fallo de detección,
+decide a favor de ejecutar la suite (fail-open), igual que el resto de detectores del
+repositorio.
+
 **Estado del check.** WHILE el repositorio no disponga de protección de rama compatible, THE SYSTEM
 SHALL ejecutar y reportar `compose-ports` **sin** configurarlo como check obligatorio para fusionar
 — igual que `api-contract` y `frontend-tests`, y por el mismo motivo de plan de GitHub
@@ -444,10 +464,12 @@ que aquí se eximen allí serían infracción. Dos conjuntos de exenciones opues
 guardia.
 
 El script vive en `scripts/compose-ports.py` con `scripts/test_compose_ports.py` al lado, cargado por
-`importlib` como los demás de `scripts/`. Su suite **sí** la recoge un workflow —`compose-ports.yml`,
-con `uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/ -q`—, y es el primer
-workflow del repositorio que ejecuta `scripts/test_*.py`: hasta entonces solo corrían a mano, porque
-el `pytest` de `backend-tests.yml` va con `working-directory: backend`. En local sigue siendo
+`importlib` como los demás de `scripts/`. Su suite **sí** la recoge un workflow — el job
+`compose-ports-suite` de `compose-ports.yml`, con
+`uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/ -q`, ejecutado solo cuando
+`compose-ports-detect` afirma que el diff toca el área —, y es el primer workflow del repositorio
+que ejecuta `scripts/test_*.py`: hasta entonces solo corrían a mano, porque el `pytest` de
+`backend-tests.yml` va con `working-directory: backend`. En local sigue siendo
 `python3 -m pytest scripts/`.
 
 ### Makefile como entrypoint único
