@@ -330,6 +330,47 @@ describe("forwarding headers", () => {
     expect(calls[0].init.headers.get("x-forwarded-for")).toBeNull();
   });
 
+  it("reports https to the backend when the edge is in front (auth-session-persistence R7.3)", async () => {
+    stubUpstream();
+
+    await GET(
+      incoming("/api/v1/auth/me", {
+        headers: { "cf-connecting-ip": EDGE_CLIENT_IP },
+      }) as never,
+      context("v1", "auth", "me"),
+    );
+
+    expect(calls[0].init.headers.get("x-forwarded-proto")).toBe("https");
+  });
+
+  it("does not claim https for a request that bypassed the edge", async () => {
+    // A request reaching this container directly (e.g. `ssh -L` to 127.0.0.1:3000, design
+    // D2) carries no `cf-connecting-ip`, so nothing here should tell the backend the
+    // request was HTTPS — it would make `resolve_cookie_secure` lie in the one path this
+    // container cannot vouch for.
+    stubUpstream();
+
+    await GET(incoming("/api/v1/auth/me") as never, context("v1", "auth", "me"));
+
+    expect(calls[0].init.headers.get("x-forwarded-proto")).toBeNull();
+  });
+
+  it("ignores a client-supplied x-forwarded-proto even when the edge is in front", async () => {
+    stubUpstream();
+
+    await GET(
+      incoming("/api/v1/auth/me", {
+        headers: {
+          "x-forwarded-proto": "http",
+          "cf-connecting-ip": EDGE_CLIENT_IP,
+        },
+      }) as never,
+      context("v1", "auth", "me"),
+    );
+
+    expect(calls[0].init.headers.get("x-forwarded-proto")).toBe("https");
+  });
+
   it.each(["connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade"])(
     "drops the hop-by-hop header %s",
     async (header) => {

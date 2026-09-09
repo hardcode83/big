@@ -48,6 +48,13 @@
 - [x] 6.3 `make check-rule11-ownership` desde el worktree, sin stack levantado, para validar las atribuciones en la prosa nueva de la sección 3 (el steering `documentation.md` exige afirmaciones en positivo y la prosa de D6 las introduce).
 - [x] 6.4 Confirmar que `frontend/openapi.json` no cambió: `git status frontend/openapi.json` → "nothing to commit, working tree clean". Si cambió, regenerar el contrato con la receta documentada en `sdd/project.md` y commitear aparte antes del PR.
 
+## 7. Contador de identidad de tokens (D8, R6) <!-- añadido retroactivamente tras la tercera ronda de /sdd:review; el trabajo ya estaba hecho y verificado, sólo faltaba su entrada en esta lista -->
+
+- [x] 7.1 `frontend/lib/auth/session-store.ts`: añadir `tokenGeneration` como contador independiente de `sessionGeneration`, con `getTokenGeneration()`. `setSessionTokens()` avanza ambos; `clearSessionTokens()` avanza sólo `tokenGeneration`; `advanceSessionGeneration()`/`purgeSessionCache()` avanzan sólo `sessionGeneration` (R6.1).
+- [x] 7.2 `frontend/lib/auth/refresh-coordinator.ts`: capturar y comparar `getTokenGeneration()` en vez de `getSessionGeneration()` en el dedupe de `inFlight` y en las guardas de éxito/fallo del refresco (R6.2).
+- [x] 7.3 Tests: `session-store.test.ts` confirma que `tokenGeneration` avanza en escritura/borrado de tokens pero no en una purga sola; tres tests nuevos en `refresh-coordinator.test.ts` reproducen la interleaving exacta que motivó R6 —una purga ajena en vuelo no descarta una rotación legítima ni deja viva una sesión genuinamente revocada—, verificados en rojo al revertir temporalmente el fix (R6.3).
+- [x] 7.4 La guarda del `catch` del coordinador pasa a llamar `purgeSessionCache()` antes de `clearSessionTokens()`/`clearSessionPresent()`, cerrando el último sitio con un `clearSessionTokens()` desnudo (R6.4).
+
 ## Implementation Notes
 
 <!-- Append-only. Una viñeta por sección; nombres, decisiones, gotchas. -->

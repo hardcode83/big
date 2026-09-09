@@ -45,6 +45,31 @@
     "email": "Correo electrónico",
     "phone": "Teléfono",
     "preferredLanguage": "Idioma",
-    "openReservation": "Abrir reserva"
+    "openReservation": "Abrir reserva",
+    "propertyCode": "Código interno",
+    "propertyName": "Nombre de la propiedad"
+  },
+  "guestPortalLink": {
+    "title": "Enlace del portal del huésped",
+    "status": {
+      "loading": "Comprobando el estado del enlace…",
+      "live": "Enlace activo desde {{issuedAt}}",
+      "none": "Sin enlace activo"
+    },
+    "actions": {
+      "mint": "Generar enlace",
+      "revoke": "Revocar enlace",
+      "send": "Enviar por correo"
+    },
+    "reveal": {
+      "copy": "Copiar",
+      "copied": "Copiado",
+      "warning": "Este enlace no volverá a mostrarse. Cópialo ahora."
+    },
+    "feedback": {
+      "delivered": "Correo enviado al huésped",
+      "notDelivered": "El enlace se generó, pero no se pudo entregar por correo",
+      "error": "No se pudo completar la acción. Inténtalo de nuevo."
+    }
   }
 }

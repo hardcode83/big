@@ -13,6 +13,11 @@
  * strings (PRD §23) until a downstream component formats them. Types only — no
  * business logic, no runtime code.
  *
+ * `propertyName`, `propertyInternalCode` and `guestFullName` are derived,
+ * read-only fields the API resolves server-side (`property_name`,
+ * `property_internal_code`, `guest_full_name`); they are always nullable and
+ * never synthesized client-side (reservations-identity-web R1).
+ *
  * These shapes are the feature contract that `HttpReservationsSource` maps
  * from the two responses consumed by this change: the list and the detail.
  * Fields not present in those responses are not synthesized or fetched from
@@ -84,6 +89,9 @@ export interface ReservationSummaryDto {
   currency: string;
   grossAmount: string | null;
   paymentStatus: PaymentStatus;
+  propertyName: string | null;
+  propertyInternalCode: string | null;
+  guestFullName: string | null;
 }
 
 /**
@@ -143,4 +151,17 @@ export interface ReservationFilters {
   dateTo?: CivilDate;
   page?: number;
   perPage?: number;
+}
+
+/**
+ * Live-token status for a reservation's guest portal link (proposal R1.1 / R2,
+ * design D1). `issuedAt` is `null` iff `isLive` is `false` — the same
+ * invariant `GuestAccessTokenStatus` (`application/portal.py`) documents on
+ * the backend. Never a `token`/`tokenHash` field: this DTO models exactly
+ * what `GET .../guest-access-token` returns, and that route deliberately
+ * never returns the credential itself (R2.2).
+ */
+export interface GuestAccessTokenStatusDto {
+  isLive: boolean;
+  issuedAt: IsoDateTime | null;
 }

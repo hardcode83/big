@@ -27,9 +27,9 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
-from app.auth.api.dependencies import AuthenticatedRequest, require
+from app.auth.api.dependencies import AuthenticatedRequest, RequestLocaleDep, require
 from app.auth.domain.policy import Permission
 from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.timeline.api.dependencies import (
@@ -92,9 +92,10 @@ ReadDep = Annotated[AuthenticatedRequest, Depends(require(Permission.READ_PROPER
         "carries `property_id`, `property_name` and `property_internal_code` — the latter "
         "two are `null` on the rare event whose `property_id` does not resolve within the "
         "tenant, which is a valid shape and never a reason to drop the entry or fail the "
-        "request. `title` arrives already composed in the authenticated user's language "
-        "(PRD §10); `description` does not — it carries operator-written text and is "
-        "returned verbatim in whatever language it was typed. The `event_type`, "
+        "request. `title` arrives already composed in the language the request states in "
+        "its `X-Locale` header, falling back to the authenticated user's stored preference "
+        "and then to Spanish (PRD §10); `description` does not — it carries operator-written "
+        "text and is returned verbatim in whatever language it was typed. The `event_type`, "
         "`actor_type` and `severity` literals are never translated. The `metadata` "
         "column is not part of this contract and is never serialised. A tenant with no "
         "properties, or with properties that have no events, answers `200` with an empty "
@@ -102,7 +103,9 @@ ReadDep = Annotated[AuthenticatedRequest, Depends(require(Permission.READ_PROPER
     ),
 )
 async def list_tenant_activity(
+    response: Response,
     authenticated: ReadDep,
+    locale: RequestLocaleDep,
     use_case: Annotated[
         ListTenantActivityUseCase, Depends(get_tenant_activity_use_case)
     ],
@@ -114,6 +117,7 @@ async def list_tenant_activity(
     occurred_from: Annotated[datetime | None, Query(alias="from")] = None,
     occurred_to: Annotated[datetime | None, Query(alias="to")] = None,
 ) -> TenantTimelinePageResponse:
+    response.headers["Cache-Control"] = "private, no-store"
     result = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         filters=TimelineFilters(
@@ -125,7 +129,7 @@ async def list_tenant_activity(
         ),
         page=page,
         per_page=per_page,
-        locale=authenticated.context.preferred_language,
+        locale=locale,
     )
     return TenantTimelinePageResponse.build(result, page=page, per_page=per_page)
 
@@ -138,8 +142,9 @@ async def list_tenant_activity(
         "Paginated with `page`/`per_page` (PRD §23) and ordered by occurrence descending, "
         "with the entry id as tiebreaker so paging neither repeats an entry nor skips one "
         "when several share an instant. Filters combine with AND; `from`/`to` are "
-        "inclusive on both ends. `title` arrives already composed in the authenticated "
-        "user's language (PRD §10); `description` does not — it carries operator-written "
+        "inclusive on both ends. `title` arrives already composed in the language the "
+        "request states in its `X-Locale` header, falling back to the authenticated user's "
+        "stored preference and then to Spanish (PRD §10); `description` does not — it carries operator-written "
         "text, such as the reason a property was blocked, and is returned verbatim in "
         "whatever language it was typed. The `event_type`, `actor_type` and "
         "`severity` literals are never translated. The `metadata` column is not part of "
@@ -149,7 +154,9 @@ async def list_tenant_activity(
 )
 async def get_property_timeline(
     property_id: uuid.UUID,
+    response: Response,
     authenticated: ReadDep,
+    locale: RequestLocaleDep,
     use_case: Annotated[
         GetPropertyTimelineUseCase, Depends(get_property_timeline_use_case)
     ],
@@ -161,6 +168,7 @@ async def get_property_timeline(
     occurred_from: Annotated[datetime | None, Query(alias="from")] = None,
     occurred_to: Annotated[datetime | None, Query(alias="to")] = None,
 ) -> TimelinePageResponse:
+    response.headers["Cache-Control"] = "private, no-store"
     result = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         property_id=property_id,
@@ -173,7 +181,7 @@ async def get_property_timeline(
         ),
         page=page,
         per_page=per_page,
-        locale=authenticated.context.preferred_language,
+        locale=locale,
     )
     return TimelinePageResponse.build(
         result.entries, total=result.total, page=page, per_page=per_page

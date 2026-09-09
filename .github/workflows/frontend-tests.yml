@@ -7,13 +7,33 @@ name: frontend-tests
 # check exista en todos los Pull Requests: un check requerido con filtro de rutas no se
 # ejecuta en los PR que no las tocan, y GitHub los deja bloqueados esperando para siempre.
 #
-# Nota de coherencia: la comparación "igual que backend-tests" ya no es exacta. Desde el
-# change `ci-backend-tests-conditional-gate`, backend-tests reporta su check en todos los PR
-# pero solo ejecuta la suite cuando el diff toca `backend/**`, porque tardaba ~6 minutos —y
-# llegó a tardar 15m54s antes de que `backend-suite-runtime` la bajara a ~2m44s—.
-# Aquí no se ha replicado **a propósito**: este workflow tarda ~1m30-2m15, y ese patrón
-# cuesta tres jobs. Es una decisión revisable, no un olvido — si el frontend crece hasta
-# doler, backend-tests.yml es el precedente a copiar.
+# --- Por qué son tres jobs (change `ci-pr-gates-optimization`) ---
+#
+# Hasta este change eran dos jobs (`provenance-contract` + `frontend-tests`) y el patrón de
+# `backend-tests.yml` se había dejado SIN copiar a propósito, por coste. `ci-pr-gates-optimization`
+# lo adopta: de los PR que no tocan el frontend la suite no puede decir nada nuevo, así que ahora
+# solo se ejecuta cuando el diff toca `frontend/**` (o el manifiesto, el lockfile, el Dockerfile
+# del frontend, los guards que la suite ejecuta fuera de `frontend/**` — `scripts/**` entero
+# (como hacen compose/rule11), `.github/scripts/**`—, `Makefile` o este propio workflow). Anclar
+# `scripts/*` en bloque (§13-A) —en vez de los dos scripts `.py` nombrados de antes— disuelve la
+# clase fail-open de superficie de detección: cualquier `scripts/**` que la suite ejecute queda
+# gateado por el propio `case`, con independencia del parser textual de `check-detect-surface.py`.
+# Pero el check se sigue reportando SIEMPRE:
+#
+#   frontend-tests-detect  decide si el diff toca el área      (siempre corre, ~segundos)
+#   frontend-tests-suite   la verificación de verdad           (corre si toca)
+#   frontend-tests         consolida y reporta                 (siempre corre)
+#
+# SIGUE PROHIBIDO poner `paths:` en `on:`: con un filtro en el disparador el workflow NO arranca,
+# así que un check requerido nunca reporta y GitHub deja el PR bloqueado esperando para siempre.
+# Lo que se ha movido es *dónde* se decide: del disparador (donde condicionar implica no reportar)
+# al interior de la ejecución (donde se puede condicionar el trabajo y reportar igualmente).
+#
+# El check run toma el nombre del JOB, no del workflow. `frontend-tests` es por tanto el único
+# contexto marcable como obligatorio; `frontend-tests-suite` se salta de forma legítima y marcarlo
+# reproduciría el bloqueo indefinido por otra puerta. El precedente literal es `backend-tests.yml`
+# (change `ci-backend-tests-conditional-gate`), del que este workflow copia la lógica de detección,
+# el fail-open ante diff ambiguo y la consolidación con `if: always()`.
 
 on:
   pull_request: {}
@@ -29,48 +49,203 @@ permissions:
   contents: read
 
 jobs:
-  provenance-contract:
+  # --- ¿Hay que ejecutar la suite? Se decide una vez, aquí, y se publica. -----------
+  # Sin dependencias: solo git. Es el job que hace que el camino corto cueste segundos.
+  frontend-tests-detect:
     runs-on: [self-hosted, dev]
     timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      frontend: ${{ steps.decide.outputs.frontend }}
+      reason: ${{ steps.decide.outputs.reason }}
+
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          # Historia completa: el diff se calcula contra la base del PR (o el estado
+          # anterior de `main`), y un clon shallow no la contiene.
+          fetch-depth: 0
+          # Los pasos posteriores no necesitan Git autenticado.
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      # D11: el runner self-hosted trae python3 3.10; el self-test siguiente exige >= 3.12.
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Version parity
-        run: make check-version-parity
-      - name: Pull request extractor self-test
-        run: bash .github/scripts/extract-pr.sh --self-test
-      - name: Provenance producer contract self-test
-        run: python3 scripts/validate-provenance-contract.py --self-test
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-      - name: Generated API contract and provenance disclosure tests
-        working-directory: frontend
-        run: npm run api:check && npm test -- --run features/provenance
-      - name: Production build and public artifact disclosure gate
-        working-directory: frontend
-        run: |
-          set -euo pipefail
-          export APP_PROVENANCE_REPOSITORY_URL='https://github.com/private-sentinel/repository'
-          export APP_PROVENANCE_PULL_REQUEST_NUMBER='987654321'
-          export APP_PROVENANCE_COMMIT_SHA='dddddddddddddddddddddddddddddddddddddddd'
-          export APP_PROVENANCE_ACTIONS_RUN_ID='876543210'
-          npm run build
-          npm run test:public-artifacts
 
-  frontend-tests:
+      # Invariante temporal (design D1.1.c): la superficie de detección de ESTE job debe cubrir
+      # todo lo que `frontend-tests-suite` ejecuta fuera de `frontend/**` (los guards
+      # `scripts/*.py`, `.github/scripts/*` y los `make <target>`). Corre SIEMPRE y ANTES de
+      # `decide` (fuera de su `set +e`, bajo el `bash -e` por defecto), así que si la suite crece
+      # un guard sin ampliar el `case` de abajo, este paso ABORTA el job en el mismo PR que abre la
+      # brecha —no un PR después—. Un fallo aquí es un error de configuración del gate: el
+      # consolidador lo ve como `DETECT_RESULT != success` y reporta **fail-closed** (rojo),
+      # distinto del fail-open ante un diff ambiguo. Stdlib puro (`python3` del runner, sin `uv`).
+      - name: Verificar superficie de detección
+        run: python3 scripts/check-detect-surface.py frontend
+
+      - name: ¿El diff toca el frontend?
+        id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        # Aquí un fallo inesperado NO debe abortar el paso: si el diff no se puede
+        # determinar, el requisito (R1.5) es ejecutar la suite completa, no dejar el
+        # check en rojo — la duda se resuelve verificando. Por eso cada comando que
+        # puede fallar se comprueba explícitamente y `frontend` arranca en `true`: solo
+        # una ruta afirmativa lo baja a `false`.
+        run: |
+          # `set +e` explícito porque GitHub invoca los `run:` con `bash -e {0}`: `-e`
+          # está activo por defecto y un `set -uo pipefail` NO lo desactiva.
+          #
+          # Es una medida defensiva, no la que hace funcionar el fail-open de R1.5 hoy.
+          # Comprobado: `-e` queda suspendido en todo el cuerpo de una función invocada
+          # como test de un `if`/`elif` (o negada con `!`), y ahora mismo TODOS los
+          # comandos que pueden fallar —`git cat-file`, `read_diff`— se invocan así, de
+          # modo que ya degradaban correctamente sin esta línea. Lo que `set +e` cubre es
+          # el futuro: el día que alguien añada aquí un comando fuera de un condicional,
+          # su fallo abortaría el paso y el gate reportaría rojo en vez de caer al camino
+          # completo, que es lo contrario de lo que R1.5 pide.
+          set +e
+          set -uo pipefail
+
+          frontend=true
+          reason="unknown-event-defaults-to-full-suite"
+          files=()
+
+          # `core.quotePath=false` y `-z` no son cosmética. Por defecto git ESCAPA las
+          # rutas no ASCII y las envuelve en comillas —`"frontend/caf\303\251.ts"`—, con
+          # lo que un patrón anclado en `^frontend/` no casa: un PR cuyo único cambio de
+          # frontend fuese un fichero con acento se saltaría la suite y el check saldría
+          # VERDE. Con el quoting desactivado las rutas llegan literales, y `-z` las
+          # separa por NUL, que es lo único seguro con nombres que llevan espacios o
+          # saltos de línea.
+          # `--no-renames` NO es un detalle de rendimiento. Git detecta renombrados por
+          # defecto, y con `--name-only` un movimiento COLAPSA a una sola línea con la
+          # ruta destino: mover `frontend/app/x.ts` a `shared/x.ts` sale solo como
+          # `shared/x.ts`. Sin este flag, un PR que saca un módulo DE `frontend/` se
+          # juzga «no toca el frontend», se salta la suite y el check sale VERDE — con
+          # código del frontend desaparecido. Con el flag salen ambas rutas.
+          read_diff() {
+            local out rc
+            out="$(mktemp)"
+            git -c core.quotePath=false diff -z --no-renames --name-only "$@" >"$out" 2>/dev/null
+            rc=$?
+            if [ "$rc" -eq 0 ]; then
+              mapfile -d '' -t files <"$out"
+            fi
+            rm -f "$out"
+            return "$rc"
+          }
+
+          # Comparación ruta a ruta con `case`, no un regex sobre el conjunto pegado:
+          # evita escapar el punto de `.github` y hace imposible un acierto parcial.
+          evaluate() {
+            local f
+            for f in "${files[@]}"; do
+              case "$f" in
+                frontend/* | frontend/devops/Dockerfile | frontend/package.json | frontend/package-lock.json | scripts/* | .github/scripts/* | Makefile | .github/workflows/frontend-tests.yml)
+                  frontend=true
+                  reason="diff-touches-frontend"
+                  return
+                  ;;
+              esac
+            done
+            frontend=false
+            reason="no-frontend-changes"
+          }
+
+          case "$EVENT_NAME" in
+            workflow_dispatch)
+              # Vía de escape deliberada: una ejecución manual siempre verifica todo.
+              reason="workflow-dispatch-runs-full-suite"
+              ;;
+
+            pull_request)
+              if [ -z "${PR_BASE_SHA:-}" ] || [ -z "${PR_HEAD_SHA:-}" ]; then
+                reason="pr-shas-missing"
+              elif ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null; then
+                reason="pr-base-unreachable"
+              # Tres puntos, no dos: interesan los cambios de la rama desde el ancestro
+              # común. Con dos puntos, fusionar `main` en la rama dispararía la suite
+              # sin que el PR haya tocado el frontend.
+              elif ! read_diff "${PR_BASE_SHA}...${PR_HEAD_SHA}"; then
+                reason="git-diff-failed"
+              else
+                evaluate
+              fi
+              ;;
+
+            push)
+              if [ -z "${PUSH_BEFORE:-}" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                # Rama nueva o primer push: no hay estado anterior con el que comparar.
+                reason="push-before-is-zero"
+              elif ! git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+                # Force-push: el commit anterior ya no es alcanzable.
+                reason="push-before-unreachable"
+              elif ! read_diff "${PUSH_BEFORE}" "${PUSH_AFTER}"; then
+                reason="git-diff-failed"
+              else
+                evaluate
+              fi
+              ;;
+          esac
+
+          {
+            echo "frontend=${frontend}"
+            echo "reason=${reason}"
+          } >> "$GITHUB_OUTPUT"
+
+          # A stdout además del output: `$GITHUB_OUTPUT` es un canal entre jobs y no
+          # imprime nada en el log, y el resumen lo escribe el job consolidador. Sin
+          # esto la decisión no sería visible donde se toma. Ambos valores salen de un
+          # conjunto cerrado de literales de este script, así que no son inyectables.
+          echo "::notice::frontend=${frontend} (${reason})"
+
+          if [ "${#files[@]}" -gt 0 ]; then
+            echo "Ficheros cambiados considerados (${#files[@]}):"
+            # `%q` y el prefijo son contención, no formato. Quien abre el PR elige los
+            # nombres de fichero, y un nombre puesto al principio de una línea del log
+            # lo ejecuta el runner como comando de workflow (`::notice::`, `::error::`,
+            # `::add-mask::`, `::stop-commands::`): permitiría falsificar la anotación de
+            # la decisión que R1.7 exige, o silenciar el resto del log.
+            #
+            # El prefijo de dos espacios NO basta por sí solo: un nombre de fichero puede
+            # contener SALTOS DE LÍNEA, y con `-z` llegan crudos, así que el prefijo solo
+            # protegería la primera línea y las demás empezarían en la columna 0. `%q`
+            # colapsa cada ruta a una sola línea (`$'frontend/z\n::error::…'`), con lo que
+            # el prefijo vuelve a cubrirla entera — y de paso el tope de 50 pasa a contar
+            # líneas de verdad y no elementos que pueden expandirse a muchas.
+            printf '  %q\n' "${files[@]:0:50}"
+          fi
+
+  # --- La verificación de verdad. Fusiona las 9 señales (5 de provenance + 4 de suite)
+  # de los dos jobs originales en uno solo, con un ÚNICO `npm ci` (R3.1). Solo corre
+  # cuando el detector afirma que el diff toca el frontend.
+  frontend-tests-suite:
+    needs: frontend-tests-detect
+    if: needs.frontend-tests-detect.outputs.frontend == 'true'
     runs-on: [self-hosted, dev]
     timeout-minutes: 15
+    permissions:
+      contents: read
+
+    # Cada señal se publica como salida para que el consolidador la nombre si falla.
+    # `continue-on-error: true` en cada verificación deja que `outcome` refleje el
+    # resultado real aunque el job siga en verde: el veredicto se decide señal a señal.
+    outputs:
+      version_parity_outcome: ${{ steps.version_parity.outcome }}
+      extract_pr_outcome: ${{ steps.extract_pr.outcome }}
+      validate_provenance_outcome: ${{ steps.validate_provenance.outcome }}
+      install_outcome: ${{ steps.install.outcome }}
+      provenance_suite_outcome: ${{ steps.provenance_suite.outcome }}
+      public_artifacts_outcome: ${{ steps.public_artifacts.outcome }}
+      tests_outcome: ${{ steps.tests.outcome }}
+      layout_outcome: ${{ steps.layout.outcome }}
+      lint_outcome: ${{ steps.lint.outcome }}
+      typecheck_outcome: ${{ steps.typecheck.outcome }}
+      # Duraciones para el resumen del consolidador (R1.7).
+      tests_seconds: ${{ steps.tests.outputs.seconds }}
+      layout_seconds: ${{ steps.layout.outputs.seconds }}
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -87,10 +262,62 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # El runner self-hosted trae Python 3.10; la primera precondición de provenance
+      # (`make check-version-parity` → `python3 scripts/check-version-parity.py`) usa
+      # `tomllib`, stdlib de Python 3.11+. Sin este setup, el step falla con
+      # `ModuleNotFoundError: No module named 'tomllib'` y el consolidador lee la señal
+      # como `failure`. Mismo SHA pinneado y misma acción que ya usa la suite del guard
+      # en `rule11-ownership.yml`.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # --- Precondiciones (no necesitan `node_modules`, van antes del `npm ci`). ------
+      # Con `continue-on-error: true` para preservar R1.1: si una falla, el job no se
+      # aborta y el consolidador la nombra como señal roja en vez de dejar el check sin
+      # reportar. Son tres de las cinco señales de provenance (R3.3).
+      - name: Version parity
+        id: version_parity
+        continue-on-error: true
+        run: make check-version-parity
+
+      - name: Pull request extractor self-test
+        id: extract_pr
+        continue-on-error: true
+        run: bash .github/scripts/extract-pr.sh --self-test
+
+      - name: Provenance producer contract self-test
+        id: validate_provenance
+        continue-on-error: true
+        run: python3 scripts/validate-provenance-contract.py --self-test
+
+      # --- Un único `npm ci` por ejecución (R3.1, R3.2). ------------------------------
       - name: Instalar dependencias desde el lockfile
         id: install
         working-directory: frontend
         run: npm ci
+
+      # --- Señales que necesitan `node_modules`. Todas guardadas por `install`. --------
+      - name: Generated API contract and provenance disclosure tests
+        id: provenance_suite
+        if: ${{ steps.install.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        working-directory: frontend
+        run: npm run api:check && npm test -- --run features/provenance
+
+      - name: Production build and public artifact disclosure gate
+        id: public_artifacts
+        if: ${{ steps.install.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          export APP_PROVENANCE_REPOSITORY_URL='https://github.com/private-sentinel/repository'
+          export APP_PROVENANCE_PULL_REQUEST_NUMBER='987654321'
+          export APP_PROVENANCE_COMMIT_SHA='dddddddddddddddddddddddddddddddddddddddd'
+          export APP_PROVENANCE_ACTIONS_RUN_ID='876543210'
+          npm run build
+          npm run test:public-artifacts
 
       - name: Tests (Vitest)
         id: tests
@@ -105,7 +332,13 @@ jobs:
         # contenido se limita a la plantilla que emite `next` y al `routes.d.ts`
         # generado bajo `.next/dev/types/`, así que también se siembra ese
         # directorio vacío para que el `import` resuelva.
+        #
+        # `set +e` solo alrededor de `npm test` para poder cronometrar la suite y
+        # publicar los segundos AUNQUE falle (R1.7): la duración tiene que existir para
+        # el resumen incluso cuando la señal sale roja, así que se captura el código de
+        # salida, se publican los segundos y solo después se rinde con `exit`.
         run: |
+          set -uo pipefail
           mkdir -p .next/dev/types
           printf '%s\n' \
             '/// <reference types="next" />' \
@@ -116,7 +349,23 @@ jobs:
             '// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.' \
             > next-env.d.ts
           : > .next/dev/types/routes.d.ts
+          started=$(date +%s)
+          set +e
           npm test
+          status=$?
+          set -e
+          echo "seconds=$(( $(date +%s) - started ))" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Restore Playwright browser cache
+        id: cache-restore
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          # Cache EXACTA: una key nueva (lockfile cambiado) produce miss y restaura
+          # en vacío; NO se usa `restore-keys:` para evitar restaurar silenciosamente
+          # browsers de otro lockfile (riesgo de binario desactualizado).
+          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
 
       - name: Guarda de desbordamiento a 360px (Vitest browser)
         id: layout
@@ -130,11 +379,10 @@ jobs:
         #
         # Coste: el binario de Chromium son ~180 MiB de descarga más las
         # dependencias de sistema; la suite en sí tarda ~13 s (medido en local:
-        # 8 s de Vitest y 0,3 s de compilar el CSS). En un job que hoy tarda
-        # ~1m30-2m15, la instalación del navegador es lo que domina y puede
-        # llegar a duplicarlo. Si duele, hay dos salidas escritas: cachear
-        # `~/.cache/ms-playwright` por versión de playwright, o partir el job
-        # como hizo `ci-backend-tests-conditional-gate` en `backend-tests.yml`.
+        # 8 s de Vitest y 0,3 s de compilar el CSS). La cache de arriba
+        # (`~/.cache/ms-playwright`, keyed por lockfile) evita volver a bajar el
+        # binario cuando el lockfile no cambia; el `install --with-deps` de abajo
+        # corre SIEMPRE porque las system libs no viven en esa cache.
         #
         # `npm exec --no --` y no `npx`: cuando el paquete no está en
         # `node_modules`, `npx` lo descarga del registro y lo ejecuta. Y
@@ -144,9 +392,28 @@ jobs:
         # registro la versión del día y ejecútala con `--with-deps`», es decir
         # bajo el sudo sin contraseña del runner. `--no` se niega a instalar
         # nada: usa el binario que `npm ci` dejó desde el lockfile, o falla.
+        #
+        # `set +e` solo alrededor de `npm run test:layout` para cronometrarlo y
+        # publicar los segundos aunque falle (R1.7); la instalación del navegador
+        # queda FUERA del cronómetro para que la duración mida la suite, no la
+        # descarga del binario.
         run: |
+          set -uo pipefail
           npm exec --no -- playwright install --with-deps chromium
+          started=$(date +%s)
+          set +e
           npm run test:layout
+          status=$?
+          set -e
+          echo "seconds=$(( $(date +%s) - started ))" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Save Playwright browser cache
+        if: steps.cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
 
       - name: Lint (ESLint)
         id: lint
@@ -162,33 +429,149 @@ jobs:
         working-directory: frontend
         run: npm run typecheck
 
-      - name: Consolidar resultados
-        if: always()
+  # --- El check que se reporta. SIEMPRE se ejecuta: es el invariante del gate. ------
+  # Este nombre de job es el contexto que ve GitHub, así que no se renombra sin romper
+  # cualquier selección de check obligatorio.
+  frontend-tests:
+    needs: [frontend-tests-detect, frontend-tests-suite]
+    if: always()
+    runs-on: [self-hosted, dev]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - name: Consolidar el resultado del gate
         env:
-          INSTALL_OUTCOME: ${{ steps.install.outcome }}
-          TESTS_OUTCOME: ${{ steps.tests.outcome }}
-          LAYOUT_OUTCOME: ${{ steps.layout.outcome }}
-          LINT_OUTCOME: ${{ steps.lint.outcome }}
-          TYPECHECK_OUTCOME: ${{ steps.typecheck.outcome }}
+          DETECT_RESULT: ${{ needs.frontend-tests-detect.result }}
+          SUITE_RESULT: ${{ needs.frontend-tests-suite.result }}
+          FRONTEND: ${{ needs.frontend-tests-detect.outputs.frontend }}
+          REASON: ${{ needs.frontend-tests-detect.outputs.reason }}
+          VERSION_PARITY_OUTCOME: ${{ needs.frontend-tests-suite.outputs.version_parity_outcome }}
+          EXTRACT_PR_OUTCOME: ${{ needs.frontend-tests-suite.outputs.extract_pr_outcome }}
+          VALIDATE_PROVENANCE_OUTCOME: ${{ needs.frontend-tests-suite.outputs.validate_provenance_outcome }}
+          INSTALL_OUTCOME: ${{ needs.frontend-tests-suite.outputs.install_outcome }}
+          PROVENANCE_SUITE_OUTCOME: ${{ needs.frontend-tests-suite.outputs.provenance_suite_outcome }}
+          PUBLIC_ARTIFACTS_OUTCOME: ${{ needs.frontend-tests-suite.outputs.public_artifacts_outcome }}
+          TESTS_OUTCOME: ${{ needs.frontend-tests-suite.outputs.tests_outcome }}
+          LAYOUT_OUTCOME: ${{ needs.frontend-tests-suite.outputs.layout_outcome }}
+          LINT_OUTCOME: ${{ needs.frontend-tests-suite.outputs.lint_outcome }}
+          TYPECHECK_OUTCOME: ${{ needs.frontend-tests-suite.outputs.typecheck_outcome }}
+          TESTS_SECONDS: ${{ needs.frontend-tests-suite.outputs.tests_seconds }}
+          LAYOUT_SECONDS: ${{ needs.frontend-tests-suite.outputs.layout_seconds }}
+        # Los casos se enumeran uno a uno en vez de escribir un `!= 'failure'`
+        # abreviado: esa forma daría verde ante una cancelación y ante un job de
+        # detección roto, que son precisamente los dos falsos verdes que hay que
+        # evitar. Misma forma que la consolidación de backend-tests.yml: la rama de
+        # "suite ejecutada" exige `result == success`, y como las nueve señales llevan
+        # `continue-on-error`, un fallo de señal deja el job en `success` y el veredicto
+        # se decide señal a señal en el bucle. Un `result` de `failure` (npm ci, o los
+        # pasos de `actions/cache` que no llevan `continue-on-error` ni se trackean como
+        # señal) NO entra en esa rama: cae al `else` genérico y falla fail-closed.
         run: |
           set -euo pipefail
+
+          # Señales en orden de reporte. Ningún nombre contiene `:`, así que el corte
+          # `name%%:*` / `outcome#*:` es seguro.
+          signals=(
+            "version-parity:${VERSION_PARITY_OUTCOME:-}"
+            "PR extractor self-test:${EXTRACT_PR_OUTCOME:-}"
+            "Validador de provenance self-test:${VALIDATE_PROVENANCE_OUTCOME:-}"
+            "npm ci:${INSTALL_OUTCOME:-}"
+            "API contract + disclosure (provenance):${PROVENANCE_SUITE_OUTCOME:-}"
+            "Build + public artifact disclosure:${PUBLIC_ARTIFACTS_OUTCOME:-}"
+            "Tests (Vitest node):${TESTS_OUTCOME:-}"
+            "Guarda de layout 360px (Vitest browser):${LAYOUT_OUTCOME:-}"
+            "Lint (ESLint):${LINT_OUTCOME:-}"
+            "Typecheck (TypeScript):${TYPECHECK_OUTCOME:-}"
+          )
+
+          if [ "$DETECT_RESULT" != "success" ]; then
+            verdict=fail
+            detail="el job de detección terminó en '${DETECT_RESULT}', así que no se sabe si la suite hacía falta"
+            suite_line="no ejecutada"
+          elif [ "$SUITE_RESULT" = "success" ]; then
+            # La suite se ejecutó y su `result` es `success`: con `continue-on-error` en
+            # las nueve señales, un fallo de señal NO tumba el job, así que el veredicto
+            # se decide señal a señal en el bucle de abajo. Un `result` de `failure`
+            # (npm ci, o `cache-restore`/`cache-save`, que no llevan `continue-on-error`
+            # ni se trackean como señal) NO llega aquí: cae al `else` genérico y falla
+            # fail-closed. Ampliar esta rama a `|| failure` daría verde cuando un paso no
+            # trackeado del job fallara con las diez señales en verde — el falso verde que
+            # D2 prohíbe (misma clase de bug que el árbol enumerado de backend-tests.yml
+            # existe para evitar).
+            verdict=pass
+            detail="la suite se ejecutó completa y todas las señales pasaron"
+            suite_line="ejecutada y verde"
+            failed=""
+            for entry in "${signals[@]}"; do
+              name="${entry%%:*}"
+              outcome="${entry#*:}"
+              if [ "$outcome" != "success" ]; then
+                verdict=fail
+                failed="${failed:+${failed}; }${name} (${outcome:-not-run})"
+              fi
+            done
+            if [ -n "$failed" ]; then
+              detail="una o más señales del frontend no pasaron: ${failed}"
+              suite_line="ejecutada, con fallos"
+            fi
+          elif [ "$SUITE_RESULT" = "skipped" ]; then
+            if [ "$FRONTEND" = "false" ]; then
+              verdict=pass
+              detail="el diff no toca \`frontend/**\` ni este workflow, así que la suite NO se ejecutó"
+              suite_line="**OMITIDA** (no ejecutada)"
+            else
+              # No debería poder ocurrir: si hacía falta, no se salta. Si pasa, es un
+              # bug del gate y no un PR válido.
+              verdict=fail
+              detail="incoherencia del gate: la suite se saltó con frontend='${FRONTEND}'"
+              suite_line="omitida indebidamente"
+            fi
+          else
+            verdict=fail
+            detail="la suite terminó en '${SUITE_RESULT}'"
+            suite_line="${SUITE_RESULT}"
+          fi
+
+          # --- Duraciones (R1.7): solo cuando la suite se ejecutó. ------------------
+          if [ "$SUITE_RESULT" = "skipped" ]; then
+            tests_dur="no aplica — la suite no se ejecutó"
+            layout_dur="no aplica — la suite no se ejecutó"
+          else
+            if [ -n "${TESTS_SECONDS:-}" ]; then tests_dur="**${TESTS_SECONDS}s**"; else tests_dur="no medida"; fi
+            if [ -n "${LAYOUT_SECONDS:-}" ]; then layout_dur="**${LAYOUT_SECONDS}s**"; else layout_dur="no medida"; fi
+          fi
+
           {
-            echo "## Frontend checks"
+            echo "## frontend-tests"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Veredicto | ${verdict} |"
+            echo "| Suite del frontend | ${suite_line} |"
+            echo "| Decisión de área | \`${FRONTEND:-desconocida}\` (\`${REASON:-sin razón}\`) |"
+            echo "| Duración de \`npm test\` | ${tests_dur} |"
+            echo "| Duración de \`npm run test:layout\` | ${layout_dur} |"
             echo ""
             echo "| Verificación | Resultado |"
             echo "|---|---|"
-            echo "| npm ci | ${INSTALL_OUTCOME:-not-run} |"
-            echo "| Tests (Vitest) | ${TESTS_OUTCOME:-not-run} |"
-            echo "| Guarda de layout 360px (Vitest browser) | ${LAYOUT_OUTCOME:-not-run} |"
-            echo "| Lint (ESLint) | ${LINT_OUTCOME:-not-run} |"
-            echo "| Typecheck (TypeScript) | ${TYPECHECK_OUTCOME:-not-run} |"
+            for entry in "${signals[@]}"; do
+              name="${entry%%:*}"
+              outcome="${entry#*:}"
+              echo "| ${name} | ${outcome:-not-run} |"
+            done
+            echo ""
+            echo "${detail}"
+            if [ "$suite_line" = "**OMITIDA** (no ejecutada)" ]; then
+              echo ""
+              echo "> Este check está verde porque **no había nada que verificar**, no porque"
+              echo "> la suite haya pasado. Un PR que toque \`frontend/**\` la ejecuta entera."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$INSTALL_OUTCOME" != "success" ] || \
-             [ "$TESTS_OUTCOME" != "success" ] || \
-             [ "$LAYOUT_OUTCOME" != "success" ] || \
-             [ "$LINT_OUTCOME" != "success" ] || \
-             [ "$TYPECHECK_OUTCOME" != "success" ]; then
-            echo "::error::Una o más verificaciones del frontend fallaron, se cancelaron o no llegaron a ejecutarse."
+          if [ "$verdict" != "pass" ]; then
+            echo "::error::${detail}"
             exit 1
           fi
+          echo "::notice::${detail}"

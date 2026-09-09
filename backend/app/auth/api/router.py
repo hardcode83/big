@@ -1,31 +1,38 @@
 """Auth endpoints (PRD §23, R1, R2, R3)."""
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response, status
 
 from app.auth.api.dependencies import (
     AuthenticatedRequest,
+    LogoutSubject,
+    enforce_same_origin,
     get_change_own_password_use_case,
     get_client_ip,
     get_consume_password_reset_use_case,
     get_current_user_use_case,
     get_login_use_case,
+    get_logout_subject,
     get_logout_use_case,
     get_refresh_use_case,
     get_request_password_reset_use_case,
+    is_same_origin_allowed,
     now_utc,
     require,
+    resolve_cookie_secure,
 )
 from app.auth.api.schemas import (
+    SESSION_REFRESH_COOKIE,
     ChangePasswordRequest,
     CurrentUserResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     LoginRequest,
-    RefreshRequest,
     ResetPasswordRequest,
     TokenPairResponse,
+    emit_refresh_cookie,
 )
 from app.auth.application.recovery import (
     ChangeOwnPasswordUseCase,
@@ -38,8 +45,12 @@ from app.auth.application.use_cases import (
     LogoutUseCase,
     RefreshTokenUseCase,
 )
+from app.auth.domain.exceptions import InvalidTokenError
 from app.auth.domain.policy import Permission
+from app.core.config import settings
 from app.core.openapi import AUTHENTICATED_RESPONSES
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -57,13 +68,28 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 async def login(
     body: LoginRequest,
     request: Request,
+    response: Response,
     use_case: Annotated[LoginUseCase, Depends(get_login_use_case)],
 ) -> TokenPairResponse:
+    # `InvalidCredentialsError`/`TooManyAttemptsError` raised inside `execute` propagate
+    # past this point, so the cookie below is never set on a failed login (R1.3) — no
+    # extra guard needed, `tests/auth/test_api.py` asserts it directly.
     pair = await use_case.execute(
         email=body.email,
         password=body.password,
         client_ip=get_client_ip(request),
         now=now_utc(),
+    )
+    secure = resolve_cookie_secure(request)
+    logger.info(
+        "auth.refresh_cookie_issued",
+        extra={"secure": secure, "scheme": request.url.scheme, "endpoint": "login"},
+    )
+    emit_refresh_cookie(
+        response,
+        pair.refresh_token,
+        secure=secure,
+        max_age_seconds=settings.jwt_refresh_token_days * 86400,
     )
     return TokenPairResponse(**vars(pair))
 
@@ -74,19 +100,42 @@ async def login(
     summary="Rotate a refresh token",
     description=(
         "Anonymous: the refresh token itself is the credential. The presented token is "
-        "invalidated. Presenting an already-used one revokes the whole session family."
+        "invalidated. Presenting an already-used one revokes the whole session family. "
+        "Rejects a cross-origin caller outside the CORS allowlist with the same 401 a "
+        "missing/invalid cookie gets (review: sdd-security, CSRF finding) — SameSite "
+        "alone does not cover a same-site sibling origin."
     ),
+    dependencies=[Depends(enforce_same_origin)],
 )
 async def refresh(
     request: Request,
-    body: RefreshRequest,
+    response: Response,
     use_case: Annotated[RefreshTokenUseCase, Depends(get_refresh_use_case)],
 ) -> TokenPairResponse:
+    # R2.3: the refresh token travels exclusively via the `SESSION_REFRESH_COOKIE`
+    # cookie — a body carrying `refresh_token` is never read, so it is silently ignored
+    # rather than accepted as a fallback.
+    token = request.cookies.get(SESSION_REFRESH_COOKIE)
+    if token is None:
+        # Same 401 `INVALID_TOKEN` envelope a missing/invalid Bearer token gets
+        # (`backend/app/auth/api/errors.py`) — no new error path for a missing cookie.
+        raise InvalidTokenError("Token is not valid")
     pair = await use_case.execute(
-        refresh_token=body.refresh_token,
+        refresh_token=token,
         # R8 of `api-ingress-routing`: the per-IP budget needs the client, same as login.
         client_ip=get_client_ip(request),
         now=now_utc(),
+    )
+    secure = resolve_cookie_secure(request)
+    logger.info(
+        "auth.refresh_cookie_issued",
+        extra={"secure": secure, "scheme": request.url.scheme, "endpoint": "refresh"},
+    )
+    emit_refresh_cookie(
+        response,
+        pair.refresh_token,
+        secure=secure,
+        max_age_seconds=settings.jwt_refresh_token_days * 86400,
     )
     return TokenPairResponse(**vars(pair))
 
@@ -94,25 +143,53 @@ async def refresh(
 @router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="End the session this access token belongs to",
+    summary="End the session this access token or refresh cookie belongs to",
     description=(
-        "Revokes the refresh family named by the token. Access tokens already issued "
-        "keep working until they expire — at most their configured lifetime."
+        "Revokes the refresh family named by a valid access token, or by the refresh "
+        "cookie itself when there is no access token, or the one presented does not "
+        "authenticate — the cookie is as much a credential here as it already is for "
+        "/auth/refresh (review: sdd-security, R3.1/R6.2), so a caller with no valid "
+        "access token can still end its own session without minting a new one first. "
+        "Never answers 401 for an authentication reason: idempotent, nothing to "
+        "revoke answers the same 204 — including a cookie presented by a cross-origin "
+        "caller outside the CORS allowlist (CSRF finding), which is treated as nothing "
+        "to revoke rather than raised."
     ),
     responses=AUTHENTICATED_RESPONSES,
 )
 async def logout(
-    authenticated: Annotated[
-        AuthenticatedRequest, Depends(require(Permission.MANAGE_OWN_SESSION))
-    ],
+    request: Request,
+    response: Response,
+    subject: Annotated[LogoutSubject | None, Depends(get_logout_subject)],
     use_case: Annotated[LogoutUseCase, Depends(get_logout_use_case)],
 ) -> Response:
-    await use_case.execute(
-        tenant_id=authenticated.context.tenant_id,
-        family_id=authenticated.family_id,
-        now=now_utc(),
-    )
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    # Design D6: unconditional on "revoked something", "nothing to revoke" (idempotent,
+    # R3.2) AND "no credential to resolve" (R6.2's cookie fallback) — none of these
+    # branch the response, so there is nothing to condition it on.
+    if subject is not None:
+        await use_case.execute(
+            tenant_id=subject.tenant_id,
+            family_id=subject.family_id,
+            now=now_utc(),
+        )
+    # NOT unconditional (review round 6, security panel finding): a same-site-but-
+    # cross-origin caller whose Origin get_logout_subject already rejected (folding it
+    # into "nothing to revoke" above) must not be able to purge the victim's cookie
+    # either — an earlier version deleted it here regardless of subject/Origin, so a
+    # forged-Origin request could not revoke the session but could still force the
+    # browser to drop its cookie and lose the persisted session. A legitimate caller
+    # (allowed Origin, or no Origin at all — a non-browser client) still gets the
+    # deletion unconditionally, whatever subject resolved to, preserving R3.2's
+    # idempotent cleanup for every real case (no cookie, garbage cookie, stale Bearer).
+    if is_same_origin_allowed(request):
+        # Mutates and returns the SAME `response` FastAPI injected, rather than
+        # constructing a fresh `Response(...)`: when an endpoint returns its own
+        # `Response` instance, FastAPI sends that instance as-is and does NOT merge
+        # headers set on the injected dependency — a fresh instance here would silently
+        # drop the `Set-Cookie` deletion.
+        response.delete_cookie(SESSION_REFRESH_COOKIE, path="/api/v1/auth")
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
 
 
 @router.post(
