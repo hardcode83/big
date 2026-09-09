@@ -123,9 +123,15 @@ Criterios de aceptación:
 
 1. WHEN una aprobación se responde y la incidencia tiene una persona asignada, THE SYSTEM SHALL
    escribir una notificación dirigida a esa persona diciendo si el gasto se aprobó o se rechazó.
-2. THE SYSTEM SHALL usar para ello un `NotificationType` propio — hoy **ninguno de sus veinte
-   miembros sirve** (`backend/app/notifications/domain/enums.py`), y hay precedente declarado para
-   añadir uno fuera del catálogo de PRD §14 (`REVIEW_RESPONSE_APPROVED`, `PASSWORD_RESET_REQUESTED`).
+2. THE SYSTEM SHALL usar para ello **dos `NotificationType` propios, uno por resultado** — hoy
+   **ninguno de sus veinte miembros sirve** (`backend/app/notifications/domain/enums.py`), y hay
+   precedente declarado para añadir miembros fuera del catálogo de PRD §14
+   (`REVIEW_RESPONSE_APPROVED`, `PASSWORD_RESET_REQUESTED`). *(Enmendado en `/sdd:design` (D6, OQ2,
+   aprobado en el gate el 2026-09-05): decía «un `NotificationType` propio». La bandeja renderiza
+   su texto **sólo desde el tipo** —`frontend/features/notifications/lib/notification-copy.ts`, y
+   `subject`/`body` ni siquiera están en `NotificationDto`—, así que un único tipo genérico no
+   puede decir si el gasto se aprobó o se rechazó, que es lo que exige R4.1. Mismo patrón que
+   `INCIDENT_CREATED_CRITICAL`/`INCIDENT_CREATED_HIGH`.)*
 3. IF la incidencia no tiene persona asignada, THEN THE SYSTEM SHALL no escribir notificación
    alguna y no fallar.
 4. THE SYSTEM SHALL mantener el cuerpo de esa notificación en **forma cerrada** —constante más
@@ -196,5 +202,9 @@ Criterios de aceptación:
 - `sdd/specs/access-notifications.md` — el `NotificationType` nuevo de R4 y su escritor.
 - `sdd/specs/notifications-inbox-web.md` — los destinos de R5 (`workspace` → `/approvals`,
   `technician` → `/tech/incidents/[id]`).
+- `sdd/specs/revenue-statements.md` — *(añadido en `/sdd:design`, OQ1)*: su `:294` afirma que la
+  propietaria responde los `OwnerApproval(OTHER)` por la ruta de `maintenance`, y está medido que
+  esa ruta devuelve `404` para ellos. El archivo corrige la afirmación y abre la entrada de roadmap
+  `expense-approval-response`; el arreglo no es de este change.
 - `sdd/specs/approvals-web.md` — *(no existe aún — se creará al archivar)*: la pantalla y su
   contrato.
