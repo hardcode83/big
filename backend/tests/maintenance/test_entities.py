@@ -731,13 +731,23 @@ def test_triage_is_refused_on_a_closed_incident(status: IncidentStatus) -> None:
     assert dataclasses.asdict(incident) == before
 
 
-def test_triage_is_allowed_while_the_owner_has_not_answered() -> None:
-    """`AWAITING_OWNER_APPROVAL` is not terminal, so R1.4 still applies to it."""
+def test_triage_is_refused_while_the_owner_has_not_answered() -> None:
+    """R1.3: an incident parked on owner approval rejects every non-cancel /
+    non-resume operation, including triage — the manager cannot fix category,
+    severity, or cost from the side while the owner is deciding.
+    """
     incident = make_incident(IncidentStatus.AWAITING_OWNER_APPROVAL)
+    before = dataclasses.asdict(incident)
 
-    incident.set_triage(severity=IncidentSeverity.CRITICAL, now=LATER)
+    with pytest.raises(IncidentBlockedByPendingApprovalError):
+        incident.set_triage(
+            category=IncidentCategory.PLUMBING,
+            severity=IncidentSeverity.CRITICAL,
+            estimated_cost=Decimal("450.00"),
+            now=LATER,
+        )
 
-    assert incident.severity is IncidentSeverity.CRITICAL
+    assert dataclasses.asdict(incident) == before
 
 
 # --- Triage that classifies (R3.5, design D1/D2) -----------------------------------------

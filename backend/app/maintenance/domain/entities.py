@@ -441,6 +441,15 @@ class Incident:
         `ai_classification`, `title` and `description` are never touched (R3.5).
         """
         self._reject_if_closed()
+        # An incident parked on owner approval is not terminal, so `_reject_if_closed`
+        # does not see it — but triage is still forbidden while the owner has not
+        # answered (R1.3 / R1 of `sdd/specs/maintenance.md`). Reject with the same
+        # error the rest of the table raises for this case so the API can map it to
+        # a single 409 reason.
+        if self.status is IncidentStatus.AWAITING_OWNER_APPROVAL:
+            raise IncidentBlockedByPendingApprovalError(
+                "An incident awaiting owner approval cannot be triaged"
+            )
         if estimated_cost is not None and estimated_cost < 0:
             raise MaintenanceValidationError("Estimated cost cannot be negative")
 

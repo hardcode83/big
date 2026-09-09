@@ -29,6 +29,7 @@ una conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   | Operación | Orígenes admitidos | Destino |
   |---|---|---|
   | `classify` | `OPEN` | `CLASSIFIED` |
+  | `classify_by_triage` | `OPEN` | `CLASSIFIED` |
   | `require_owner_approval` | `CLASSIFIED`, `IN_PROGRESS` | `AWAITING_OWNER_APPROVAL` |
   | `resume_after_approval:INCIDENT` | `AWAITING_OWNER_APPROVAL` | `CLASSIFIED` |
   | `resume_after_approval:MAINTENANCE_COST` | `AWAITING_OWNER_APPROVAL` | `IN_PROGRESS` |
@@ -484,7 +485,11 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   módulo que admite actor ausente; cualquier otra sin actor SHALL fallar, incluida el alta genérica.
   Lo que concede la excepción es la ausencia de **decisión**, no la de petición: una clasificación
   manual por `POST /incidents/{id}/classify` lleva su actor aunque la lance un operador, y ningún
-  otro comando queda eximido por ser un comando.
+  otro comando queda eximido por ser un comando. WHEN la clasificación la dispara una persona que
+  corrige la categoría y la severidad sobre un incidente `OPEN` mediante
+  `classify_by_triage` (`PATCH /incidents/{id}` con `category` y `severity`), THE SYSTEM SHALL
+  escribir la fila `INCIDENT_CLASSIFIED` con el actor del llamante (`actor = USER`): la decisión
+  la toma la persona, no el clasificador, así que la excepción del párrafo anterior no se aplica.
 - WHEN se crea una incidencia por el alta genérica, THE SYSTEM SHALL escribir su `AuditLog`
   `INCIDENT_CREATED` con un `ChangeSet` que sólo difiere `source` y `status`, y su `TimelineEvent`
   `INCIDENT_CREATED` con actor `USER`, título constante y metadatos sólo con identificadores.
