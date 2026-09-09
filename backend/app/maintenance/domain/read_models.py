@@ -40,6 +40,23 @@ and what it adds are ten attributes of one property over a row set **narrower** 
 """
 
 from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
+from uuid import UUID
+
+from app.maintenance.domain.enums import (
+    IncidentCategory,
+    IncidentSeverity,
+    OwnerApprovalRelatedType,
+    OwnerApprovalStatus,
+)
+
+#: `owner_approvals` has no `currency` column (§7.19), so this listing cannot read the
+#: currency off the row — it has to declare one. `EUR` is not a guess: the tenant threshold
+#: this whole flow gates against is literally `owner_approval_threshold_eur`
+#: (`app/tenants/domain/entities.py:151`), so the amount an owner is asked to approve is
+#: already denominated in EUR before it ever reaches this projection (`approvals-web` D3).
+OWNER_APPROVAL_CURRENCY = "EUR"
 
 
 @dataclass(frozen=True)
@@ -68,3 +85,73 @@ class IncidentContext:
     timezone: str
     access_notes: str | None
     assignment_note: str | None
+
+
+@dataclass(frozen=True)
+class OwnerApprovalIncidentRef:
+    """The incident behind an `INCIDENT`/`MAINTENANCE_COST` approval (R1.3).
+
+    Four attributes, not the entity: enough for the owner to recognise which fault this
+    money answers for, without carrying `description` or `ai_summary` — the same narrowing
+    `IncidentSummary` already applies to the dashboard, for the same rule-11 reason.
+
+    `None` on `OwnerApprovalListItem.incident` — never this type with blank fields — is how
+    an `OTHER`-related approval (one that answers for something that is not an incident at
+    all) is told apart from one whose incident failed to resolve; the latter cannot happen
+    without also dropping the whole row (see `OwnerApprovalReader.list_for_tenant`).
+    """
+
+    id: UUID
+    title: str
+    category: IncidentCategory
+    severity: IncidentSeverity
+
+
+@dataclass(frozen=True)
+class OwnerApprovalPropertyRef:
+    """The vivienda in the form a person reads, never a bare UUID (R1.3)."""
+
+    id: UUID
+    name: str
+    internal_code: str
+
+
+@dataclass(frozen=True)
+class OwnerApprovalListItem:
+    """One row of `GET /owner-approvals` — everything needed to decide without navigating
+    away (R1.3), and no free text: neither `reason` nor `response_notes` is a field here,
+    the same closed-form rule `OwnerApprovalSummary` already applies to the dashboard card
+    (design D2).
+
+    `currency` is always `OWNER_APPROVAL_CURRENCY` — declared, not read off a column that
+    does not exist (design D3).
+
+    `incident` is `None` exactly when `related_type` is `OTHER` (an approval that does not
+    answer for an incident at all); it is never `None` because a resolvable incident failed
+    to resolve, since `OwnerApprovalReader.list_for_tenant`'s LEFT OUTER JOIN only omits
+    `OTHER` rows on purpose (design D4).
+
+    `property` is populated by composing this reader's output with
+    `PropertyRepository.list_for_ids` in the use case, not by this module — see that
+    reader's own docstring for why, and for what a reader-produced item's `property` field
+    holds before that composition runs.
+    """
+
+    id: UUID
+    related_type: OwnerApprovalRelatedType
+    status: OwnerApprovalStatus
+    amount: Decimal
+    currency: str
+    requested_at: datetime
+    responded_at: datetime | None
+    incident: OwnerApprovalIncidentRef | None
+    property: OwnerApprovalPropertyRef
+
+
+@dataclass(frozen=True)
+class OwnerApprovalPage:
+    """One page of `OwnerApprovalListItem`, plus the `total` a client needs for
+    `total_pages` — the same shape `IncidentPage` already gives its own listing."""
+
+    items: tuple[OwnerApprovalListItem, ...]
+    total: int

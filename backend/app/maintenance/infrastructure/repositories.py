@@ -27,7 +27,7 @@ INSERTs at all (limit 3 of that module), which is why the writer checks the tena
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cleaning.domain.entities import CleaningTask
@@ -43,12 +43,25 @@ from app.maintenance.domain.entities import (
     IncidentPhoto,
     OwnerApproval,
 )
-from app.maintenance.domain.enums import IncidentSeverity, IncidentStatus, OwnerApprovalStatus
+from app.maintenance.domain.enums import (
+    IncidentSeverity,
+    IncidentStatus,
+    OwnerApprovalRelatedType,
+    OwnerApprovalStatus,
+)
 from app.maintenance.domain.exceptions import MaintenanceValidationError
+from app.maintenance.domain.read_models import (
+    OWNER_APPROVAL_CURRENCY,
+    OwnerApprovalIncidentRef,
+    OwnerApprovalListItem,
+    OwnerApprovalPage,
+    OwnerApprovalPropertyRef,
+)
 from app.maintenance.domain.repositories import (
     IncidentFilters,
     IncidentMessagePage,
     IncidentPage,
+    OwnerApprovalFilters,
 )
 from app.maintenance.domain.value_objects import (
     IncidentSummary,
@@ -328,6 +341,113 @@ class SqlAlchemyOwnerApprovalReader:
             )
             for row in rows.all()
         ]
+
+    async def list_for_tenant(
+        self,
+        tenant_id: uuid.UUID,
+        filters: OwnerApprovalFilters,
+        *,
+        page: int,
+        per_page: int,
+    ) -> OwnerApprovalPage:
+        """`GET /owner-approvals` (design D4, D5). See the port's docstring
+        (`domain/repositories.py`) for the full contract — in particular, that this method
+        does not resolve property names and that `property` on every returned item is a
+        placeholder the use case must replace.
+        """
+        if page < 1 or per_page < 1:
+            # Same second line of defence `SqlAlchemyIncidentQuery.list` keeps: a bad
+            # `page`/`per_page` must not reach Postgres as a negative `OFFSET`.
+            raise MaintenanceValidationError(
+                f"page and per_page must be positive, got page={page}, per_page={per_page}"
+            )
+
+        # D5: absent is PENDING, not "no filter" — the pending queue is the default view.
+        status = filters.status if filters.status is not None else OwnerApprovalStatus.PENDING
+        conditions = (
+            OwnerApprovalModel.tenant_id == tenant_id,
+            OwnerApprovalModel.status == status,
+        )
+        total = await self._session.scalar(
+            select(func.count()).select_from(OwnerApprovalModel).where(*conditions)
+        )
+
+        # LEFT OUTER, gated on `related_type != OTHER`: an `OTHER` approval answers for
+        # something that is not an incident, so it must never pick one up by a matching
+        # `related_id` (design D4). Both tables belong to `maintenance`.
+        #
+        # `related_id` deliberately carries no `ForeignKey` (it's a polymorphic pointer,
+        # per `OwnerApprovalModel`'s own docstring), so nothing at the DB level ties it to
+        # an incident of the same tenant — the ON-clause must repeat `tenant_id` itself, the
+        # same pattern `access.list_revocable` and `cleaning`'s checklist joins use for a
+        # second tenant-scoped table joined on a bare id. The session listener in
+        # `app/core/db.py` also covers `IncidentModel`, but it is the net and never the
+        # mechanism (module docstring above).
+        query = (
+            select(
+                OwnerApprovalModel.id,
+                OwnerApprovalModel.related_type,
+                OwnerApprovalModel.status,
+                OwnerApprovalModel.amount,
+                OwnerApprovalModel.requested_at,
+                OwnerApprovalModel.responded_at,
+                OwnerApprovalModel.property_id,
+                IncidentModel.id.label("incident_id"),
+                IncidentModel.title.label("incident_title"),
+                IncidentModel.category.label("incident_category"),
+                IncidentModel.severity.label("incident_severity"),
+            )
+            .select_from(OwnerApprovalModel)
+            .outerjoin(
+                IncidentModel,
+                and_(
+                    IncidentModel.id == OwnerApprovalModel.related_id,
+                    IncidentModel.tenant_id == tenant_id,
+                    OwnerApprovalModel.related_type != OwnerApprovalRelatedType.OTHER,
+                ),
+            )
+            .where(*conditions)
+        )
+        if status == OwnerApprovalStatus.PENDING:
+            query = query.order_by(OwnerApprovalModel.requested_at, OwnerApprovalModel.id)
+        else:
+            # Any answered status: a history, newest answer first (D5, R2.3).
+            query = query.order_by(
+                OwnerApprovalModel.responded_at.desc(), OwnerApprovalModel.id.desc()
+            )
+
+        rows = await self._session.execute(
+            query.limit(per_page).offset((page - 1) * per_page)
+        )
+        items = tuple(
+            OwnerApprovalListItem(
+                id=row.id,
+                related_type=row.related_type,
+                status=row.status,
+                amount=row.amount,
+                currency=OWNER_APPROVAL_CURRENCY,
+                requested_at=row.requested_at,
+                responded_at=row.responded_at,
+                incident=(
+                    OwnerApprovalIncidentRef(
+                        id=row.incident_id,
+                        title=row.incident_title,
+                        category=row.incident_category,
+                        severity=row.incident_severity,
+                    )
+                    if row.incident_id is not None
+                    else None
+                ),
+                # Placeholder — this reader never queries `properties` (port docstring).
+                # The use case resolves it via `PropertyRepository.list_for_ids` and drops
+                # the row when the id does not come back.
+                property=OwnerApprovalPropertyRef(
+                    id=row.property_id, name="", internal_code=""
+                ),
+            )
+            for row in rows.all()
+        )
+        return OwnerApprovalPage(items=items, total=int(total or 0))
 
 
 class SqlAlchemyIncidentRepository:

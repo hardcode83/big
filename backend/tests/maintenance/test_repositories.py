@@ -35,7 +35,7 @@ from app.maintenance.domain.enums import (
     OwnerApprovalStatus,
 )
 from app.maintenance.domain.exceptions import MaintenanceValidationError
-from app.maintenance.domain.repositories import IncidentFilters
+from app.maintenance.domain.repositories import IncidentFilters, OwnerApprovalFilters
 from tests.maintenance.conftest import make_incident
 from app.maintenance.domain.value_objects import (
     IncidentClassification,
@@ -111,17 +111,22 @@ async def _approval(
     *,
     status: OwnerApprovalStatus = OwnerApprovalStatus.PENDING,
     requested_at: datetime = NOW,
+    responded_at: datetime | None = None,
+    related_type: OwnerApprovalRelatedType = OwnerApprovalRelatedType.INCIDENT,
+    related_id: uuid.UUID | None = None,
+    amount: Decimal | int = 180,
 ) -> OwnerApprovalModel:
     model = OwnerApprovalModel(
         id=uuid.uuid4(),
         tenant_id=tenant.id,
         property_id=prop.id,
-        related_type=OwnerApprovalRelatedType.INCIDENT,
-        related_id=uuid.uuid4(),
-        amount=180,
+        related_type=related_type,
+        related_id=related_id if related_id is not None else uuid.uuid4(),
+        amount=amount,
         reason="Replace the boiler",
         status=status,
         requested_at=requested_at,
+        responded_at=responded_at,
     )
     db_session.add(model)
     await db_session.flush()
@@ -516,6 +521,212 @@ async def test_the_pending_approvals_never_cross_a_tenant_boundary(db_session) -
     )
 
     assert found == []
+
+
+# --- `list_for_tenant`, `GET /owner-approvals` (`approvals-web` R1, design D4, D5) ------
+#
+# **Property resolution is out of scope for this reader**, and so is dropping/logging an
+# approval whose property does not resolve inside the tenant: `domain/repositories.py`'s
+# `OwnerApprovalReader.list_for_tenant` docstring and design D4 both put that in the use
+# case (`ListOwnerApprovalsUseCase`, section 3), which is the only collaborator that holds
+# `PropertyRepository`. This reader never queries `properties` at all — every item's
+# `property` field comes back a placeholder carrying only `property_id`. That is why there
+# is no "a property outside the tenant is dropped and logged" test in this section: nothing
+# here can tell an in-tenant property from an out-of-tenant one, on purpose (design D4
+# rejects "joining `PropertyModel` inside the maintenance reader").
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_defaults_to_pending_oldest_first(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    newer = await _approval(db_session, tenant, prop, requested_at=NOW)
+    older = await _approval(
+        db_session, tenant, prop, requested_at=NOW - timedelta(days=3)
+    )
+    await _approval(db_session, tenant, prop, status=OwnerApprovalStatus.APPROVED)
+
+    page = await SqlAlchemyOwnerApprovalReader(db_session).list_for_tenant(
+        tenant.id, OwnerApprovalFilters(), page=1, per_page=10
+    )
+
+    assert [item.id for item in page.items] == [older.id, newer.id]
+    assert page.total == 2
+    assert all(item.status == OwnerApprovalStatus.PENDING for item in page.items)
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_answered_status_is_newest_responded_first(
+    db_session,
+) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    older_answer = await _approval(
+        db_session,
+        tenant,
+        prop,
+        status=OwnerApprovalStatus.APPROVED,
+        responded_at=NOW - timedelta(days=1),
+    )
+    newer_answer = await _approval(
+        db_session, tenant, prop, status=OwnerApprovalStatus.APPROVED, responded_at=NOW
+    )
+    # A PENDING row must never leak into an answered-status filter's page.
+    await _approval(db_session, tenant, prop, status=OwnerApprovalStatus.PENDING)
+
+    page = await SqlAlchemyOwnerApprovalReader(db_session).list_for_tenant(
+        tenant.id,
+        OwnerApprovalFilters(status=OwnerApprovalStatus.APPROVED),
+        page=1,
+        per_page=10,
+    )
+
+    assert [item.id for item in page.items] == [newer_answer.id, older_answer.id]
+    assert page.total == 2
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_joins_the_incident_for_incident_and_maintenance_cost(
+    db_session,
+) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    incident = await _incident(db_session, tenant, prop)
+    approval = await _approval(
+        db_session,
+        tenant,
+        prop,
+        related_type=OwnerApprovalRelatedType.INCIDENT,
+        related_id=incident.id,
+    )
+
+    page = await SqlAlchemyOwnerApprovalReader(db_session).list_for_tenant(
+        tenant.id, OwnerApprovalFilters(), page=1, per_page=10
+    )
+
+    assert len(page.items) == 1
+    item = page.items[0]
+    assert item.id == approval.id
+    assert item.incident is not None
+    assert item.incident.id == incident.id
+    assert item.incident.title == incident.title
+    assert item.incident.category == incident.category
+    assert item.incident.severity == incident.severity
+    assert item.currency == "EUR"
+    # The reader never resolves the property's name — only the id survives, as the
+    # placeholder the use case is documented to replace.
+    assert item.property.id == prop.id
+    assert item.property.name == ""
+    assert item.property.internal_code == ""
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_other_rows_carry_no_incident(db_session) -> None:
+    """D4's gate: `related_type = OTHER` must never pick up an incident by a matching id,
+    however unlikely — the row comes back with `incident=None` regardless."""
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    incident = await _incident(db_session, tenant, prop)
+    await _approval(
+        db_session,
+        tenant,
+        prop,
+        related_type=OwnerApprovalRelatedType.OTHER,
+        related_id=incident.id,
+    )
+
+    page = await SqlAlchemyOwnerApprovalReader(db_session).list_for_tenant(
+        tenant.id, OwnerApprovalFilters(), page=1, per_page=10
+    )
+
+    assert len(page.items) == 1
+    assert page.items[0].related_type == OwnerApprovalRelatedType.OTHER
+    assert page.items[0].incident is None
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_join_does_not_leak_another_tenants_incident(
+    db_session,
+) -> None:
+    """`related_id` carries no `ForeignKey` (polymorphic pointer), so nothing at the DB
+    level stops it from matching an incident that belongs to a *different* tenant. This
+    constructs exactly that crossed pointer — an adversarial state the app never produces
+    today — and asserts the join's ON-clause tenant filter refuses to surface it."""
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    prop_a = await _property(db_session, tenant_a, "REDES11")
+    prop_b = await _property(db_session, tenant_b, "THEIRS")
+    their_incident = await _incident(db_session, tenant_b, prop_b)
+    approval = await _approval(
+        db_session,
+        tenant_a,
+        prop_a,
+        related_type=OwnerApprovalRelatedType.INCIDENT,
+        related_id=their_incident.id,
+    )
+
+    page = await SqlAlchemyOwnerApprovalReader(db_session).list_for_tenant(
+        tenant_a.id, OwnerApprovalFilters(), page=1, per_page=10
+    )
+
+    assert len(page.items) == 1
+    assert page.items[0].id == approval.id
+    assert page.items[0].incident is None
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_paginates_and_total_matches_the_full_count(
+    db_session,
+) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    for offset in range(5):
+        await _approval(
+            db_session, tenant, prop, requested_at=NOW + timedelta(hours=offset)
+        )
+
+    reader = SqlAlchemyOwnerApprovalReader(db_session)
+    first_page = await reader.list_for_tenant(
+        tenant.id, OwnerApprovalFilters(), page=1, per_page=2
+    )
+    second_page = await reader.list_for_tenant(
+        tenant.id, OwnerApprovalFilters(), page=2, per_page=2
+    )
+    last_page = await reader.list_for_tenant(
+        tenant.id, OwnerApprovalFilters(), page=3, per_page=2
+    )
+
+    assert first_page.total == second_page.total == last_page.total == 5
+    assert len(first_page.items) == 2
+    assert len(second_page.items) == 2
+    assert len(last_page.items) == 1
+    ids = [item.id for item in (*first_page.items, *second_page.items, *last_page.items)]
+    assert len(set(ids)) == 5
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_never_crosses_a_tenant_boundary(db_session) -> None:
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    theirs = await _property(db_session, tenant_b, "THEIRS")
+    await _approval(db_session, tenant_b, theirs)
+
+    page = await SqlAlchemyOwnerApprovalReader(db_session).list_for_tenant(
+        tenant_a.id, OwnerApprovalFilters(), page=1, per_page=10
+    )
+
+    assert page.items == ()
+    assert page.total == 0
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_refuses_a_non_positive_page(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+
+    with pytest.raises(MaintenanceValidationError):
+        await SqlAlchemyOwnerApprovalReader(db_session).list_for_tenant(
+            tenant.id, OwnerApprovalFilters(), page=0, per_page=10
+        )
 
 
 # --- The ports `maintenance` adds (R2, R4, R5; design D7, D11, D15) ---------------------

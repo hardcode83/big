@@ -38,6 +38,7 @@ from app.maintenance.application.use_cases import (
     GetIncidentContextUseCase,
     GetIncidentUseCase,
     ListIncidentsUseCase,
+    ListOwnerApprovalsUseCase,
     RejectIncidentUseCase,
     ResolveIncidentUseCase,
     RespondOwnerApprovalUseCase,
@@ -53,6 +54,7 @@ from app.maintenance.infrastructure.repositories import (
     SqlAlchemyIncidentRepository,
     SqlAlchemyUnscopedIncidentPhotoLocationQuery,
     SqlAlchemyLiveCleaningTaskQuery,
+    SqlAlchemyOwnerApprovalReader,
     SqlAlchemyOwnerApprovalRepository,
 )
 from app.notifications.infrastructure.repositories import (
@@ -112,6 +114,20 @@ def get_incident_context_use_case(session: SessionDep) -> GetIncidentContextUseC
     """
     return GetIncidentContextUseCase(
         incidents=SqlAlchemyIncidentRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
+    )
+
+
+def get_list_owner_approvals_use_case(session: SessionDep) -> ListOwnerApprovalsUseCase:
+    """`GET /owner-approvals` (`approvals-web` R1.1) — a read, so no unit of work and no
+    audit repository, the same shape `get_incident_context_use_case` already sets.
+
+    `SqlAlchemyOwnerApprovalReader`, not `SqlAlchemyOwnerApprovalRepository`: the reader is
+    the projection port `list_for_tenant` belongs to (design D4); the repository beside it
+    is the write side `RespondOwnerApprovalUseCase` uses.
+    """
+    return ListOwnerApprovalsUseCase(
+        approvals=SqlAlchemyOwnerApprovalReader(session),
         properties=SqlAlchemyPropertyRepository(session),
     )
 
@@ -184,8 +200,15 @@ def get_cancel_incident_use_case(session: SessionDep) -> CancelIncidentUseCase:
 def get_respond_owner_approval_use_case(
     session: SessionDep,
 ) -> RespondOwnerApprovalUseCase:
+    """`approvals-web` R4 — `users`/`notifications`/`configs` added so the technician learns
+    the answer inside the same transaction (design D7), the same trio `_gate_kwargs` already
+    hands the two use cases that open a gate."""
     return RespondOwnerApprovalUseCase(
-        approvals=SqlAlchemyOwnerApprovalRepository(session), **_flow_kwargs(session)
+        approvals=SqlAlchemyOwnerApprovalRepository(session),
+        users=SqlAlchemyUserRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
+        configs=SqlAlchemyTenantConfigRepository(session),
+        **_flow_kwargs(session),
     )
 
 

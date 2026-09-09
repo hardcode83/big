@@ -46,6 +46,12 @@ DECLARED_DIVERGENCES = (
     # catalogue is about the operational event itself, not about staff discussing it.
     "CLEANING_TASK_MESSAGE",
     "INCIDENT_MESSAGE",
+    # `approvals-web` design D6 (R4.2): telling the technician which way the owner answered is
+    # not one of §14's operational events either — the catalogue has a slot for the *request*
+    # (`OWNER_APPROVAL_REQUIRED`) but none for its outcome, and one member could not carry both
+    # possible outcomes, hence two.
+    "OWNER_APPROVAL_APPROVED",
+    "OWNER_APPROVAL_REJECTED",
 )
 
 

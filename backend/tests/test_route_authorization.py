@@ -546,14 +546,18 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/cleaning-tasks/{task_id}/reject",
         "/api/v1/cleaning-tasks/{task_id}/start",
         "/api/v1/cleaning-tasks/{task_id}/validate",
-        # `maintenance`: seventeen authenticated routes now, sixteen here plus the owner approval
-        # below — fifteen until `staff-messaging` added `POST` and `GET` on `.../messages`,
-        # fourteen until `incident-photos` added `POST` and `GET` on `.../photos`, and
-        # thirteen before `tech-cycle-completion` added `reject`. Every one of *these* is
-        # authenticated. The module does have an anonymous door, exactly one, and it is not on
-        # this router: `GET /api/v1/incident-photos/{photo_id}` is in `ANONYMOUS_ENDPOINTS`
-        # above (R4.6). The only surface that creates an incident without a session is still
-        # the guest portal's, also in `ANONYMOUS_ENDPOINTS`.
+        # `maintenance`: nineteen authenticated routes now (method+path pairs, recounted
+        # directly against the app's route table rather than incremented by habit) —
+        # seventeen on `incidents_router.py` plus two on `approvals_router.py`:
+        # `POST /owner-approvals/{id}/respond`, and `GET /owner-approvals`, which
+        # `approvals-web` R1 adds, guarded by the new `READ_OWNER_APPROVALS` (asserted per
+        # role in `tests/maintenance/test_api_approvals.py`) rather than a reuse of
+        # `READ_INCIDENTS` — reusing it would show a `TECHNICIAN` the tenant's whole expense
+        # queue. Every one of *these* is authenticated. The module does have an anonymous
+        # door, exactly one, and it is not on this router: `GET
+        # /api/v1/incident-photos/{photo_id}` is in `ANONYMOUS_ENDPOINTS` above (R4.6). The
+        # only surface that creates an incident without a session is still the guest
+        # portal's, also in `ANONYMOUS_ENDPOINTS`.
         # Asserted per role in `tests/maintenance/test_api_incidents.py`.
         "/api/v1/incidents",
         "/api/v1/incidents/{incident_id}",
@@ -595,6 +599,7 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/incidents/{incident_id}/resolve",
         "/api/v1/incidents/{incident_id}/resume",
         "/api/v1/incidents/{incident_id}/wait-parts",
+        "/api/v1/owner-approvals",
         "/api/v1/owner-approvals/{approval_id}/respond",
         "/api/v1/reservations",
         "/api/v1/reservations/{reservation_id}",

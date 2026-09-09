@@ -81,13 +81,20 @@ from app.maintenance.domain.notifications import (
     NOTIFICATION_TYPE_INCIDENT_REJECTED,
     RELATED_TYPE_INCIDENT,
     incident_rejection_notification,
+    owner_approval_approved_notification,
     owner_approval_notification,
+    owner_approval_rejected_notification,
     sla_minutes_for,
     staff_message_notification,
     technician_assignment_notification,
 )
 from app.maintenance.domain.ports import IncidentClassifier, LiveCleaningTaskQuery
-from app.maintenance.domain.read_models import IncidentContext
+from app.maintenance.domain.read_models import (
+    IncidentContext,
+    OwnerApprovalListItem,
+    OwnerApprovalPage,
+    OwnerApprovalPropertyRef,
+)
 from app.maintenance.domain.repositories import (
     IncidentPhotoRepository,
     IncidentFilters,
@@ -96,6 +103,8 @@ from app.maintenance.domain.repositories import (
     IncidentPage,
     IncidentQuery,
     IncidentRepository,
+    OwnerApprovalFilters,
+    OwnerApprovalReader,
     OwnerApprovalRepository,
 )
 # `messaging` owns the actor that crosses `IncidentReportingPort`, which this module
@@ -1614,11 +1623,26 @@ class RespondOwnerApprovalUseCase(_IncidentFlowBase):
     `IN_PROGRESS`. A rejection cancels the incident and fires `INCIDENT_RESOLVED`, which is
     what brings the property back out of `CRITICAL_INCIDENT` — possible because D9 widened
     that trigger's precondition to accept a cancelled incident.
+
+    **`approvals-web` R4, design D7**: also tells the assigned technician which way the owner
+    answered, through `_notify_answer`, inside this same transaction — so there is no window
+    in which an answer is recorded and the technician's notice is not (R4.5).
     """
 
-    def __init__(self, *, approvals: OwnerApprovalRepository, **kwargs) -> None:
+    def __init__(
+        self,
+        *,
+        approvals: OwnerApprovalRepository,
+        users: UserRepository,
+        notifications: NotificationLogRepository,
+        configs: TenantConfigRepository,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self._approvals = approvals
+        self._users = users
+        self._notifications = notifications
+        self._configs = configs
 
     async def execute(
         self,
@@ -1717,8 +1741,75 @@ class RespondOwnerApprovalUseCase(_IncidentFlowBase):
                 now=now,
             )
 
+        # `approvals-web` R4.1, R4.5, design D7 — inside the same transaction this use case
+        # already commits, so there is no window between the answer and the technician's
+        # notice.
+        await self._notify_answer(
+            tenant_id=tenant_id,
+            incident=incident,
+            approval=approval,
+            approved_cost=approved_cost,
+            now=now,
+        )
+
         await self._uow.commit()
         return incident
+
+    async def _notify_answer(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        incident: Incident,
+        approval: OwnerApproval,
+        approved_cost: Decimal | None,
+        now: datetime,
+    ) -> None:
+        """R4.1, R4.3 — tell the assigned technician which way the owner answered.
+
+        `None`, or a technician id that no longer resolves, writes nothing and fails nothing
+        (R4.3): the approval is answered either way, and this row is a courtesy on top of it,
+        not a gate — mirroring `_notify_owner`'s pattern for the same anomaly (design D7).
+        """
+        technician_id = incident.assigned_technician_id
+        technician = (
+            await self._users.get(tenant_id, technician_id)
+            if technician_id is not None
+            else None
+        )
+        if technician is None:
+            logger.warning(
+                "maintenance.owner_approval_answer_without_recipient",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "owner_approval_id": str(approval.id),
+                },
+            )
+            return
+
+        config = await self._configs.get_or_create(tenant_id, now)
+        approved = approved_cost is not None
+        await dispatch_and_persist(
+            notifications=self._notifications,
+            tenant_id=tenant_id,
+            recipient=technician,
+            config=config,
+            notification_type=(
+                NotificationType.OWNER_APPROVAL_APPROVED.value
+                if approved
+                else NotificationType.OWNER_APPROVAL_REJECTED.value
+            ),
+            recipient_role=technician.role.value,
+            log_builder=(
+                owner_approval_approved_notification
+                if approved
+                else owner_approval_rejected_notification
+            ),
+            incident_id=incident.id,
+            property_id=incident.property_id,
+            approval_id=approval.id,
+            technician_id=technician.id,
+            now=now,
+        )
 
 
 class AssignIncidentUseCase(_IncidentFlowBase):
@@ -2392,6 +2483,75 @@ class ListIncidentsUseCase:
         if restrict is not None:
             filters = replace(filters, assigned_technician_id=restrict)
         return await self._reader.list(tenant_id, filters, page=page, per_page=per_page)
+
+
+class ListOwnerApprovalsUseCase:
+    """`GET /owner-approvals` (`approvals-web` R1.1, R1.2, R1.3).
+
+    **Composes the reader with `PropertyRepository.list_for_ids`, exactly the split design
+    D4 draws and `OwnerApprovalReader.list_for_tenant`'s own docstring restates**: the reader
+    never queries `properties` and hands back a page whose every `property` field is a
+    placeholder (`OwnerApprovalPropertyRef(id=<property_id>, name="", internal_code="")`).
+    This use case runs the one batched `list_for_ids` call the reader could not, the same
+    "page query, then one batch" shape `ListReservationsUseCase` already uses for its own
+    property/guest identity.
+
+    **Unresolved properties are dropped, not degraded** (D4) — unlike
+    `ListReservationsUseCase`, which blanks the name and keeps the row. An owner approval
+    without a readable property is not a useful row to show at all, so it is removed from
+    the page and logged under `maintenance.owner_approval_property_unresolved`, the same
+    anomaly `GetIncidentContextUseCase` logs as
+    `maintenance.incident_context_property_unresolved`.
+
+    `page.total` is passed through from the reader **unadjusted** for any drop (design D4):
+    it is the reader's own count of matching rows, and a crossed property pointer is rare
+    enough not to warrant reconciling it here.
+    """
+
+    def __init__(
+        self, *, approvals: OwnerApprovalReader, properties: PropertyRepository
+    ) -> None:
+        self._approvals = approvals
+        self._properties = properties
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        filters: OwnerApprovalFilters,
+        page: int,
+        per_page: int,
+    ) -> OwnerApprovalPage:
+        result = await self._approvals.list_for_tenant(
+            tenant_id, filters, page=page, per_page=per_page
+        )
+        property_ids = {item.property.id for item in result.items}
+        properties_by_id = {
+            prop.id: prop
+            for prop in await self._properties.list_for_ids(tenant_id, property_ids)
+        }
+        resolved: list[OwnerApprovalListItem] = []
+        for item in result.items:
+            prop = properties_by_id.get(item.property.id)
+            if prop is None:
+                logger.warning(
+                    "maintenance.owner_approval_property_unresolved",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "approval_id": str(item.id),
+                        "property_id": str(item.property.id),
+                    },
+                )
+                continue
+            resolved.append(
+                replace(
+                    item,
+                    property=OwnerApprovalPropertyRef(
+                        id=prop.id, name=prop.name, internal_code=prop.internal_code
+                    ),
+                )
+            )
+        return OwnerApprovalPage(items=tuple(resolved), total=result.total)
 
 
 class GetIncidentUseCase:

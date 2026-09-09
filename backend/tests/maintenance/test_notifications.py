@@ -11,7 +11,9 @@ from app.maintenance.domain.notifications import (
     incident_critical_notification,
     incident_high_notification,
     incident_rejection_notification,
+    owner_approval_approved_notification,
     owner_approval_notification,
+    owner_approval_rejected_notification,
     sla_minutes_for,
     technician_assignment_notification,
 )
@@ -149,6 +151,100 @@ def test_neither_notification_carries_incident_free_text() -> None:
         for token in log.body.replace(",", " ").replace(".", " ").split():
             if len(token) == 36 and "-" in token:
                 assert uuid.UUID(token) in {incident_id, property_id, approval_id}
+
+
+# --- The technician learns the answer (`approvals-web` R4, design D6) -------------------
+
+
+@pytest.mark.parametrize(
+    ("builder", "expected_type"),
+    [
+        (owner_approval_approved_notification, NotificationType.OWNER_APPROVAL_APPROVED),
+        (owner_approval_rejected_notification, NotificationType.OWNER_APPROVAL_REJECTED),
+    ],
+)
+def test_owner_approval_answer_notifications_have_no_deadline(builder, expected_type) -> None:
+    """D6: nobody is late for reading an outcome, and `escalation_for` has no rule for either
+    type, so a deadline here would produce a breach that escalates to nobody."""
+    log = builder(
+        tenant_id=uuid.uuid4(),
+        incident_id=uuid.uuid4(),
+        property_id=uuid.uuid4(),
+        approval_id=uuid.uuid4(),
+        technician_id=uuid.uuid4(),
+        recipient_contact="tech@example.com",
+        now=NOW,
+    )
+
+    assert log.notification_type == expected_type.value
+    assert log.status is NotificationStatus.PENDING
+    assert log.sla_deadline_at is None
+    assert log.related_type == RELATED_TYPE_INCIDENT
+
+
+@pytest.mark.parametrize(
+    "builder", [owner_approval_approved_notification, owner_approval_rejected_notification]
+)
+def test_owner_approval_answer_notifications_point_at_the_incident(builder) -> None:
+    """The polymorphic pair points at the incident, like every sibling in this module."""
+    incident_id = uuid.uuid4()
+    log = builder(
+        tenant_id=uuid.uuid4(),
+        incident_id=incident_id,
+        property_id=uuid.uuid4(),
+        approval_id=uuid.uuid4(),
+        technician_id=uuid.uuid4(),
+        now=NOW,
+    )
+
+    assert log.related_id == incident_id
+
+
+@pytest.mark.parametrize(
+    "builder", [owner_approval_approved_notification, owner_approval_rejected_notification]
+)
+def test_owner_approval_answer_notifications_carry_no_reason_or_response_notes(builder) -> None:
+    """R4.4 — the closed form this module keeps: ids and a constant, never a free-text field
+    from `OwnerApproval` such as `reason` or `response_notes`."""
+    leaked_reason = "Maintenance expense above the tenant threshold. Incident abc."
+    leaked_response_notes = "Adelante, aprobado por el propietario porque es urgente."
+    incident_id = uuid.uuid4()
+    property_id = uuid.uuid4()
+    approval_id = uuid.uuid4()
+
+    log = builder(
+        tenant_id=uuid.uuid4(),
+        incident_id=incident_id,
+        property_id=property_id,
+        approval_id=approval_id,
+        technician_id=uuid.uuid4(),
+        now=NOW,
+    )
+
+    assert leaked_reason not in log.body
+    assert leaked_response_notes not in log.body
+    # Everything variable in the body is one of the three identifiers this builder was handed.
+    for token in log.body.replace(",", " ").replace(".", " ").split():
+        if len(token) == 36 and "-" in token:
+            assert uuid.UUID(token) in {incident_id, property_id, approval_id}
+
+
+def test_the_two_answer_notifications_are_distinguishable_to_a_reader() -> None:
+    """D6's whole reason to exist: one member cannot say whether the expense was approved or
+    rejected, so the inbox has to be able to render a different line for each."""
+    kwargs = dict(
+        tenant_id=uuid.uuid4(),
+        incident_id=uuid.uuid4(),
+        property_id=uuid.uuid4(),
+        approval_id=uuid.uuid4(),
+        technician_id=uuid.uuid4(),
+        now=NOW,
+    )
+    approved = owner_approval_approved_notification(**kwargs)
+    rejected = owner_approval_rejected_notification(**kwargs)
+
+    assert approved.notification_type != rejected.notification_type
+    assert approved.subject != rejected.subject
 
 
 # --- The refusal's notification (`tech-cycle-completion` R1.4, design D3) ----------------

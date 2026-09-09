@@ -47,14 +47,18 @@ from app.guests.api.portal_schemas import (
     MAX_INCIDENT_TITLE,
     ReportIncidentRequest,
 )
+from app.maintenance.api.schemas import MAX_RESPONSE_NOTES, RespondOwnerApprovalRequest
 from app.maintenance.application.use_cases import IncidentActor
-from app.maintenance.domain.enums import IncidentStatus
+from app.maintenance.domain.enums import IncidentStatus, OwnerApprovalStatus
 from app.maintenance.infrastructure.models import IncidentModel
 from app.timeline.domain.enums import TimelineEventType
 from app.timeline.infrastructure.models import TimelineEventModel
 from tests.maintenance.conftest import (  # noqa: F401
     NOW,
+    api,
+    auth_header,
     flow,
+    make_approval,
     make_incident,
     world,
 )
@@ -666,4 +670,98 @@ def test_the_anonymous_boundary_bounds_what_can_land_there() -> None:
         )
 
     assert ReportIncidentRequest.model_config["extra"] == "forbid"
+
+
+# --- `response_notes` (`approvals-web` D12) ---------------------------------------------
+#
+# **Not a fifth sink column** — `SINK_COLUMNS` above stays untouched. This is the OTHER named
+# exception of rule 11 (excepción 3, "la prosa de una persona autenticada"), and its own text
+# says in as many words that it does not propagate to `audit_logs.changes` or
+# `timeline_events` — `RespondOwnerApprovalUseCase`'s existing wiring already keeps it out of
+# both, and `approvals-web` R3.6 leaves that untouched. What changed here is narrower: the
+# field used to accept plain `str`, which let a `U+0000` or a lone surrogate reach asyncpg as
+# an undeclared `500` — the same finding this file's `title`/`description` cases already
+# document, now closed for this field too by swapping `str` for `MultiLineText`.
+
+
+def test_response_notes_is_bounded_by_the_same_three_things() -> None:
+    """The schema-level half: type, length, and the control-character guard, the same trio
+    `test_the_anonymous_boundary_bounds_what_can_land_there` pins for `title`/`description`.
+
+    `response_notes` is `Annotated[MultiLineText, Field(...)] | None`, so pydantic nests the
+    `AfterValidator`/`Field` metadata inside the non-`None` half of the `Union` rather than on
+    `FieldInfo.metadata` directly — the same shape `materials` (`ResolveIncidentRequest`)
+    already has, which is why this walks `typing.get_args` instead of reusing the flatter
+    check the anonymous-boundary test above uses for `title`/`description`.
+    """
+    import typing
+
+    annotation = RespondOwnerApprovalRequest.model_fields["response_notes"].annotation
+    inner = next(arg for arg in typing.get_args(annotation) if arg is not type(None))
+    constraints = {
+        type(item).__name__: item for item in typing.get_args(inner)[1:]
+    }
+
+    assert MAX_RESPONSE_NOTES == 2000
+    field_info = constraints.get("FieldInfo")
+    assert field_info is not None and any(
+        getattr(item, "max_length", None) == MAX_RESPONSE_NOTES
+        for item in field_info.metadata
+    ), f"response_notes lost its maximum: {constraints}"
+    assert "AfterValidator" in constraints, (
+        "response_notes lost its control-character guard — it is now plain `str`, which "
+        "lets a `U+0000` or a lone surrogate reach asyncpg as an undeclared `500` (D12)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_nul_byte_in_response_notes_is_a_422_not_a_500(
+    api, world, db_session
+) -> None:
+    """The behavioural half, over HTTP: `U+0000` travels fine as JSON (`\\u0000`), so this
+    reaches the field validator rather than dying at the parser — unlike the lone-surrogate
+    case below."""
+    incident = await make_incident(
+        db_session, world, status=IncidentStatus.AWAITING_OWNER_APPROVAL
+    )
+    approval = await make_approval(db_session, world, incident.id)
+
+    response = await api.post(
+        f"/api/v1/owner-approvals/{approval.id}/respond",
+        json={
+            "status": OwnerApprovalStatus.APPROVED.value,
+            "response_notes": "Adelante.\x00",
+        },
+        headers=auth_header(api, world.owner),
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_lone_surrogate_in_response_notes_is_a_422_not_a_500(
+    api, world, db_session
+) -> None:
+    """Sent as a raw body, for the reason
+    `test_a_body_carrying_a_lone_surrogate_is_refused_before_the_field_is_reached`
+    (`tests/guests/test_portal_incident_api.py`) gives: httpx's `json=` serialises with
+    `ensure_ascii=False` and dies client-side before a request exists for a lone surrogate."""
+    incident = await make_incident(
+        db_session, world, status=IncidentStatus.AWAITING_OWNER_APPROVAL
+    )
+    approval = await make_approval(db_session, world, incident.id)
+    body = (
+        '{"status": "APPROVED", "response_notes": "Adelante\\ud800"}'
+    )
+
+    response = await api.post(
+        f"/api/v1/owner-approvals/{approval.id}/respond",
+        content=body.encode("ascii"),
+        headers={
+            **auth_header(api, world.owner),
+            "content-type": "application/json",
+        },
+    )
+
+    assert response.status_code == 422
     assert ReportIncidentRequest.model_config["str_strip_whitespace"] is True

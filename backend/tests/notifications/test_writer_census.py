@@ -56,17 +56,21 @@ EXCLUDED = {"notifications/domain/enums.py"}
 #: `Escalation(...)` built somewhere else from silently joining the census.
 ESCALATION_MODULE = "notifications/domain/escalation.py"
 
-#: Types with a production writer, as of `staff-messaging` section 4. Fifteen.
+#: Types with a production writer, as of `approvals-web` section 4. Eighteen — measured by
+#: counting this set's own members (`test_the_measured_writers_are_exactly_the_declared_ones`
+#: is what enforces that this number cannot drift from the AST census), not carried forward
+#: from the previous section's count: it said "Fifteen" here when the set already held sixteen
+#: members, which is exactly the kind of prose rot D14 exists to catch (recount, never
+#: increment by habit).
 #:
 #: Seven predate `notification-writers-gap` — `CLEANING_TASK_ASSIGNED`, `CLEANING_NO_RESPONSE`,
 #: `TECHNICIAN_ASSIGNED`, `OWNER_APPROVAL_REQUIRED`, `GUEST_ESCALATION`,
-#: `PASSWORD_RESET_REQUESTED` and `SLA_BREACH` — six are that change's own, and the last two
-#: are `staff-messaging`'s: `SendCleaningTaskMessageUseCase` (`cleaning/application/use_cases.py`)
-#: fans `CLEANING_TASK_MESSAGE` out via `staff_message_notification` to every active
-#: `PROPERTY_MANAGER` (R4.2) or to the assigned cleaner (R4.3); `SendIncidentMessageUseCase`
-#: (`maintenance/application/use_cases.py`) does the same for `INCIDENT_MESSAGE` via that
-#: module's own `staff_message_notification`, to every active `PROPERTY_MANAGER` or to the
-#: assigned technician.
+#: `PASSWORD_RESET_REQUESTED` and `SLA_BREACH` — six are that change's own, two are
+#: `staff-messaging`'s (`CLEANING_TASK_MESSAGE`, `INCIDENT_MESSAGE`), and the last two are
+#: `approvals-web`'s own (R4.2): `RespondOwnerApprovalUseCase`
+#: (`maintenance/application/use_cases.py`) writes `OWNER_APPROVAL_APPROVED` or
+#: `OWNER_APPROVAL_REJECTED` to the assigned technician via `owner_approval_approved_notification`
+#: / `owner_approval_rejected_notification` in `app/maintenance/domain/notifications.py`.
 WITH_WRITER = frozenset(
     {
         "CLEANING_TASK_ASSIGNED",
@@ -88,6 +92,9 @@ WITH_WRITER = frozenset(
         "REVIEW_RESPONSE_APPROVED",
         "CLEANING_TASK_MESSAGE",
         "INCIDENT_MESSAGE",
+        # `approvals-web` design D6 (R4.2) — see the module docstring above this set.
+        "OWNER_APPROVAL_APPROVED",
+        "OWNER_APPROVAL_REJECTED",
     }
 )
 
