@@ -82,10 +82,16 @@ pasan por `PropertyStateMachine`, que es el único sitio donde ocurre una transi
 
 **El triaje que clasifica (`classify_by_triage`).** Un triaje que fija sólo uno de los dos
 campos —o sólo el coste, sin ninguno de los dos— no transiciona nada: la incidencia sigue
-donde estaba, sea `OPEN` o no, exactamente como antes de este change. Sobre una incidencia
-que ya no está `OPEN` (`ASSIGNED`, por ejemplo), el triaje tampoco transiciona nunca por esta
-vía aunque traiga los dos campos: la fila `classify_by_triage` sólo admite `OPEN` como
-origen, así que ahí categoría, severidad y coste se limitan a anotarse. Si el mismo triaje
+donde estaba, siempre que el triaje se admita en ese estado, exactamente como antes de este
+change. Sobre una incidencia que ya no está `OPEN` (`ASSIGNED`, por ejemplo), el triaje
+tampoco transiciona nunca por esta vía aunque traiga los dos campos: la fila
+`classify_by_triage` sólo admite `OPEN` como origen, así que ahí categoría, severidad y
+coste se limitan a anotarse. **El triaje se rechaza con `409`** sobre `AWAITING_OWNER_APPROVAL`
+(la incidencia está esperando a la propietaria y no admite cambios laterales que no sean
+`cancel` o `resume_after_approval` — la pantalla del manager ya no muestra controles de
+triaje en ese estado) y sobre los estados terminales (`RESOLVED`, `CANCELLED`); el resto
+de estados no terminales (`OPEN`, `CLASSIFIED`, `ASSIGNED`, `ACCEPTED`, `IN_PROGRESS`,
+`WAITING_EXTERNAL_PARTS`) admiten la anotación sin transición. Si el mismo triaje
 clasifica (`OPEN → CLASSIFIED`) **y** su `estimated_cost` supera el umbral del tenant, la
 incidencia pasa por `CLASSIFIED` de camino a `AWAITING_OWNER_APPROVAL` en la misma petición
 — no es lógica nueva, sale del orden ya vigente (`set_triage` corre antes que la puerta de
