@@ -9,7 +9,12 @@ const cleaners: CleanerSummary[] = [
 ];
 
 const properties: PropertySummary[] = [
-  { id: "property-1", name: "Redes 11", internalCode: "REDES11" },
+  {
+    id: "property-1",
+    name: "Redes 11",
+    internalCode: "REDES11",
+    currentOperationalState: "AWAITING_CLEANING",
+  },
 ];
 
 function settled<T extends { id: string }>(entries: readonly T[]) {

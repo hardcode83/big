@@ -39,7 +39,40 @@ export type CleaningTaskStatus = components["schemas"]["CleaningTaskStatus"];
 export type CleaningAssignmentBlocker =
   components["schemas"]["CleaningAssignmentBlocker"];
 
-/** One cleaning task (PRD §11, §24) — what every single-task endpoint returns. */
+/**
+ * Alias of the generated union, same discipline as `CleaningTaskStatus` above: a
+ * fifth member on the backend has to break this build once the contract is
+ * regenerated, never a hand-copied list.
+ */
+export type CleaningValidationStatus =
+  components["schemas"]["CleaningValidationStatus"];
+
+/**
+ * The only two verdicts a manager can actually emit (R3.2) — `PENDING` and
+ * `WAIVED` are states the backend can be in, never a value this feature's
+ * validate control sends.
+ */
+export type CleaningValidationVerdict = Extract<
+  CleaningValidationStatus,
+  "PASSED" | "FAILED"
+>;
+
+/**
+ * Alias of the generated union (design D2): a state renamed on the backend has
+ * to break this build once the contract is regenerated, same discipline as
+ * `CleaningTaskStatus` above.
+ */
+export type PropertyOperationalState =
+  components["schemas"]["PropertyOperationalState"];
+
+/**
+ * One cleaning task (PRD §11, §24) — what every single-task endpoint returns.
+ *
+ * `completedAt`, `validationStatus` and `validatedAt` live here and not only on
+ * `CleaningTaskListItem` (design D3): both `CleaningTaskResponse` (create,
+ * validate, cancel) and `CleaningTaskListItemResponse` (the listing) publish
+ * all three identically.
+ */
 export interface CleaningTask {
   id: string;
   propertyId: string;
@@ -48,6 +81,9 @@ export interface CleaningTask {
   scheduledStart: IsoDateTime | null;
   scheduledEnd: IsoDateTime | null;
   createdAt: IsoDateTime;
+  completedAt: IsoDateTime | null;
+  validationStatus: CleaningValidationStatus;
+  validatedAt: IsoDateTime | null;
 }
 
 /**
@@ -79,15 +115,34 @@ export interface CleanerSummary {
   isActive: boolean;
 }
 
-/** A property from the tenant's catalog, identified as R2.1 requires. */
+/**
+ * A property from the tenant's catalog, identified as R2.1 requires.
+ *
+ * `currentOperationalState` already travels in `PropertyListItemResponse` at no
+ * extra request cost (design D2); it is what the non-assignability notice (R2.1)
+ * derives from.
+ */
 export interface PropertySummary {
   id: string;
   name: string;
   internalCode: string;
+  currentOperationalState: PropertyOperationalState;
 }
 
 /** Server-side filters for the task list (R3.1–R3.3); never applied in the client. */
 export interface CleaningTaskFilters {
   propertyId?: string;
   status?: CleaningTaskStatus;
+}
+
+/**
+ * The only three fields R1.2 allows the create control to send. `propertyId` is
+ * mandatory; the scheduled window is optional and, unlike the rest of this
+ * feature's inputs, still camelCase to ISO strings — `reservation_id` is never
+ * part of this shape (ASSUMPTION 2).
+ */
+export interface CreateCleaningTaskInput {
+  propertyId: string;
+  scheduledStart?: string;
+  scheduledEnd?: string;
 }

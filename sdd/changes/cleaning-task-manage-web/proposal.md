@@ -125,17 +125,27 @@ Contexto medido: `CleaningTask.record_manual_validation` exige estado `COMPLETED
 Criterios de aceptación:
 
 1. THE SYSTEM SHALL ofrecer el control de validación **únicamente** en filas cuyo `status` sea
-   `COMPLETED` y cuyo `validation_status` sea `PENDING`.
+   `COMPLETED`, con o sin veredicto previo. **Enmendado en el gate de `/sdd:design` del 2026-09-05**
+   (design D6): la redacción original lo limitaba además a `validation_status = PENDING`, lo que
+   dejaba un `FAILED` mal pulsado —que notifica a la limpiadora— sin corrección posible desde el
+   producto. `record_manual_validation` sólo exige `COMPLETED` y no comprueba el veredicto previo, así
+   que revalidar no estrena ruta ni relaja regla alguna.
 2. WHEN el usuario emite un veredicto, THE SYSTEM SHALL llamar a
    `POST /api/v1/cleaning-tasks/{id}/validate` con ese `validation_status` y, al recibir `200`,
    invalidar la clave de listado de tareas.
 3. THE SYSTEM SHALL mostrar en la fila el `validation_status` vigente y, cuando exista, la fecha
    de validación — campos que el backend ya publica en `CleaningTaskListItemResponse` y que el
-   DTO del frontend hoy descarta.
+   DTO del frontend hoy descarta. **Acotado en el gate del 2026-09-05** (design D7): se pinta en las
+   filas que se han completado alguna vez (`completed_at` no nulo) o que ya tienen veredicto, no en
+   todas — «Pendiente de validación» sobre una tarea `CREATED` que nadie ha limpiado todavía se lee
+   como una tarea atascada.
 4. THE SYSTEM SHALL **no** afirmar en ningún texto que validar cambia el estado de la vivienda:
    `ValidateCleaningTaskUseCase` no ejecuta ninguna transición de propiedad.
 5. IF la llamada falla, THEN THE SYSTEM SHALL anunciar el error por código de estado HTTP, con la
    misma regla que R1.4.
+6. THE SYSTEM SHALL impedir reenviar el veredicto que la tarea ya tiene, deshabilitando su control:
+   repetir `FAILED` volvería a notificar a la limpiadora y a escribir otra fila de auditoría.
+   Añadido en el mismo gate, como contrapeso de la enmienda a R3.1.
 
 ### R4 — Cancelar desde la lista, no sólo desde el dashboard
 
@@ -176,6 +186,11 @@ Criterios de aceptación:
    sólo oculta»).
 
 ## Preguntas abiertas para `/sdd:design`
+
+**Las tres están resueltas en `design.md` (gate del 2026-09-05).** 1 → opción (a), con la deriva
+escrita (design D2); 2 → confirmada, no se ofrece `reservation_id`; 3 → confirmada, `PASSED` y
+`FAILED`, `WAIVED` fuera. Se conservan tal cual porque el razonamiento que las planteó es lo que
+justifica la decisión.
 
 1. **Cómo sabe el frontend qué estados admiten `CLEANER_ASSIGNED` (R2.1).** Hoy la única fuente
    es la matriz del backend, y `assignment_blocker` documenta explícitamente que una copia a mano

@@ -3,6 +3,8 @@ import type {
   CleaningTask,
   CleaningTaskFilters,
   CleaningTaskListItem,
+  CleaningValidationVerdict,
+  CreateCleaningTaskInput,
   PaginatedResponse,
   PropertySummary,
 } from "./dto";
@@ -62,5 +64,26 @@ export interface CleaningDataSource {
     tenantId: string,
     taskId: string,
     reason: string,
+  ): Promise<CleaningTask>;
+
+  /**
+   * Creates a cleaning task by hand (R1.2, R1.3). Exactly the three fields of
+   * `CreateCleaningTaskInput` travel — `reservation_id` is never sent
+   * (ASSUMPTION 2) — and the caller invalidates the listing key on `201`.
+   */
+  createTask(
+    tenantId: string,
+    input: CreateCleaningTaskInput,
+  ): Promise<CleaningTask>;
+
+  /**
+   * Records a manager's verdict on a finished cleaning (R3.2). `verdict` is
+   * narrower than the backend's full `CleaningValidationStatus`: this control
+   * only ever emits `PASSED` or `FAILED`, never `PENDING`/`WAIVED`.
+   */
+  validateTask(
+    tenantId: string,
+    taskId: string,
+    verdict: CleaningValidationVerdict,
   ): Promise<CleaningTask>;
 }

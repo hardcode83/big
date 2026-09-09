@@ -42,6 +42,9 @@ const mappedTask = {
   scheduledStart: "2026-08-20T09:00:00Z",
   scheduledEnd: "2026-08-20T11:00:00Z",
   createdAt: "2026-08-19T18:00:00Z",
+  completedAt: null,
+  validationStatus: "PENDING",
+  validatedAt: null,
 };
 
 /**
@@ -283,7 +286,12 @@ describe("HttpCleaningSource.listProperties (R2.1)", () => {
     });
 
     await expect(source.listProperties("tenant-1")).resolves.toEqual([
-      { id: "property-1", name: "Redes 11", internalCode: "REDES11" },
+      {
+        id: "property-1",
+        name: "Redes 11",
+        internalCode: "REDES11",
+        currentOperationalState: "VACANT_READY",
+      },
     ]);
     expect(request).toHaveBeenCalledWith("/api/v1/properties", {
       query: { page: 1, per_page: 100 },
@@ -384,4 +392,176 @@ describe("HttpCleaningSource.listTasks maps the pre-flight (R3.2, R3.3, design D
     expect(task).toEqual(mappedTask);
     expect("assignmentBlockedBy" in task).toBe(false);
   });
+});
+
+describe("HttpCleaningSource maps completedAt/validationStatus/validatedAt (R3.3, design D3)", () => {
+  it("maps a task that has never been completed nor validated", async () => {
+    const { source } = sourceWith(taskResponse);
+
+    const task = await source.assignTask("tenant-1", "task-1", "cleaner-1");
+
+    expect(task).toMatchObject({
+      completedAt: null,
+      validationStatus: "PENDING",
+      validatedAt: null,
+    });
+  });
+
+  it("maps a completed and validated task through mapTask", async () => {
+    const { source } = sourceWith({
+      ...taskResponse,
+      completed_at: "2026-08-20T12:00:00Z",
+      validation_status: "PASSED",
+      validated_at: "2026-08-20T13:00:00Z",
+    });
+
+    const task = await source.assignTask("tenant-1", "task-1", "cleaner-1");
+
+    expect(task).toMatchObject({
+      completedAt: "2026-08-20T12:00:00Z",
+      validationStatus: "PASSED",
+      validatedAt: "2026-08-20T13:00:00Z",
+    });
+  });
+
+  it("maps the same three fields through mapListItem", async () => {
+    const { source } = sourceWith(
+      taskPage([
+        {
+          ...taskResponse,
+          completed_at: "2026-08-20T12:00:00Z",
+          validation_status: "FAILED",
+          validated_at: "2026-08-20T13:00:00Z",
+        },
+      ]),
+    );
+
+    const page = await source.listTasks("tenant-1", {}, 1);
+
+    expect(page.data[0]).toMatchObject({
+      completedAt: "2026-08-20T12:00:00Z",
+      validationStatus: "FAILED",
+      validatedAt: "2026-08-20T13:00:00Z",
+    });
+  });
+});
+
+describe("HttpCleaningSource.createTask (R1.2, R1.3)", () => {
+  it("POSTs only property_id when no scheduled window is chosen", async () => {
+    const { source, request } = sourceWith(taskResponse);
+
+    await expect(
+      source.createTask("tenant-1", { propertyId: "property-1" }),
+    ).resolves.toEqual(mappedTask);
+
+    expect(request).toHaveBeenCalledWith("/api/v1/cleaning-tasks", {
+      method: "POST",
+      body: { property_id: "property-1" },
+    });
+    expect(Object.keys(request.mock.calls[0][1].body)).toEqual([
+      "property_id",
+    ]);
+  });
+
+  it("POSTs the chosen scheduled window alongside property_id, and never reservation_id", async () => {
+    const { source, request } = sourceWith(taskResponse);
+
+    await source.createTask("tenant-1", {
+      propertyId: "property-1",
+      scheduledStart: "2026-08-20T09:00:00Z",
+      scheduledEnd: "2026-08-20T11:00:00Z",
+    });
+
+    expect(request).toHaveBeenCalledWith("/api/v1/cleaning-tasks", {
+      method: "POST",
+      body: {
+        property_id: "property-1",
+        scheduled_start: "2026-08-20T09:00:00Z",
+        scheduled_end: "2026-08-20T11:00:00Z",
+      },
+    });
+    expect(Object.keys(request.mock.calls[0][1].body).sort()).toEqual([
+      "property_id",
+      "scheduled_end",
+      "scheduled_start",
+    ]);
+  });
+
+  it("omits scheduled_end when only scheduled_start is chosen", async () => {
+    const { source, request } = sourceWith(taskResponse);
+
+    await source.createTask("tenant-1", {
+      propertyId: "property-1",
+      scheduledStart: "2026-08-20T09:00:00Z",
+    });
+
+    expect(Object.keys(request.mock.calls[0][1].body).sort()).toEqual([
+      "property_id",
+      "scheduled_start",
+    ]);
+  });
+
+  it.each([403, 404, 409, 422, 500] as const)(
+    "propagates an ApiError %s untouched, without wrapping or adapter retry",
+    async (status) => {
+      const error = new ApiError({
+        code: "CODE",
+        message: `API error ${status}`,
+        status,
+      });
+      const request = vi.fn().mockRejectedValue(error);
+      const source = new HttpCleaningSource({ request } as unknown as ApiClient);
+
+      await expect(
+        source.createTask("tenant-1", { propertyId: "property-1" }),
+      ).rejects.toBe(error);
+      expect(request).toHaveBeenCalledTimes(1);
+    },
+  );
+});
+
+describe("HttpCleaningSource.validateTask (R3.2)", () => {
+  it.each(["PASSED", "FAILED"] as const)(
+    "POSTs validation_status=%s as the only body field",
+    async (verdict) => {
+      const { source, request } = sourceWith({
+        ...taskResponse,
+        validation_status: verdict,
+      });
+
+      await expect(
+        source.validateTask("tenant-1", "task-1", verdict),
+      ).resolves.toMatchObject({ validationStatus: verdict });
+
+      expect(request).toHaveBeenCalledWith(
+        "/api/v1/cleaning-tasks/{task_id}/validate",
+        {
+          method: "POST",
+          pathParams: { task_id: "task-1" },
+          body: { validation_status: verdict },
+        },
+      );
+      expect(Object.keys(request.mock.calls[0][1].body)).toEqual([
+        "validation_status",
+      ]);
+    },
+  );
+
+  it.each([403, 404, 409, 422, 500] as const)(
+    "propagates an ApiError %s untouched, without wrapping or adapter retry",
+    async (status) => {
+      const error = new ApiError({
+        code: "CODE",
+        message: `API error ${status}`,
+        status,
+      });
+      const request = vi.fn().mockRejectedValue(error);
+      const source = new HttpCleaningSource({ request } as unknown as ApiClient);
+
+      await expect(
+        source.validateTask("tenant-1", "task-1", "PASSED"),
+      ).rejects.toBe(error);
+      expect(request).toHaveBeenCalledTimes(1);
+    },
+  );
 });

@@ -17,7 +17,9 @@
     "status": "Estado",
     "scheduledStart": "Inicio previsto",
     "scheduledEnd": "Fin previsto",
-    "createdAt": "Fecha de creación"
+    "createdAt": "Fecha de creación",
+    "completedAt": "Fecha de finalización",
+    "validation": "Validación"
   },
   "status": {
     "CREATED": "Creada",
@@ -55,6 +57,35 @@
     "pageOfTotal": "Página {{page}} de {{totalPages}}",
     "totalTasks": "{{total}} tareas en total"
   },
+  "create": {
+    "open": "Nueva limpieza",
+    "close": "Cerrar formulario",
+    "fields": {
+      "property": {
+        "label": "Vivienda de la nueva tarea",
+        "placeholder": "Elige una vivienda"
+      },
+      "scheduledStart": {
+        "label": "Inicio programado (opcional)"
+      },
+      "scheduledEnd": {
+        "label": "Fin programado (opcional)"
+      }
+    },
+    "confirm": "Crear",
+    "sending": "Creando…",
+    "success": "Tarea de limpieza creada.",
+    "warning": {
+      "notAssignable": "Esta tarea se creará, pero no podrá asignarse hasta que la vivienda esté en estado «Pendiente de limpieza»."
+    },
+    "error": {
+      "forbidden": "No tienes permiso para crear limpiezas.",
+      "notFound": "Esa vivienda ya no existe, o no tiene una plantilla de checklist activa.",
+      "ambiguousTemplate": "Esa vivienda admite más de una plantilla de checklist activa; no se puede crear la tarea.",
+      "invalid": "Revisa los datos introducidos.",
+      "generic": "No se pudo crear la limpieza. Vuelve a intentarlo."
+    }
+  },
   "assign": {
     "label": "Asignar limpiadora",
     "placeholder": "Elige una limpiadora",
@@ -72,6 +103,50 @@
       "propertyState": "La vivienda todavía no está pendiente de limpieza.",
       "invalid": "Esa persona ya no es una limpiadora activa de este tenant.",
       "generic": "No se pudo asignar la limpieza. Vuelve a intentarlo."
+    }
+  },
+  "validate": {
+    "passed": "Validar",
+    "failed": "No pasa",
+    "sending": "Enviando…",
+    "notice": "«No pasa» notifica a la limpiadora asignada. Validar no cambia el estado de la vivienda.",
+    "success": {
+      "passed": "Limpieza validada como correcta.",
+      "failed": "Limpieza marcada como no conforme; se ha notificado a la limpiadora asignada."
+    },
+    "error": {
+      "forbidden": "No tienes permiso para validar limpiezas.",
+      "notFound": "Esa tarea de limpieza ya no existe.",
+      "notCompleted": "Esa tarea ya no está completada; no se puede validar.",
+      "generic": "No se pudo validar la limpieza. Vuelve a intentarlo."
+    }
+  },
+  "validation": {
+    "PENDING": "Pendiente de validación",
+    "PASSED": "Validada",
+    "FAILED": "No conforme",
+    "WAIVED": "Exenta"
+  },
+  "cancel": {
+    "open": "Cancelar",
+    "title": "Cancelar limpieza",
+    "warning": "Cancelar esta limpieza puede crear una tarea de reemplazo sin asignar.",
+    "reason": {
+      "label": "Motivo de la cancelación",
+      "placeholder": "Explica por qué se cancela esta limpieza",
+      "help": "Máximo 500 caracteres.",
+      "empty": "El motivo no puede estar en blanco.",
+      "charsRemaining": "({{count}})"
+    },
+    "confirm": "Confirmar cancelación",
+    "sending": "Cancelando…",
+    "success": "Limpieza cancelada.",
+    "error": {
+      "forbidden": "No tienes permiso para cancelar limpiezas.",
+      "notFound": "Esa tarea de limpieza ya no existe.",
+      "terminal": "Esa tarea ya está cerrada; no se puede cancelar.",
+      "propertyState": "El estado de la vivienda impide cancelar esta limpieza ahora mismo.",
+      "generic": "No se pudo cancelar la limpieza. Vuelve a intentarlo."
     }
   }
 }

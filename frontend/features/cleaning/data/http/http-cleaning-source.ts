@@ -7,6 +7,8 @@ import type {
   CleaningTask,
   CleaningTaskFilters,
   CleaningTaskListItem,
+  CleaningValidationVerdict,
+  CreateCleaningTaskInput,
   PaginatedResponse,
   PropertySummary,
 } from "../dto";
@@ -63,6 +65,9 @@ function mapTask(value: TaskResponse): CleaningTask {
     scheduledStart: value.scheduled_start,
     scheduledEnd: value.scheduled_end,
     createdAt: value.created_at,
+    completedAt: value.completed_at,
+    validationStatus: value.validation_status,
+    validatedAt: value.validated_at,
   };
 }
 
@@ -95,6 +100,7 @@ function mapProperty(value: PropertyListItemResponse): PropertySummary {
     id: value.id,
     name: value.name,
     internalCode: value.internal_code,
+    currentOperationalState: value.current_operational_state,
   };
 }
 
@@ -184,6 +190,56 @@ export class HttpCleaningSource implements CleaningDataSource {
         method: "POST",
         pathParams: { task_id: taskId },
         body: { reason },
+      },
+    );
+    return mapTask(response);
+  }
+
+  /**
+   * Creates a cleaning task by hand (R1.2, R1.3). Exactly `property_id` plus
+   * whichever of `scheduled_start`/`scheduled_end` were actually chosen — an
+   * unset field is omitted from the body, never sent as `null` — and
+   * `reservation_id` is never part of it (ASSUMPTION 2): this control has no
+   * way to know a reservation id, so it must not invent the field.
+   */
+  async createTask(
+    _tenantId: string,
+    input: CreateCleaningTaskInput,
+  ): Promise<CleaningTask> {
+    const response: TaskResponse = await this.client.request(
+      "/api/v1/cleaning-tasks",
+      {
+        method: "POST",
+        body: {
+          property_id: input.propertyId,
+          ...(input.scheduledStart !== undefined
+            ? { scheduled_start: input.scheduledStart }
+            : {}),
+          ...(input.scheduledEnd !== undefined
+            ? { scheduled_end: input.scheduledEnd }
+            : {}),
+        },
+      },
+    );
+    return mapTask(response);
+  }
+
+  /**
+   * Records a manager's verdict on a finished cleaning (R3.2). `verdict` is
+   * the only field sent; `CleaningValidationVerdict` narrows the wire type to
+   * the two values this control can actually emit.
+   */
+  async validateTask(
+    _tenantId: string,
+    taskId: string,
+    verdict: CleaningValidationVerdict,
+  ): Promise<CleaningTask> {
+    const response: TaskResponse = await this.client.request(
+      "/api/v1/cleaning-tasks/{task_id}/validate",
+      {
+        method: "POST",
+        pathParams: { task_id: taskId },
+        body: { validation_status: verdict },
       },
     );
     return mapTask(response);
