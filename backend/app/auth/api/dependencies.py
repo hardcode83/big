@@ -45,7 +45,7 @@ from app.auth.infrastructure.token_codec import JwtTokenCodec
 from app.core.config import settings
 from app.core.db import bind_session_to_tenant, get_db_session
 from app.core.errors import ForbiddenError
-from app.core.i18n import Locale
+from app.core.i18n import Locale, resolve_locale
 # The single SqlAlchemyUnitOfWork of the project. `auth` used to carry its own
 # eight-line copy; `user-management` consolidated them (its design D16), which was the
 # debt `sdd/specs/reservations.md` assigned to "the next change that touches auth".
@@ -510,6 +510,45 @@ async def get_authenticated_request(
 
 
 AuthenticatedDep = Annotated[AuthenticatedRequest, Depends(get_authenticated_request)]
+
+
+#: The header the interface states its active language in (`frontend-verification-fixes`
+#: design D1). A product header and not `Accept-Language` on purpose: the browser sends
+#: `Accept-Language` by itself, carrying the *operating system's* preference, and the proxy
+#: forwards it untouched — so reusing that name would let a header nobody in our interface
+#: wrote decide the language of composed text on any request that does not go through the
+#: `ApiClient`. With a name of our own, every value arriving here was put there by our code,
+#: and "the language the client asked for" is a checkable claim instead of an inference.
+#:
+#: The `X-` prefix is discouraged by RFC 6648 and is used deliberately: it marks the header
+#: as ours right next to a standard one it could otherwise be confused with.
+LOCALE_HEADER = "X-Locale"
+
+
+async def get_request_locale(request: Request, authenticated: AuthenticatedDep) -> Locale:
+    """The locale to render this request's composed text in (design D2, D3; R1.1, R1.5).
+
+    Read off the `Request` object rather than declared as `Annotated[str | None, Header()]`,
+    which is what R1.5 asks for: FastAPI publishes header *parameters* in `openapi.json` and
+    publishes nothing it cannot see, so the routes that depend on this gain no parameter and
+    the generated client does not grow one.
+
+    Costs no query. It depends on `AuthenticatedDep`, which FastAPI resolves once per
+    request, so the stored preference it falls back to is the one the revalidation in
+    `get_authenticated_request` already read off the user row.
+
+    The effective locale deliberately does NOT enter `RequestContext`: that object documents
+    itself as built "never from request input" and is what tenant isolation rests on, so the
+    untrusted half of this resolution gets its own carrier instead. `RequestContext.
+    preferred_language` stays the stored preference of the row; this is the language the
+    answer is painted in. See `app/auth/domain/context.py`.
+    """
+    return resolve_locale(
+        request.headers.get(LOCALE_HEADER), authenticated.context.preferred_language
+    )
+
+
+RequestLocaleDep = Annotated[Locale, Depends(get_request_locale)]
 
 
 REQUIRED_PERMISSION_ATTR = "__required_permission__"

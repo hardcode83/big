@@ -56,6 +56,30 @@ class Locale(str, enum.Enum):
             return cls.ES
 
 
+def resolve_locale(requested: str | None, stored: str | None) -> Locale:
+    """The locale to render in, for one request (`frontend-verification-fixes` D4, R1.2/R1.3).
+
+    `requested` wins when `Locale` recognizes it. Otherwise this degrades to
+    `Locale.resolve(stored)` — which already falls further to `es` when `stored` is `None`
+    or unsupported. That is the whole chain: a request can only ever *narrow* the outcome
+    to one of the two languages the product speaks, never fail it.
+
+    `requested` is matched the same way `Locale.resolve` matches `stored` — stripped and
+    lowercased — but unlike `Locale.resolve` an unrecognized `requested` does NOT default to
+    `es` on its own: it falls through to `stored` instead, so a request in an unsupported
+    language still gets the reader's own stored preference rather than being forced to
+    Spanish. A value like `es-ES` (a regional tag) or `es;q=0.9` (an `Accept-Language`
+    quality list) is not parsed or split here — it is simply not a value `Locale`
+    recognizes, so it degrades exactly like any other unsupported request.
+    """
+    if requested is not None:
+        try:
+            return Locale(requested.strip().lower())
+        except ValueError:
+            pass
+    return Locale.resolve(stored)
+
+
 class Catalog:
     """Templates for one vocabulary, in every locale.
 

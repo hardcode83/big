@@ -287,9 +287,15 @@ tocar la base de datos a mano.
 - WHEN se construye el `RequestContext` de una petición autenticada, THE SYSTEM SHALL incluir
   el `preferred_language` del usuario como un `Locale` ya resuelto, tomado de la **misma fila
   que la revalidación acaba de releer**, de modo que no cueste ninguna consulta adicional. Lo
-  añadió `dashboard-api` (su diseño D3) para que la capa de lectura pueda localizar textos sin
-  releer el usuario ni depender de `Accept-Language`: PRD:205 fija el idioma en la preferencia
-  del usuario autenticado, que es la fila y no el navegador.
+  añadió `dashboard-api` (su diseño D3) sin depender de `Accept-Language`: PRD:205 fija el
+  idioma en la preferencia del usuario autenticado, que es la fila y no el navegador.
+  **Corrección (`frontend-verification-fixes`, su diseño D3):** este campo ya no es lo que una
+  ruta renderiza — es el escalón de degradación de `RequestLocaleDep`
+  (`backend/app/auth/api/dependencies.py`), que resuelve primero la cabecera `X-Locale` de la
+  petición y sólo cae a esta fila si la petición no declara un idioma que `Locale` reconozca.
+  El valor no fiable de la cabecera se queda fuera de `RequestContext` a propósito — ver
+  `sdd/specs/dashboard-api.md`, sección «Textos legibles en el idioma del usuario» — para que
+  la invariante de este documento («never from request input») siga siendo cierta.
 - IF `users.preferred_language` contiene un valor que no corresponde a ningún `Locale`
   soportado —la columna es `String(5)` y no lo restringe—, THEN THE SYSTEM SHALL degradar al
   idioma por defecto en vez de fallar la petición.
