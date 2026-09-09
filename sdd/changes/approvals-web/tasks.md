@@ -236,7 +236,7 @@
 - [x] 8.5 Contract in sync: `git status` shows `backend/openapi.json` and
       `frontend/lib/api/generated/openapi.d.ts` committed together (from section 3.6); re-run
       `npm run api:check` if the worktree workaround was used, to confirm no drift.
-- [ ] 8.6 Manual end-to-end pass (needs an **assigned** incident — start from `make bootstrap` /
+- [ ] 8.6 <!-- manual --> Manual end-to-end pass (needs an **assigned** incident — start from `make bootstrap` /
       `seed_demo` or the CLI, per the proposal's `ASSUMPTION`; the UI has no assign action yet):
       resolve an incident with a final cost above the tenant's threshold → it appears in
       `/approvals` → the owner approves (or rejects) with a note → the technician sees the

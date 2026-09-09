@@ -86,11 +86,27 @@ Al aprobar el coste real el sistema **no cierra la incidencia**: la devuelve a `
 y el técnico repite el cierre. Cerrarla por él haría que `resolved_at` dejara de significar
 «lo dio por terminado».
 
+## El técnico se entera de la respuesta de la propietaria
+
+Responder una aprobación (`POST /owner-approvals/{id}/respond`) escribe, en la misma
+transacción, una notificación al técnico **asignado** a la incidencia — `OWNER_APPROVAL_APPROVED`
+si dijo que sí, `OWNER_APPROVAL_REJECTED` si dijo que no. El cuerpo es una frase fija más los
+identificadores de la incidencia/propiedad/aprobación: nunca lleva el motivo ni las notas que
+escribió la propietaria (son texto libre de la excepción 3 de la regla 11, y esta notificación no
+es su sumidero). Si la incidencia no tiene técnico asignado —puede pasar en la puerta de
+`INCIDENT` (R1 de esta tabla), que se abre en el triaje antes de asignar a nadie— no se escribe
+nada y la respuesta no falla: no hay a quién avisar.
+
+La campana del técnico lleva a `/tech/incidents/{id}`, la misma incidencia. La propia campana de
+la propietaria, cuando se abre una aprobación nueva (`OWNER_APPROVAL_REQUIRED`), lleva a
+`/approvals` — ver más abajo.
+
 ## Quién puede hacer qué
 
 | | propietaria | manager | técnico | limpiadora |
 |---|---|---|---|---|
 | Ver incidencias | ✔ | ✔ | ✔ sólo las suyas | — |
+| Ver la cola de aprobaciones (`GET /owner-approvals`) | ✔ | ✔ | — | — |
 | Ver el contexto de una incidencia (a qué piso y cómo entrar) | ✔ | ✔ | ✔ sólo las suyas | — |
 | Clasificar, triar, asignar, cancelar | — | ✔ | — | — |
 | Aceptar, empezar, esperar piezas, reanudar, resolver | — | ✔ | ✔ sólo las suyas | — |
@@ -467,6 +483,20 @@ campos de `IncidentResponse` — incluido `description` como **texto plano** (re
 `assigned_technician_id` bajo una sección secundaria etiquetada con su nota de limitación
 (no hay `GET /api/v1/users` en el contrato, así que el UUID no se resuelve a nombre aquí).
 
+La cola de aprobaciones (`/approvals`, `approvals-web`) ya no es un `RoutePlaceholder`: pinta la
+cola pendiente (sin filtro de `status`, orden `requested_at` ascendente) y un historial con las
+últimas cinco respondidas (dos peticiones a `GET /owner-approvals`, una por `status`, fusionadas y
+ordenadas por `responded_at` porque el endpoint sólo admite un `status` a la vez). Cada fila pinta
+el nombre de la propiedad y su código interno —nunca el UUID—, la categoría/severidad/título de la
+incidencia traducidos, el importe en EUR y desde cuándo espera; una fila `related_type=OTHER`
+(sin incidencia asociada) muestra la nota genérica en su lugar. Los botones de aprobar/rechazar
+sólo aparecen tras `RESPOND_OWNER_APPROVALS` (sólo la propietaria; el manager ve la cola en modo
+lectura) y nunca en una fila `OTHER`, junto con el aviso de que rechazar **cancela la incidencia y
+no es reversible** — nunca sólo en un diálogo de confirmación. Un `409` (ya respondida por otra
+pestaña) muestra el aviso junto a esa fila y refresca la cola, sin perder las demás. La campana de
+notificaciones de la propietaria (`OWNER_APPROVAL_REQUIRED`) y el enlace del bloque de
+aprobaciones en el detalle de la propiedad llevan aquí.
+
 Quedan fuera de esa pantalla, hasta que lleguen sus entradas propias:
 
 - Las **cuatro operaciones del manager** (`classify`, `triage` vía `PATCH`, `assign`, `cancel`),
@@ -475,9 +505,6 @@ Quedan fuera de esa pantalla, hasta que lleguen sus entradas propias:
   técnico descrita arriba, y de esta pantalla del workspace siguen ausentes. Cada una lleva su
   validación de transición (`IncidentAlreadyClosedError`, `InvalidIncidentTransitionError`,
   `IncidentBlockedByPendingApprovalError`) y su auditoría.
-- **Responder una aprobación** (`POST /owner-approvals/{id}/respond`): la ruta `/approvals`
-  sigue como `RoutePlaceholder` y la regla 11 ata esa pantalla a una decisión de UX sobre
-  el flujo de la propietaria.
 - **Selector de propiedad** y **resolución nombre↔id de `assigned_technician_id`**: ambos
   son `M` por derecho propio. No los desbloquea `tech-app`: la app del técnico resuelve **su**
   vivienda con `tech-incident-context`, que proyecta el contexto de una incidencia y no ofrece

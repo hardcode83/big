@@ -670,6 +670,7 @@ def test_the_anonymous_boundary_bounds_what_can_land_there() -> None:
         )
 
     assert ReportIncidentRequest.model_config["extra"] == "forbid"
+    assert ReportIncidentRequest.model_config["str_strip_whitespace"] is True
 
 
 # --- `response_notes` (`approvals-web` D12) ---------------------------------------------
@@ -764,4 +765,3 @@ async def test_a_lone_surrogate_in_response_notes_is_a_422_not_a_500(
     )
 
     assert response.status_code == 422
-    assert ReportIncidentRequest.model_config["str_strip_whitespace"] is True
