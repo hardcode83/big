@@ -67,7 +67,7 @@ describe("authenticated ApiClient sends X-Locale (R1.4, design D6)", () => {
 
   it("sends both X-Locale and Authorization when a session is present", async () => {
     setActiveLocale("en");
-    setSessionTokens({ accessToken: "access-1", refreshToken: "refresh-1" });
+    setSessionTokens({ accessToken: "access-1" });
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ ok: 1 }));
     const { apiClient } = createAuthenticatedClients({
       apiBaseUrl: "https://api.example.com",

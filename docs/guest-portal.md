@@ -79,10 +79,9 @@ dos tokens vivos para una estancia.
 (`smtp-delivery-adapter`; `ConsoleEmailAdapter` si no hay relay SMTP configurado) de forma
 síncrona dentro de la petición y escribe su fila en `notification_logs` ya `SENT`/`FAILED` —
 nunca `PENDING` — porque la regla 11 de `steering/security.md` prohíbe un cuerpo que lleve un
-enlace acuñado en el `dispatch_notifications` asíncrono, que solo relee `subject`/`body`. Es el
-primer escritor de `notification_logs` dirigido a un huésped. Construir la URL a mano y mandarla
-por otra vía sigue siendo válido (el `POST` plano sin `/send` no cambia), pero ya no es la única
-opción.
+enlace acuñado en el `dispatch_notifications` asíncrono, que solo relee `subject`/`body`.
+Construir la URL a mano y mandarla por otra vía sigue siendo válido (el `POST` plano sin `/send`
+no cambia), pero ya no es la única opción.
 
 ## Qué ve el huésped
 
