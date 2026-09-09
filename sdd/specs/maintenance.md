@@ -278,7 +278,13 @@ una conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   SHALL escribir `current_operational_state` directamente
   ([`timeline-state-machine.md`](timeline-state-machine.md)).
 - THE SYSTEM NEVER SHALL disparar nada al triar, asignar, aceptar, empezar, esperar piezas,
-  reanudar, ni al abrir cualquiera de las dos puertas de aprobación, ni al aprobarla.
+  reanudar, ni al abrir cualquiera de las dos puertas de aprobación, ni al aprobarla — con la
+  **única** excepción de `classify_by_triage` (`PATCH /incidents/{id}` que fija
+  simultáneamente `category` y `severity` sobre una incidencia `OPEN`): esa vía **sí** dispara
+  `INCIDENT_HIGH` o `INCIDENT_CRITICAL` a través de `PropertyStateMachine`, igual que la
+  clasificación automática, porque cierra el mismo hueco que ella (R3.5, design D5). El resto
+  de los triajes —los que no completan la clasificación— se limitan a anotar categoría,
+  severidad o coste sin tocar el estado operacional de la vivienda.
 - IF la máquina rechaza la transición por no haber cambio de estado o por no existir fila de
   política —por ejemplo con la propiedad en `BLOCKED_BY_OWNER` u `OUT_OF_SERVICE`—, THEN THE SYSTEM
   SHALL registrar `maintenance.transition_refused` y **mantener el cambio de la incidencia**: la
