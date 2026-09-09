@@ -6,8 +6,11 @@
  * enumerated by hand, so the snake_case/camelCase boundary stays at the HTTP source.
  *
  * `NotificationType` is re-exported from the generated contract on purpose and never
- * re-declared here (design D7): it is the union of the seventeen names the backend knows, and
- * typing the copy catalogue by it is what makes a missing translation fail
+ * re-declared here (design D7): it is the union of the twenty-two names the backend knows
+ * (measured against the live enum after `approvals-web` section 4 added
+ * `OWNER_APPROVAL_APPROVED`/`OWNER_APPROVAL_REJECTED` — design D14: re-measured, not
+ * incremented from the stale "seventeen" this comment used to say), and typing the copy
+ * catalogue by it is what makes a missing translation fail
  * `npm run typecheck` instead of shipping a raw identifier to a cleaner's screen. Declaring
  * the list by hand would drift the day `notification-writers-gap` touches the enum.
  */

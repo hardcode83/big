@@ -5,7 +5,10 @@ import type { NotificationType } from "../data";
  *
  * **The `Record<NotificationType, string>` annotation is the whole mechanism**, not a
  * formality. `NotificationType` is `components["schemas"]["NotificationType"]`, generated from
- * `backend/openapi.json`, so it is the seventeen names the backend actually knows. A `Record`
+ * `backend/openapi.json`, so it is the twenty-two names the backend actually knows (measured
+ * against the live enum after `approvals-web` section 4 added `OWNER_APPROVAL_APPROVED`/
+ * `OWNER_APPROVAL_REJECTED` — design D14: re-measured, not incremented from the stale
+ * "seventeen" this comment used to say). A `Record`
  * over a closed union must be exhaustive, which means a type without an entry here fails
  * `npm run typecheck` — a CI gate — instead of reaching a cleaner's screen as a raw
  * identifier. That is what makes R4.1's "los diecisiete, incluidos los nueve que hoy no
@@ -34,6 +37,8 @@ export const NOTIFICATION_COPY_KEYS: Record<NotificationType, string> = {
   REVIEW_RESPONSE_APPROVED: "notifications:types.REVIEW_RESPONSE_APPROVED",
   CLEANING_TASK_MESSAGE: "notifications:types.CLEANING_TASK_MESSAGE",
   INCIDENT_MESSAGE: "notifications:types.INCIDENT_MESSAGE",
+  OWNER_APPROVAL_APPROVED: "notifications:types.OWNER_APPROVAL_APPROVED",
+  OWNER_APPROVAL_REJECTED: "notifications:types.OWNER_APPROVAL_REJECTED",
 };
 
 /** The translated generic of R4.3, for a value the interface does not know. */

@@ -32,6 +32,8 @@ import esCleaner from "@/locales/es/cleaner.json";
 import enCleaner from "@/locales/en/cleaner.json";
 import esPlatform from "@/locales/es/platform.json";
 import enPlatform from "@/locales/en/platform.json";
+import esApprovals from "@/locales/es/approvals.json";
+import enApprovals from "@/locales/en/approvals.json";
 
 /** i18next namespaces (design D13). */
 export const NAMESPACES = [
@@ -52,6 +54,7 @@ export const NAMESPACES = [
   "tech",
   "cleaner",
   "platform",
+  "approvals",
 ] as const;
 export const DEFAULT_NS = "common";
 
@@ -75,6 +78,7 @@ export const resources = {
     tech: esTech,
     cleaner: esCleaner,
     platform: esPlatform,
+    approvals: esApprovals,
   },
   en: {
     common: enCommon,
@@ -94,5 +98,6 @@ export const resources = {
     tech: enTech,
     cleaner: enCleaner,
     platform: enPlatform,
+    approvals: enApprovals,
   },
 } as const;

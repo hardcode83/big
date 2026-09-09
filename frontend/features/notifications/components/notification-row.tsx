@@ -37,6 +37,7 @@ export function NotificationRow({
   const { t, i18n } = useTranslation("notifications");
   const unread = notification.readAt === null;
   const href = notificationHref(
+    notification.type,
     profile,
     notification.relatedType,
     notification.relatedId,

@@ -81,4 +81,18 @@ describe("PropertyDetailSections (R2)", () => {
     const { container } = renderSections(<PropertyDetailSections detail={detail} />);
     expect(await getA11yViolations(container)).toEqual([]);
   });
+
+  it("links the approvals block to /approvals, with no id in the href (D13)", () => {
+    renderSections(<PropertyDetailSections detail={detail} />);
+    const link = screen.getByRole("link");
+    expect(link).toHaveAttribute("href", "/approvals");
+  });
+
+  it("still links to /approvals when there are no pending approvals (D13)", () => {
+    renderSections(
+      <PropertyDetailSections detail={{ ...detail, pendingApprovals: [] }} />,
+    );
+    const link = screen.getByRole("link");
+    expect(link).toHaveAttribute("href", "/approvals");
+  });
 });

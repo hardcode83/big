@@ -175,6 +175,40 @@ it("denies MANAGE_CONVERSATIONS to TENANT_OWNER — owner reads but does not ope
     expect(incidents.result.current).toBe(false);
   });
 
+  it("grants RESPOND_OWNER_APPROVALS to TENANT_OWNER (approvals-web D10)", () => {
+    useAuth.mockReturnValue({ user: { role: "TENANT_OWNER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("RESPOND_OWNER_APPROVALS"),
+    );
+    expect(result.current).toBe(true);
+  });
+
+  it("denies RESPOND_OWNER_APPROVALS to PROPERTY_MANAGER — sees the queue, not the buttons (R3.2)", () => {
+    useAuth.mockReturnValue({ user: { role: "PROPERTY_MANAGER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("RESPOND_OWNER_APPROVALS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
+  it("denies RESPOND_OWNER_APPROVALS to CLEANER, TECHNICIAN, SUPER_ADMIN", () => {
+    for (const role of ["CLEANER", "TECHNICIAN", "SUPER_ADMIN"]) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() =>
+        useHasPermission("RESPOND_OWNER_APPROVALS"),
+      );
+      expect(result.current, `${role} should not have it`).toBe(false);
+    }
+  });
+
+  it("denies RESPOND_OWNER_APPROVALS without an authenticated user", () => {
+    useAuth.mockReturnValue({ user: null });
+    const { result } = renderHook(() =>
+      useHasPermission("RESPOND_OWNER_APPROVALS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
   it("declares every UserRole of the generated contract", () => {
     expect(Object.keys(ROLE_UI_PERMISSIONS).sort()).toEqual([
       "CLEANER",
