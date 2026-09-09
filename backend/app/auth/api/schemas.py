@@ -7,10 +7,56 @@ reaches a use case (R4.1, design D6).
 
 import uuid
 
+from fastapi import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.domain.entities import User
 from app.auth.domain.enums import UserRole
+
+# `auth-session-persistence` design D4. Name and attributes live as a single constant plus
+# one helper, deliberately not a separate cookie-attributes module: there is exactly one
+# cookie and three callers (login, refresh, logout — sections 2 and 3, not this one).
+SESSION_REFRESH_COOKIE = "autohostai.session.refresh"
+
+
+def emit_refresh_cookie(
+    response: Response,
+    value: str,
+    *,
+    secure: bool,
+    max_age_seconds: int,
+) -> None:
+    """Sets the refresh-token cookie with its full, fixed attribute set (design D4).
+
+    The caller passes only the value and the two things that vary per request: whether the
+    effective client scheme is HTTPS (`resolve_cookie_secure`, R7.2/R7.3) and the refresh
+    token's TTL. Everything else is fixed:
+
+    - `HttpOnly`: the token is never readable from JS, which is the whole point of moving
+      it out of memory (R1, R2).
+    - `SameSite=Strict`: **corrected 2026-09-06** (security panel finding, review round
+      4) — the docstring used to justify `Lax` with a scenario that does not occur: a
+      top-level navigation from an email link targets a PAGE (`/login`), never
+      `Path=/api/v1/auth`, so the cookie was never in scope for that navigation to carry
+      regardless of `SameSite`. Neither value stops a same-site sibling origin from
+      triggering a `POST` with this cookie attached — `SameSite` only distinguishes
+      *cross-site* from *same-site*, and a sibling under the same registrable domain is
+      same-site by definition — which is why `enforce_same_origin` and
+      `get_logout_subject`'s inline check exist as the actual CSRF defence
+      (`backend/app/auth/api/dependencies.py`). `Strict` costs nothing over `Lax` given
+      the cookie's own `Path` scope, so there is no reason left to keep the weaker value.
+    - `Path=/api/v1/auth`: keeps the cookie off every other route — `Path=/` would send it
+      on every request, wider than the contract asks for.
+    """
+    response.set_cookie(
+        key=SESSION_REFRESH_COOKIE,
+        value=value,
+        max_age=max_age_seconds,
+        path="/api/v1/auth",
+        secure=secure,
+        httponly=True,
+        samesite="strict",
+    )
 
 
 class LoginRequest(BaseModel):
@@ -18,12 +64,6 @@ class LoginRequest(BaseModel):
 
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=1, max_length=1024)
-
-
-class RefreshRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    refresh_token: str = Field(min_length=1)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -111,8 +151,11 @@ class ChangePasswordRequest(BaseModel):
 
 
 class TokenPairResponse(BaseModel):
+    # `refresh_token` is deliberately absent (`auth-session-persistence` R1.2, design D3):
+    # the refresh token travels exclusively via the `SESSION_REFRESH_COOKIE` `Set-Cookie`
+    # header (`emit_refresh_cookie` above), never in this JSON body. No dual period — see
+    # the design's rejected-alternatives note on this point.
     access_token: str
-    refresh_token: str
     token_type: str
     expires_in: int
 

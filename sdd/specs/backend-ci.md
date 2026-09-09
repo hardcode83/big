@@ -36,6 +36,17 @@ olvidar regenerar el contrato cortara la ejecución antes de la suite.
   minutos para detección y publicación, 20 para la suite.
 - THE SYSTEM SHALL conceder al workflow solo `contents: read`.
 
+### Patrón replicado a otros workflows
+
+- El patrón de tres jobs descrito arriba (`*-detect` / `*-suite` / `*-tests`) es el **origen**
+  y la referencia canónica de esta forma en el repositorio. El change `ci-pr-gates-optimization`
+  lo replicó a los tres workflows que antes ejecutaban su verificación completa en un único job
+  o sin puerta de área: `frontend-tests.yml` (`specs/frontend-ci.md`), `compose-ports.yml`
+  (guardia documentada en `sdd/specs/local-environment.md` § «Guardia de la postura de red»,
+  que describe los tres jobs del workflow) y `rule11-ownership.yml`
+  (`specs/rule11-ownership-guard.md`). Cada spec describe su propia instancia del patrón;
+  esta sección no se repite en las otras tres.
+
 ### Detección del área y camino corto
 
 - THE SYSTEM SHALL derivar del diff una decisión booleana sobre si el cambio afecta al backend,
@@ -86,6 +97,12 @@ olvidar regenerar el contrato cortara la ejecución antes de la suite.
   rotación y reutilización concurrente de tokens, RBAC, aislamiento por tenant y el test
   estructural de autorización de rutas. El flag `-rs` deja en el log el motivo de cada test
   omitido, para que el recuento de omitidos sea auditable y no un número opaco.
+- THE SYSTEM SHALL NOT ejecutar `pytest-cov` ni ningún flag de cobertura (`--cov`) en este
+  workflow. `pytest -q -rs` corre sin instrumentación de cobertura, y el change
+  `ci-pr-gates-optimization` retiró `pytest-cov` de `[dependency-groups].dev` en
+  `backend/pyproject.toml` (no se invocaba en CI) y regeneró `backend/uv.lock` en consecuencia.
+  Esta nota deja constancia de que **el change no introduce cobertura real**: es la eliminación
+  de una dependencia de desarrollo sin uso en el pipeline, no una capacidad nueva.
 - THE SYSTEM SHALL ejecutar `alembic downgrade base`, que ningún test cubre y es lo que
   ejecuta un operador cuando un deploy sale mal.
 

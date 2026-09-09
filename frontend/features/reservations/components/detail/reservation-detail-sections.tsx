@@ -10,6 +10,7 @@ import type {
   ReservationDetailDto,
   ReservationStatus,
 } from "../../data";
+import { GuestPortalLinkCard } from "./guest-portal-link-card";
 
 /**
  * Pure presentational sub-components for the detail view. They receive the
@@ -306,6 +307,10 @@ export function composeDetailSections(detail: ReservationDetailDto) {
       />
     ),
     guest: <DetailGuestBlock guest={detail.guest} />,
+    // Rendered after `sections.guest` in `ReservationDetailView` (proposal
+    // R1.1, design D7). `GuestPortalLinkCard` owns its own permission gate
+    // and data fetching; this composition point only threads the id.
+    guestPortalLink: <GuestPortalLinkCard reservationId={detail.id} />,
     notes: (
       <DetailNotesBlock
         internalNotes={detail.internalNotes}

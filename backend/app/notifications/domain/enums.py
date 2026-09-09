@@ -58,6 +58,12 @@ class NotificationType(str, enum.Enum):
     # body of each carries only ids and a constant text — never the message's `content` (R4).
     CLEANING_TASK_MESSAGE = "CLEANING_TASK_MESSAGE"
     INCIDENT_MESSAGE = "INCIDENT_MESSAGE"
+    # `guest-link-delivery` R4.1. The same kind of divergence as the three above: an operator
+    # choosing to send the guest their portal link is not one of PRD §14's sixteen operational
+    # events (cleanings, incidents, technicians, guests-as-recipients-of-price-or-SLA-events,
+    # prices, SLA). No `escalation_for` entry (R4.2) — a link the operator chose to send has no
+    # SLA to breach, unlike the cleaning/technician events the catalogue was built around.
+    GUEST_PORTAL_LINK_DELIVERED = "GUEST_PORTAL_LINK_DELIVERED"
 
 
 class NotificationChannel(str, enum.Enum):

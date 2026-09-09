@@ -51,7 +51,7 @@ describe("the guest portal's composition root (R5.9)", () => {
 
     // A staff session, live in the same JavaScript runtime — the situation in which a client
     // that *could* read the session would leak it.
-    setSessionTokens({ accessToken: "staff-access-token", refreshToken: "staff-refresh-token" });
+    setSessionTokens({ accessToken: "staff-access-token" });
     try {
       await getGuestPortalDataSource().getStayInfo("opaque-guest-token");
     } finally {

@@ -20,6 +20,7 @@
     "REVIEW_RESPONSE_APPROVED": "A response to a review has been approved",
     "CLEANING_TASK_MESSAGE": "New message on a cleaning task",
     "INCIDENT_MESSAGE": "New message on an incident",
+    "GUEST_PORTAL_LINK_DELIVERED": "Guest portal link delivered",
     "unknown": "System notice"
   },
   "bell": {

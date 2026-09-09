@@ -3,9 +3,13 @@
 ## Purpose
 
 El frontend conecta `/login` con el contrato de autenticación del backend y
-expone la identidad autenticada a la interfaz. Mantiene los JWT solo durante el
-runtime actual del navegador, coordina su renovación y ofrece guards client-side
-para UX; el backend conserva la autoridad sobre autorización, RBAC y tenant.
+expone la identidad autenticada a la interfaz. Mantiene el access token solo
+en memoria del runtime actual del navegador; el refresh token vive en una
+cookie `httpOnly` que el backend controla, así que la sesión sobrevive a un
+reload o a una nueva pestaña vía un mount-refresh silencioso
+(`auth-session-persistence`). El frontend coordina la renovación y ofrece
+guards client-side para UX; el backend conserva la autoridad sobre
+autorización, RBAC y tenant.
 
 ## Requirements
 
@@ -28,10 +32,12 @@ para UX; el backend conserva la autoridad sobre autorización, RBAC y tenant.
   verdad. WHEN el `?returnTo=` es válido, THE SYSTEM SHALL respetarlo sobre
   la redirección por rol — la intención del visitante manda.
 
-### Sesión efímera y refresh
+### Sesión persistente y refresh (`auth-session-persistence`)
 
-- THE SYSTEM SHALL mantener access y refresh JWT únicamente en memoria del
-  runtime JavaScript actual.
+- THE SYSTEM SHALL mantener el access token únicamente en memoria del runtime
+  JavaScript actual (`lib/auth/session-store.ts`); el refresh token NUNCA
+  llega a JavaScript — viaja exclusivamente en la cookie `httpOnly`
+  `autohostai.session.refresh` que el backend emite y lee (`sdd/specs/auth-tenancy.md`).
 - WHEN una petición autenticada elegible recibe `401`, THE SYSTEM SHALL
   ejecutar como máximo un refresh coordinado mediante
   `POST /api/v1/auth/refresh` y SHALL reintentar una sola vez la petición
@@ -42,10 +48,19 @@ para UX; el backend conserva la autoridad sobre autorización, RBAC y tenant.
 - IF el refresh falla o la sesión se invalida mientras está en curso, THEN THE
   SYSTEM SHALL limpiar los tokens, marcar la sesión como expirada y evitar
   nuevos reintentos automáticos para esa petición.
-- WHEN ocurre un reload completo, se cierra la pestaña o comienza un nuevo
-  runtime, THE SYSTEM SHALL perder la sesión y requerir un nuevo login.
-- THE SYSTEM SHALL NOT escribir tokens ni credenciales en localStorage,
-  sessionStorage, cookies, IndexedDB, Zustand ni otro almacenamiento persistente.
+- WHEN comienza un nuevo runtime (reload completo, nueva pestaña, o el
+  arranque de la app), THE SYSTEM SHALL intentar un mount-refresh silencioso:
+  una única llamada a `POST /api/v1/auth/refresh` con `credentials: "include"`
+  y sin cuerpo, compartida entre todos los `AuthProvider` montados en el mismo
+  tick. Si el backend acepta la cookie `httpOnly` que el navegador conserva
+  entre runtimes, THE SYSTEM SHALL restaurar la sesión (`user`, `role`,
+  `tenant_id`) sin requerir un nuevo login; SI falla (cookie ausente,
+  expirada o revocada), THE SYSTEM SHALL resolver a anónimo sin mostrar ningún
+  error visible — el usuario solo ve el formulario de login si navega a una
+  ruta protegida.
+- THE SYSTEM SHALL NOT escribir tokens ni credenciales en `localStorage`,
+  `sessionStorage`, IndexedDB, Zustand u otro almacenamiento persistente; el
+  refresh token se transporta exclusivamente vía cookie `httpOnly`.
 - THE SYSTEM SHALL llevar dos contadores monótonos independientes en
   `lib/auth/session-store.ts`, cada uno con un único dueño: **generación de
   caché** (`getSessionGeneration()`), que avanza en `setSessionTokens` y en

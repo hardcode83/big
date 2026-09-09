@@ -10,10 +10,7 @@ import {
 import { useRuntimeConfig } from "@/lib/config/runtime-config-provider";
 import { purgeSessionCache } from "@/lib/auth/session-cache-purge";
 import { clearSessionPresent } from "@/lib/auth/session-presence-cookie";
-import {
-  clearSessionTokens,
-  getSessionTokens,
-} from "@/lib/auth/session-store";
+import { clearSessionTokens } from "@/lib/auth/session-store";
 import { notifyLogout } from "@/lib/auth/logout-event";
 
 /**
@@ -22,11 +19,39 @@ import { notifyLogout } from "@/lib/auth/logout-event";
  * shares the same machinery as every other mutation in the app — retry on
  * transient failures, typed response, cache-key invalidation.
  *
- * **Local purge is unconditional** (mirrors `auth-provider.tsx:127-134` and
- * `frontend-auth-session.md:81-86`): the `try/finally` around the endpoint
- * call runs `purgeSessionCache → clearSessionTokens → clearSessionPresent`
- * regardless of success or 5xx/network error. The endpoint is best-effort;
- * the local cleanup is the contract.
+ * **Local purge is unconditional** (mirrors `auth-provider.tsx:127-134`): the
+ * `try/finally` around the endpoint call runs `purgeSessionCache →
+ * clearSessionTokens → clearSessionPresent` regardless of success or
+ * 5xx/network error. The endpoint is best-effort; the local cleanup is the
+ * contract.
+ *
+ * **A missing access token does not skip the call.** The store can be empty at
+ * logout time — a mount-refresh that never repopulated it, or a
+ * session-expired reset — while the `autohostai.session.refresh` cookie the
+ * browser holds may still be perfectly live; skipping the request outright
+ * left that server-side session, and its cookie, alive with nothing to ever
+ * clear either (review finding: security panel, `auth-session-persistence`).
+ * `POST /api/v1/auth/logout` is always called, Bearer or not — `needsCredentials`
+ * already sends `credentials: "include"` for this path regardless — and the
+ * backend accepts the refresh cookie itself as the credential when no Bearer is
+ * presented, the same "the token IS the credential" stance `/auth/refresh`
+ * already takes (`get_logout_subject`, `backend/app/auth/api/dependencies.py`).
+ *
+ * **This replaced an earlier fix that called `refreshSession` first** purely to
+ * obtain a Bearer for the empty-store case: that rotated and re-extended the
+ * refresh cookie by a fresh week *before* attempting to revoke it, so a POST
+ * that then failed left the browser holding a freshly-extended, still-valid
+ * session — worse than the one being logged out of (review finding: security
+ * panel, second round). Letting the backend read the cookie directly removes
+ * that round trip, and with it the window entirely. A stale-but-present token
+ * (the common case: an access token that expired without ever being cleared)
+ * needs no special handling either — the backend's own fallthrough
+ * (`get_logout_subject`, `backend/app/auth/api/dependencies.py`, design D6b)
+ * already falls back to the refresh cookie as the credential when the Bearer
+ * fails, so this call never reaches a 401 to recover from in the first place.
+ * `lib/api/client.ts` still does not exempt this path from its 401-recovery —
+ * that exclusion is inert today given the backend fallthrough, kept only as
+ * defence in depth.
  *
  * **Query invalidation** (`onSuccess`): `queryClient.removeQueries` on the
  * `["auth", "me"]` key, so a subsequent `useAuth()` starts in `anonymous`
@@ -48,34 +73,33 @@ import { notifyLogout } from "@/lib/auth/logout-event";
  * the retry config a no-op (review F6).
  *
  * **Module boundaries**: imports of `@/lib/auth/*` are made against the
- * specific files, not the barrel, to avoid a load-order cycle with
- * `lib/auth/auth-provider.tsx`, which itself imports this hook to keep
- * `useAuth().logout()` as a thin delegating wrapper (R3 #5).
+ * specific files, not the barrel, to avoid a load-order cycle — this hook
+ * and `lib/auth/auth-provider.tsx` communicate only through
+ * `lib/auth/logout-event.ts`'s pub/sub, never through a direct import of
+ * one from the other.
  */
 export function useLogoutMutation() {
   const { apiBaseUrl } = useRuntimeConfig();
   const queryClient = useQueryClient();
 
-  const apiClient = useMemo(() => {
+  const { apiClient } = useMemo(() => {
     return createAuthenticatedClients({
       apiBaseUrl,
       onSessionExpired: notifySessionExpired,
-    }).apiClient;
+    });
   }, [apiBaseUrl]);
 
   return useMutation({
     mutationFn: async () => {
       // We capture the network error so the local purge still runs
-      // unconditionally per `frontend-auth-session.md:81-86`, and then
+      // unconditionally (see the doc comment above), and then
       // re-throw so TanStack Query's `retry: 1` actually fires on transient
       // 5xx / network errors. Without the re-throw, the empty `catch`
       // would silently swallow the failure and the retry config would be
       // a no-op (R3 #3, review F6).
       let networkError: unknown = null;
       try {
-        if (getSessionTokens()) {
-          await apiClient.request("/api/v1/auth/logout", { method: "POST" });
-        }
+        await apiClient.request("/api/v1/auth/logout", { method: "POST" });
       } catch (error) {
         networkError = error;
       } finally {

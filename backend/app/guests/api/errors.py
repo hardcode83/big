@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.error_codes import ErrorCode
 from app.core.errors import error_envelope
 from app.guests.domain.exceptions import (
+    GuestContactMissingError,
     GuestDocumentMissingError,
     GuestDomainError,
     GuestNotFoundError,
@@ -36,6 +37,12 @@ _MAPPING: tuple[tuple[type[GuestDomainError], int, ErrorCode], ...] = (
     (ReservationNotFoundError, 404, ErrorCode.NOT_FOUND),
     (GuestDocumentMissingError, 404, ErrorCode.NOT_FOUND),
     (LegalRegistrationNotReadyError, 409, ErrorCode.CONFLICT),
+    # `guest-link-delivery` R3.2: nobody to email the link to. A `422`, not a `404` — the
+    # reservation has already resolved inside the acting tenant by the time this is raised
+    # (`SendGuestAccessTokenUseCase`), so this is a validation failure on the send itself, not
+    # an existence question. Both `.NO_GUEST` and `.NO_EMAIL` messages are safe to show the
+    # operator for the same reason.
+    (GuestContactMissingError, 422, ErrorCode.VALIDATION_ERROR),
     # The net, not the mechanism. Every portal route catches `GuestPortalUnauthorised`
     # itself, because the refusal has to be **charged** to the per-IP budget before it is
     # sent (task 6.1, constraint 2) and a handler cannot do that. But this table declares

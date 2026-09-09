@@ -25,6 +25,11 @@ import type { components } from "@/lib/api/generated/openapi";
  * operates the inbox while the owner reads it, and granting the owner the
  * composer that the backend would then 403 is exactly the failure mode the
  * partial mirror exists to prevent.
+ *
+ * `guest-link-delivery` D7 adds `MANAGE_GUEST_ACCESS_TOKENS`, gating
+ * `GuestPortalLinkCard` on `/reservations/[id]`: the same two roles the
+ * backend policy already grants it (`guest-portal-api` D14 — `TENANT_OWNER`
+ * and `PROPERTY_MANAGER`, nobody else).
  */
 type UserRole = components["schemas"]["UserRole"];
 
@@ -32,7 +37,8 @@ export type Permission =
   | "MANAGE_CLEANING_TASKS"
   | "MANAGE_PRICE_RECOMMENDATIONS"
   | "EXECUTE_INCIDENTS"
-  | "MANAGE_CONVERSATIONS";
+  | "MANAGE_CONVERSATIONS"
+  | "MANAGE_GUEST_ACCESS_TOKENS";
 
 export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [],
@@ -46,12 +52,13 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   // backend was granting them.
   // `MANAGE_CONVERSATIONS` is the other side of that rule (messaging-ai D17):
   // the owner reads but does not write, so she is intentionally absent here.
-  TENANT_OWNER: ["MANAGE_PRICE_RECOMMENDATIONS"],
+  TENANT_OWNER: ["MANAGE_PRICE_RECOMMENDATIONS", "MANAGE_GUEST_ACCESS_TOKENS"],
   PROPERTY_MANAGER: [
     "MANAGE_CLEANING_TASKS",
     "MANAGE_PRICE_RECOMMENDATIONS",
     "EXECUTE_INCIDENTS",
     "MANAGE_CONVERSATIONS",
+    "MANAGE_GUEST_ACCESS_TOKENS",
   ],
   CLEANER: [],
   TECHNICIAN: [],

@@ -599,6 +599,11 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/reservations",
         "/api/v1/reservations/{reservation_id}",
         "/api/v1/reservations/{reservation_id}/guest-access-token",
+        # `guest-link-delivery` R2.1/R3.1: the read (`GET`, same path/permission as the two
+        # above — no new entry needed since the set is per-path) and the send (`POST`, a
+        # sibling path segment), both `MANAGE_GUEST_ACCESS_TOKENS`. Asserted per role in
+        # `tests/guests/test_guest_link_delivery_api.py`.
+        "/api/v1/reservations/{reservation_id}/guest-access-token/send",
         "/api/v1/integrations/pms/import-csv",
         "/api/v1/integrations/webhook-endpoints",
         "/api/v1/integrations/webhook-endpoints/{endpoint_id}/rotate",

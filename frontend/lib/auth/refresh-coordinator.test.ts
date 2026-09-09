@@ -35,34 +35,32 @@ describe("refresh coordinator", () => {
     clearAllCookies();
   });
 
-  it("shares one refresh and atomically replaces the pair", async () => {
-    setSessionTokens({ accessToken: "old-access", refreshToken: "old-refresh" });
-    let resolveRefresh!: (tokens: { accessToken: string; refreshToken: string }) => void;
+  it("shares one refresh and atomically replaces the access token", async () => {
+    setSessionTokens({ accessToken: "old-access" });
+    let resolveRefresh!: (tokens: { accessToken: string }) => void;
     const refresh = vi.fn(
       () =>
-        new Promise<{ accessToken: string; refreshToken: string }>((resolve) => {
+        new Promise<{ accessToken: string }>((resolve) => {
           resolveRefresh = resolve;
         }),
     );
 
     const first = refreshSession(refresh);
     const second = refreshSession(refresh);
-    resolveRefresh({ accessToken: "new-access", refreshToken: "new-refresh" });
+    resolveRefresh({ accessToken: "new-access" });
 
     await expect(Promise.all([first, second])).resolves.toEqual([
-      { accessToken: "new-access", refreshToken: "new-refresh" },
-      { accessToken: "new-access", refreshToken: "new-refresh" },
+      { accessToken: "new-access" },
+      { accessToken: "new-access" },
     ]);
     expect(refresh).toHaveBeenCalledOnce();
-    expect(getSessionTokens()).toEqual({
-      accessToken: "new-access",
-      refreshToken: "new-refresh",
-    });
+    expect(refresh).toHaveBeenCalledWith();
+    expect(getSessionTokens()).toEqual({ accessToken: "new-access" });
     expect(readPresenceCookie()).toBe("1");
   });
 
-  it("fans out one failure, cleans once, and makes no second refresh", async () => {
-    setSessionTokens({ accessToken: "old-access", refreshToken: "old-refresh" });
+  it("fans out one failure, cleans once, and shares no stale in-flight promise", async () => {
+    setSessionTokens({ accessToken: "old-access" });
     const error = new Error("refresh failed");
     const refresh = vi.fn().mockRejectedValue(error);
 
@@ -80,16 +78,28 @@ describe("refresh coordinator", () => {
     expect(refresh).toHaveBeenCalledOnce();
     expect(getSessionTokens()).toBeNull();
     expect(readPresenceCookie()).toBeNull();
-    await expect(refreshSession(refresh)).rejects.toThrow("No refresh token available");
+  });
+
+  it("calls refresh even when no access token is in memory (reload-with-cookie path)", async () => {
+    // No `setSessionTokens` call here: an empty store (e.g. right after a page
+    // reload, with the refresh cookie still live) is no longer a reason for
+    // this coordinator to skip calling refresh — R6.1 / design D8's "two
+    // distinct callers".
+    const refresh = vi.fn().mockResolvedValue({ accessToken: "restored-access" });
+
+    await expect(refreshSession(refresh)).resolves.toEqual({
+      accessToken: "restored-access",
+    });
     expect(refresh).toHaveBeenCalledOnce();
+    expect(getSessionTokens()).toEqual({ accessToken: "restored-access" });
   });
 
   it("discards a refresh result after the session is cleared", async () => {
-    setSessionTokens({ accessToken: "old-access", refreshToken: "old-refresh" });
-    let resolveRefresh!: (tokens: { accessToken: string; refreshToken: string }) => void;
+    setSessionTokens({ accessToken: "old-access" });
+    let resolveRefresh!: (tokens: { accessToken: string }) => void;
     const refresh = vi.fn(
       () =>
-        new Promise<{ accessToken: string; refreshToken: string }>((resolve) => {
+        new Promise<{ accessToken: string }>((resolve) => {
           resolveRefresh = resolve;
         }),
     );
@@ -97,7 +107,7 @@ describe("refresh coordinator", () => {
     const pending = refreshSession(refresh);
     purgeSessionCache();
     clearSessionTokens();
-    resolveRefresh({ accessToken: "late-access", refreshToken: "late-refresh" });
+    resolveRefresh({ accessToken: "late-access" });
 
     await expect(pending).rejects.toThrow("Session was invalidated");
     expect(getSessionTokens()).toBeNull();
@@ -105,37 +115,28 @@ describe("refresh coordinator", () => {
   });
 
   it("does not let an old refresh affect a new login", async () => {
-    setSessionTokens({ accessToken: "old-access", refreshToken: "old-refresh" });
-    let resolveOldRefresh!: (tokens: { accessToken: string; refreshToken: string }) => void;
+    setSessionTokens({ accessToken: "old-access" });
+    let resolveOldRefresh!: (tokens: { accessToken: string }) => void;
     const oldRefresh = vi.fn(
       () =>
-        new Promise<{ accessToken: string; refreshToken: string }>((resolve) => {
+        new Promise<{ accessToken: string }>((resolve) => {
           resolveOldRefresh = resolve;
         }),
     );
 
     const oldPending = refreshSession(oldRefresh);
     clearSessionTokens();
-    setSessionTokens({ accessToken: "new-access", refreshToken: "new-refresh" });
+    setSessionTokens({ accessToken: "new-access" });
 
-    const newRefresh = vi.fn().mockResolvedValue({
-      accessToken: "rotated-access",
-      refreshToken: "rotated-refresh",
-    });
+    const newRefresh = vi.fn().mockResolvedValue({ accessToken: "rotated-access" });
     const newPending = refreshSession(newRefresh);
 
-    resolveOldRefresh({ accessToken: "late-access", refreshToken: "late-refresh" });
+    resolveOldRefresh({ accessToken: "late-access" });
 
     await expect(oldPending).rejects.toThrow("Session was invalidated");
-    await expect(newPending).resolves.toEqual({
-      accessToken: "rotated-access",
-      refreshToken: "rotated-refresh",
-    });
-    expect(newRefresh).toHaveBeenCalledWith("new-refresh");
-    expect(getSessionTokens()).toEqual({
-      accessToken: "rotated-access",
-      refreshToken: "rotated-refresh",
-    });
+    await expect(newPending).resolves.toEqual({ accessToken: "rotated-access" });
+    expect(newRefresh).toHaveBeenCalledWith();
+    expect(getSessionTokens()).toEqual({ accessToken: "rotated-access" });
   });
 
   // Security review (second `/sdd:review` round): the app has 11 independent
@@ -147,11 +148,11 @@ describe("refresh coordinator", () => {
   // `sessionGeneration` counter, so a bare purge looked identical to an identity change.
 
   it("does not discard a legitimate token rotation when an unrelated cache purge happens mid-flight", async () => {
-    setSessionTokens({ accessToken: "old-access", refreshToken: "old-refresh" });
-    let resolveRefresh!: (tokens: { accessToken: string; refreshToken: string }) => void;
+    setSessionTokens({ accessToken: "old-access" });
+    let resolveRefresh!: (tokens: { accessToken: string }) => void;
     const refresh = vi.fn(
       () =>
-        new Promise<{ accessToken: string; refreshToken: string }>((resolve) => {
+        new Promise<{ accessToken: string }>((resolve) => {
           resolveRefresh = resolve;
         }),
     );
@@ -162,24 +163,22 @@ describe("refresh coordinator", () => {
     // reason unrelated to this refresh — no token write, no token clear.
     purgeSessionCache();
 
-    resolveRefresh({ accessToken: "rotated-access", refreshToken: "rotated-refresh" });
+    resolveRefresh({ accessToken: "rotated-access" });
 
     await expect(pending).resolves.toEqual({
       accessToken: "rotated-access",
-      refreshToken: "rotated-refresh",
     });
     expect(getSessionTokens()).toEqual({
       accessToken: "rotated-access",
-      refreshToken: "rotated-refresh",
     });
   });
 
   it("still clears a genuinely revoked session when an unrelated cache purge happens mid-flight", async () => {
-    setSessionTokens({ accessToken: "old-access", refreshToken: "old-refresh" });
+    setSessionTokens({ accessToken: "old-access" });
     let rejectRefresh!: (error: unknown) => void;
     const refresh = vi.fn(
       () =>
-        new Promise<{ accessToken: string; refreshToken: string }>((_resolve, reject) => {
+        new Promise<{ accessToken: string }>((_resolve, reject) => {
           rejectRefresh = reject;
         }),
     );
@@ -196,7 +195,7 @@ describe("refresh coordinator", () => {
   });
 
   it("advances the cache generation when its own guard clears the session, so no future caller has to purge on its behalf", async () => {
-    setSessionTokens({ accessToken: "old-access", refreshToken: "old-refresh" });
+    setSessionTokens({ accessToken: "old-access" });
     const before = getSessionGeneration();
     const refresh = vi.fn().mockRejectedValue(new Error("revoked"));
 

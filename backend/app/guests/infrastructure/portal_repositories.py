@@ -82,6 +82,7 @@ class SqlAlchemyGuestAccessTokenRepository:
                     GuestAccessTokenModel.tenant_id,
                     GuestAccessTokenModel.reservation_id,
                     GuestAccessTokenModel.token_hash,
+                    GuestAccessTokenModel.created_at,
                     GuestAccessTokenModel.revoked_at,
                 ).where(GuestAccessTokenModel.token_hash == token_hash)
             )
@@ -93,6 +94,7 @@ class SqlAlchemyGuestAccessTokenRepository:
             tenant_id=row.tenant_id,
             reservation_id=row.reservation_id,
             token_hash=row.token_hash,
+            issued_at=row.created_at,
             revoked_at=row.revoked_at,
         )
 
@@ -143,6 +145,43 @@ class SqlAlchemyGuestAccessTokenRepository:
                 .returning(GuestAccessTokenModel.id)
             )
         ).scalar_one_or_none()
+
+    async def find_live_for_reservation(
+        self, tenant_id: uuid.UUID, reservation_id: uuid.UUID
+    ) -> GuestAccessToken | None:
+        """The stay's live token for the operator status surface (`guest-link-delivery` R2, D3).
+
+        Same predicate as `revoke_live_for_reservation` above — `revoked_at IS NULL`, scoped
+        to `tenant_id` and `reservation_id` — so "live" cannot mean two different things
+        across this repository. Columns, not the model, and never `token_hash`: this method's
+        contract is that nothing built on top of it ever serialises that field.
+        """
+        row = (
+            await self._session.execute(
+                select(
+                    GuestAccessTokenModel.id,
+                    GuestAccessTokenModel.tenant_id,
+                    GuestAccessTokenModel.reservation_id,
+                    GuestAccessTokenModel.token_hash,
+                    GuestAccessTokenModel.created_at,
+                    GuestAccessTokenModel.revoked_at,
+                ).where(
+                    GuestAccessTokenModel.tenant_id == tenant_id,
+                    GuestAccessTokenModel.reservation_id == reservation_id,
+                    GuestAccessTokenModel.revoked_at.is_(None),
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return GuestAccessToken(
+            id=row.id,
+            tenant_id=row.tenant_id,
+            reservation_id=row.reservation_id,
+            token_hash=row.token_hash,
+            issued_at=row.created_at,
+            revoked_at=row.revoked_at,
+        )
 
 
 class SessionTenantBinder:

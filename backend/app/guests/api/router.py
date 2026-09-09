@@ -1,8 +1,8 @@
 """Guest documents, the legal registration of a stay, and the portal credential
 (PRD §17, §23; `access-notifications` R6, R7; `guest-portal-api` R1).
 
-Five routes, and every one of them is a review trigger under `steering/security.md` —
-the first three under "manejo de documentos de huésped", the last two under "endpoints
+Seven routes, and every one of them is a review trigger under `steering/security.md` —
+the first three under "manejo de documentos de huésped", the last four under "endpoints
 nuevos" and "cambios de auth/RBAC". What that means concretely:
 
 * `GET /guests/{id}/document` is the **only** endpoint in the system that returns an identity
@@ -16,8 +16,12 @@ nuevos" and "cambios de auth/RBAC". What that means concretely:
   returns a secret it just minted — rule 3(a)'s single named exception (`guest-portal-api`
   D14). It requires `MANAGE_GUEST_ACCESS_TOKENS`.
 * `DELETE /reservations/{id}/guest-access-token` withdraws it (R1.4), same permission.
+* `GET /reservations/{id}/guest-access-token` (`guest-link-delivery` R2, D1) answers presence
+  and issuance instant only, same permission, never the credential.
+* `POST /reservations/{id}/guest-access-token/send` (`guest-link-delivery` R3, D4, D5) mints
+  and emails the link in one request; same permission, `422` if there is nobody to send it to.
 
-The last two live here rather than on the reservations router for the reason the submission
+The last four live here rather than on the reservations router for the reason the submission
 one does: the credential belongs to the guest's stay, and keeping every route that can reach
 a guest's identity — directly or by handing out a link to it — in one file is what makes this
 the file a security reviewer opens.
@@ -39,22 +43,28 @@ from app.auth.api.dependencies import AuthenticatedRequest, get_client_ip, now_u
 from app.auth.domain.policy import Permission
 from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.guests.api.dependencies import (
+    get_guest_access_token_status_use_case,
     get_issue_guest_access_token_use_case,
     get_read_guest_document_use_case,
     get_revoke_guest_access_token_use_case,
+    get_send_guest_access_token_use_case,
     get_set_guest_document_use_case,
     get_submit_legal_registration_use_case,
 )
 from app.guests.api.schemas import (
     DocumentStoredResponse,
     GuestAccessTokenIssuedResponse,
+    GuestAccessTokenSentResponse,
+    GuestAccessTokenStatusResponse,
     GuestDocumentResponse,
     LegalRegistrationResponse,
     SetDocumentRequest,
 )
 from app.guests.application.portal import (
+    GetGuestAccessTokenStatusUseCase,
     IssueGuestAccessTokenUseCase,
     RevokeGuestAccessTokenUseCase,
+    SendGuestAccessTokenUseCase,
 )
 from app.guests.application.use_cases import (
     DocumentInput,
@@ -211,6 +221,62 @@ async def revoke_guest_access_token(
         actor=_actor(authenticated, client_ip),
         now=now_utc(),
     )
+
+
+@router.get(
+    "/reservations/{reservation_id}/guest-access-token",
+    response_model=GuestAccessTokenStatusResponse,
+    summary="Read whether a stay's guest portal token is live",
+    description=(
+        "Presence and issuance instant only — never the token or its digest (R2.2). This is "
+        "how an operator finds out a link already exists without pressing the button that "
+        "replaces it. Same permission and same `404`-for-foreign-tenant behavior as the two "
+        "routes above."
+    ),
+)
+async def get_guest_access_token_status(
+    reservation_id: uuid.UUID,
+    authenticated: ManageAccessTokenDep,
+    use_case: Annotated[
+        GetGuestAccessTokenStatusUseCase, Depends(get_guest_access_token_status_use_case)
+    ],
+) -> GuestAccessTokenStatusResponse:
+    status = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id, reservation_id=reservation_id
+    )
+    return GuestAccessTokenStatusResponse.from_domain(status)
+
+
+@router.post(
+    "/reservations/{reservation_id}/guest-access-token/send",
+    response_model=GuestAccessTokenSentResponse,
+    summary="Mint the guest's portal token and email it",
+    description=(
+        "Mints a fresh token for the stay (replacing any live one, exactly like the plain "
+        "`POST` above) and, within the same request, emails the portal URL to the "
+        "reservation's `Guest.email`. Returns whether the adapter accepted delivery — "
+        "**never the cleartext token itself**: an operator who triggers a send has no reason "
+        "to also see the value in their own browser. A delivery failure does not roll the "
+        "mint back (R3.5); `422` if the stay has no linked `Guest` or that guest has no email "
+        "on file, and nothing is minted in that case. Responds `404` for a stay of another "
+        "tenant, same as its two siblings."
+    ),
+)
+async def send_guest_access_token(
+    reservation_id: uuid.UUID,
+    authenticated: ManageAccessTokenDep,
+    use_case: Annotated[
+        SendGuestAccessTokenUseCase, Depends(get_send_guest_access_token_use_case)
+    ],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+) -> GuestAccessTokenSentResponse:
+    delivered = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        reservation_id=reservation_id,
+        actor=_actor(authenticated, client_ip),
+        now=now_utc(),
+    )
+    return GuestAccessTokenSentResponse(delivered=delivered)
 
 
 @router.post(

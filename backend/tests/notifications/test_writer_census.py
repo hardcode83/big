@@ -56,7 +56,9 @@ EXCLUDED = {"notifications/domain/enums.py"}
 #: `Escalation(...)` built somewhere else from silently joining the census.
 ESCALATION_MODULE = "notifications/domain/escalation.py"
 
-#: Types with a production writer, as of `staff-messaging` section 4. Fifteen.
+#: Types with a production writer, as of `guest-link-delivery` section 3. Seventeen —
+#: recounted against the set below rather than incremented, since the previous count ("fifteen"
+#: for sixteen entries) had already drifted by one.
 #:
 #: Seven predate `notification-writers-gap` — `CLEANING_TASK_ASSIGNED`, `CLEANING_NO_RESPONSE`,
 #: `TECHNICIAN_ASSIGNED`, `OWNER_APPROVAL_REQUIRED`, `GUEST_ESCALATION`,
@@ -88,6 +90,18 @@ WITH_WRITER = frozenset(
         "REVIEW_RESPONSE_APPROVED",
         "CLEANING_TASK_MESSAGE",
         "INCIDENT_MESSAGE",
+        # `guest-link-delivery` R3.3/R4.3 — `SendGuestAccessTokenUseCase`
+        # (`guests/application/portal.py`) composes one row per send attempt, `SENT` or
+        # `FAILED` and never `PENDING`, in the same transaction as the token it mints. It is
+        # the second writer of rule 11's "constante más identificadores" contract for
+        # `notification_logs.subject`/`body`, after `auth-account-recovery`: the row's text
+        # comes from `render_stored_guest_link_notice` (link-free constants) while the portal
+        # URL goes only to the adapter, via `render_guest_link_delivery_email`.
+        #
+        # It joins `PASSWORD_RESET_REQUESTED` above in composing its row inline rather than
+        # through a `domain/notifications.py` builder — see `CONSTRUCTION_SITES` below, where
+        # the module is declared for exactly that reason.
+        "GUEST_PORTAL_LINK_DELIVERED",
     }
 )
 
@@ -308,6 +322,13 @@ CONSTRUCTION_SITES = {
     # Two writers that predate the builder convention and compose their row inline.
     "auth/application/recovery.py",
     "guests/application/use_cases.py",
+    # `guest-link-delivery` R3.3 — `SendGuestAccessTokenUseCase`'s row, composed inline for
+    # the same reason `auth/application/recovery.py` composes its own: the row's `status` is
+    # the adapter's answer, which only exists inside the use case, so a pure builder could
+    # not produce the row without being handed the delivery result anyway. Its *text* does
+    # live in a domain module — `guests/domain/notifications.py` — which is the half of the
+    # builder convention that carries rule 11's contract.
+    "guests/application/portal.py",
     # The escalation policy (its `Escalation` entries) and the row its use case composes.
     "notifications/domain/escalation.py",
     "notifications/application/use_cases.py",
