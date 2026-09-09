@@ -589,7 +589,9 @@ tocar la base de datos a mano.
 ## Key files
 
 - Dominio: `backend/app/auth/domain/` — `context.py` (`RequestContext` inmutable, con
-  `preferred_language: Locale` desde `dashboard-api`),
+  `preferred_language: Locale` desde `dashboard-api`; `frontend-verification-fixes` añadió
+  `RequestLocaleDep` en la API, no en este objeto, para preservar la invariante
+  «never from request input»),
   `policy.py` (`Permission`, `ROLE_PERMISSIONS`, `is_allowed`), `ports.py`, `entities.py`
   (`User`, `UserSession` con `is_usable`/`rotate`), `enums.py`, `value_objects.py`
   (`normalize_email`), `exceptions.py`.
@@ -601,9 +603,13 @@ tocar la base de datos a mano.
   Protocol `UnitOfWork` sigue declarado en `app/auth/domain/ports.py` a propósito, para que
   `auth/application/` importe sus puertos de su propio `domain/`.
 - API: `backend/app/auth/api/` — `router.py`, `schemas.py`, `dependencies.py`
-  (`get_authenticated_request`, `require(permission)`, `get_client_ip`).
+  (`get_authenticated_request`, `require(permission)`, `get_client_ip`,
+  `RequestLocaleDep` y la constante `LOCALE_HEADER = "X-Locale"` desde
+  `frontend-verification-fixes`).
 - Núcleo compartido: `backend/app/core/` — `config.py`, `db.py` (filtro global por tenant),
-  `errors.py` (sobre de error), `redis.py`, `models_registry.py`.
+  `errors.py` (sobre de error), `redis.py`, `models_registry.py`, `i18n.py`
+  (`Locale`, `Catalog`, `resolve_locale` desde `dashboard-api`, este último ampliado
+  por `frontend-verification-fixes` para aceptar el idioma pedido por la petición).
 - Bootstrap: `backend/app/cli/bootstrap.py`. El seed que lo completa vive en
   `backend/app/cli/seed_demo.py` y es capacidad aparte (`specs/seed-data-demo.md`).
 - Migraciones: `backend/alembic/versions/8ff62a7cb50c_auth_sessions.py`,
