@@ -821,14 +821,15 @@ def test_triage_without_both_fields_leaves_an_open_incident_open(
         IncidentStatus.ACCEPTED,
         IncidentStatus.IN_PROGRESS,
         IncidentStatus.WAITING_EXTERNAL_PARTS,
-        IncidentStatus.AWAITING_OWNER_APPROVAL,
     ],
 )
 def test_triage_on_an_incident_past_open_annotates_without_transitioning(
     status: IncidentStatus,
 ) -> None:
     """D1 — the row admits `OPEN` and nothing else, and a triage that does not classify is
-    still the annotation it has always been (R1.4)."""
+    still the annotation it has always been (R1.4). `AWAITING_OWNER_APPROVAL` is **not**
+    in this list because R1.3 refuses triage in that state — covered separately by
+    `test_triage_is_refused_while_the_owner_has_not_answered`."""
     incident = make_incident(status)
 
     classified = incident.set_triage(
