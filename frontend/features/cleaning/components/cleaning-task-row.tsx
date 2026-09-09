@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useHasPermission } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -11,12 +12,27 @@ import { cn } from "@/lib/utils";
 import type {
   CleanerSummary,
   CleaningTaskListItem,
+  CleaningTaskStatus,
+  CleaningValidationVerdict,
   PropertySummary,
 } from "../data";
 import type { Directory, Identity } from "../lib/directory";
 import { resolveIdentity } from "../lib/directory";
 import { STATUS_BADGE_CLASS, statusColorGroup } from "../lib/task-status";
 import { AssignCleanerControl } from "./assign-cleaner-control";
+import { ValidateCleaningControl } from "./validate-cleaning-control";
+
+/**
+ * R4.1: the cancel control is offered only while the task can still be cancelled —
+ * "any live status" the same way the backend's `cancel()` reads `LIVE_STATUSES`, so a
+ * task that already finished one way or another (`COMPLETED`, `FAILED`, `CANCELLED`)
+ * never shows a button the backend would refuse with `409`.
+ */
+const TERMINAL_TASK_STATUSES: ReadonlySet<CleaningTaskStatus> = new Set([
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+]);
 
 /**
  * One cleaning task, as a card rather than a table row. Deliberate: R5.2 forbids
@@ -50,6 +66,37 @@ export interface CleaningTaskRowProps {
     isPending: boolean;
     isBlocked: boolean;
     onConfirm: (input: { taskId: string; cleanerId: string }) => void;
+  };
+  /**
+   * Supplied by the view when validation is on offer. Same shape and same reasoning as
+   * `assignment` above — the row hides `ValidateCleaningControl` from a role without
+   * `MANAGE_CLEANING_TASKS` (R5.1), and the control itself hides when `task.status` is not
+   * `COMPLETED` (R3.1) — this prop being present is necessary but not sufficient.
+   */
+  validate?: {
+    isPending: boolean;
+    isBlocked: boolean;
+    onValidate: (input: { taskId: string; verdict: CleaningValidationVerdict }) => void;
+  };
+  /**
+   * Supplied by the view when cancellation is on offer. Same "necessary but not
+   * sufficient" shape as `assignment`/`validate` above: the row still hides the
+   * control from a role without `MANAGE_CLEANING_TASKS` (R5.1) and from a task whose
+   * `status` is already terminal (R4.1). The view owns the dialog's open state and the
+   * shared `useCancelCleaningTask()` instance (design D4) — this callback only tells it
+   * which row asked.
+   */
+  cancel?: {
+    onOpen: () => void;
+    /**
+     * Some cancellation — this row's or another's — is in flight against the shared
+     * mutation. Disables every row's open button the same way `assignment.isBlocked`
+     * does for assignment (fix round, Finding 1, referent D4): the view owns one
+     * `CancelCleaningTaskDialog`/mutation pair, so a second row cannot open it while
+     * the first is still submitting — that is what would remount the dialog body and
+     * clobber the in-flight mutation's state.
+     */
+    isBlocked: boolean;
   };
 }
 
@@ -115,9 +162,11 @@ export function CleaningTaskRow({
   properties,
   cleaners,
   assignment,
+  validate,
+  cancel,
 }: CleaningTaskRowProps) {
   const { t, i18n } = useTranslation("cleaning");
-  const canAssign = useHasPermission("MANAGE_CLEANING_TASKS");
+  const canManage = useHasPermission("MANAGE_CLEANING_TASKS");
   const locale = i18n.language;
   const headingId = `cleaning-task-${task.id}`;
 
@@ -169,7 +218,7 @@ export function CleaningTaskRow({
             the server refused. The control below it only proposes.
           */}
           <IdentityValue identity={cleaner} render={(value) => value.name} />
-          {assignment && canAssign ? (
+          {assignment && canManage ? (
             <AssignCleanerControl
               taskId={task.id}
               currentCleanerId={task.assignedCleanerId}
@@ -190,7 +239,57 @@ export function CleaningTaskRow({
         <Field label={t("columns.createdAt")} className="sm:col-span-2">
           {formatDate(task.createdAt)}
         </Field>
+        {/*
+          Painted once the task has ever been completed or already carries a verdict
+          (design D7) — never for a task nobody has cleaned yet, where "Pending
+          validation" would read as stuck. Shown to EVERY role, control or not
+          (R5.2): the verdict is data the backend already publishes, not a permission.
+        */}
+        {task.completedAt !== null || task.validationStatus !== "PENDING" ? (
+          <>
+            <Field label={t("columns.completedAt")}>
+              {formatDate(task.completedAt)}
+            </Field>
+            <Field label={t("columns.validation")} className="sm:col-span-2">
+              {t(`validation.${task.validationStatus}`)}
+              {task.validatedAt !== null ? (
+                <span className="block text-muted-foreground">
+                  {formatDate(task.validatedAt)}
+                </span>
+              ) : null}
+              {validate && canManage ? (
+                <ValidateCleaningControl
+                  taskId={task.id}
+                  status={task.status}
+                  validationStatus={task.validationStatus}
+                  isPending={validate.isPending}
+                  isBlocked={validate.isBlocked}
+                  onValidate={validate.onValidate}
+                />
+              ) : null}
+            </Field>
+          </>
+        ) : null}
       </div>
+      {/*
+        R4.1: offered only for a live task and only to a manager (R5.1) — same
+        `canManage` gate as assignment and validation above, plus the terminal-status
+        check this control alone needs. Opening the dialog is all this button does;
+        the mutation and the reason form live in `CancelCleaningTaskDialog`, owned by
+        the view (design D4).
+      */}
+      {cancel && canManage && !TERMINAL_TASK_STATUSES.has(task.status) ? (
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={cancel.isBlocked}
+            onClick={cancel.onOpen}
+          >
+            {t("cancel.open")}
+          </Button>
+        </div>
+      ) : null}
       </Card>
     </li>
   );

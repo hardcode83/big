@@ -17,7 +17,9 @@
     "status": "Status",
     "scheduledStart": "Scheduled start",
     "scheduledEnd": "Scheduled end",
-    "createdAt": "Creation date"
+    "createdAt": "Creation date",
+    "completedAt": "Completion date",
+    "validation": "Validation"
   },
   "status": {
     "CREATED": "Created",
@@ -55,6 +57,35 @@
     "pageOfTotal": "Page {{page}} of {{totalPages}}",
     "totalTasks": "{{total}} tasks in total"
   },
+  "create": {
+    "open": "New cleaning",
+    "close": "Close form",
+    "fields": {
+      "property": {
+        "label": "Property for the new task",
+        "placeholder": "Choose a property"
+      },
+      "scheduledStart": {
+        "label": "Scheduled start (optional)"
+      },
+      "scheduledEnd": {
+        "label": "Scheduled end (optional)"
+      }
+    },
+    "confirm": "Create",
+    "sending": "Creating…",
+    "success": "Cleaning task created.",
+    "warning": {
+      "notAssignable": "This task will be created, but it cannot be assigned until the property is in the \"Awaiting cleaning\" state."
+    },
+    "error": {
+      "forbidden": "You do not have permission to create cleanings.",
+      "notFound": "That property no longer exists, or has no active checklist template.",
+      "ambiguousTemplate": "That property matches more than one active checklist template; the task cannot be created.",
+      "invalid": "Please review the data you entered.",
+      "generic": "The cleaning could not be created. Please try again."
+    }
+  },
   "assign": {
     "label": "Assign cleaner",
     "placeholder": "Choose a cleaner",
@@ -72,6 +103,50 @@
       "propertyState": "The property is not awaiting cleaning yet.",
       "invalid": "That person is no longer an active cleaner in this tenant.",
       "generic": "The cleaning could not be assigned. Please try again."
+    }
+  },
+  "validate": {
+    "passed": "Validate",
+    "failed": "Does not pass",
+    "sending": "Sending…",
+    "notice": "\"Does not pass\" notifies the assigned cleaner. Validating does not change the property's state.",
+    "success": {
+      "passed": "Cleaning validated as passed.",
+      "failed": "Cleaning marked as not passing; the assigned cleaner has been notified."
+    },
+    "error": {
+      "forbidden": "You do not have permission to validate cleanings.",
+      "notFound": "That cleaning task no longer exists.",
+      "notCompleted": "That task is no longer completed; it cannot be validated.",
+      "generic": "The cleaning could not be validated. Please try again."
+    }
+  },
+  "validation": {
+    "PENDING": "Awaiting validation",
+    "PASSED": "Passed",
+    "FAILED": "Not passing",
+    "WAIVED": "Waived"
+  },
+  "cancel": {
+    "open": "Cancel",
+    "title": "Cancel cleaning",
+    "warning": "Cancelling may create a replacement task without an assigned cleaner.",
+    "reason": {
+      "label": "Reason for cancelling",
+      "placeholder": "Explain why this cleaning is being cancelled",
+      "help": "500 characters maximum.",
+      "empty": "The reason cannot be blank.",
+      "charsRemaining": "({{count}})"
+    },
+    "confirm": "Confirm cancellation",
+    "sending": "Cancelling…",
+    "success": "Cleaning cancelled.",
+    "error": {
+      "forbidden": "You do not have permission to cancel cleanings.",
+      "notFound": "That cleaning task no longer exists.",
+      "terminal": "That task is already closed; it cannot be cancelled.",
+      "propertyState": "The property's state prevents cancelling this cleaning right now.",
+      "generic": "The cleaning could not be cancelled. Please try again."
     }
   }
 }

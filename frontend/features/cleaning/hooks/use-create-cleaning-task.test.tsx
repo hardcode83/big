@@ -7,7 +7,7 @@ import { ApiError } from "@/lib/api";
 
 import type { CleaningDataSource, CleaningTask } from "../data";
 import { cleaningKeys } from "./query-keys";
-import { useAssignCleaningTask } from "./use-assign-cleaning-task";
+import { useCreateCleaningTask } from "./use-create-cleaning-task";
 
 const listTasks = vi.hoisted(() => vi.fn());
 const listCleaners = vi.hoisted(() => vi.fn());
@@ -37,8 +37,8 @@ vi.mock("../data", async (importOriginal) => ({
 const task: CleaningTask = {
   id: "task-1",
   propertyId: "property-1",
-  assignedCleanerId: "cleaner-9",
-  status: "ASSIGNED",
+  assignedCleanerId: null,
+  status: "CREATED",
   scheduledStart: null,
   scheduledEnd: null,
   createdAt: "2026-08-19T18:00:00Z",
@@ -49,7 +49,11 @@ const task: CleaningTask = {
 
 function harness() {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+    // A nonzero mutations default here is deliberate: it lets the "never
+    // retries a rejected write" test discriminate the hook's own explicit
+    // `retry: false` from TanStack Query's built-in default (which is
+    // already 0), instead of passing vacuously either way.
+    defaultOptions: { queries: { retry: false }, mutations: { retry: 3 } },
   });
   const invalidate = vi.spyOn(client, "invalidateQueries");
   const setQueryData = vi.spyOn(client, "setQueryData");
@@ -60,33 +64,38 @@ function harness() {
 }
 
 beforeEach(() => {
-  assignTask.mockReset().mockResolvedValue(task);
+  createTask.mockReset().mockResolvedValue(task);
   listTasks.mockReset();
   listCleaners.mockReset();
   listProperties.mockReset();
+  assignTask.mockReset();
+  cancelTask.mockReset();
+  validateTask.mockReset();
 });
 
-describe("useAssignCleaningTask (R4.1, R4.5, R4.6, design D9)", () => {
-  it("asks the source for exactly the task and the cleaner, nothing else", async () => {
+describe("useCreateCleaningTask (R1.3, design D10)", () => {
+  it("asks the source for exactly the input it was given", async () => {
     const { Wrapper } = harness();
-    const { result } = renderHook(() => useAssignCleaningTask(), {
+    const { result } = renderHook(() => useCreateCleaningTask(), {
       wrapper: Wrapper,
     });
 
-    result.current.mutate({ taskId: "task-1", cleanerId: "cleaner-9" });
+    result.current.mutate({ propertyId: "property-1" });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(assignTask).toHaveBeenCalledWith("tenant-1", "task-1", "cleaner-9");
-    expect(assignTask).toHaveBeenCalledTimes(1);
+    expect(createTask).toHaveBeenCalledWith("tenant-1", {
+      propertyId: "property-1",
+    });
+    expect(createTask).toHaveBeenCalledTimes(1);
   });
 
-  it("invalidates the whole task prefix on success (design D9)", async () => {
+  it("invalidates the whole task prefix on success", async () => {
     const { invalidate, Wrapper } = harness();
-    const { result } = renderHook(() => useAssignCleaningTask(), {
+    const { result } = renderHook(() => useCreateCleaningTask(), {
       wrapper: Wrapper,
     });
 
-    result.current.mutate({ taskId: "task-1", cleanerId: "cleaner-9" });
+    result.current.mutate({ propertyId: "property-1" });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(invalidate).toHaveBeenCalledWith({
@@ -95,17 +104,17 @@ describe("useAssignCleaningTask (R4.1, R4.5, R4.6, design D9)", () => {
   });
 
   it.each([403, 404, 409, 422] as const)(
-    "invalidates the task prefix after a %s too, so a rejected assignment cannot stay on screen (R4.4, R4.5)",
+    "invalidates the task prefix after a %s too",
     async (status) => {
-      assignTask.mockRejectedValue(
+      createTask.mockRejectedValue(
         new ApiError({ code: "CODE", message: "no", status }),
       );
       const { invalidate, Wrapper } = harness();
-      const { result } = renderHook(() => useAssignCleaningTask(), {
+      const { result } = renderHook(() => useCreateCleaningTask(), {
         wrapper: Wrapper,
       });
 
-      result.current.mutate({ taskId: "task-1", cleanerId: "cleaner-9" });
+      result.current.mutate({ propertyId: "property-1" });
       await waitFor(() => expect(result.current.isError).toBe(true));
 
       expect(invalidate).toHaveBeenCalledWith({
@@ -115,27 +124,27 @@ describe("useAssignCleaningTask (R4.1, R4.5, R4.6, design D9)", () => {
   );
 
   it("never retries a rejected write", async () => {
-    assignTask.mockRejectedValue(
+    createTask.mockRejectedValue(
       new ApiError({ code: "CONFLICT", message: "no", status: 409 }),
     );
     const { Wrapper } = harness();
-    const { result } = renderHook(() => useAssignCleaningTask(), {
+    const { result } = renderHook(() => useCreateCleaningTask(), {
       wrapper: Wrapper,
     });
 
-    result.current.mutate({ taskId: "task-1", cleanerId: "cleaner-9" });
+    result.current.mutate({ propertyId: "property-1" });
     await waitFor(() => expect(result.current.isError).toBe(true));
 
-    expect(assignTask).toHaveBeenCalledTimes(1);
+    expect(createTask).toHaveBeenCalledTimes(1);
   });
 
-  it("never writes the cache optimistically (design D9)", async () => {
+  it("never writes the cache optimistically", async () => {
     const { setQueryData, Wrapper } = harness();
-    const { result } = renderHook(() => useAssignCleaningTask(), {
+    const { result } = renderHook(() => useCreateCleaningTask(), {
       wrapper: Wrapper,
     });
 
-    result.current.mutate({ taskId: "task-1", cleanerId: "cleaner-9" });
+    result.current.mutate({ propertyId: "property-1" });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(setQueryData).not.toHaveBeenCalled();
@@ -153,10 +162,10 @@ describe("useAssignCleaningTask (R4.1, R4.5, R4.6, design D9)", () => {
       client.setQueryData(key, { data: [], total: 0, page: 1, per_page: 20, total_pages: 0 });
     }
 
-    const { result } = renderHook(() => useAssignCleaningTask(), {
+    const { result } = renderHook(() => useCreateCleaningTask(), {
       wrapper: Wrapper,
     });
-    result.current.mutate({ taskId: "task-1", cleanerId: "cleaner-9" });
+    result.current.mutate({ propertyId: "property-1" });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     for (const key of combinations) {
@@ -178,16 +187,16 @@ describe("useAssignCleaningTask (R4.1, R4.5, R4.6, design D9)", () => {
       total_pages: 0,
     });
 
-    const { result } = renderHook(() => useAssignCleaningTask(), {
+    const { result } = renderHook(() => useCreateCleaningTask(), {
       wrapper: Wrapper,
     });
-    result.current.mutate({ taskId: "task-1", cleanerId: "cleaner-9" });
+    result.current.mutate({ propertyId: "property-1" });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(client.getQueryState(otherTenant)?.isInvalidated).toBe(false);
   });
 
-  it("does not invalidate the catalogs, which the assignment cannot have changed", async () => {
+  it("does not invalidate the catalogs, which the creation cannot have changed", async () => {
     const { client, Wrapper } = harness();
     const catalogs = [
       cleaningKeys.cleaners("tenant-1"),
@@ -197,10 +206,10 @@ describe("useAssignCleaningTask (R4.1, R4.5, R4.6, design D9)", () => {
       client.setQueryData(key, []);
     }
 
-    const { result } = renderHook(() => useAssignCleaningTask(), {
+    const { result } = renderHook(() => useCreateCleaningTask(), {
       wrapper: Wrapper,
     });
-    result.current.mutate({ taskId: "task-1", cleanerId: "cleaner-9" });
+    result.current.mutate({ propertyId: "property-1" });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     for (const key of catalogs) {
