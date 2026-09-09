@@ -367,7 +367,9 @@ describe("HttpIncidentsSource", () => {
       "utf8",
     );
     const declaredRoutes = [
-      ...sourceText.matchAll(/this\.client\.request\(\s*\n?\s*"([^"]+)"/g),
+      ...sourceText.matchAll(
+        /this\.client\.request(?:<[^>]*>)?\(\s*\n?\s*"([^"]+)"/g,
+      ),
     ].map((match) => match[1]);
 
     it("declares exactly the routes these screens are allowed to reach", () => {
@@ -386,6 +388,7 @@ describe("HttpIncidentsSource", () => {
           "/api/v1/incidents/{incident_id}/classify",
           "/api/v1/incidents/{incident_id}/assign",
           "/api/v1/incidents/{incident_id}/cancel",
+          "/api/v1/users",
         ]),
       );
     });
@@ -728,7 +731,7 @@ describe("HttpIncidentsSource", () => {
     });
   });
 
-  describe("assignIncident (R2.1, D14)", () => {
+  describe("assignIncident (R2.1, D13)", () => {
     const RESPONSE = {
       id: "i1",
       property_id: "p1",

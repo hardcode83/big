@@ -148,7 +148,7 @@ export interface AssignIncidentVariables extends AssignIncidentInput {
   incidentId: string;
 }
 
-/** Assign or reassign a technician (R2.1, R2.4, design D14). */
+/** Assign or reassign a technician (R2.1, R2.4, design D13). */
 export function useAssignIncident(): UseMutationResult<
   IncidentDetailDto,
   Error,
@@ -181,7 +181,7 @@ export interface CancelIncidentVariables {
  * invalidates the dashboard's `blocked-transitions`, `dashboard-cards` and
  * `property-timeline` buckets (R5.2, D8) — the same literal key arrays
  * `use-resolve-incident.ts` reproduces, for the same reason: `features/incidents`
- * does not import the dashboard's key factory (design D2).
+ * does not import the dashboard's key factory (design D8).
  */
 export function useCancelIncident(): UseMutationResult<
   IncidentDetailDto,

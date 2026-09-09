@@ -38,7 +38,7 @@ export interface TriageIncidentInput {
   estimatedCost?: string;
 }
 
-/** Assignment input (R2.1, design D14). */
+/** Assignment input (R2.1, design D13). */
 export interface AssignIncidentInput {
   technicianId: string;
   assignmentNote?: string;
@@ -446,9 +446,9 @@ export class HttpIncidentsSource {
   }
 
   /**
-   * Assign or reassign a technician (R2.1, design D14). `assignmentNote`
+   * Assign or reassign a technician (R2.1, design D13). `assignmentNote`
    * absent omits `assignment_note` from the body entirely; the backend
-   * treats an absent note the same as clearing it (design D14 quote above).
+   * treats an absent note the same as clearing it (design D13 quote above).
    */
   async assignIncident(
     _tenantId: string,
