@@ -22,11 +22,40 @@ type GuestAccessTokenIssuedResponse =
 type GuestAccessTokenSentResponse =
   components["schemas"]["GuestAccessTokenSentResponse"];
 
-/** Keep optional blank form values out of mutation bodies without changing null clears. */
-function omitBlankOptionals<T extends Record<string, unknown>>(input: T): T {
+/** Keep optional blank form values out without trusting runtime object keys. */
+function pickMutationFields(
+  input: Record<string, unknown>,
+  fields: readonly string[],
+): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined && value !== ""),
-  ) as T;
+    fields
+      .filter((field) => input[field] !== undefined && input[field] !== "")
+      .map((field) => [field, input[field]]),
+  );
+}
+
+const CREATE_FIELDS = [
+  "adults", "channel", "check_in_date", "check_in_time", "check_out_date",
+  "check_out_time", "children", "cleaning_required", "currency",
+  "external_channel_id", "gross_amount", "internal_notes",
+  "net_amount", "ota_commission", "payment_status", "property_id",
+  "special_requests",
+] as const;
+
+const UPDATE_FIELDS = [
+  "adults", "check_in_date", "check_in_time", "check_out_date",
+  "check_out_time", "children", "cleaning_required", "currency",
+  "gross_amount", "internal_notes", "net_amount", "ota_commission",
+  "payment_status", "special_requests", "status",
+] as const;
+
+function sanitizeGuest(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const guest = value as Record<string, unknown>;
+  const sanitized = pickMutationFields(guest, [
+    "full_name", "email", "phone", "preferred_language",
+  ]);
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
 /** Map `GuestSummaryResponse` (snake_case, no PII) to the UI DTO (camelCase). */
@@ -161,9 +190,14 @@ export class HttpReservationsSource {
     _tenantId: string,
     input: CreateReservationInput,
   ): Promise<ReservationSummaryDto> {
+    const guest = sanitizeGuest(input.guest);
+    const body = {
+      ...pickMutationFields(input, CREATE_FIELDS),
+      ...(guest ? { guest } : {}),
+    } as components["schemas"]["CreateReservationRequest"];
     const response = await this.client.request("/api/v1/reservations", {
       method: "POST",
-      body: omitBlankOptionals(input),
+      body,
     });
     return mapReservationSummary(response as ReservationResponse);
   }
@@ -174,12 +208,13 @@ export class HttpReservationsSource {
     reservationId: string,
     input: UpdateReservationInput,
   ): Promise<ReservationSummaryDto> {
+    const body = pickMutationFields(input, UPDATE_FIELDS) as components["schemas"]["UpdateReservationRequest"];
     const response = await this.client.request(
       "/api/v1/reservations/{reservation_id}",
       {
         method: "PATCH",
         pathParams: { reservation_id: reservationId },
-        body: omitBlankOptionals(input),
+        body,
       },
     );
     return mapReservationSummary(response as ReservationResponse);

@@ -379,6 +379,64 @@ describe("HttpReservationsSource — reservation mutations (R1, R2, R3, D4)", ()
     expect(request.mock.calls[0][1].body).not.toHaveProperty("guest_id");
   });
 
+  it("allowlists runtime mutation keys and nested guest fields", async () => {
+    const { source, request } = sourceWith(response);
+    await source.createReservation(TENANT, {
+      property_id: "property-1",
+      check_in_date: "2026-09-15",
+      check_out_date: "2026-09-16",
+      guest: {
+        full_name: "Guest",
+        email: "guest@example.com",
+        // Runtime callers can bypass TypeScript; these keys must not cross the boundary.
+        guest_id: "forbidden",
+        document_number: "123",
+      },
+      guest_id: "forbidden",
+      unexpected: "forbidden",
+    } as never);
+
+    expect(request.mock.calls[0][1].body).toEqual({
+      property_id: "property-1",
+      check_in_date: "2026-09-15",
+      check_out_date: "2026-09-16",
+      guest: { full_name: "Guest", email: "guest@example.com" },
+    });
+  });
+
+  it("omits blank optional guest fields but preserves explicit null", async () => {
+    const { source, request } = sourceWith(response);
+    await source.createReservation(TENANT, {
+      property_id: "property-1",
+      check_in_date: "2026-09-15",
+      check_out_date: "2026-09-16",
+      guest: {
+        full_name: "Guest",
+        email: "",
+        phone: "",
+        preferred_language: null,
+      },
+    } as never);
+
+    expect(request.mock.calls[0][1].body).toMatchObject({
+      guest: { full_name: "Guest", preferred_language: null },
+    });
+    expect(request.mock.calls[0][1].body.guest).not.toHaveProperty("email");
+    expect(request.mock.calls[0][1].body.guest).not.toHaveProperty("phone");
+  });
+
+  it("omits a guest block that has no accepted values", async () => {
+    const { source, request } = sourceWith(response);
+    await source.createReservation(TENANT, {
+      property_id: "property-1",
+      check_in_date: "2026-09-15",
+      check_out_date: "2026-09-16",
+      guest: { email: "", document_number: "123" },
+    } as never);
+
+    expect(request.mock.calls[0][1].body).not.toHaveProperty("guest");
+  });
+
   it("deletes the exact reservation path without a body and resolves void", async () => {
     const { source, request } = sourceWith(undefined);
 
