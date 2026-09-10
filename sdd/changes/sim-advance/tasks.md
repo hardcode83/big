@@ -32,10 +32,10 @@
 - [x] 3.3 Test R4.3 en el mismo fichero: invocar CLI con `--at` 3 horas antes del check-in; verificar que la vivienda **no** transiciona y el informe del primer job incluye `not_eligible: 1` (o el cubo equivalente que el caso de uso emita para «la hora aún no ha llegado»). [R4]
 - [x] 3.4 Test R4.4 en el mismo fichero: parchear `settings.environment` a `"staging"` con `monkeypatch.setattr`, invocar CLI; verificar exit code 1 y mensaje de guardia en stderr; verificar que **no** se ha creado ninguna fila de `property_state_transitions` ni de `TimelineEvent`. [R2, R4]
 
-## 4. Makefile y `docker-compose.deploy.yml`
+## 4. Makefile y `docker-compose.deploy.yml` <!-- panel: PASS 2026-09-10 receipt:68085f9d -->
 
-- [ ] 4.1 Añadir target `sim-advance` al `Makefile` raíz (junto a `bootstrap`, `seed-demo`, `demo-reset`, `openapi`) que invoque `$(COMPOSE) exec -T backend python -m app.cli.sim_advance --tenant $(TENANT)` y, si `$(AT)` está definido, `--at $(AT)`. Comentario de cabecera que diga: «sólo dev/local; no se publica en `docker-compose.deploy.yml`». [R5]
-- [ ] 4.2 Verificar que `docker-compose.deploy.yml` NO contiene ningún target, servicio, ni entrypoint que invoque `app.cli.sim_advance` (grep cruzado contra el nombre del módulo). Si lo contiene, eliminarlo y documentar en `Implementation Notes`. Si no, escribir `Implementation Notes` que diga «verificado, no estaba». [R2, R5]
+- [x] 4.1 Añadir target `sim-advance` al `Makefile` raíz (junto a `bootstrap`, `seed-demo`, `demo-reset`, `openapi`) que invoque `$(COMPOSE) exec -T backend python -m app.cli.sim_advance --tenant $(TENANT)` y, si `$(AT)` está definido, `--at $(AT)`. Comentario de cabecera que diga: «sólo dev/local; no se publica en `docker-compose.deploy.yml`». [R5]
+- [x] 4.2 Verificar que `docker-compose.deploy.yml` NO contiene ningún target, servicio, ni entrypoint que invoque `app.cli.sim_advance` (grep cruzado contra el nombre del módulo). Si lo contiene, eliminarlo y documentar en `Implementation Notes`. Si no, escribir `Implementation Notes` que diga «verificado, no estaba». [R2, R5]
 
 ## 5. Documentación
 
@@ -73,3 +73,6 @@
 - Section 3: for R4.2 the test seeds the property in `OCCUPIED_ESTIMATED` and the reservation in `CHECKED_IN_ESTIMATED` directly via `db_session`, then seeds a `CleaningChecklistTemplateModel`; without the template the provisioner's `resolve_template` raises `ChecklistTemplateNotFoundError`, returns `None`, and `transitioned_without_task` increments to `1` — the failure path of R2.4, not what R4.2 certifies.
 - Section 3: row counts in R4.4 are taken on a fresh `AsyncSession(test_engine, expire_on_commit=False)` (the `db_session` fixture shares one transaction for the whole test, and a row written by the CLI's other session needs that fresh eye to be visible); `_count_rows` is local to the test, not a fixture, because the count is tenant-scoped to a row that only exists in this test.
 - Section 3: the conftest's per-test vacuum (`_WIPE_EVERY_TABLE`) runs before every test, so `0` is the truth at the start of R4.4's count; the assertion `transitions_before == 0` is what makes the test self-checking against that vacuum and not against any other test's residue.
+- Section 4: el target se inserta entre `demo-reset` y `openapi`, y `sim-advance` se añade a `.PHONY` justo después de `demo-reset` (no antes de `openapi`), para que el orden PHONY refleje el orden del recetario.
+- Section 4: la guarda de `AT` se hace con `$(if $(AT),--at $(AT),)` y no con un `AT_ARG` separado: con `AT` vacío la función de `make` produce cadena vacía y deja un solo espacio entre `--tenant $(TENANT)` y el final; `docker compose exec` lo acepta como argumento vacío. La forma con variable auxiliar añadiría una variable sin valor añadido.
+- Section 4: verificado, no estaba: `grep -nE 'sim[_-]advance' docker-compose.deploy.yml` sale en blanco (rc=1), así que la guardia de R2.3 se cumple sin tocar el fichero.

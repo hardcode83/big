@@ -122,7 +122,7 @@ COMPOSE_ARGS := $(if $(OFFSET),-f docker-compose.yml -f $(OFFSET_FILE),$(if $(IS
 COMPOSE := $(strip docker compose $(COMPOSE_ARGS))
 
 
-.PHONY: up down logs ps sh ports bootstrap seed-demo demo-reset openapi check-version-parity check-frontend-build compose-stacks check-compose-ports check-rule11-ownership check-detect-surface db-clean-test
+.PHONY: up down logs ps sh ports bootstrap seed-demo demo-reset sim-advance openapi check-version-parity check-frontend-build compose-stacks check-compose-ports check-rule11-ownership check-detect-surface db-clean-test
 
 # El guard del overlay de worktree queda acotado a la rama SIN desplazamiento, y no por higiene:
 # con desplazamiento ese fichero no se carga (lo sustituye el overlay generado, ver COMPOSE_ARGS),
@@ -283,6 +283,15 @@ seed-demo:
 # sola vez, así que si no se imprime se pierde.
 demo-reset:
 	$(COMPOSE) exec backend python -m app.cli.demo_reset
+
+# Avanza el reloj de un tenant ejecutando los tres jobs en orden
+# (`check_checkin_windows` → `mark_occupied_estimated` → `process_checkouts`) con
+# `TENANT` (UUID, requerido) y `AT` opcional (instante ISO 8601 tz-aware). Sin `AT`,
+# el comando usa el `now` real: «no esperes a beat».
+#
+# Sólo dev/local; no se publica en `docker-compose.deploy.yml`.
+sim-advance:
+	$(COMPOSE) exec -T backend python -m app.cli.sim_advance --tenant $(TENANT) $(if $(AT),--at $(AT),)
 
 # Regenera backend/openapi.json, el contrato que consume el frontend. Ejecútalo cuando
 # cambies la forma de una respuesta: el workflow api-contract lo comprueba en cada PR y
