@@ -27,6 +27,7 @@ from app.integrations.infrastructure.pms_factory import (
     SqlAlchemyPMSAdapterFactory,
 )
 from app.integrations.infrastructure.repositories import SqlAlchemyPmsCredentialRepository
+from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
 
 
@@ -283,6 +284,7 @@ async def test_the_run_writes_one_audit_row_naming_the_credential(
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
         audit=SqlAlchemyAuditLogRepository(db_session),
+        email_exclusion=PostgresGuestEmailExclusion(db_session),
     ).execute(tenant_id=tenant_a.id, since=now, now=now)
 
     # The provider could not be synced — no adapter yet — and that is REPORTED, not raised: one
@@ -328,6 +330,7 @@ async def test_a_run_that_decrypted_nothing_writes_no_audit_row(
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
         audit=SqlAlchemyAuditLogRepository(db_session),
+        email_exclusion=PostgresGuestEmailExclusion(db_session),
     ).execute(tenant_id=tenant_a.id, since=now, now=now)
 
     count = await db_session.scalar(
@@ -366,6 +369,7 @@ async def test_two_runs_of_one_use_case_do_not_share_their_credential_reads(
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
         audit=SqlAlchemyAuditLogRepository(db_session),
+        email_exclusion=PostgresGuestEmailExclusion(db_session),
     )
     now = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
 
@@ -547,6 +551,7 @@ async def test_an_undecryptable_credential_fails_its_provider_without_taking_the
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
         audit=SqlAlchemyAuditLogRepository(db_session),
+        email_exclusion=PostgresGuestEmailExclusion(db_session),
     ).execute(tenant_id=tenant_a.id, since=now, now=now)
 
     assert report.provider_failures == ["BEDS24"], "the broken provider is reported, not raised"
@@ -620,10 +625,10 @@ async def test_a_credential_that_is_not_ciphertext_at_all_also_isolates_to_its_p
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
         audit=SqlAlchemyAuditLogRepository(db_session),
+        email_exclusion=PostgresGuestEmailExclusion(db_session),
     ).execute(tenant_id=tenant_a.id, since=now, now=now)
 
     assert report.provider_failures == ["BEDS24"]
     assert report.created > 0, "the healthy provider must still have synced"
     # And the plaintext never reaches the operator-facing report.
     assert all("in-the-clear" not in error.reason for error in report.errors)
-

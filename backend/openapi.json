@@ -2134,6 +2134,7 @@
       },
       "CreateReservationRequest": {
         "additionalProperties": false,
+        "description": "Manual reservation input.\n\n`guest_id` and `guest` are mutually exclusive: send either one, or neither for a\nguest-less reservation. When `guest` is supplied, the created response contains its\nresolved `guest_id`; the response field remains nullable for guest-less bookings.",
         "properties": {
           "adults": {
             "default": 1,
@@ -2227,6 +2228,16 @@
               }
             ],
             "title": "Gross Amount"
+          },
+          "guest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManualGuestRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "guest_id": {
             "anyOf": [
@@ -4119,6 +4130,56 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "ManualGuestRequest": {
+        "additionalProperties": false,
+        "description": "Optional guest identity supplied when creating a manual reservation (R4, D6).",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional; trimmed and lowercased, with an empty result treated as absent.",
+            "title": "Email"
+          },
+          "full_name": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Full Name",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional; accepts a supported E.164 or Spanish national format and is normalized to E.164.",
+            "title": "Phone"
+          },
+          "preferred_language": {
+            "default": "es",
+            "enum": [
+              "es",
+              "en"
+            ],
+            "title": "Preferred Language",
+            "type": "string"
+          }
+        },
+        "required": [
+          "full_name"
+        ],
+        "title": "ManualGuestRequest",
         "type": "object"
       },
       "MarkAllReadResponse": {
@@ -18470,7 +18531,7 @@
         ]
       },
       "post": {
-        "description": "For bookings that do not come from the PMS. `nights` and `total_guests` are derived from the dates and the party, never accepted from the caller. Answers `404` when the property is not the caller's tenant's.",
+        "description": "For bookings that do not come from the PMS. `nights` and `total_guests` are derived from the dates and the party, never accepted from the caller. Answers `404` when the property is not the caller's tenant's. `guest_id` may reference an existing guest, `guest` resolves or creates one by email, or both may be omitted for a guest-less reservation; sending both answers `422`. The response keeps `guest_id` nullable or returns the resolved id.",
         "operationId": "create_reservation_api_v1_reservations_post",
         "requestBody": {
           "content": {

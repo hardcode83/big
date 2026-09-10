@@ -23,6 +23,7 @@ from app.audit.infrastructure.models import AuditLogModel
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
+from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.integrations.application.use_cases import (
     WEBHOOK_SOURCE,
     SyncReservationsFromPmsUseCase,
@@ -156,6 +157,7 @@ def _use_case(
             timeline=SqlAlchemyTimelineEventRepository(db_session),
             uow=SqlAlchemyUnitOfWork(db_session),
             audit=SqlAlchemyAuditLogRepository(db_session),
+            email_exclusion=PostgresGuestEmailExclusion(db_session),
         ),
         advance=AdvancePropertyStatesUseCase(
             properties=SqlAlchemyPropertyRepository(db_session),

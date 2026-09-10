@@ -16,7 +16,9 @@ from decimal import Decimal
 from typing import Any
 
 from app.core.unit_of_work import UnitOfWork
+from app.guests.application.resolution import ManualGuestIdentityInput, ResolveOrCreateGuest
 from app.guests.domain.repositories import GuestRepository
+from app.guests.domain.ports import GuestEmailExclusion
 from app.guests.domain.value_objects import GuestSummary
 from app.properties.domain.enums import PropertyStatus
 from app.properties.domain.repositories import PropertyRepository
@@ -61,6 +63,7 @@ class CreateReservationCommand:
     adults: int = 1
     children: int = 0
     guest_id: uuid.UUID | None = None
+    guest: ManualGuestIdentityInput | None = None
     check_in_time: time | None = None
     check_out_time: time | None = None
     gross_amount: Decimal | None = None
@@ -90,6 +93,8 @@ class CreateReservationCommand:
                 "channel must be MANUAL or DIRECT when creating a reservation by hand; "
                 f"{self.channel.value} arrives through the PMS sync or the CSV import"
             )
+        if self.guest_id is not None and self.guest is not None:
+            raise ReservationValidationError("guest_id and guest are mutually exclusive")
 
 
 @dataclass(frozen=True)
@@ -161,12 +166,17 @@ class CreateReservationUseCase:
         guests: GuestRepository,
         timeline: TimelineEventRepository,
         uow: UnitOfWork,
+        guest_email_exclusion: GuestEmailExclusion,
     ) -> None:
         self._reservations = reservations
         self._properties = properties
         self._guests = guests
         self._timeline = _TimelineWriter(timeline)
         self._uow = uow
+        # The resolver shares the caller-owned GuestRepository and transaction-scoped
+        # exclusion. Section 3 supplies the identity input and invokes it before the
+        # Reservation is built; constructing it here closes the manual composition root now.
+        self._guest_resolver = ResolveOrCreateGuest(guests, guest_email_exclusion)
 
     async def execute(
         self,
@@ -191,8 +201,13 @@ class CreateReservationUseCase:
             # check is here and not in the entity because it is a fact about the PROPERTY, not
             # an invariant of the reservation, and `Reservation.create` has no property to ask.
             raise InactivePropertyError("Property is retired and does not accept reservations")
-        if command.guest_id is not None:
-            if await self._guests.get(tenant_id, command.guest_id) is None:
+        resolved_guest_id = command.guest_id
+        if command.guest is not None:
+            resolved_guest_id = await self._guest_resolver.execute(
+                tenant_id=tenant_id, identity=command.guest, now=now
+            )
+        if resolved_guest_id is not None:
+            if await self._guests.get(tenant_id, resolved_guest_id) is None:
                 raise GuestNotFoundError("Guest does not exist")
 
         reservation = Reservation.create(
@@ -205,7 +220,7 @@ class CreateReservationUseCase:
             now=now,
             adults=command.adults,
             children=command.children,
-            guest_id=command.guest_id,
+            guest_id=resolved_guest_id,
             check_in_time=command.check_in_time,
             check_out_time=command.check_out_time,
             gross_amount=command.gross_amount,

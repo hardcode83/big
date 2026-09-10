@@ -867,7 +867,7 @@ export interface paths {
     get: operations["list_reservations_api_v1_reservations_get"];
     /**
      * Create a reservation by hand
-     * @description For bookings that do not come from the PMS. `nights` and `total_guests` are derived from the dates and the party, never accepted from the caller. Answers `404` when the property is not the caller's tenant's.
+     * @description For bookings that do not come from the PMS. `nights` and `total_guests` are derived from the dates and the party, never accepted from the caller. Answers `404` when the property is not the caller's tenant's. `guest_id` may reference an existing guest, `guest` resolves or creates one by email, or both may be omitted for a guest-less reservation; sending both answers `422`. The response keeps `guest_id` nullable or returns the resolved id.
      */
     post: operations["create_reservation_api_v1_reservations_post"];
   };
@@ -2029,7 +2029,14 @@ export interface components {
       /** Wifi Password */
       wifi_password?: string | null;
     };
-    /** CreateReservationRequest */
+    /**
+     * CreateReservationRequest
+     * @description Manual reservation input.
+     *
+     * `guest_id` and `guest` are mutually exclusive: send either one, or neither for a
+     * guest-less reservation. When `guest` is supplied, the created response contains its
+     * resolved `guest_id`; the response field remains nullable for guest-less bookings.
+     */
     CreateReservationRequest: {
       /**
        * Adults
@@ -2071,6 +2078,7 @@ export interface components {
       external_channel_id?: string | null;
       /** Gross Amount */
       gross_amount?: number | string | null;
+      guest?: components["schemas"]["ManualGuestRequest"] | null;
       /** Guest Id */
       guest_id?: string | null;
       /** Internal Notes */
@@ -2992,6 +3000,30 @@ export interface components {
       email: string;
       /** Password */
       password: string;
+    };
+    /**
+     * ManualGuestRequest
+     * @description Optional guest identity supplied when creating a manual reservation (R4, D6).
+     */
+    ManualGuestRequest: {
+      /**
+       * Email
+       * @description Optional; trimmed and lowercased, with an empty result treated as absent.
+       */
+      email?: string | null;
+      /** Full Name */
+      full_name: string;
+      /**
+       * Phone
+       * @description Optional; accepts a supported E.164 or Spanish national format and is normalized to E.164.
+       */
+      phone?: string | null;
+      /**
+       * Preferred Language
+       * @default es
+       * @enum {string}
+       */
+      preferred_language?: "es" | "en";
     };
     /**
      * MarkAllReadResponse
@@ -9825,7 +9857,7 @@ export interface operations {
   };
   /**
    * Create a reservation by hand
-   * @description For bookings that do not come from the PMS. `nights` and `total_guests` are derived from the dates and the party, never accepted from the caller. Answers `404` when the property is not the caller's tenant's.
+   * @description For bookings that do not come from the PMS. `nights` and `total_guests` are derived from the dates and the party, never accepted from the caller. Answers `404` when the property is not the caller's tenant's. `guest_id` may reference an existing guest, `guest` resolves or creates one by email, or both may be omitted for a guest-less reservation; sending both answers `422`. The response keeps `guest_id` nullable or returns the resolved id.
    */
   create_reservation_api_v1_reservations_post: {
     requestBody: {

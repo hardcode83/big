@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
+from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.integrations.application.use_cases import (
     WEBHOOK_SOURCE,
     SyncReservationsFromPmsUseCase,
@@ -99,6 +100,7 @@ def _tenant_use_case(
             timeline=SqlAlchemyTimelineEventRepository(db_session),
             uow=SqlAlchemyUnitOfWork(db_session),
             audit=SqlAlchemyAuditLogRepository(db_session),
+            email_exclusion=PostgresGuestEmailExclusion(db_session),
         ),
         advance=advance,
         uow=SqlAlchemyUnitOfWork(db_session),
@@ -631,6 +633,7 @@ async def test_one_account_credential_serving_two_properties_is_audited_once(
             timeline=SqlAlchemyTimelineEventRepository(db_session),
             uow=SqlAlchemyUnitOfWork(db_session),
             audit=SqlAlchemyAuditLogRepository(db_session),
+            email_exclusion=PostgresGuestEmailExclusion(db_session),
         ),
         advance=_CountingAdvancer(),
         uow=SqlAlchemyUnitOfWork(db_session),

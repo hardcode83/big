@@ -8,10 +8,12 @@ nothing records nothing.
 
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from inspect import Parameter, signature
 
 import pytest
 
 from app.guests.domain.entities import Guest
+from app.guests.application.resolution import ManualGuestIdentityInput, ResolveOrCreateGuest
 from app.properties.domain.entities import Property
 from app.reservations.application.use_cases import (
     CancelReservationUseCase,
@@ -31,6 +33,7 @@ from app.reservations.domain.repositories import ReservationFilters
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType
 from tests.reservations.doubles import (
     FakeGuestRepository,
+    FakeGuestEmailExclusion,
     FakePropertyRepository,
     FakeReservationRepository,
     FakeTimelineEventRepository,
@@ -68,6 +71,7 @@ def world():
                 guests=self.guests,
                 timeline=self.timeline,
                 uow=self.uow,
+                guest_email_exclusion=FakeGuestEmailExclusion(),
             )
 
         def update_use_case(self) -> UpdateReservationUseCase:
@@ -114,6 +118,17 @@ def world():
             )
 
     return World()
+
+
+def test_manual_use_case_constructs_shared_guest_resolver(world) -> None:
+    use_case = world.create_use_case()
+    assert isinstance(use_case._guest_resolver, ResolveOrCreateGuest)  # noqa: SLF001
+    assert use_case._guest_resolver._guests is world.guests  # noqa: SLF001
+
+
+def test_manual_use_case_requires_guest_email_exclusion() -> None:
+    parameter = signature(CreateReservationUseCase).parameters["guest_email_exclusion"]
+    assert parameter.default is Parameter.empty
 
 
 def _property(tenant_id: uuid.UUID, code: str) -> Property:
@@ -185,6 +200,59 @@ class TestCreate:
         reservation = await world.create(guest_id=world.guest_a.id)
 
         assert reservation.guest_id == world.guest_a.id
+
+    @pytest.mark.asyncio
+    async def test_a_guest_block_is_resolved_before_reservation_creation(self, world) -> None:
+        reservation = await world.create(
+            guest=ManualGuestIdentityInput(
+                full_name="  New Guest  ",
+                email=" NEW@EXAMPLE.COM ",
+                phone="612 345 678",
+            )
+        )
+
+        assert reservation.guest_id is not None
+        created = world.guests.guests[reservation.guest_id]
+        assert created.full_name == "New Guest"
+        assert created.email == "new@example.com"
+        assert created.phone == "+34612345678"
+        assert created.preferred_language == "es"
+        assert world.uow.commits == 1
+
+    @pytest.mark.asyncio
+    async def test_a_guest_resolution_failure_commits_nothing(self, world) -> None:
+        class FailingExclusion:
+            async def acquire(self, tenant_id, normalized_email) -> None:  # noqa: ANN001
+                raise RuntimeError("lock unavailable")
+
+        use_case = CreateReservationUseCase(
+            reservations=world.reservations,
+            properties=world.properties,
+            guests=world.guests,
+            timeline=world.timeline,
+            uow=world.uow,
+            guest_email_exclusion=FailingExclusion(),
+        )
+
+        with pytest.raises(RuntimeError):
+            await use_case.execute(
+                tenant_id=world.tenant_a,
+                actor_user_id=world.user_a,
+                command=CreateReservationCommand(
+                    property_id=world.property_a.id,
+                    channel=ReservationChannel.DIRECT,
+                    check_in_date=CHECK_IN,
+                    check_out_date=CHECK_OUT,
+                    guest=ManualGuestIdentityInput(
+                        full_name="New Guest", email="new@example.com"
+                    ),
+                ),
+                now=NOW,
+            )
+
+        assert world.reservations.reservations == {}
+        assert world.timeline.events == []
+        assert world.uow.commits == 0
 
     @pytest.mark.asyncio
     async def test_nothing_is_committed_when_the_timeline_write_fails(self, world) -> None:

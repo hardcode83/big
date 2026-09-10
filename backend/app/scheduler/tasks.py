@@ -43,6 +43,7 @@ from app.cleaning.infrastructure.repositories import (
 from app.core.config import settings
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.legal import SqlAlchemyLegalRegistrationInitialiser
+from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
 from app.integrations.application.webhooks import (
@@ -461,6 +462,7 @@ def _webhook_tenant_use_case(
             timeline=SqlAlchemyTimelineEventRepository(session),
             uow=SqlAlchemyUnitOfWork(session),
             audit=SqlAlchemyAuditLogRepository(session),
+            email_exclusion=PostgresGuestEmailExclusion(session),
         ),
         # `AdvancePropertyStatesUseCase` unmodified, satisfying `PropertyStateAdvancer`
         # structurally (D12). No provisioner: that collaborator belongs to the checkout

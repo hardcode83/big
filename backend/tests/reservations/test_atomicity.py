@@ -8,6 +8,7 @@ catch a repository that committed on its own.
 """
 
 import uuid
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -16,7 +17,10 @@ from sqlalchemy import func, select
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.infrastructure.models import UserModel
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
+from app.guests.application.resolution import ManualGuestIdentityInput
+from app.guests.infrastructure.models import GuestModel
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
+from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.properties.infrastructure.models import PropertyModel
 from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
 from app.reservations.application.use_cases import (
@@ -40,6 +44,19 @@ class _ExplodingTimelineRepository(SqlAlchemyTimelineEventRepository):
 
     async def add(self, tenant_id, event) -> None:  # noqa: ANN001
         raise RuntimeError("timeline storage is unavailable")
+
+
+class _ExplodingReservationRepository(SqlAlchemyReservationRepository):
+    async def add(self, tenant_id, reservation) -> None:  # noqa: ANN001
+        raise RuntimeError("reservation storage is unavailable")
+
+
+class _ExplodingCommitUnitOfWork(SqlAlchemyUnitOfWork):
+    async def commit(self) -> None:
+        # Flush first so this exercises rollback after all three rows reached the database
+        # transaction, rather than only testing that pending ORM objects are discarded.
+        await self._session.flush()
+        raise RuntimeError("commit is unavailable")
 
 
 async def _tenant_property_and_user(db_session) -> tuple[TenantModel, PropertyModel, UserModel]:
@@ -78,30 +95,56 @@ def _command(prop: PropertyModel) -> CreateReservationCommand:
     )
 
 
+@pytest.mark.parametrize("failure_stage", ["reservation", "timeline", "commit"])
 @pytest.mark.asyncio
-async def test_a_failing_timeline_write_leaves_no_reservation_behind(db_session) -> None:
+async def test_a_failure_during_creation_rolls_back_guest_reservation_and_timeline(
+    db_session, failure_stage
+) -> None:
     tenant, prop, user = await _tenant_property_and_user(db_session)
+    repositories = {
+        "reservation": _ExplodingReservationRepository(db_session),
+        "timeline": _ExplodingTimelineRepository(db_session),
+        "commit": SqlAlchemyReservationRepository(db_session),
+    }
+    timeline = (
+        SqlAlchemyTimelineEventRepository(db_session)
+        if failure_stage == "commit"
+        else _ExplodingTimelineRepository(db_session)
+    )
+    uow = (
+        _ExplodingCommitUnitOfWork(db_session)
+        if failure_stage == "commit"
+        else SqlAlchemyUnitOfWork(db_session)
+    )
     use_case = CreateReservationUseCase(
-        reservations=SqlAlchemyReservationRepository(db_session),
+        reservations=repositories[failure_stage],
         properties=SqlAlchemyPropertyRepository(db_session),
         guests=SqlAlchemyGuestRepository(db_session),
-        timeline=_ExplodingTimelineRepository(db_session),
-        uow=SqlAlchemyUnitOfWork(db_session),
+        timeline=timeline,
+        uow=uow,
+        guest_email_exclusion=PostgresGuestEmailExclusion(db_session),
     )
 
     with pytest.raises(RuntimeError):
         await use_case.execute(
             tenant_id=tenant.id,
             actor_user_id=user.id,
-            command=_command(prop),
+            command=replace(
+                _command(prop),
+                guest=ManualGuestIdentityInput(
+                    full_name="New Guest", email="new-guest@example.com"
+                ),
+            ),
             now=NOW,
         )
 
     # What `get_db_session` does when a request ends in an exception.
     await db_session.rollback()
 
+    guests = await db_session.scalar(select(func.count()).select_from(GuestModel))
     reservations = await db_session.scalar(select(func.count()).select_from(ReservationModel))
     events = await db_session.scalar(select(func.count()).select_from(TimelineEventModel))
+    assert guests == 0
     assert reservations == 0
     assert events == 0
 
@@ -117,6 +160,7 @@ async def test_the_successful_path_persists_both_rows_together(db_session) -> No
         guests=SqlAlchemyGuestRepository(db_session),
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
+        guest_email_exclusion=PostgresGuestEmailExclusion(db_session),
     )
 
     reservation = await use_case.execute(
@@ -153,6 +197,7 @@ async def test_a_failing_timeline_write_rolls_back_an_update_too(db_session) -> 
         guests=SqlAlchemyGuestRepository(db_session),
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
+        guest_email_exclusion=PostgresGuestEmailExclusion(db_session),
     ).execute(
         tenant_id=tenant.id, actor_user_id=user.id, command=_command(prop), now=NOW
     )
@@ -189,6 +234,7 @@ async def test_a_failing_timeline_write_rolls_back_a_cancellation_too(db_session
         guests=SqlAlchemyGuestRepository(db_session),
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
+        guest_email_exclusion=PostgresGuestEmailExclusion(db_session),
     ).execute(
         tenant_id=tenant.id, actor_user_id=user.id, command=_command(prop), now=NOW
     )
@@ -234,6 +280,7 @@ async def test_an_unstorable_metadata_value_also_leaves_nothing_behind(db_sessio
         guests=SqlAlchemyGuestRepository(db_session),
         timeline=_RawDateTimeline(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
+        guest_email_exclusion=PostgresGuestEmailExclusion(db_session),
     )
 
     with pytest.raises(Exception) as raised:
