@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Entidades de dominio y esquema de base de datos para las 8 entidades del PRD (§7.1-7.8) que forman el backbone de identidad, tenencia, propiedad y reserva: `Tenant`, `TenantConfig`, `User`, `Property`, `PropertyStateTransition`, `Guest`, `Reservation`, `TimelineEvent`. Es la base sobre la que se construyen `domain-foundation-ops`, `domain-foundation-financial` y el resto del roadmap — solo estructura de datos (entidades + esquema + migraciones), sin lógica de negocio, repositorios, casos de uso ni endpoints todavía.
+Entidades de dominio, persistencia y políticas de aplicación de las 8 entidades del PRD (§7.1-7.8) que forman el backbone de identidad, tenencia, propiedad y reserva: `Tenant`, `TenantConfig`, `User`, `Property`, `PropertyStateTransition`, `Guest`, `Reservation`, `TimelineEvent`. Es la base sobre la que se construyen `domain-foundation-ops`, `domain-foundation-financial` y el resto del roadmap.
 
 ## Requirements
 
@@ -31,6 +31,24 @@ Entidades de dominio y esquema de base de datos para las 8 entidades del PRD (§
 - De los dos campos que el PRD marca como cifrados en reposo, `Property.wifi_password_encrypted` **ya almacena texto cifrado con Fernet**: `properties-crud` es su primer escritor y lo cifra antes de que el valor alcance SQL, sin exponer ninguna vía de lectura (ver spec `properties-crud`). `Guest.document_number_encrypted` sigue siendo texto **en claro**, y eso es deliberado: nada la lee ni la escribe todavía. La primitiva Fernet existe desde `pms-provider-resolution` (`app/core/crypto.py`, con `ENCRYPTION_KEY` obligatoria al arrancar), así que lo que falta ahí no es el cifrado sino el change que use ese campo. Las credenciales de proveedor, que sí tienen escritor, nacen cifradas (`security.md` #3).
 - Cualquier columna FK que referencia una tabla de otro módulo (p.ej. `reservations.property_id` → `properties.id`) usa un tipo `Uuid` explícito en `mapped_column`, no solo la anotación `Mapped[uuid.UUID]` — SQLAlchemy puede resolverla como `NullType` si el módulo destino no se ha importado antes en el proceso, un fallo silencioso que rompería el DDL.
 
+### Resolución de identidad de Guest
+
+- THE SYSTEM SHALL resolver automáticamente un `Guest` únicamente por email normalizado dentro
+  del tenant; nombre y teléfono son datos de contacto y no claves de matching.
+- WHEN el email normalizado ya existe, THE SYSTEM SHALL seleccionar de forma determinista el
+  registro más antiguo por `created_at` y, en empate, el menor `id`, sin actualizarlo ni fusionar
+  sus datos, reservas o conversaciones.
+- WHEN no existe coincidencia, THE SYSTEM SHALL crear el `Guest` con los datos normalizados
+  permitidos. Un email vacío o ausente SHALL omitir la identidad de email y no SHALL ser
+  persistido como tal.
+- THE SYSTEM SHALL serializar la resolución/creación concurrente por `(tenant_id,
+  normalized_email)` mediante el puerto `GuestEmailExclusion`; el adapter PostgreSQL SHALL usar
+  un `pg_advisory_xact_lock` sobre la transacción del llamante, sin abrir una UoW ni hacer commit
+  propio. `domain/` y `application/` SHALL permanecer independientes de PostgreSQL.
+- THE SYSTEM SHALL conservar el índice tenant/email no único existente. Este comportamiento no
+  constituye una garantía de identidad de base de datos: una constraint `UNIQUE` y cualquier
+  reconciliación de duplicados históricos requieren un change de hardening aprobado por separado.
+
 ### Migraciones Alembic
 
 - Una única migración baseline (`backend/alembic/versions/`) crea las 8 tablas sobre una DB vacía, en orden de dependencia, reversible.
@@ -51,6 +69,8 @@ Entidades de dominio y esquema de base de datos para las 8 entidades del PRD (§
 - `backend/app/auth/{domain,infrastructure}/` — `User`.
 - `backend/app/properties/{domain,infrastructure}/` — `Property`, `PropertyStateTransition`.
 - `backend/app/guests/{domain,infrastructure}/` — `Guest`.
+- `backend/app/guests/application/resolution.py` — política compartida `ResolveOrCreateGuest`.
+- `backend/app/guests/infrastructure/postgres_guest_email_exclusion.py` — exclusión transaccional PostgreSQL.
 - `backend/app/reservations/{domain,infrastructure}/` — `Reservation`.
 - `backend/app/timeline/{domain,infrastructure}/` — `TimelineEvent`.
 - `backend/alembic.ini`, `backend/alembic/env.py`, `backend/alembic/versions/` — bootstrap y migración baseline.

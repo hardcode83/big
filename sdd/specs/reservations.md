@@ -54,6 +54,24 @@ no las dispara; aporta el dato del que cuelgan.
   la ve y puede reactivarla, así que no hay nada que ocultarle.
 - IF el `guest_id` indicado no existe en el tenant del token, THEN THE SYSTEM SHALL
   responder `404`.
+- WHEN el alta manual recibe un bloque `guest` sin `guest_id`, THE SYSTEM SHALL exigir un
+  `full_name` de 1 a 300 caracteres después de aplicar `trim`, y SHALL aceptar `email` y
+  `phone` opcionales con sus normalizaciones vigentes; `preferred_language` SHALL aceptar
+  únicamente `es` o `en` y SHALL usar `es` por defecto.
+- WHEN `guest.email` está presente, THE SYSTEM SHALL aplicar `trim` y `lowercase`, tratar un
+  resultado vacío como ausencia y reutilizar el `Guest` coincidente dentro del tenant; si no
+  existe coincidencia, SHALL crear un `Guest` y vincularlo a la reserva.
+- THE SYSTEM SHALL usar el email normalizado como único criterio automático de matching en el
+  alta manual; sin email no SHALL buscar por nombre o teléfono, y cada alta con `guest` SHALL
+  crear un nuevo `Guest`.
+- WHEN se reutiliza un `Guest` por email, THE SYSTEM SHALL conservar sin cambios su nombre,
+  teléfono, idioma y demás datos; el bloque `guest` resuelve identidad y no edita el `Guest`.
+- IF el request contiene a la vez `guest_id` y `guest`, THEN THE SYSTEM SHALL responder `422`
+  con el envelope de validación existente y no SHALL escribir `Guest`, `Reservation` ni
+  `TimelineEvent`. Omitir ambos SHALL seguir siendo válido y crear una reserva guest-less.
+- WHEN el alta crea o reutiliza un `Guest`, THE SYSTEM SHALL mantener la resolución, la
+  creación de la reserva y `RESERVATION_CREATED_MANUAL` en la misma UoW y en un único commit;
+  cualquier fallo SHALL provocar rollback conjunto.
 
 ### Consulta y listado
 
