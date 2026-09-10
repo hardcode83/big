@@ -253,8 +253,17 @@ de tablas locales, igual que `revenue-pricing`. La pantalla `/statements` queda 
 - THE SYSTEM SHALL proteger las once rutas con dos permisos —`READ_OWNER_STATEMENTS` y
   `MANAGE_OWNER_STATEMENTS`—, concediendo `READ` a `TENANT_OWNER` y `PROPERTY_MANAGER`,
   y `MANAGE` sólo a `PROPERTY_MANAGER`. `CLEANER`, `TECHNICIAN` y `SUPER_ADMIN` no
-  reciben ninguno. `RESPOND_OWNER_APPROVALS`, ya existente, sigue siendo el permiso con
-  el que el owner responde las aprobaciones de umbral que D4 genera.
+  reciben ninguno.
+- **Corrección medida en `approvals-web` (design D11, 2026-09-10), no en la frase de
+  arriba porque no es cuestión de permisos sino de ruta.** `RESPOND_OWNER_APPROVALS` sigue
+  siendo el único permiso de escritura sobre una `OwnerApproval`, pero
+  `POST /api/v1/owner-approvals/{id}/respond` **no sirve** las aprobaciones
+  `related_type = OTHER` que D4 genera para un `Expense`: `RespondOwnerApprovalUseCase`
+  carga la incidencia desde `approval.related_id` sin condición y responde `404`
+  (`IncidentNotFoundError`) cuando no existe, y en una aprobación `OTHER` ese `related_id`
+  es un id de `Expense`, no de incidencia. Hoy **no hay ninguna ruta** por la que la
+  propietaria responda una `OwnerApproval(OTHER)` desde la API; la entrada de roadmap
+  `expense-approval-response` recoge el hueco.
 - THE SYSTEM SHALL resolver el tenant siempre desde la sesión autenticada (nunca del
   cuerpo ni de la query) y comprobar en el repositorio que la entidad pertenece a ese
   tenant antes de leer o mutar.
@@ -294,7 +303,12 @@ de tablas locales, igual que `revenue-pricing`. La pantalla `/statements` queda 
 - **`RESPOND_OWNER_APPROVALS` sobre `Expense`**: el endpoint de respuesta de
   `maintenance` no se toca; la integración pasa por el `OwnerApproval(related_type=OTHER)`
   canónico y el job de reconciliación, sin acoplar `maintenance.application` a
-  `Expense`.
+  `Expense`. **Esta decisión no tocar el endpoint es correcta y sigue vigente; lo que era
+  falso es la frase que solía seguir aquí, afirmando que ese endpoint sin tocar ya
+  servía la respuesta — no la sirve (ver §«Permisos, aislamiento, auditoría», corrección
+  de `approvals-web` D11): hoy no hay ninguna ruta que responda una `OwnerApproval(OTHER)`,
+  y ese hueco es justamente lo que queda fuera de alcance aquí y lo que recoge la
+  entrada de roadmap `expense-approval-response`.**
 
 ## Estado y deuda conocida
 

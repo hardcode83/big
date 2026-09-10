@@ -257,13 +257,14 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
   (`specs/guest-portal-api.md`). Las catorce están nombradas **con su verbo** en el allowlist de
   `tests/test_route_authorization.py`, que es el diff visible que ese allowlist existe para
   forzar.
-- **Las dieciséis rutas de `maintenance` entraron todas autenticadas y con permiso declarado**:
-  quince bajo `/api/v1/incidents` —las dos últimas,
+- **Las rutas de `maintenance` entraron todas autenticadas y con permiso declarado** (recontadas al archivar `approvals-web`; la cifra exacta de este párrafo no se actualiza sola con cada capacidad que añade rutas fuera de `maintenance`, así que no se afirma aquí un total global del documento). Quince bajo `/api/v1/incidents` —las dos últimas,
   `POST` y `GET /api/v1/incidents/{incident_id}/photos`, entraron el 2026-08-23 con
   [`incident-photos`](incident-photos.md), y antes de ellas
   `POST /api/v1/incidents/{incident_id}/reject`, el 2026-08-22 con
-  [`tech-cycle-completion`](maintenance.md)— y
-  `POST /api/v1/owner-approvals/{approval_id}/respond`. Sólo una capacidad del módulo tocó el
+  [`tech-cycle-completion`](maintenance.md)— y dos bajo `/api/v1/owner-approvals`:
+  `POST /api/v1/owner-approvals/{approval_id}/respond` y, desde `approvals-web`,
+  `GET /api/v1/owner-approvals` (permiso `READ_OWNER_APPROVALS`, paginada, `status` opcional —
+  ver [`maintenance.md`](maintenance.md)). Sólo una capacidad del módulo tocó el
   allowlist anónimo: `incident-photos`, que le añadió la **duodécima** entrada
   (`GET /api/v1/incident-photos/{photo_id}`) porque un `<img src>` no puede mandar
   `Authorization`. Las otras no: la proyección de contexto del técnico exige `READ_INCIDENTS` como

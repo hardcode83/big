@@ -110,10 +110,12 @@ componente de esta capa necesita cambiar para que R1 y R2 sigan siendo ciertos.
   traducido (`notifications:types.<MIEMBRO>`), y SHALL NOT usar `subject` ni `body`: están
   escritos en inglés, para un operador, y llevan UUID en crudo. El DTO del frontend **ni siquiera
   los transporta**, de modo que pintarlos no es una opción disponible.
-- THE SYSTEM SHALL cubrir los **dieciocho** miembros de `NotificationType` en `locales/es` y
-  `locales/en` (los diecisiete originales más `REVIEW_RESPONSE_APPROVED`, que `revenue-reviews`
-  introduce para avisar al propietario del tenant cuando una respuesta a reseña pasa a
-  `APPROVED`). La exhaustividad la garantiza el tipo:
+- THE SYSTEM SHALL cubrir los **veintitrés** miembros de `NotificationType` en `locales/es` y
+  `locales/en` — los dieciséis de PRD §14 más `REVIEW_RESPONSE_APPROVED`, `PASSWORD_RESET_REQUESTED`,
+  `CLEANING_TASK_MESSAGE`, `INCIDENT_MESSAGE`, `GUEST_PORTAL_LINK_DELIVERED` y, desde
+  `approvals-web`, `OWNER_APPROVAL_APPROVED`/`OWNER_APPROVAL_REJECTED` (D6: dos miembros, uno por
+  resultado, porque la fila se pinta solo desde el tipo y un único miembro no podría decir si la
+  propietaria aprobó o rechazó). La exhaustividad la garantiza el tipo:
 - IF llega un `notification_type` que la interfaz no conoce —la columna es `String(100)` libre y
   admite valores anteriores al enum—, THEN THE SYSTEM SHALL pintar `types.unknown` traducido y
   SHALL NOT romper el renderizado. La búsqueda en la tabla usa `Object.hasOwn`, de modo que un
@@ -154,12 +156,14 @@ componente de esta capa necesita cambiar para que R1 y R2 sigan siendo ciertos.
 
 - THE SYSTEM SHALL declarar los destinos en **un único sitio**
   (`features/notifications/lib/notification-destinations.ts`), indexado por perfil de shell y por
-  `related_type`, de modo que añadir un destino cuando entreguen `cleaner-app` o `tech-app` sea una
-  entrada más y no una búsqueda por componentes.
+  `related_type` (`NOTIFICATION_DESTINATIONS`), de modo que añadir un destino cuando entreguen
+  `cleaner-app` o `tech-app` sea una entrada más y no una búsqueda por componentes.
 - THE SYSTEM SHALL enlazar, en el perfil `workspace`, `incident → /incidents/{id}`,
-  `conversation → /conversations/{id}` y `reservation → /reservations/{id}`.
-- THE SYSTEM SHALL dejar **vacías** las tablas de `cleaner`, `technician`, `public`, `guest` y
-  `authenticated`, y SHALL NOT enlazar `related_type = "cleaning_task"` en ningún perfil: no hay
+  `conversation → /conversations/{id}` y `reservation → /reservations/{id}`; y en el perfil
+  `technician`, `incident → /tech/incidents/{id}` (`approvals-web` R5.2 — la app del técnico ya
+  existe, así que esta fila deja de estar vacía).
+- THE SYSTEM SHALL dejar **vacías** las tablas de `cleaner`, `public`, `guest`, `authenticated` y
+  `platform`, y SHALL NOT enlazar `related_type = "cleaning_task"` en ningún perfil: no hay
   página de detalle de manager para una tarea de limpieza, y las de campo siguen siendo
   `RoutePlaceholder`. Es el tipo más frecuente y se pinta sin enlace a propósito.
 - IF `related_type` o `related_id` son `null`, o el tipo no está en la tabla del perfil, THEN THE
@@ -168,6 +172,24 @@ componente de esta capa necesita cambiar para que R1 y R2 sigan siendo ciertos.
 - THE SYSTEM SHALL resolver la tabla con `Object.hasOwn` y SHALL exigir que el `href` construido
   sea una cadena que empiece por `/` antes de navegar: sin esa guarda, una clave heredada del
   prototipo rompería el render de la lista entera.
+
+### R6.5 — Una segunda tabla, indexada por tipo y consultada primero (`approvals-web`, D8)
+
+- THE SYSTEM SHALL declarar una segunda tabla, `NOTIFICATION_TYPE_DESTINATIONS`, indexada por
+  perfil de shell y por `notification_type` (no por `related_type`), para los tipos cuyo destino
+  no depende de un id de fila — `OWNER_APPROVAL_REQUIRED` no apunta a una incidencia ni a una
+  aprobación concreta, apunta a la cola de aprobaciones misma, que no lleva id.
+- THE SYSTEM SHALL enlazar, en el perfil `workspace`, `OWNER_APPROVAL_REQUIRED → /approvals`. Antes
+  de esta entrada esa notificación se resolvía por la tabla de `related_type` (`incident →
+  /incidents/{id}`, de solo lectura para la propietaria); ahora la lleva directamente a donde
+  puede actuar.
+- THE SYSTEM SHALL consultar `notificationHref` la tabla por tipo **antes** que la tabla por
+  `related_type`: un tipo con entrada en la primera tabla gana directamente y no necesita
+  `related_type`/`related_id`. Un tipo sin entrada cae a la tabla de R6 sin cambio de
+  comportamiento.
+- THE SYSTEM SHALL dejar **vacías** las filas `cleaner` y `technician` de esta segunda tabla — no
+  hay hoy ningún tipo cuyo destino en esos perfiles dependa solo del tipo — y las mismas guardas
+  de R6 (`Object.hasOwn`, `href` debe empezar por `/`) se aplican también a esta tabla.
 
 ### R7 — La frontera Server/Client de la shell, partida en dos puertas
 
@@ -223,9 +245,10 @@ reincidencia llegó justo después (PR #137).
   (mutaciones optimistas con guarda de generación de sesión), `restore-count.ts` (los tres casos de
   reversión del contador), `query-keys.ts` (claves por tenant **y** usuario).
 - `frontend/features/notifications/lib/` — `notification-copy.ts`
-  (`Record<NotificationType, string>` exhaustivo por tipo), `notification-destinations.ts` (la
-  única tabla de destinos), `error-mapping.ts` (status HTTP → clave i18n), `format.ts` (fecha
-  localizada).
+  (`Record<NotificationType, string>` exhaustivo por tipo), `notification-destinations.ts` (las
+  dos tablas de destinos: `NOTIFICATION_DESTINATIONS` por `related_type` y
+  `NOTIFICATION_TYPE_DESTINATIONS` por tipo, R6.5), `error-mapping.ts` (status HTTP → clave i18n),
+  `format.ts` (fecha localizada).
 - `frontend/features/notifications/data/` — DTO y fuente HTTP sobre el transporte central; consume
   los tipos generados del contrato.
 - `frontend/features/shell/index.ts` (puerta de cliente) y `frontend/features/shell/server.ts`
@@ -234,7 +257,7 @@ reincidencia llegó justo después (PR #137).
   slot `end` del `Topbar`.
 - `frontend/features/shell/state/use-shell-ui-store.ts` — `notificationsOpen` efímero, incluido en
   `closeOverlays()`.
-- `frontend/locales/{es,en}/notifications.json` — namespace `notifications` (17 tipos + `unknown`,
+- `frontend/locales/{es,en}/notifications.json` — namespace `notifications` (23 tipos + `unknown`,
   `bell.*`, `panel.*`, `states.*`, `errors.*`), registrado en `frontend/lib/i18n/resources.ts`.
 - Mitad de servidor: `backend/app/notifications/` y
   [`access-notifications.md`](access-notifications.md) §«La bandeja in-app».
