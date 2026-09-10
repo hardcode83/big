@@ -13,5 +13,5 @@ One entry per pending item (shared rule 5): `decision` needs a human before the 
 
 - **phase**: run
 - **type**: deferred
-- **what & why**: Los revisores arquitectónico, seguridad, QA, i18n y UI/UX devolvieron PASS sobre el HEAD actual y los tests focalizados pasan 23/23, pero reviewer_panel.py rechazó los envelopes en dos intentos con identity or scope mismatch. No se obtuvo recibo ni anotación panel: PASS; las tareas 1.1-1.3 permanecen sin marcar.
+- **what & why**: Los revisores arquitectónico, seguridad, QA, i18n y UI/UX devolvieron PASS sobre el HEAD actual y los tests focalizados pasan 23/23, pero reviewer_panel.py rechazó los envelopes en dos intentos con identity or scope mismatch. No se obtuvo recibo ni anotación panel: PASS; la implementación de 1.1-1.3 está verificada y marcada, pero la sección no está certificada por el panel.
 - **exact resume command**: /sdd:run reservation-create-web 1
