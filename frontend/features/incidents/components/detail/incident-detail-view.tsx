@@ -3,8 +3,11 @@
 import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
+import { useHasPermission } from "@/lib/auth";
+
 import { mapIncidentsError } from "../../lib/error-mapping";
 import { useIncident } from "../../hooks/use-incidents";
+import { useTechnicianDirectory } from "../../hooks/use-incident-management";
 import {
   DetailAssignedTechnicianBlock,
   DetailCostsBlock,
@@ -13,16 +16,27 @@ import {
   DetailIdentifyingBlock,
   DetailMetadataBlock,
 } from "./incident-detail-sections";
+import { ManagerIncidentActions } from "./manager-incident-actions";
 
 /**
- * The detail view for `/incidents/[id]` (proposal R3, design D7).
- * Composes the section components in order. No mutation controls, no
- * `owner-approvals/{id}/respond` button — the approval lives in `/approvals`.
+ * The detail view for `/incidents/[id]` (proposal R1-R6, design D7/D13).
+ * Composes the read-only section components in order, then — for **every**
+ * viewer, permission or not — resolves the assigned technician's name
+ * against the tenant's roster (R2.6, design D10: `TENANT_OWNER` has
+ * `READ_USERS` too, so this never `403`s for her). `ManagerIncidentActions`
+ * mounts only behind `useHasPermission("MANAGE_INCIDENTS")` — without the
+ * permission, nothing is imported or rendered, not even an empty slot
+ * (R1.1, R1.2).
  */
 export function IncidentDetailView({ incidentId }: { incidentId: string }) {
   const { t } = useTranslation(["incidents", "states", "navigation"]);
   const query = useIncident(incidentId);
   const state = mapIncidentsError(query);
+  const canManage = useHasPermission("MANAGE_INCIDENTS");
+  // Every viewer resolves the technician's name, not only the manager
+  // (R2.6, design D10) — this hook is unconditional so it runs the same for
+  // `TENANT_OWNER` (who has `READ_USERS` but not `MANAGE_INCIDENTS`).
+  const technicians = useTechnicianDirectory();
 
   if (state.kind === "loading") {
     return <p className="p-4 text-body-base text-muted-foreground">{t("states:loading.label", { ns: "states" })}</p>;
@@ -62,6 +76,10 @@ export function IncidentDetailView({ incidentId }: { incidentId: string }) {
   }
 
   const d = state.data;
+  const technicianName = d.assignedTechnicianId
+    ? (technicians.data?.find((technician) => technician.id === d.assignedTechnicianId)
+        ?.name ?? null)
+    : null;
   return (
     <article aria-labelledby="incident-heading" className="flex flex-col gap-4 p-4">
       <div className="flex items-center gap-3">
@@ -87,6 +105,7 @@ export function IncidentDetailView({ incidentId }: { incidentId: string }) {
       />
       <DetailAssignedTechnicianBlock
         assignedTechnicianId={d.assignedTechnicianId}
+        technicianName={technicianName}
       />
       <DetailDescriptionBlock description={d.description} />
       <DetailCostsBlock
@@ -100,6 +119,7 @@ export function IncidentDetailView({ incidentId }: { incidentId: string }) {
         updatedAt={d.updatedAt}
         resolvedAt={d.resolvedAt}
       />
+      {canManage ? <ManagerIncidentActions incident={d} /> : null}
     </article>
   );
 }

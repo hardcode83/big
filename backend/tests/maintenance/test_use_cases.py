@@ -23,6 +23,7 @@ from app.auth.infrastructure.models import UserModel
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.maintenance.application.use_cases import (
     IncidentActor,
+    ListOwnerApprovalsUseCase,
     _load_incident_in_scope,
 )
 from app.maintenance.domain.enums import (
@@ -41,8 +42,9 @@ from app.maintenance.domain.exceptions import (
     MaintenanceValidationError,
     OwnerApprovalNotFoundError,
 )
-from app.maintenance.domain.repositories import IncidentFilters
+from app.maintenance.domain.repositories import IncidentFilters, OwnerApprovalFilters
 from app.maintenance.infrastructure.models import IncidentModel, OwnerApprovalModel
+from app.maintenance.infrastructure.repositories import SqlAlchemyOwnerApprovalReader
 from app.notifications.domain.enums import NotificationChannel, NotificationStatus, NotificationType
 from app.notifications.infrastructure.models import NotificationLogModel
 from app.tenants.infrastructure.models import TenantModel
@@ -52,6 +54,7 @@ from app.properties.infrastructure.models import (
     PropertyModel,
     PropertyStateTransitionModel,
 )
+from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType
 from app.timeline.infrastructure.models import TimelineEventModel
 from tests.maintenance.conftest import (
@@ -502,6 +505,208 @@ async def test_triage_is_refused_on_a_closed_incident(flow, world, db_session) -
         )
 
 
+# --- Triage that classifies (R3.5, design D1/D2/D4/D5) ----------------------------------
+
+
+async def _triage_open(flow, world, db_session, **fields):
+    """One `OPEN` incident triaged by the manager, which is every case of R3.5."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.OPEN)
+    result = await flow.triage.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=manager(world),
+        now=LATER,
+        **fields,
+    )
+    return incident, result
+
+
+async def test_a_triage_with_category_and_severity_classifies_an_open_incident(
+    flow, world, db_session
+) -> None:
+    """R3.5 — the human path out of `OPEN` the automatic classifier could not always give."""
+    incident, result = await _triage_open(
+        flow,
+        world,
+        db_session,
+        category=IncidentCategory.PLUMBING,
+        severity=IncidentSeverity.MEDIUM,
+    )
+
+    assert result.status is IncidentStatus.CLASSIFIED
+    db_session.expunge_all()
+    stored = await db_session.get(IncidentModel, incident.id)
+    assert stored.status is IncidentStatus.CLASSIFIED
+
+
+async def test_the_triage_audit_row_carries_the_status_it_moved(
+    flow, world, db_session
+) -> None:
+    """D4 — one `INCIDENT_TRIAGED` row whose `ChangeSet` shows the move, and never a
+    second `INCIDENT_CLASSIFIED` audit row for the same triage."""
+    incident, _ = await _triage_open(
+        flow,
+        world,
+        db_session,
+        category=IncidentCategory.PLUMBING,
+        severity=IncidentSeverity.MEDIUM,
+    )
+
+    changes = await audit_changes_for(db_session, incident.id, audit_actions.INCIDENT_TRIAGED)
+    assert changes["status"]["old"] == IncidentStatus.OPEN.value
+    assert changes["status"]["new"] == IncidentStatus.CLASSIFIED.value
+    assert await audit_actions_for(db_session, incident.id) == [
+        audit_actions.INCIDENT_TRIAGED
+    ]
+
+
+async def test_a_triage_that_does_not_classify_leaves_the_status_where_it_was(
+    flow, world, db_session
+) -> None:
+    """R3.5's negative case, at the use-case level: one field only, `OPEN` throughout."""
+    incident, result = await _triage_open(
+        flow, world, db_session, severity=IncidentSeverity.CRITICAL
+    )
+
+    assert result.status is IncidentStatus.OPEN
+    changes = await audit_changes_for(db_session, incident.id, audit_actions.INCIDENT_TRIAGED)
+    assert changes["status"]["old"] == changes["status"]["new"] == IncidentStatus.OPEN.value
+    assert TimelineEventType.INCIDENT_CLASSIFIED.value not in await timeline_types_for(
+        db_session, world.tenant.id
+    )
+
+
+async def test_a_triage_that_classifies_writes_the_milestone_as_a_person(
+    flow, world, db_session
+) -> None:
+    """D4 — actor `USER`: R9's missing-actor exception is the automatic path's alone."""
+    await _triage_open(
+        flow,
+        world,
+        db_session,
+        category=IncidentCategory.PLUMBING,
+        severity=IncidentSeverity.MEDIUM,
+    )
+
+    events = await db_session.execute(
+        select(TimelineEventModel).where(
+            TimelineEventModel.event_type == TimelineEventType.INCIDENT_CLASSIFIED
+        )
+    )
+    event = events.scalars().one()
+    assert event.actor_type is TimelineActorType.USER
+    assert event.actor_user_id == world.manager.id
+
+
+@pytest.mark.parametrize(
+    ("severity", "trigger", "state"),
+    [
+        (
+            IncidentSeverity.HIGH,
+            PropertyStateTrigger.INCIDENT_HIGH,
+            PropertyOperationalState.MAINTENANCE_REQUIRED,
+        ),
+        (
+            IncidentSeverity.CRITICAL,
+            PropertyStateTrigger.INCIDENT_CRITICAL,
+            PropertyOperationalState.CRITICAL_INCIDENT,
+        ),
+    ],
+)
+async def test_classifying_by_triage_fires_the_same_trigger_as_the_automatic_path(
+    flow, world, db_session, severity, trigger, state
+) -> None:
+    """D5/R3.5 — "el mismo disparador que usa la vía automática", asserted on the
+    transition row's own `trigger` and on the state it left the property in."""
+    await _triage_open(
+        flow, world, db_session, category=IncidentCategory.PLUMBING, severity=severity
+    )
+
+    rows = await db_session.execute(select(PropertyStateTransitionModel))
+    transition = rows.scalars().one()
+    assert transition.metadata_["trigger"] == trigger.value
+    assert await state_of(db_session, world.property.id) is state
+
+
+@pytest.mark.parametrize("severity", [IncidentSeverity.MEDIUM, IncidentSeverity.LOW])
+async def test_classifying_a_mild_incident_by_triage_fires_nothing(
+    flow, world, db_session, severity
+) -> None:
+    """R3.5 — "NEVER SHALL disparar nada para `MEDIUM` ni `LOW`", asserted as an absence."""
+    _, result = await _triage_open(
+        flow, world, db_session, category=IncidentCategory.PLUMBING, severity=severity
+    )
+
+    assert result.status is IncidentStatus.CLASSIFIED
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(PropertyStateTransitionModel)
+        )
+        == 0
+    )
+    assert await state_of(db_session, world.property.id) is (
+        PropertyOperationalState.VACANT_READY
+    )
+
+
+async def test_a_triage_that_only_prices_the_job_fires_nothing_and_stays_open(
+    flow, world, db_session
+) -> None:
+    """R3.5 — the trigger "SHALL ser exclusivo de esta transición": a triage that does not
+    classify never asks the property state machine for anything, whatever the severity."""
+    incident = await make_incident(
+        db_session, world, status=IncidentStatus.OPEN, severity=IncidentSeverity.CRITICAL
+    )
+
+    result = await flow.triage.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=manager(world),
+        now=LATER,
+        estimated_cost=Decimal("40.00"),
+    )
+
+    assert result.status is IncidentStatus.OPEN
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(PropertyStateTransitionModel)
+        )
+        == 0
+    )
+    assert await state_of(db_session, world.property.id) is (
+        PropertyOperationalState.VACANT_READY
+    )
+
+
+async def test_one_triage_can_classify_and_open_the_budget_gate_at_once(
+    flow, world, db_session
+) -> None:
+    """R3.5's last clause — `AWAITING_OWNER_APPROVAL` "pasando por `CLASSIFIED`".
+
+    The order is the assertion and not an implementation detail:
+    `require_owner_approval` admits `CLASSIFIED` and `IN_PROGRESS` as origins and nothing
+    else, so an incident that starts `OPEN` and ends `AWAITING_OWNER_APPROVAL` can only have
+    got there through the classification `set_triage` did first.
+    """
+    incident, result = await _triage_open(
+        flow,
+        world,
+        db_session,
+        category=IncidentCategory.PLUMBING,
+        severity=IncidentSeverity.MEDIUM,
+        estimated_cost=Decimal("450.00"),
+    )
+
+    assert result.status is IncidentStatus.AWAITING_OWNER_APPROVAL
+    assert result.owner_approval_required is True
+    assert TimelineEventType.INCIDENT_CLASSIFIED.value in await timeline_types_for(
+        db_session, world.tenant.id
+    )
+    changes = await audit_changes_for(db_session, incident.id, audit_actions.INCIDENT_TRIAGED)
+    assert changes["status"]["old"] == IncidentStatus.OPEN.value
+    assert changes["status"]["new"] == IncidentStatus.AWAITING_OWNER_APPROVAL.value
+
+
 # --- Answering the approval (task 6.6; R2.4, R2.5, R2.6) --------------------------------
 
 
@@ -654,6 +859,207 @@ async def test_an_unknown_approval_is_not_found(flow, world) -> None:
             actor=owner(world),
             now=LATER,
         )
+
+
+# --- The technician learns the answer (`approvals-web` R4, design D7) -------------------
+
+
+async def _answer_notifications(db_session, tenant_id, notification_type: str) -> list:
+    """Rows of one notification type for one tenant — the same shape `_severity_alerts`
+    (below in this file) uses for the severity alert, named here for these answer tests."""
+    rows = await db_session.execute(
+        select(NotificationLogModel).where(
+            NotificationLogModel.tenant_id == tenant_id,
+            NotificationLogModel.notification_type == notification_type,
+        )
+    )
+    return list(rows.scalars())
+
+
+async def test_approving_notifies_the_assigned_technician(flow, world, db_session) -> None:
+    """R4.1 — the technician who is waiting on the answer is the one told."""
+    incident = await _in_progress(flow, world, db_session)
+    await flow.resolve.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        final_cost=Decimal("500.00"),
+        actor=technician(world),
+        now=LATER,
+    )
+    approval = (await db_session.execute(select(OwnerApprovalModel))).scalars().one()
+
+    await flow.respond.execute(
+        tenant_id=world.tenant.id,
+        approval_id=approval.id,
+        status=OwnerApprovalStatus.APPROVED,
+        response_notes="Adelante.",
+        actor=owner(world),
+        now=LATER,
+    )
+
+    rows = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_APPROVED.value
+    )
+    assert [row.recipient_user_id for row in rows] == [world.technician.id]
+    rejected = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_REJECTED.value
+    )
+    assert rejected == []
+
+
+async def test_rejecting_notifies_the_assigned_technician(flow, world, db_session) -> None:
+    """R4.1 — a rejection is as much news as being unblocked (design D7)."""
+    incident = await _in_progress(flow, world, db_session)
+    await flow.resolve.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        final_cost=Decimal("500.00"),
+        actor=technician(world),
+        now=LATER,
+    )
+    approval = (await db_session.execute(select(OwnerApprovalModel))).scalars().one()
+
+    await flow.respond.execute(
+        tenant_id=world.tenant.id,
+        approval_id=approval.id,
+        status=OwnerApprovalStatus.REJECTED,
+        response_notes="Demasiado caro.",
+        actor=owner(world),
+        now=LATER,
+    )
+
+    rows = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_REJECTED.value
+    )
+    assert [row.recipient_user_id for row in rows] == [world.technician.id]
+    approved = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_APPROVED.value
+    )
+    assert approved == []
+
+
+async def test_an_incident_with_no_assigned_technician_writes_no_notification(
+    flow, world, db_session
+) -> None:
+    """R4.3 — no assignee, no notification, and the answer itself must not fail."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+    await flow.triage.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=manager(world),
+        now=LATER,
+        estimated_cost=Decimal("450.00"),
+    )
+    approval = (await db_session.execute(select(OwnerApprovalModel))).scalars().one()
+
+    result = await flow.respond.execute(
+        tenant_id=world.tenant.id,
+        approval_id=approval.id,
+        status=OwnerApprovalStatus.APPROVED,
+        response_notes=None,
+        actor=owner(world),
+        now=LATER,
+    )
+
+    assert result.status is IncidentStatus.CLASSIFIED
+    approved = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_APPROVED.value
+    )
+    rejected = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_REJECTED.value
+    )
+    assert approved == []
+    assert rejected == []
+
+
+async def test_the_answer_notification_carries_no_reason_or_response_notes(
+    flow, world, db_session
+) -> None:
+    """R4.4 — the closed form: ids and a constant, never `OwnerApproval.reason` or the
+    owner's own `response_notes`."""
+    leaked_response_notes = "Aprobado porque el fontanero es de confianza."
+    incident = await _in_progress(flow, world, db_session)
+    await flow.resolve.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        final_cost=Decimal("500.00"),
+        actor=technician(world),
+        now=LATER,
+    )
+    approval = (await db_session.execute(select(OwnerApprovalModel))).scalars().one()
+
+    await flow.respond.execute(
+        tenant_id=world.tenant.id,
+        approval_id=approval.id,
+        status=OwnerApprovalStatus.APPROVED,
+        response_notes=leaked_response_notes,
+        actor=owner(world),
+        now=LATER,
+    )
+
+    rows = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_APPROVED.value
+    )
+    row = rows[0]
+    assert leaked_response_notes not in row.body
+    assert leaked_response_notes not in row.subject
+    assert approval.reason not in row.body
+
+
+async def test_the_answer_notification_reaches_the_same_commit_as_the_response(
+    flow, world, db_session
+) -> None:
+    """R4.5 — no window in which the response is recorded and the technician's notice is not.
+
+    Mirrors `test_the_alert_and_the_verdict_reach_the_same_commit`: wraps the use case's unit
+    of work and, at the moment `commit()` is called, asks whether the notification row is
+    already visible in the session.
+    """
+    incident = await _in_progress(flow, world, db_session)
+    await flow.resolve.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        final_cost=Decimal("500.00"),
+        actor=technician(world),
+        now=LATER,
+    )
+    approval = (await db_session.execute(select(OwnerApprovalModel))).scalars().one()
+
+    real_uow = flow.respond._uow
+    seen: list[bool] = []
+
+    class _WatchesTheCommit:
+        async def commit(self) -> None:
+            rows = await db_session.execute(
+                select(func.count())
+                .select_from(NotificationLogModel)
+                .where(
+                    NotificationLogModel.tenant_id == world.tenant.id,
+                    NotificationLogModel.related_id == incident.id,
+                    NotificationLogModel.notification_type
+                    == NotificationType.OWNER_APPROVAL_APPROVED.value,
+                )
+            )
+            seen.append(rows.scalar_one() == 1)
+            await real_uow.commit()
+
+        async def rollback(self) -> None:  # pragma: no cover - not reached here
+            await real_uow.rollback()
+
+    flow.respond._uow = _WatchesTheCommit()
+    try:
+        await flow.respond.execute(
+            tenant_id=world.tenant.id,
+            approval_id=approval.id,
+            status=OwnerApprovalStatus.APPROVED,
+            response_notes=None,
+            actor=owner(world),
+            now=LATER,
+        )
+    finally:
+        flow.respond._uow = real_uow
+
+    assert seen == [True]
 
 
 # --- Assignment and SLA (task 6.7; R3.1, R3.4, R3.5) ------------------------------------
@@ -2551,3 +2957,72 @@ async def test_a_confident_medium_verdict_announces_nothing(
         )
     )
     assert list(rows.scalars()) == []
+
+
+# --- ListOwnerApprovalsUseCase (`approvals-web` design D4) ------------------------------
+
+
+async def test_list_owner_approvals_drops_a_row_whose_property_does_not_resolve(
+    world, db_session, caplog
+) -> None:
+    """D4: `OwnerApprovalReader.list_for_tenant` never touches `properties`, so a property
+    that does not resolve *inside the tenant* only surfaces once this use case runs its own
+    batched `list_for_ids` — this is the one test that exercises that composition, the same
+    role `test_a_dangling_property_is_a_not_found_and_never_a_partial_answer` plays for
+    `GetIncidentContextUseCase`.
+
+    Such a row is dropped from the page and logged under
+    `maintenance.owner_approval_property_unresolved` (mirroring
+    `incident_context_property_unresolved`), and `page.total` — the reader's own count — is
+    NOT adjusted for the drop.
+    """
+    neighbour_tenant = TenantModel(name="TenantB", billing_email="b@example.com")
+    db_session.add(neighbour_tenant)
+    await db_session.flush()
+    theirs = PropertyModel(
+        tenant_id=neighbour_tenant.id, name="Otra", internal_code="OTRA"
+    )
+    db_session.add(theirs)
+    await db_session.flush()
+
+    incident = await make_incident(
+        db_session, world, status=IncidentStatus.AWAITING_OWNER_APPROVAL
+    )
+    approval = OwnerApprovalModel(
+        id=uuid.uuid4(),
+        tenant_id=world.tenant.id,
+        property_id=theirs.id,
+        related_type=OwnerApprovalRelatedType.INCIDENT,
+        related_id=incident.id,
+        amount=Decimal("450.00"),
+        reason="Maintenance expense above the tenant threshold.",
+        requested_at=NOW,
+    )
+    db_session.add(approval)
+    await db_session.flush()
+
+    use_case = ListOwnerApprovalsUseCase(
+        approvals=SqlAlchemyOwnerApprovalReader(db_session),
+        properties=SqlAlchemyPropertyRepository(db_session),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        page = await use_case.execute(
+            tenant_id=world.tenant.id,
+            filters=OwnerApprovalFilters(),
+            page=1,
+            per_page=10,
+        )
+
+    assert page.items == ()
+    assert page.total == 1
+
+    warnings = [
+        record
+        for record in caplog.records
+        if record.message == "maintenance.owner_approval_property_unresolved"
+    ]
+    assert len(warnings) == 1
+    assert warnings[0].tenant_id == str(world.tenant.id)
+    assert warnings[0].approval_id == str(approval.id)
+    assert warnings[0].property_id == str(theirs.id)

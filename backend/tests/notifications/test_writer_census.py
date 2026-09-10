@@ -56,19 +56,23 @@ EXCLUDED = {"notifications/domain/enums.py"}
 #: `Escalation(...)` built somewhere else from silently joining the census.
 ESCALATION_MODULE = "notifications/domain/escalation.py"
 
-#: Types with a production writer, as of `guest-link-delivery` section 3. Seventeen —
-#: recounted against the set below rather than incremented, since the previous count ("fifteen"
-#: for sixteen entries) had already drifted by one.
+#: Types with a production writer, as of the merge of `approvals-web` section 4 and
+#: `guest-link-delivery` section 3. Nineteen — measured by counting this set's own members
+#: (`test_the_measured_writers_are_exactly_the_declared_ones` is what enforces that this number
+#: cannot drift from the AST census), not carried forward from either branch's own count: one
+#: said "Eighteen" and the other "Seventeen", each correct for its own sixteen-member base plus
+#: its own addition, but neither anticipated the other's — recount, never increment by habit.
 #:
 #: Seven predate `notification-writers-gap` — `CLEANING_TASK_ASSIGNED`, `CLEANING_NO_RESPONSE`,
 #: `TECHNICIAN_ASSIGNED`, `OWNER_APPROVAL_REQUIRED`, `GUEST_ESCALATION`,
-#: `PASSWORD_RESET_REQUESTED` and `SLA_BREACH` — six are that change's own, and the last two
-#: are `staff-messaging`'s: `SendCleaningTaskMessageUseCase` (`cleaning/application/use_cases.py`)
-#: fans `CLEANING_TASK_MESSAGE` out via `staff_message_notification` to every active
-#: `PROPERTY_MANAGER` (R4.2) or to the assigned cleaner (R4.3); `SendIncidentMessageUseCase`
-#: (`maintenance/application/use_cases.py`) does the same for `INCIDENT_MESSAGE` via that
-#: module's own `staff_message_notification`, to every active `PROPERTY_MANAGER` or to the
-#: assigned technician.
+#: `PASSWORD_RESET_REQUESTED` and `SLA_BREACH` — six are that change's own, two are
+#: `staff-messaging`'s (`CLEANING_TASK_MESSAGE`, `INCIDENT_MESSAGE`), two are `approvals-web`'s
+#: own (R4.2): `RespondOwnerApprovalUseCase` (`maintenance/application/use_cases.py`) writes
+#: `OWNER_APPROVAL_APPROVED` or `OWNER_APPROVAL_REJECTED` to the assigned technician via
+#: `owner_approval_approved_notification` / `owner_approval_rejected_notification` in
+#: `app/maintenance/domain/notifications.py`, and the last one is `guest-link-delivery`'s own
+#: (R3.3/R4.3): `SendGuestAccessTokenUseCase` (`guests/application/portal.py`) writes
+#: `GUEST_PORTAL_LINK_DELIVERED`.
 WITH_WRITER = frozenset(
     {
         "CLEANING_TASK_ASSIGNED",
@@ -90,6 +94,9 @@ WITH_WRITER = frozenset(
         "REVIEW_RESPONSE_APPROVED",
         "CLEANING_TASK_MESSAGE",
         "INCIDENT_MESSAGE",
+        # `approvals-web` design D6 (R4.2) — see the module docstring above this set.
+        "OWNER_APPROVAL_APPROVED",
+        "OWNER_APPROVAL_REJECTED",
         # `guest-link-delivery` R3.3/R4.3 — `SendGuestAccessTokenUseCase`
         # (`guests/application/portal.py`) composes one row per send attempt, `SENT` or
         # `FAILED` and never `PENDING`, in the same transaction as the token it mints. It is

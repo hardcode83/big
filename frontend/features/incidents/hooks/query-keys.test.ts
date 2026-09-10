@@ -24,6 +24,7 @@ describe("incidentsKeys tenant isolation (steering security rule 1, R1.3)", () =
     context: incidentsKeys.context(tenantId, "i1"),
     photos: incidentsKeys.photos(tenantId, "i1"),
     listPrefix: incidentsKeys.listPrefix(tenantId),
+    technicians: incidentsKeys.technicians(tenantId),
   });
 
   it("prefixes every key with its tenant", () => {
@@ -54,6 +55,15 @@ describe("incidentsKeys tenant isolation (steering security rule 1, R1.3)", () =
     expect(
       new Set([list, detail, context, photos].map((k) => JSON.stringify(k))).size,
     ).toBe(4);
+  });
+
+  it("gives the technician roster its own key, distinct from the others", () => {
+    const { list, detail, context, photos, technicians } = forTenant(A);
+    expect(
+      new Set(
+        [list, detail, context, photos, technicians].map((k) => JSON.stringify(k)),
+      ).size,
+    ).toBe(5);
   });
 
   it("shares one key between the row and the detail context (R1.3)", () => {

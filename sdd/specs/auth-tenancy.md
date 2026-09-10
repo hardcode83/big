@@ -231,10 +231,18 @@ tocar la base de datos a mano.
   (`READ_RESERVATIONS`, `MANAGE_RESERVATIONS`), los cuatro de `user-management`
   (`READ_USERS`, `MANAGE_USERS`, `READ_TENANT_SETTINGS`, `MANAGE_TENANT_SETTINGS`), los dos de
   `properties-crud` (`READ_PROPERTIES`, `MANAGE_PROPERTIES`), los cinco de `cleaning`, los
-  cuatro de `maintenance` (`READ_INCIDENTS`, `MANAGE_INCIDENTS`, `EXECUTE_INCIDENTS`,
-  `RESPOND_OWNER_APPROVALS`), los cinco de `revenue-reviews` (`READ_REVIEWS`,
+  cinco de `maintenance` (`READ_INCIDENTS`, `MANAGE_INCIDENTS`, `EXECUTE_INCIDENTS`,
+  `RESPOND_OWNER_APPROVALS`, `READ_OWNER_APPROVALS`), los cinco de `revenue-reviews` (`READ_REVIEWS`,
   `CREATE_REVIEW`, `APPROVE_REVIEW`, `IGNORE_REVIEW`, `MARK_REVIEW_POSTED`) y el que añadió
   `platform-admin-api` (`MANAGE_PLATFORM`), todos diferenciados por rol.
+- **`READ_OWNER_APPROVALS`** (cambio `approvals-web`, D1) da a `TENANT_OWNER` y a
+  `PROPERTY_MANAGER` — y a nadie más — la lectura de la cola de aprobaciones del tenant
+  (`GET /api/v1/owner-approvals`, ver [`maintenance.md`](maintenance.md)). Es un permiso propio,
+  deliberadamente **no** una reutilización de `READ_INCIDENTS`: `_INCIDENT_EXECUTE` incluye
+  `READ_INCIDENTS` y `UserRole.TECHNICIAN` tiene `_INCIDENT_EXECUTE`, así que reutilizarlo habría
+  mostrado al técnico toda la cola de gastos del tenant. Responder una aprobación sigue exigiendo
+  `RESPOND_OWNER_APPROVALS`, que continúa siendo sólo de `TENANT_OWNER`: el manager ve por qué el
+  flujo está parado, pero no decide.
 - `MANAGE_PLATFORM` lo sostiene `SUPER_ADMIN` y solo `SUPER_ADMIN` (cambio
   `platform-admin-api`, R5.1/R5.2/D6). Vive en una entrada `_PLATFORM` del módulo
   `app/auth/domain/policy.py`, sumada a `_SELF_SERVICE` para componer

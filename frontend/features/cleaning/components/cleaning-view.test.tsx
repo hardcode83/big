@@ -21,6 +21,8 @@ const listCleaners = vi.hoisted(() => vi.fn());
 const listProperties = vi.hoisted(() => vi.fn());
 const assignTask = vi.hoisted(() => vi.fn());
 const cancelTask = vi.hoisted(() => vi.fn());
+const createTask = vi.hoisted(() => vi.fn());
+const validateTask = vi.hoisted(() => vi.fn());
 
 const role = vi.hoisted(() => ({ current: "PROPERTY_MANAGER" }));
 const tenantId = vi.hoisted(() => ({ current: "tenant-1" }));
@@ -45,6 +47,8 @@ vi.mock("../data", async (importOriginal) => ({
     listProperties,
     assignTask,
     cancelTask,
+    createTask,
+    validateTask,
   }),
 }));
 
@@ -59,6 +63,9 @@ const task: CleaningTaskListItem = {
   scheduledStart: "2026-08-20T09:00:00Z",
   scheduledEnd: "2026-08-20T11:00:00Z",
   createdAt: "2026-08-19T18:00:00Z",
+  completedAt: null,
+  validationStatus: "PENDING",
+  validatedAt: null,
   // Assignable by default, so every pre-existing test keeps describing the ordinary row.
   assignmentBlockedBy: null,
 };
@@ -67,7 +74,12 @@ const cleaners: CleanerSummary[] = [
   { id: CLEANER_UUID, name: "Marta Ruiz", isActive: true },
 ];
 const properties: PropertySummary[] = [
-  { id: PROPERTY_UUID, name: "Redes 11", internalCode: "REDES11" },
+  {
+    id: PROPERTY_UUID,
+    name: "Redes 11",
+    internalCode: "REDES11",
+    currentOperationalState: "AWAITING_CLEANING",
+  },
 ];
 
 function page(
@@ -116,6 +128,9 @@ beforeEach(() => {
   listCleaners.mockReset().mockResolvedValue(cleaners);
   listProperties.mockReset().mockResolvedValue(properties);
   assignTask.mockReset();
+  createTask.mockReset();
+  validateTask.mockReset();
+  cancelTask.mockReset();
 });
 
 describe("CleaningView — the real list (R1.1)", () => {
@@ -714,5 +729,757 @@ describe("CleaningView — the pre-flight, and the race it does not pretend to w
     expect(document.body.textContent).not.toContain(
       "La vivienda todavía no está pendiente de limpieza.",
     );
+  });
+});
+
+describe("CleaningView — the create control (R1.1, R5.1)", () => {
+  it("offers the create control to a PROPERTY_MANAGER", async () => {
+    renderView();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Nueva limpieza" }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("hides the create control from a role without MANAGE_CLEANING_TASKS", async () => {
+    role.current = "TENANT_OWNER";
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByRole("listitem")).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Nueva limpieza" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("CleaningView — creating a task (R1.1, R1.3, R1.4, R1.5)", () => {
+  async function openCreatePanel() {
+    renderView();
+    fireEvent.click(await screen.findByRole("button", { name: "Nueva limpieza" }));
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("Vivienda de la nueva tarea"),
+      ).toBeInTheDocument(),
+    );
+  }
+
+  it("sends the create input, invalidates the listing, announces success, and closes the panel", async () => {
+    await openCreatePanel();
+    createTask.mockResolvedValue({
+      id: "task-2",
+      propertyId: PROPERTY_UUID,
+      assignedCleanerId: null,
+      status: "CREATED",
+      scheduledStart: null,
+      scheduledEnd: null,
+      createdAt: "2026-09-06T10:00:00Z",
+      completedAt: null,
+      validationStatus: "PENDING",
+      validatedAt: null,
+    });
+    listTasks.mockResolvedValue(page([task, { ...task, id: "task-2" }]));
+
+    fireEvent.change(screen.getByLabelText("Vivienda de la nueva tarea"), {
+      target: { value: PROPERTY_UUID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Crear" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Tarea de limpieza creada."),
+      ).toBeInTheDocument(),
+    );
+    expect(createTask).toHaveBeenCalledExactlyOnceWith("tenant-1", {
+      propertyId: PROPERTY_UUID,
+    });
+    // R1.3: the listing key is invalidated so the new row appears without a
+    // manual reload — the same refetch mechanism assignment already uses.
+    await waitFor(() => expect(listTasks).toHaveBeenCalledTimes(2));
+    // The panel closes on success — its field is no longer in the document.
+    expect(
+      screen.queryByLabelText("Vivienda de la nueva tarea"),
+    ).not.toBeInTheDocument();
+    // Still the single live region, and success is not an alert.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [403, "No tienes permiso para crear limpiezas."],
+    [404, "Esa vivienda ya no existe, o no tiene una plantilla de checklist activa."],
+    [
+      409,
+      "Esa vivienda admite más de una plantilla de checklist activa; no se puede crear la tarea.",
+    ],
+    [422, "Revisa los datos introducidos."],
+    [500, "No se pudo crear la limpieza. Vuelve a intentarlo."],
+  ] as const)(
+    "announces the translated message for %s and keeps the panel open (R1.4)",
+    async (status, message) => {
+      await openCreatePanel();
+      createTask.mockRejectedValue(
+        new ApiError({ code: "CODE", message: "backend detail", status }),
+      );
+
+      fireEvent.change(screen.getByLabelText("Vivienda de la nueva tarea"), {
+        target: { value: PROPERTY_UUID },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Crear" }));
+
+      await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
+      expect(screen.getByRole("alert").textContent).toBe(message);
+      // The panel stays open so the manager can see the failure and retry.
+      expect(
+        screen.getByLabelText("Vivienda de la nueva tarea"),
+      ).toBeInTheDocument();
+      // Never the backend's technical text (R5.1, design D10).
+      expect(document.body.textContent).not.toContain("backend detail");
+      // Still the single live region while the mutation is in its error state,
+      // not just while it is pending (design D11).
+      expect(
+        screen
+          .getAllByRole("status")
+          .filter((node) => node.getAttribute("aria-busy") === null),
+      ).toHaveLength(1);
+    },
+  );
+
+  it("never opens a second live region while creating", async () => {
+    await openCreatePanel();
+    createTask.mockReturnValue(new Promise(() => {}));
+
+    fireEvent.change(screen.getByLabelText("Vivienda de la nueva tarea"), {
+      target: { value: PROPERTY_UUID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Crear" }));
+
+    // Both the submit button and the live region can legitimately say "Creando…"
+    // at once, so this asserts on the region specifically, not on the text.
+    await waitFor(() => {
+      const region = screen
+        .getAllByRole("status")
+        .find((node) => node.getAttribute("aria-live") === "polite");
+      expect(region?.textContent).toBe("Creando…");
+    });
+    const regions = screen
+      .getAllByRole("status")
+      .filter((node) => node.getAttribute("aria-busy") === null);
+    expect(regions).toHaveLength(1);
+  });
+});
+
+describe("CleaningView — precedence between create and assign (design D4)", () => {
+  async function openCreatePanel() {
+    fireEvent.click(await screen.findByRole("button", { name: "Nueva limpieza" }));
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("Vivienda de la nueva tarea"),
+      ).toBeInTheDocument(),
+    );
+  }
+
+  it("shows create's pending message over a settled assign success", async () => {
+    listCleaners.mockResolvedValue([
+      ...cleaners,
+      { id: "cleaner-2", name: "Lucía Gil", isActive: true },
+    ]);
+    renderView();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Asignar limpiadora" }),
+      ).toBeInTheDocument(),
+    );
+    assignTask.mockResolvedValue({ ...task, assignedCleanerId: "cleaner-2" });
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Asignar limpiadora" }),
+      { target: { value: "cleaner-2" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Asignar" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("Tarea asignada a Lucía Gil."),
+      ).toBeInTheDocument(),
+    );
+
+    // Now start a creation that never settles: it must outrank the already
+    // -settled assign success, per the "isPending wins outright" rule.
+    createTask.mockReturnValue(new Promise(() => {}));
+    await openCreatePanel();
+    fireEvent.change(screen.getByLabelText("Vivienda de la nueva tarea"), {
+      target: { value: PROPERTY_UUID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Crear" }));
+
+    // Both the submit button and the live region can legitimately say "Creando…"
+    // at once, so this asserts on the region specifically, not on the text.
+    await waitFor(() => {
+      const region = screen
+        .getAllByRole("status")
+        .find((node) => node.getAttribute("aria-live") === "polite");
+      expect(region?.textContent).toBe("Creando…");
+    });
+    expect(
+      screen.queryByText("Tarea asignada a Lucía Gil."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("prefers the most recently submitted error between the two mutations", async () => {
+    listCleaners.mockResolvedValue([
+      ...cleaners,
+      { id: "cleaner-2", name: "Lucía Gil", isActive: true },
+    ]);
+    renderView();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Asignar limpiadora" }),
+      ).toBeInTheDocument(),
+    );
+
+    // The assignment fails first...
+    assignTask.mockRejectedValue(
+      new ApiError({ code: "CODE", message: "assign failed", status: 403 }),
+    );
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Asignar limpiadora" }),
+      { target: { value: "cleaner-2" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Asignar" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("No tienes permiso para asignar limpiezas."),
+      ).toBeInTheDocument(),
+    );
+
+    // ...and creation fails afterwards: its error, submitted later, wins.
+    createTask.mockRejectedValue(
+      new ApiError({ code: "CODE", message: "create failed", status: 422 }),
+    );
+    await openCreatePanel();
+    fireEvent.change(screen.getByLabelText("Vivienda de la nueva tarea"), {
+      target: { value: PROPERTY_UUID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Crear" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Revisa los datos introducidos."),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText("No tienes permiso para asignar limpiezas."),
+    ).not.toBeInTheDocument();
+    // Still exactly one live region throughout.
+    expect(
+      screen
+        .getAllByRole("status")
+        .filter((node) => node.getAttribute("aria-busy") === null),
+    ).toHaveLength(1);
+  });
+
+  it("prefers assign's error over create's when assign is submitted later, despite create being declared first in the sources array", async () => {
+    listCleaners.mockResolvedValue([
+      ...cleaners,
+      { id: "cleaner-2", name: "Lucía Gil", isActive: true },
+    ]);
+    renderView();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Asignar limpiadora" }),
+      ).toBeInTheDocument(),
+    );
+
+    // Creation fails first...
+    createTask.mockRejectedValue(
+      new ApiError({ code: "CODE", message: "create failed", status: 422 }),
+    );
+    await openCreatePanel();
+    fireEvent.change(screen.getByLabelText("Vivienda de la nueva tarea"), {
+      target: { value: PROPERTY_UUID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Crear" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Revisa los datos introducidos."),
+      ).toBeInTheDocument(),
+    );
+
+    // ...and the assignment fails afterwards: its error, submitted later, wins —
+    // this is the only case that falsifies "array position drives the pick"
+    // (`create` is declared first in the fixed `[create, assign]` array) versus
+    // "submittedAt drives the pick".
+    assignTask.mockRejectedValue(
+      new ApiError({ code: "CODE", message: "assign failed", status: 403 }),
+    );
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Asignar limpiadora" }),
+      { target: { value: "cleaner-2" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Asignar" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("No tienes permiso para asignar limpiezas."),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText("Revisa los datos introducidos."),
+    ).not.toBeInTheDocument();
+    // Still exactly one live region throughout.
+    expect(
+      screen
+        .getAllByRole("status")
+        .filter((node) => node.getAttribute("aria-busy") === null),
+    ).toHaveLength(1);
+  });
+});
+
+describe("CleaningView — validating a completed task (R3.1, R3.2, R3.5)", () => {
+  const completedTask: CleaningTaskListItem = {
+    ...task,
+    status: "COMPLETED",
+    completedAt: "2026-08-20T12:00:00Z",
+    validationStatus: "PENDING",
+  };
+
+  it("offers the control to a PROPERTY_MANAGER on a COMPLETED task", async () => {
+    listTasks.mockResolvedValue(page([completedTask]));
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Validar" })).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "No pasa" })).toBeInTheDocument();
+  });
+
+  it("hides the control from a TENANT_OWNER, though the verdict field still shows", async () => {
+    role.current = "TENANT_OWNER";
+    listTasks.mockResolvedValue(page([completedTask]));
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByText("Pendiente de validación")).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: "Validar" })).not.toBeInTheDocument();
+  });
+
+  it("sends the task id and verdict, invalidates the listing, and announces success", async () => {
+    listTasks.mockResolvedValue(page([completedTask]));
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Validar" })).toBeInTheDocument(),
+    );
+
+    validateTask.mockResolvedValue({
+      ...completedTask,
+      validationStatus: "PASSED",
+      validatedAt: "2026-08-20T13:00:00Z",
+    });
+    listTasks.mockResolvedValue(
+      page([{ ...completedTask, validationStatus: "PASSED" }]),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Validar" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Limpieza validada como correcta."),
+      ).toBeInTheDocument(),
+    );
+    expect(validateTask).toHaveBeenCalledExactlyOnceWith(
+      "tenant-1",
+      "task-1",
+      "PASSED",
+    );
+    // R3.2: the listing key is invalidated so the fresh verdict appears.
+    await waitFor(() => expect(listTasks).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("announces the FAILED-specific success copy", async () => {
+    listTasks.mockResolvedValue(page([completedTask]));
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "No pasa" })).toBeInTheDocument(),
+    );
+
+    validateTask.mockResolvedValue({
+      ...completedTask,
+      validationStatus: "FAILED",
+      validatedAt: "2026-08-20T13:00:00Z",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "No pasa" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Limpieza marcada como no conforme; se ha notificado a la limpiadora asignada.",
+        ),
+      ).toBeInTheDocument(),
+    );
+    expect(validateTask).toHaveBeenCalledExactlyOnceWith(
+      "tenant-1",
+      "task-1",
+      "FAILED",
+    );
+  });
+
+  it.each([
+    [403, "No tienes permiso para validar limpiezas."],
+    [404, "Esa tarea de limpieza ya no existe."],
+    [409, "Esa tarea ya no está completada; no se puede validar."],
+    [500, "No se pudo validar la limpieza. Vuelve a intentarlo."],
+  ] as const)(
+    "announces the translated message for %s (R3.5)",
+    async (status, message) => {
+      listTasks.mockResolvedValue(page([completedTask]));
+      renderView();
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Validar" })).toBeInTheDocument(),
+      );
+
+      validateTask.mockRejectedValue(
+        new ApiError({ code: "CODE", message: "backend detail", status }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Validar" }));
+
+      await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
+      expect(screen.getByRole("alert").textContent).toBe(message);
+      // R3.5: still invalidated even on failure.
+      await waitFor(() => expect(listTasks).toHaveBeenCalledTimes(2));
+      expect(document.body.textContent).not.toContain("backend detail");
+    },
+  );
+
+  it("blocks a second row's verdict while the first is still in flight", async () => {
+    listTasks.mockResolvedValue(
+      page([completedTask, { ...completedTask, id: "task-2" }]),
+    );
+    validateTask.mockReturnValue(new Promise(() => {}));
+    renderView();
+
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Validar" })).toHaveLength(2),
+    );
+    const [first, second] = screen.getAllByRole("button", { name: "Validar" });
+    fireEvent.click(first);
+
+    await waitFor(() => expect(first).toBeDisabled());
+    expect(second).toBeDisabled();
+    expect(validateTask).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CleaningView — precedence including validate (design D4)", () => {
+  const completedTask: CleaningTaskListItem = {
+    ...task,
+    status: "COMPLETED",
+    completedAt: "2026-08-20T12:00:00Z",
+    validationStatus: "PENDING",
+  };
+
+  it("shows validate's pending message over a settled assign success", async () => {
+    listTasks.mockResolvedValue(page([completedTask]));
+    listCleaners.mockResolvedValue([
+      ...cleaners,
+      { id: "cleaner-2", name: "Lucía Gil", isActive: true },
+    ]);
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Validar" })).toBeInTheDocument(),
+    );
+
+    // Settle create's success first, then start a validate that never settles —
+    // it must outrank the already-settled success, per the "isPending wins
+    // outright" rule (mirrors the create-vs-assign test above).
+    createTask.mockResolvedValue({
+      id: "task-2",
+      propertyId: PROPERTY_UUID,
+      assignedCleanerId: null,
+      status: "CREATED",
+      scheduledStart: null,
+      scheduledEnd: null,
+      createdAt: "2026-09-06T10:00:00Z",
+      completedAt: null,
+      validationStatus: "PENDING",
+      validatedAt: null,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Nueva limpieza" }));
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("Vivienda de la nueva tarea"),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByLabelText("Vivienda de la nueva tarea"), {
+      target: { value: PROPERTY_UUID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Crear" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("Tarea de limpieza creada."),
+      ).toBeInTheDocument(),
+    );
+
+    validateTask.mockReturnValue(new Promise(() => {}));
+    fireEvent.click(screen.getByRole("button", { name: "Validar" }));
+
+    await waitFor(() => {
+      const region = screen
+        .getAllByRole("status")
+        .find((node) => node.getAttribute("aria-live") === "polite");
+      expect(region?.textContent).toBe("Enviando…");
+    });
+    expect(
+      screen.queryByText("Tarea de limpieza creada."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("prefers validate's error over an earlier create error, by submittedAt", async () => {
+    listTasks.mockResolvedValue(page([completedTask]));
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Validar" })).toBeInTheDocument(),
+    );
+
+    createTask.mockRejectedValue(
+      new ApiError({ code: "CODE", message: "create failed", status: 422 }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Nueva limpieza" }));
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("Vivienda de la nueva tarea"),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByLabelText("Vivienda de la nueva tarea"), {
+      target: { value: PROPERTY_UUID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Crear" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("Revisa los datos introducidos."),
+      ).toBeInTheDocument(),
+    );
+
+    validateTask.mockRejectedValue(
+      new ApiError({ code: "CODE", message: "validate failed", status: 409 }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Validar" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Esa tarea ya no está completada; no se puede validar."),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText("Revisa los datos introducidos."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen
+        .getAllByRole("status")
+        .filter((node) => node.getAttribute("aria-busy") === null),
+    ).toHaveLength(1);
+  });
+});
+
+describe("CleaningView — cancelling a live task (R4.1, R4.2, R4.3, R4.4)", () => {
+  async function openCancelDialog() {
+    renderView();
+    fireEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
+    await waitFor(() =>
+      expect(screen.getByRole("textbox")).toBeInTheDocument(),
+    );
+  }
+
+  it("offers the control to a PROPERTY_MANAGER on a live task", async () => {
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Cancelar" })).toBeInTheDocument(),
+    );
+  });
+
+  it("hides the control from a role without MANAGE_CLEANING_TASKS", async () => {
+    role.current = "TENANT_OWNER";
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByRole("listitem")).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: "Cancelar" })).not.toBeInTheDocument();
+  });
+
+  it("hides the control once the task is terminal", async () => {
+    listTasks.mockResolvedValue(page([{ ...task, status: "COMPLETED" }]));
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByRole("listitem")).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: "Cancelar" })).not.toBeInTheDocument();
+  });
+
+  it("sends only the task id and the trimmed reason (R4.2)", async () => {
+    await openCancelDialog();
+    cancelTask.mockResolvedValue({ ...task, status: "CANCELLED" });
+    listTasks.mockResolvedValue(page([{ ...task, status: "CANCELLED" }]));
+
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "  la limpiadora no volvió  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar cancelación" }));
+
+    await waitFor(() =>
+      expect(cancelTask).toHaveBeenCalledExactlyOnceWith(
+        "tenant-1",
+        "task-1",
+        "la limpiadora no volvió",
+      ),
+    );
+  });
+
+  it("invalidates the listing on success, closes the dialog, and announces success in the region (R4.3, design D4)", async () => {
+    await openCancelDialog();
+    cancelTask.mockResolvedValue({ ...task, status: "CANCELLED" });
+    listTasks.mockResolvedValue(
+      page([
+        { ...task, status: "CANCELLED" },
+        { ...task, id: "task-2", status: "CREATED" },
+      ]),
+    );
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "motivo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar cancelación" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Limpieza cancelada.")).toBeInTheDocument(),
+    );
+    // The dialog has closed — its form is no longer on screen.
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    // R4.3: the listing is refreshed so both the cancelled task and its replacement show.
+    await waitFor(() => expect(listTasks).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps the dialog open on failure and paints the alert inside it, not in the region (design D4, R4.5)", async () => {
+    await openCancelDialog();
+    cancelTask.mockRejectedValue(
+      new ApiError({ code: "CONFLICT", message: "already terminal", status: 409 }),
+    );
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "motivo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar cancelación" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Esa tarea ya está cerrada; no se puede cancelar."),
+      ).toBeInTheDocument(),
+    );
+    // The dialog is still on screen — closing only happens on success (design D4).
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+    // And the single live region says nothing about it: the alert lives in the
+    // dialog only, never duplicated into the region.
+    const region = screen
+      .getAllByRole("status")
+      .find((node) => node.getAttribute("aria-live") === "polite");
+    expect(region?.textContent).toBe("");
+    expect(document.body.textContent).not.toContain("already terminal");
+  });
+
+  it("closes the dialog through its own close control without cancelling anything", async () => {
+    await openCancelDialog();
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar limpieza" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox")).not.toBeInTheDocument(),
+    );
+    expect(cancelTask).not.toHaveBeenCalled();
+  });
+
+  it("shows cancel's pending message over a settled create success (design D4 precedence)", async () => {
+    renderView();
+    createTask.mockResolvedValue({
+      id: "task-2",
+      propertyId: PROPERTY_UUID,
+      assignedCleanerId: null,
+      status: "CREATED",
+      scheduledStart: null,
+      scheduledEnd: null,
+      createdAt: "2026-09-06T10:00:00Z",
+      completedAt: null,
+      validationStatus: "PENDING",
+      validatedAt: null,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Nueva limpieza" }));
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("Vivienda de la nueva tarea"),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByLabelText("Vivienda de la nueva tarea"), {
+      target: { value: PROPERTY_UUID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Crear" }));
+    await waitFor(() =>
+      expect(screen.getByText("Tarea de limpieza creada.")).toBeInTheDocument(),
+    );
+
+    cancelTask.mockReturnValue(new Promise(() => {}));
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    await waitFor(() =>
+      expect(screen.getByRole("textbox")).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "motivo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar cancelación" }));
+
+    await waitFor(() => {
+      const region = screen
+        .getAllByRole("status")
+        .find((node) => node.getAttribute("aria-live") === "polite");
+      expect(region?.textContent).toBe("Cancelando…");
+    });
+    expect(
+      screen.queryByText("Tarea de limpieza creada."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("blocks every other row's cancel button, and this row's own dismiss, while a cancellation is in flight (fix round, Finding 1, D4)", async () => {
+    listTasks.mockResolvedValue(
+      page([task, { ...task, id: "task-2", status: "CREATED" }]),
+    );
+    // Never settles: the cancellation stays in flight for the whole test.
+    cancelTask.mockReturnValue(new Promise(() => {}));
+    renderView();
+
+    const openButtons = await screen.findAllByRole("button", { name: "Cancelar" });
+    expect(openButtons).toHaveLength(2);
+    fireEvent.click(openButtons[0]);
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "motivo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar cancelación" }));
+    await waitFor(() => expect(cancelTask).toHaveBeenCalledTimes(1));
+
+    // While the sheet is open (modal), Radix already marks everything behind it
+    // `aria-hidden`, so task-2's "Cancelar" button is unreachable via the accessible
+    // tree — `getAllByRole` finds none, not even task-1's own (also behind the
+    // overlay). That is not new; what Finding 1 requires is that this state cannot
+    // be escaped while the request is in flight.
+    expect(screen.queryAllByRole("button", { name: "Cancelar" })).toHaveLength(0);
+
+    // The currently open dialog's own dismiss affordances (its close button here)
+    // do nothing while the request is still in flight — without this, dismissing
+    // now and reopening for task-2 would remount `CancelCleaningTaskDialogBody`,
+    // whose mount effect calls `mutation.reset()` on the very same shared mutation
+    // object task-1's still in-flight request is bound to.
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar limpieza" }));
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+    expect(cancelTask).toHaveBeenCalledTimes(1);
+
+    // Every row's button (unreachable behind the still-open modal above) is also
+    // disabled at the DOM level — `CleaningTaskRow`'s own guard, queryable directly
+    // once we bypass the accessible-tree hiding, mirroring
+    // `AssignCleanerControl.isBlocked`.
+    for (const button of screen.getAllByRole("button", {
+      name: "Cancelar",
+      hidden: true,
+    })) {
+      expect(button).toBeDisabled();
+    }
   });
 });

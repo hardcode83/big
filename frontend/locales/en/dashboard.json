@@ -89,6 +89,7 @@
     "financial": "Financial",
     "notes": "Notes",
     "approvals": "Pending approvals",
+  "viewApprovalsQueue": "View approvals queue",
     "photos": "Last cleaning photos",
     "noAccess": "No access information",
     "noCleaning": "No cleaning pending",

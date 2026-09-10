@@ -175,6 +175,74 @@ it("denies MANAGE_CONVERSATIONS to TENANT_OWNER — owner reads but does not ope
     expect(incidents.result.current).toBe(false);
   });
 
+  it("grants MANAGE_INCIDENTS to PROPERTY_MANAGER (R1.1, incident-triage-web D13)", () => {
+    useAuth.mockReturnValue({ user: { role: "PROPERTY_MANAGER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_INCIDENTS"),
+    );
+    expect(result.current).toBe(true);
+  });
+
+  it("grants RESPOND_OWNER_APPROVALS to TENANT_OWNER (approvals-web D10)", () => {
+    useAuth.mockReturnValue({ user: { role: "TENANT_OWNER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("RESPOND_OWNER_APPROVALS"),
+    );
+    expect(result.current).toBe(true);
+  });
+
+  it("denies MANAGE_INCIDENTS to TENANT_OWNER — owner keeps _INCIDENT_READ only (R1.1)", () => {
+    useAuth.mockReturnValue({ user: { role: "TENANT_OWNER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_INCIDENTS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
+  it("denies RESPOND_OWNER_APPROVALS to PROPERTY_MANAGER — sees the queue, not the buttons (R3.2)", () => {
+    useAuth.mockReturnValue({ user: { role: "PROPERTY_MANAGER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("RESPOND_OWNER_APPROVALS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
+  it("denies MANAGE_INCIDENTS to TECHNICIAN, CLEANER, SUPER_ADMIN (R1.1)", () => {
+    for (const role of ["TECHNICIAN", "CLEANER", "SUPER_ADMIN"]) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() =>
+        useHasPermission("MANAGE_INCIDENTS"),
+      );
+      expect(result.current, `${role} should not have it`).toBe(false);
+    }
+  });
+
+  it("denies RESPOND_OWNER_APPROVALS to CLEANER, TECHNICIAN, SUPER_ADMIN", () => {
+    for (const role of ["CLEANER", "TECHNICIAN", "SUPER_ADMIN"]) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() =>
+        useHasPermission("RESPOND_OWNER_APPROVALS"),
+      );
+      expect(result.current, `${role} should not have it`).toBe(false);
+    }
+  });
+
+  it("denies MANAGE_INCIDENTS without an authenticated user (R1.1)", () => {
+    useAuth.mockReturnValue({ user: null });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_INCIDENTS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
+  it("denies RESPOND_OWNER_APPROVALS without an authenticated user", () => {
+    useAuth.mockReturnValue({ user: null });
+    const { result } = renderHook(() =>
+      useHasPermission("RESPOND_OWNER_APPROVALS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
   it("grants MANAGE_GUEST_ACCESS_TOKENS to TENANT_OWNER and PROPERTY_MANAGER (guest-link-delivery D7, guest-portal-api D14)", () => {
     for (const role of ["TENANT_OWNER", "PROPERTY_MANAGER"]) {
       useAuth.mockReturnValue({ user: { role } });

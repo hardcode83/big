@@ -102,14 +102,35 @@ describe("NotificationRow", () => {
     expect(document.body.textContent).not.toContain(TASK_UUID);
   });
 
-  it("renders without a link in the field shells, whose pages are placeholders (R6.2)", () => {
+  it("renders without a link in the cleaner shell, whose pages are still placeholders (R6.2, R5.4)", () => {
+    setup(
+      row({ type: "CLEANING_TASK_ASSIGNED", relatedType: "cleaning_task", relatedId: "t1" }),
+      "cleaner",
+    );
+
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("t1");
+  });
+
+  it("links a technician-shell incident notification to /tech/incidents/{id} (R5.2)", () => {
     setup(
       row({ type: "TECHNICIAN_ASSIGNED", relatedType: "incident", relatedId: "i1" }),
       "technician",
     );
 
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    expect(document.body.textContent).not.toContain("i1");
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/tech/incidents/i1");
+  });
+
+  it("links OWNER_APPROVAL_REQUIRED in the workspace shell to /approvals (R5.1)", () => {
+    setup(
+      row({
+        type: "OWNER_APPROVAL_REQUIRED",
+        relatedType: null,
+        relatedId: null,
+      }),
+    );
+
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/approvals");
   });
 
   it("renders without a link when either half of the pair is null (R6.3)", () => {

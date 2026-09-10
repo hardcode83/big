@@ -26,6 +26,16 @@ import type { components } from "@/lib/api/generated/openapi";
  * composer that the backend would then 403 is exactly the failure mode the
  * partial mirror exists to prevent.
  *
+ * `incident-triage-web` D13 mirrors `MANAGE_INCIDENTS` (`policy.py`'s
+ * `_INCIDENT_MANAGE`) here too, `PROPERTY_MANAGER`-only: the owner keeps
+ * `_INCIDENT_READ` and stays absent from this permission, same split as
+ * `MANAGE_CONVERSATIONS` above.
+ *
+ * `approvals-web` D10 adds `RESPOND_OWNER_APPROVALS`, owner-only: the manager
+ * sees the `/approvals` queue (gated by the backend's own `READ_OWNER_APPROVALS`,
+ * held by both roles) but never the approve/reject controls, mirroring
+ * `policy.py`'s `RESPOND_OWNER_APPROVALS` bundle (owner-only there too).
+ *
  * `guest-link-delivery` D7 adds `MANAGE_GUEST_ACCESS_TOKENS`, gating
  * `GuestPortalLinkCard` on `/reservations/[id]`: the same two roles the
  * backend policy already grants it (`guest-portal-api` D14 — `TENANT_OWNER`
@@ -38,6 +48,8 @@ export type Permission =
   | "MANAGE_PRICE_RECOMMENDATIONS"
   | "EXECUTE_INCIDENTS"
   | "MANAGE_CONVERSATIONS"
+  | "MANAGE_INCIDENTS"
+  | "RESPOND_OWNER_APPROVALS"
   | "MANAGE_GUEST_ACCESS_TOKENS";
 
 export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
@@ -52,12 +64,17 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   // backend was granting them.
   // `MANAGE_CONVERSATIONS` is the other side of that rule (messaging-ai D17):
   // the owner reads but does not write, so she is intentionally absent here.
-  TENANT_OWNER: ["MANAGE_PRICE_RECOMMENDATIONS", "MANAGE_GUEST_ACCESS_TOKENS"],
+  TENANT_OWNER: [
+    "MANAGE_PRICE_RECOMMENDATIONS",
+    "RESPOND_OWNER_APPROVALS",
+    "MANAGE_GUEST_ACCESS_TOKENS",
+  ],
   PROPERTY_MANAGER: [
     "MANAGE_CLEANING_TASKS",
     "MANAGE_PRICE_RECOMMENDATIONS",
     "EXECUTE_INCIDENTS",
     "MANAGE_CONVERSATIONS",
+    "MANAGE_INCIDENTS",
     "MANAGE_GUEST_ACCESS_TOKENS",
   ],
   CLEANER: [],

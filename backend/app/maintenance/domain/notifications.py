@@ -195,6 +195,100 @@ def owner_approval_notification(
         related_id=incident_id,
     )
 
+def owner_approval_approved_notification(
+    *,
+    tenant_id: uuid.UUID,
+    incident_id: uuid.UUID,
+    property_id: uuid.UUID,
+    approval_id: uuid.UUID,
+    technician_id: uuid.UUID,
+    recipient_contact: str = "",
+    now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
+) -> NotificationLog:
+    """What the technician is told when the owner approves the cost (`approvals-web` R4.1,
+    R4.2, R4.4).
+
+    **No `sla_deadline_at`, on purpose** (design D6): nobody is late for reading an outcome,
+    and `escalation_for` has no rule for `OWNER_APPROVAL_APPROVED`, so a deadline here would
+    produce a breach that escalates to nobody — the same reasoning `owner_approval_notification`
+    already records for itself.
+
+    Subject and body are a constant plus identifiers, never the content of another row — the
+    contract rule 11 of `sdd/steering/security.md` fixes for `notification_logs.subject`/`body`.
+    Nothing here carries `reason` or `response_notes` (R4.4): the technician learns *that* the
+    expense was approved, never why.
+
+    The pair points at the incident like its siblings in this module, so everything notified
+    about one incident is reachable by one query.
+    """
+    return NotificationLog(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        recipient_user_id=technician_id,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
+        notification_type=NotificationType.OWNER_APPROVAL_APPROVED.value,
+        created_at=now,
+        updated_at=now,
+        subject="Owner approved the expense",
+        body=(
+            f"The owner approved the expense. Incident {incident_id}, "
+            f"property {property_id}, approval {approval_id}."
+        ),
+        status=NotificationStatus.PENDING,
+        related_type=RELATED_TYPE_INCIDENT,
+        related_id=incident_id,
+    )
+
+def owner_approval_rejected_notification(
+    *,
+    tenant_id: uuid.UUID,
+    incident_id: uuid.UUID,
+    property_id: uuid.UUID,
+    approval_id: uuid.UUID,
+    technician_id: uuid.UUID,
+    recipient_contact: str = "",
+    now: datetime,
+    channel: NotificationChannel = NotificationChannel.IN_APP,
+    contact: str | None = None,
+) -> NotificationLog:
+    """What the technician is told when the owner rejects the cost (`approvals-web` R4.1,
+    R4.2, R4.4).
+
+    A rejection notifies too, and that is the point of R4: the incident is cancelled and the
+    technician has to stop, which is as much news as being unblocked.
+
+    **No `sla_deadline_at`, on purpose** (design D6), for the same reason its APPROVED twin has
+    none: nobody is late for reading an outcome, and `escalation_for` has no rule for
+    `OWNER_APPROVAL_REJECTED` either.
+
+    Subject and body are a constant plus identifiers, never the content of another row — rule
+    11 of `sdd/steering/security.md`. Nothing here carries `reason` or `response_notes` (R4.4).
+
+    The pair points at the incident like its siblings in this module, so everything notified
+    about one incident is reachable by one query.
+    """
+    return NotificationLog(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        recipient_user_id=technician_id,
+        recipient_contact=contact if contact is not None else recipient_contact,
+        channel=channel,
+        notification_type=NotificationType.OWNER_APPROVAL_REJECTED.value,
+        created_at=now,
+        updated_at=now,
+        subject="Owner rejected the expense",
+        body=(
+            f"The owner rejected the expense and the incident was cancelled. "
+            f"Incident {incident_id}, property {property_id}, approval {approval_id}."
+        ),
+        status=NotificationStatus.PENDING,
+        related_type=RELATED_TYPE_INCIDENT,
+        related_id=incident_id,
+    )
+
 def incident_critical_notification(
     *,
     tenant_id: uuid.UUID,

@@ -11,8 +11,18 @@ const usePropertyDirectory = vi.hoisted(() => vi.fn());
 vi.mock("../hooks/use-cleaning-data", () => ({ usePropertyDirectory }));
 
 const properties: PropertySummary[] = [
-  { id: "property-1", name: "Redes 11", internalCode: "REDES11" },
-  { id: "property-2", name: "Pajaritos 8", internalCode: "PAJARITOS8" },
+  {
+    id: "property-1",
+    name: "Redes 11",
+    internalCode: "REDES11",
+    currentOperationalState: "AWAITING_CLEANING",
+  },
+  {
+    id: "property-2",
+    name: "Pajaritos 8",
+    internalCode: "PAJARITOS8",
+    currentOperationalState: "AWAITING_CLEANING",
+  },
 ];
 
 function renderFilters(locale: "es" | "en" = "es") {

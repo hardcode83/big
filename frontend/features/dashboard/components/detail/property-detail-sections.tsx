@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -127,22 +128,30 @@ export function PropertyDetailSections({ detail }: { detail: PropertyDetail }) {
       </Section>
 
       <Section title={t("detail.approvals")}>
-        {detail.pendingApprovals.length === 0 ? (
-          t("detail.noApprovals")
-        ) : (
-          <ul className="flex flex-col gap-1">
-            {detail.pendingApprovals.map((approval) => (
-              <li key={approval.id} className="flex items-baseline justify-between gap-3">
-                <span className="text-foreground">{approval.label}</span>
-                {approval.amount !== null ? (
-                  <span className="font-medium text-foreground">
-                    {approval.amount} {approval.currency}
-                  </span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
+        <div className="flex flex-col gap-2">
+          {detail.pendingApprovals.length === 0 ? (
+            t("detail.noApprovals")
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {detail.pendingApprovals.map((approval) => (
+                <li key={approval.id} className="flex items-baseline justify-between gap-3">
+                  <span className="text-foreground">{approval.label}</span>
+                  {approval.amount !== null ? (
+                    <span className="font-medium text-foreground">
+                      {approval.amount} {approval.currency}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link
+            href="/approvals"
+            className="self-start text-primary underline-offset-4 hover:underline"
+          >
+            {t("detail.viewApprovalsQueue")}
+          </Link>
+        </div>
       </Section>
 
       <Section title={t("detail.notes")}>

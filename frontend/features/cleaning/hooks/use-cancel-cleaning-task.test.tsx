@@ -34,6 +34,9 @@ const task: CleaningTask = {
   scheduledStart: null,
   scheduledEnd: null,
   createdAt: "2026-08-19T18:00:00Z",
+  completedAt: null,
+  validationStatus: "PENDING",
+  validatedAt: null,
 };
 
 function harness() {
