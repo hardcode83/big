@@ -597,3 +597,114 @@ async def test_a_tenant_never_sees_another_tenants_rows(
             )
         ).scalar_one()
         assert reservation_b_row.updated_at == reservation_b_updated_at_before
+
+
+# --- R3.1 — a second CLI pass (or a later `beat`) repeats nothing -------------------
+
+
+@pytest.mark.asyncio
+async def test_a_second_cli_run_repeats_no_transition_and_writes_no_row(
+    db_session, test_engine, test_factory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """R3.1: idempotence proven through the CLI's own wiring, not just the use case.
+
+    `tests/properties/test_advance_states.py::test_a_second_run_writes_nothing` already
+    certifies that `AdvancePropertyStatesUseCase` refuses a no-op destination, but it calls
+    the use case directly on a single in-memory harness. This test goes through
+    `cli._run`, which opens three separate sessions — one per job — and commits each on its
+    own; a second pass that saw uncommitted state, or that reused a session across jobs,
+    would repeat a transition here and not there.
+
+    The signal for "the transition already happened" is `candidates=0`, NOT `not_eligible`
+    (proposal R3.2): once the property has left the trigger's source states it stops being
+    a candidate at all, so the candidate query never reaches the eligibility check.
+    `not_eligible` is the distinct signal of R4.3 — a real candidate whose due instant has
+    not arrived yet.
+    """
+    tenant = await insert_tenant(db_session)
+    await db_session.commit()  # the CLI reads through its own session
+    prop = await _insert_property(db_session, tenant_id=tenant.id)
+    check_in_local = _local(2026, 9, 10, 15, 0)
+    await _insert_reservation(
+        db_session,
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        check_in=check_in_local,
+        nights=2,
+    )
+    await db_session.commit()
+
+    async def _count_rows() -> tuple[int, int]:
+        """Row counts on a fresh session — `db_session` holds one transaction for the whole
+        test and cannot see what the CLI's own sessions committed (same reason as R4.4)."""
+        async with AsyncSession(test_engine, expire_on_commit=False) as fresh:
+            transitions = (
+                await fresh.execute(
+                    select(func.count())
+                    .select_from(PropertyStateTransitionModel)
+                    .where(PropertyStateTransitionModel.tenant_id == tenant.id)
+                )
+            ).scalar_one()
+            events = (
+                await fresh.execute(
+                    select(func.count())
+                    .select_from(TimelineEventModel)
+                    .where(TimelineEventModel.tenant_id == tenant.id)
+                )
+            ).scalar_one()
+        return int(transitions), int(events)
+
+    # The per-test vacuum of `conftest.py` ran before this test, so 0 is the truth at start.
+    assert await _count_rows() == (0, 0)
+
+    at = check_in_local + timedelta(minutes=1)
+
+    rc_first = await cli._run(["--tenant", str(tenant.id), "--at", _at_utc(at)])
+    first = capsys.readouterr()
+    assert rc_first == 0, f"stdout:\n{first.out}\nstderr:\n{first.err}"
+
+    async with AsyncSession(test_engine, expire_on_commit=False) as fresh:
+        prop_row = (
+            await fresh.execute(select(PropertyModel).where(PropertyModel.id == prop.id))
+        ).scalar_one()
+        assert prop_row.current_operational_state is PropertyOperationalState.OCCUPIED_ESTIMATED
+        state_after_first = prop_row.current_operational_state
+        updated_at_after_first = prop_row.updated_at
+
+    assert "transitioned=1" in _report_line_for(first.out, "CHECKIN_TIME_REACHED")
+    # Two jobs transition on this instant (the window opened 2 h before check-in), so the
+    # committed rows are exactly two transitions and two timeline events.
+    transitions_after_first, events_after_first = await _count_rows()
+    assert (transitions_after_first, events_after_first) == (2, 2), (
+        f"unexpected rows after the first pass; stdout:\n{first.out}"
+    )
+
+    # Same tenant, same reservation, a later `--at` — what a `beat` tick after the manual
+    # run looks like from the database's point of view.
+    rc_second = await cli._run(
+        ["--tenant", str(tenant.id), "--at", _at_utc(at + timedelta(hours=1))]
+    )
+    second = capsys.readouterr()
+    assert rc_second == 0, f"stdout:\n{second.out}\nstderr:\n{second.err}"
+
+    second_line = _report_line_for(second.out, "CHECKIN_TIME_REACHED")
+    assert "candidates=0" in second_line, second_line
+    assert "transitioned=0" in second_line, second_line
+    # The bucket is present in the line but stays at 0: an already-applied transition is
+    # not an "eligibility" verdict, it never reaches the eligibility check at all.
+    assert "not_eligible=0" in second_line, second_line
+
+    transitions_after_second, events_after_second = await _count_rows()
+    assert transitions_after_second == transitions_after_first, (
+        f"the second pass wrote a transition; stdout:\n{second.out}"
+    )
+    assert events_after_second == events_after_first, (
+        f"the second pass wrote a timeline event; stdout:\n{second.out}"
+    )
+
+    async with AsyncSession(test_engine, expire_on_commit=False) as fresh:
+        prop_row = (
+            await fresh.execute(select(PropertyModel).where(PropertyModel.id == prop.id))
+        ).scalar_one()
+        assert prop_row.current_operational_state == state_after_first
+        assert prop_row.updated_at == updated_at_after_first

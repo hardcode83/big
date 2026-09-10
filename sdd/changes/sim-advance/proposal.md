@@ -107,9 +107,11 @@ Criterios de aceptación:
    no repetir la transición que `sim-advance` aplicó: la prueba viva es `property_state_transitions`
    con `trigger` y `reservation_id` en `metadata`, que `applied_clock_triggers`
    (`properties/domain/repositories.py`) lee como texto.
-2. WHEN `--at` cae en el pasado de una transición ya aplicada, THE SYSTEM SHALL contarlo como
-   `not_eligible` (no como `blocked`, ni como un error): el reloj no retrocede transiciones,
-   pero el informe tiene que decirlo para que el operador no crea que el job no corrió.
+2. WHEN `--at` cae en el pasado de una transición ya aplicada para una reserva, THE SYSTEM SHALL
+   reflejarlo como `candidates: 0` para ese disparador —la vivienda salió de los estados origen
+   del trigger y ya no es candidata— y **no** como un error ni como `blocked`: el reloj no
+   retrocede transiciones, y el informe lo dice de la única forma que la consulta de candidatos
+   ya distingue, para que el operador no crea que el job no corrió.
 3. WHERE `TimelineEvent.occurred_at` o `property_state_transitions.created_at` salen del
    `now` del caso de uso, THE SYSTEM SHALL pasarles el `--at` para que el timeline sea
    coherente con el reloj que el operador nombró; WHERE salen del reloj de BD, THE SYSTEM
