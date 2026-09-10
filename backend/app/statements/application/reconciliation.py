@@ -7,8 +7,16 @@ records the answer, and this module applies it. The split is the design's own:
 
 * `OwnerApproval(OTHER)` is the canonical way D4 created approvals for `Expense` rows
   that exceeded `TenantConfig.owner_approval_threshold_eur` (R5.7);
-* the owner answers through `POST /api/v1/owner-approvals/{id}/respond`, which is the
-  existing `maintenance` route — untouched by this change;
+* **the owner does NOT actually answer an `OTHER` approval through
+  `POST /api/v1/owner-approvals/{id}/respond`**, despite an earlier version of this
+  docstring claiming otherwise — measured false by `approvals-web` design D11
+  (2026-09) and corrected here at archive time: `RespondOwnerApprovalUseCase` loads
+  the incident from `approval.related_id` unconditionally and raises
+  `IncidentNotFoundError` (404) when it is `None`, and for an `OTHER` approval
+  `related_id` is an `Expense` id, not an incident id, so that route can never serve
+  it. The gap is tracked by roadmap entry `expense-approval-response`; this
+  reconciliation worker is unaffected either way, since it only reconciles whatever
+  answer eventually lands on the row, regardless of which route (if any) wrote it;
 * a worker running every five minutes queries the table for `APPROVED` / `REJECTED`
   answers whose expense still needs the materialisation, and applies the answer.
 
