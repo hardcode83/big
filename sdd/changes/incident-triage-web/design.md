@@ -155,7 +155,7 @@ Rejected: un `Sheet` único con pestañas — tres formularios distintos con tre
 | Permisos frontend | `frontend/lib/auth/permissions.ts` | Fila `MANAGE_INCIDENTS` en el espejo (D13) |
 | Reutilización | `frontend/features/dashboard/stalls/components/resolve-incident-dialog.tsx` | Importa `isPositiveDecimal` en vez de declarar la expresión (D11) |
 | i18n | `frontend/locales/{es,en}/incidents.json` | Acciones, notas de estado, tres razones de `409`, `422` de técnico, validaciones, «técnico no disponible» (R6.4) |
-| Documentación | `docs/maintenance.md`, `docs/diagrams/` | Cómo se opera el triaje desde la web; **se regenera** `docs/diagrams/2026-08-23_autohost-secuencia-mantenimiento.png` (gate OQ3): es un paso nuevo del ciclo —origen `OPEN`, destino `CLASSIFIED`, ruta `PATCH /incidents/{id}`, evento `INCIDENT_CLASSIFIED`— por el criterio de `steering/architecture.md`. Se genera con `sdd:diagram` **sin abrir el PNG anterior** (cuesta ~140k de contexto), derivando el contenido de `_TRANSITIONS` y los casos de uso; el obsoleto se borra |
+| Documentación | `docs/maintenance.md`, `docs/diagrams/` | Cómo se opera el triaje desde la web; **se regenera** `docs/diagrams/2026-09-05_autohost-secuencia-mantenimiento.png` (gate OQ3): es un paso nuevo del ciclo —origen `OPEN`, destino `CLASSIFIED`, ruta `PATCH /incidents/{id}`, evento `INCIDENT_CLASSIFIED`— por el criterio de `steering/architecture.md`. Se genera con `sdd:diagram` **sin abrir el PNG anterior** (cuesta ~140k de contexto), derivando el contenido de `_TRANSITIONS` y los casos de uso; el obsoleto se borra |
 
 ## Data & interfaces
 

@@ -261,6 +261,134 @@ async def test_triaging_an_incident_of_another_tenant_is_a_404(
     assert response.status_code == 404
 
 
+async def test_classifying_an_incident_of_another_tenant_is_a_404(
+    api, world, db_session
+) -> None:
+    """R3.6 + steering rule 1 — `POST /classify` is the second state-moving mutation this
+    change adds, so its cross-tenant denial is the symmetric piece of the `PATCH` test above.
+    Manager-in-A calling `/classify` on an OPEN incident in tenant B must receive `404`,
+    not `422`, not `403`: the only way `404` leaks is by writing to the neighbour's row.
+    """
+    from app.properties.infrastructure.models import PropertyModel
+    from app.tenants.infrastructure.models import TenantModel
+    from tests.maintenance.conftest import World, _user
+
+    neighbour_tenant = TenantModel(name="TenantB", billing_email="b-classify@example.com")
+    db_session.add(neighbour_tenant)
+    await db_session.flush()
+    prop = PropertyModel(
+        tenant_id=neighbour_tenant.id, name="Theirs", internal_code="THEIRS-CLASSIFY"
+    )
+    db_session.add(prop)
+    await db_session.flush()
+    neighbour = World(
+        neighbour_tenant,
+        prop,
+        await _user(db_session, neighbour_tenant, "TENANT_OWNER"),
+        await _user(db_session, neighbour_tenant, "PROPERTY_MANAGER"),
+        await _user(db_session, neighbour_tenant, "TECHNICIAN"),
+        await _user(db_session, neighbour_tenant, "TECHNICIAN"),
+    )
+    theirs = await make_incident(db_session, neighbour, status=IncidentStatus.OPEN)
+
+    response = await api.post(
+        f"{INCIDENTS}/{theirs.id}/classify",
+        headers=auth_header(api, world.manager),
+    )
+
+    assert response.status_code == 404
+
+
+async def test_assigning_an_incident_of_another_tenant_is_a_404(
+    api, world, db_session
+) -> None:
+    """R3.6 + steering rule 1 — `POST /assign` derives `tenant_id` from the session, so the
+    only isolation case that proves the router is the manager-in-A assigning "their own"
+    incident with their own tenant's technician but the incident itself is in tenant B.
+    A `422` would mean the technician was rejected (an authorization-shaped leak); a `404`
+    is what says the row was never reachable to begin with.
+    """
+    from app.properties.infrastructure.models import PropertyModel
+    from app.tenants.infrastructure.models import TenantModel
+    from tests.maintenance.conftest import World, _user
+
+    neighbour_tenant = TenantModel(name="TenantB", billing_email="b-assign@example.com")
+    db_session.add(neighbour_tenant)
+    await db_session.flush()
+    prop = PropertyModel(
+        tenant_id=neighbour_tenant.id, name="Theirs", internal_code="THEIRS-ASSIGN"
+    )
+    db_session.add(prop)
+    await db_session.flush()
+    neighbour = World(
+        neighbour_tenant,
+        prop,
+        await _user(db_session, neighbour_tenant, "TENANT_OWNER"),
+        await _user(db_session, neighbour_tenant, "PROPERTY_MANAGER"),
+        await _user(db_session, neighbour_tenant, "TECHNICIAN"),
+        await _user(db_session, neighbour_tenant, "TECHNICIAN"),
+    )
+    theirs = await make_incident(db_session, neighbour, status=IncidentStatus.CLASSIFIED)
+
+    response = await api.post(
+        f"{INCIDENTS}/{theirs.id}/assign",
+        json={"technician_id": str(world.technician.id)},
+        headers=auth_header(api, world.manager),
+    )
+
+    assert response.status_code == 404
+    # The neighbour's incident must not have been written to: their
+    # `assigned_technician_id` is still NULL because the only path that
+    # sets it is `_load_incident_in_scope`, which `404`s first.
+    neighbour_row = await db_session.execute(
+        select(IncidentModel).where(IncidentModel.id == theirs.id)
+    )
+    row = neighbour_row.scalar_one()
+    assert row.assigned_technician_id is None
+
+
+async def test_cancelling_an_incident_of_another_tenant_is_a_404(
+    api, world, db_session
+) -> None:
+    """R3.6 + steering rule 1 — `POST /cancel` is the terminal-state mutation, so a leak
+    here would write `INCIDENT_CANCELLED` to a neighbour's audit log and timeline. The
+    `404` must come from `_load_incident_in_scope` BEFORE any of those writes happen.
+    """
+    from app.properties.infrastructure.models import PropertyModel
+    from app.tenants.infrastructure.models import TenantModel
+    from tests.maintenance.conftest import World, _user
+
+    neighbour_tenant = TenantModel(name="TenantB", billing_email="b-cancel@example.com")
+    db_session.add(neighbour_tenant)
+    await db_session.flush()
+    prop = PropertyModel(
+        tenant_id=neighbour_tenant.id, name="Theirs", internal_code="THEIRS-CANCEL"
+    )
+    db_session.add(prop)
+    await db_session.flush()
+    neighbour = World(
+        neighbour_tenant,
+        prop,
+        await _user(db_session, neighbour_tenant, "TENANT_OWNER"),
+        await _user(db_session, neighbour_tenant, "PROPERTY_MANAGER"),
+        await _user(db_session, neighbour_tenant, "TECHNICIAN"),
+        await _user(db_session, neighbour_tenant, "TECHNICIAN"),
+    )
+    theirs = await make_incident(db_session, neighbour, status=IncidentStatus.CLASSIFIED)
+
+    response = await api.post(
+        f"{INCIDENTS}/{theirs.id}/cancel",
+        headers=auth_header(api, world.manager),
+    )
+
+    assert response.status_code == 404
+    neighbour_row = await db_session.execute(
+        select(IncidentModel).where(IncidentModel.id == theirs.id)
+    )
+    row = neighbour_row.scalar_one()
+    assert row.status is IncidentStatus.CLASSIFIED
+
+
 async def test_the_old_start_route_no_longer_exists(api, world, db_session) -> None:
     """R2.3 — "se renombra, no se duplica", proved against the app's own route table.
 

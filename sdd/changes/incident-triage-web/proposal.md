@@ -63,7 +63,7 @@ Acceptance criteria:
    >
    > Enmienda del gate de `/sdd:design` (2026-09-05, OQ1): la cláusula del estado de la vivienda no estaba en la redacción original y se añade porque el design la midió — crear una incidencia no dispara ningún trigger (`ReportIncidentUseCase`) y el clasificador sólo lo dispara al alcanzar `CLASSIFIED`, así que **hoy** una incidencia que quedó en `OPEN` no lleva la vivienda a `CRITICAL_INCIDENT` ni marcándola crítica a mano. Sin esto, el ciclo de R6.6 se recorrería dejando la vivienda en un estado que miente.
    >
-   > Resuelto en el mismo gate: la operación se llama **`classify_by_triage`** y es fila propia de la tabla (design D1); `openapi.json` **sí** se regenera, porque cambia la descripción de la ruta (design D12) — el esquema no cambia. Y `docs/diagrams/2026-08-23_autohost-secuencia-mantenimiento.png` se regenera, por ser un paso nuevo del ciclo (OQ3).
+   > Resuelto en el mismo gate: la operación se llama **`classify_by_triage`** y es fila propia de la tabla (design D1); `openapi.json` **sí** se regenera, porque cambia la descripción de la ruta (design D12) — el esquema no cambia. Y `docs/diagrams/2026-09-05_autohost-secuencia-mantenimiento.png` se regenera, por ser un paso nuevo del ciclo (OQ3).
 6. THE SYSTEM SHALL cubrir R3.5 con tests de dominio y de API en `backend/tests/maintenance/`, incluido el caso negativo (un solo campo → sigue `OPEN`) y el aislamiento por tenant que ya cubre el `PATCH`.
 
 ### R4 — Relanzar el clasificador
