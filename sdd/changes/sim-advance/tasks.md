@@ -47,15 +47,20 @@
 
 <!-- Use the commands recorded in the consumer project's project.md; this
      template does not prescribe a language, framework, or test runner. -->
-- [ ] 6.1 Suite backend pasa: `docker compose exec backend uv run pytest` (atajo del `Makefile`, ejecutado desde la raíz del repo con el stack levantado). Si el stack no está levantado: `docker compose run --rm backend uv run pytest`. [R4]
-- [ ] 6.2 `make check-rule11-ownership` pasa: guardia de la regla 11 con la nueva copia de wiring del CLI, que sigue siendo una atribución a `AdvancePropertyStatesUseCase` y por tanto no añade columna. [R2]
-- [ ] 6.3 Typecheck del backend: desde `backend`, `uv sync --frozen && uv run pyright .`. Cualquier finding se reporta en `Implementation Notes`, no en este checklist. [R4]
+- [x] 6.1 Suite backend pasa: `docker compose exec backend uv run pytest` (atajo del `Makefile`, ejecutado desde la raíz del repo con el stack levantado). Si el stack no está levantado: `docker compose run --rm backend uv run pytest`. [R4]
+- [x] 6.2 `make check-rule11-ownership` pasa: guardia de la regla 11 con la nueva copia de wiring del CLI, que sigue siendo una atribución a `AdvancePropertyStatesUseCase` y por tanto no añade columna. [R2]
+- [x] 6.3 Typecheck del backend: desde `backend`, `uv sync --frozen && uv run pyright .`. Cualquier finding se reporta en `Implementation Notes`, no en este checklist. [R4]
 - [ ] 6.4 Manual: ejecutar `make sim-advance TENANT=<uuid>` contra el stack local con la reserva sembrada por `make seed-demo`, verificar que la vivienda `REDES11` (en `AWAITING_CHECKIN` tras el seed) avanza a `OCCUPIED_ESTIMATED` con `transitioned: 1`. <!-- manual -->
 
 ## Implementation Notes
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
+- Sección 6 (Verification): suite completa `docker compose run --rm backend uv run pytest` → **10955 passed, 44 skipped, 0 failed** (exit 0, 10:27). Los 4 tests de `test_sim_advance_cli.py` incluidos y en verde.
+- `make check-rule11-ownership` → PASS, sin regresión: la copia del wiring en `sim_advance.py` es una atribución adicional a `AdvancePropertyStatesUseCase`, no una columna nueva del censo.
+- Typecheck (`uv run pyright .`, host y contenedor, idéntico): **979 errores preexistentes**, cero de ellos en `backend/app/cli/sim_advance.py` ni en `backend/tests/test_sim_advance_cli.py` — ambos ficheros nuevos de este change están limpios. El patrón dominante (`No parameter named "_env_file"`, ~cientos de apariciones) ya existía en `backend/tests/test_config.py` antes de esta entrada (46 de las 49 apariciones actuales de `_env_file` son preexistentes, verificado contra el commit del proposal); es un desajuste conocido entre el stub de `pydantic-settings` y pyright, no una regresión de `sim-advance`. Se reporta aquí, aparte de los fallos de arranque, tal como pide `sdd/project.md`.
+- 6.4 (manual) queda sin marcar y se registra como `deferred` en BLOCKED.md: requiere el stack levantado y `make seed-demo` corrido, que un run de `/sdd:auto` no ejecuta contra un stack real.
+
 - Section 1: field is declared with `Field(alias="APP_ENVIRONMENT")`; the default pydantic-settings mapping would otherwise bind `environment` to `ENVIRONMENT` and silently ignore the prefixed name.
 - Section 1: `APP_ENVIRONMENT=` is documented in `.env.example` as commented-out (`# APP_ENVIRONMENT=`) rather than uncommented-empty, because the `Literal` rejects `""` and there is no normalization validator like the one `_blank_whatsapp_provider_falls_back_to_default` provides; matching the form of other default-bearing settings (CORS allowlist, password recovery).
 - Section 1: tests live in `backend/tests/test_config.py` per the convention there; the standalone `backend/tests/test_settings_environment.py` file proposed in the task does not exist.
