@@ -35,7 +35,11 @@ from app.maintenance.domain.entities import (
     Incident,
     IncidentMessage,
 )
-from app.maintenance.domain.read_models import IncidentContext
+from app.maintenance.domain.read_models import (
+    IncidentContext,
+    OwnerApprovalListItem,
+    OwnerApprovalPage,
+)
 from app.maintenance.domain.repositories import IncidentMessagePage
 from app.maintenance.domain.enums import (
     IncidentCategory,
@@ -43,6 +47,7 @@ from app.maintenance.domain.enums import (
     IncidentSeverity,
     IncidentSource,
     IncidentStatus,
+    OwnerApprovalRelatedType,
     OwnerApprovalStatus,
 )
 
@@ -51,6 +56,10 @@ MAX_PER_PAGE = 100
 # 20-digit page number overflows int8, producing an unhandled driver error instead of a 422
 # in the PRD §23 envelope. Same bound and same reason as `cleaning` and `reservations`.
 MAX_PAGE = 100_000
+# `owner_approvals.response_notes` has no length column in the DDL (a plain unbounded
+# `String()`), so this bound lives only here — steering/security.md Exception 3's "acotado
+# por... longitud máxima", following the same 2000 figure the sibling free-text columns
+# below (`assignment_note`, `materials`) already use (`approvals-web` D12).
 MAX_RESPONSE_NOTES = 2000
 # Mirrors the `VARCHAR(2000)` of `incidents.assignment_note`: the bound lives in the DDL
 # and in the schema, not only in the second (`tech-incident-context` D6).
@@ -285,7 +294,108 @@ class RespondOwnerApprovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: OwnerApprovalStatus
-    response_notes: Annotated[str | None, Field(max_length=MAX_RESPONSE_NOTES)] = None
+    response_notes: Annotated[
+        MultiLineText, Field(max_length=MAX_RESPONSE_NOTES)
+    ] | None = None
+
+
+class OwnerApprovalIncidentRefResponse(BaseModel):
+    """The originating incident, in the form `GET /owner-approvals` names it (R1.3).
+
+    Four fields — enough for the owner to recognise which fault this money answers for,
+    the same narrowing `OwnerApprovalIncidentRef` already applies at the domain layer.
+    `None` on the parent row's `incident` (never this type with blank fields) is how an
+    `OTHER`-related approval is told apart from one whose incident failed to resolve.
+    """
+
+    id: uuid.UUID
+    title: str
+    category: IncidentCategory
+    severity: IncidentSeverity
+
+
+class OwnerApprovalPropertyRefResponse(BaseModel):
+    """The vivienda in the form a person reads, never a bare UUID (R1.3)."""
+
+    id: uuid.UUID
+    name: str
+    internal_code: str
+
+
+class OwnerApprovalListItemResponse(BaseModel):
+    """One row of `GET /owner-approvals` (R1.3, design D2).
+
+    **No free text**: neither `reason` nor `response_notes` is a field here, the same
+    closed-form rule `RespondOwnerApprovalRequest`'s own docstring notes for the dashboard
+    card. `property` is always populated by this point — `ListOwnerApprovalsUseCase` has
+    already dropped any row whose property did not resolve inside the tenant before this
+    model is built, so there is no placeholder to guard against here.
+    """
+
+    id: uuid.UUID
+    related_type: OwnerApprovalRelatedType
+    status: OwnerApprovalStatus
+    amount: Decimal
+    currency: str
+    requested_at: datetime
+    responded_at: datetime | None
+    incident: OwnerApprovalIncidentRefResponse | None
+    property: OwnerApprovalPropertyRefResponse
+
+    @classmethod
+    def from_domain(cls, item: OwnerApprovalListItem) -> "OwnerApprovalListItemResponse":
+        return cls(
+            id=item.id,
+            related_type=item.related_type,
+            status=item.status,
+            amount=item.amount,
+            currency=item.currency,
+            requested_at=item.requested_at,
+            responded_at=item.responded_at,
+            incident=(
+                OwnerApprovalIncidentRefResponse(
+                    id=item.incident.id,
+                    title=item.incident.title,
+                    category=item.incident.category,
+                    severity=item.incident.severity,
+                )
+                if item.incident is not None
+                else None
+            ),
+            property=OwnerApprovalPropertyRefResponse(
+                id=item.property.id,
+                name=item.property.name,
+                internal_code=item.property.internal_code,
+            ),
+        )
+
+
+class OwnerApprovalPageResponse(BaseModel):
+    """The envelope `IncidentPageResponse` already establishes for a paginated listing.
+
+    `total` is the reader's own row count and is **not** reduced when the use case drops a
+    row for an unresolved property (design D4) — so `len(items)` can be smaller than `total`
+    minus what earlier pages already returned, on the rare row with a crossed property
+    pointer. That is accepted, not a bug this schema needs to paper over.
+    """
+
+    items: list[OwnerApprovalListItemResponse]
+    total: int
+    page: int
+    per_page: int
+
+    @classmethod
+    def from_domain(
+        cls, result: OwnerApprovalPage, *, page: int, per_page: int
+    ) -> "OwnerApprovalPageResponse":
+        return cls(
+            items=[
+                OwnerApprovalListItemResponse.from_domain(item) for item in result.items
+            ],
+            total=result.total,
+            page=page,
+            per_page=per_page,
+        )
 
 
 class IncidentPhotoResponse(BaseModel):

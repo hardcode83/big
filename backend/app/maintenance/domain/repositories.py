@@ -43,7 +43,8 @@ from app.maintenance.domain.entities import (
     IncidentPhoto,
     OwnerApproval,
 )
-from app.maintenance.domain.enums import IncidentSeverity, IncidentStatus
+from app.maintenance.domain.enums import IncidentSeverity, IncidentStatus, OwnerApprovalStatus
+from app.maintenance.domain.read_models import OwnerApprovalPage
 from app.maintenance.domain.value_objects import (
     IncidentSummary,
     OpenIncidentCounts,
@@ -231,6 +232,18 @@ class IncidentQuery(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class OwnerApprovalFilters:
+    """The one filter of `GET /owner-approvals` (`approvals-web` R1.2, design D5).
+
+    A single optional `status` and not a client-supplied `tenant_id` or `property_id`: the
+    tenant comes from the token (R1.1) and this listing is tenant-wide, not per property —
+    `list_pending_for_property` above already covers the dashboard's narrower case.
+    """
+
+    status: OwnerApprovalStatus | None = None
+
+
 class OwnerApprovalReader(Protocol):
     async def list_pending_for_property(
         self, tenant_id: uuid.UUID, property_id: uuid.UUID
@@ -243,6 +256,44 @@ class OwnerApprovalReader(Protocol):
 
         Oldest first and not newest: this is a to-do list, so the one that has been waiting
         longest is the one that matters. The timeline is the surface that reads newest-first.
+        """
+        ...
+
+    async def list_for_tenant(
+        self,
+        tenant_id: uuid.UUID,
+        filters: OwnerApprovalFilters,
+        *,
+        page: int,
+        per_page: int,
+    ) -> OwnerApprovalPage:
+        """`GET /owner-approvals` (`approvals-web` R1.1, R1.2, R1.3, design D4, D5).
+
+        **Ordering is a function of what was asked for, not one fixed clause** (D5):
+        `filters.status` absent or `PENDING` orders `requested_at ASC, id ASC` — the same
+        to-do-list discipline `list_pending_for_property` above already declares; any
+        answered status (`APPROVED`/`REJECTED`) orders `responded_at DESC, id DESC` — a
+        history, newest answer first. Absent `filters.status` also **narrows** the rows to
+        `PENDING` (R1.2): this is not "no filter", it is "the pending queue by default".
+
+        One `LEFT OUTER JOIN` to `incidents`, gated on `related_type != OTHER` — **both
+        tables belong to `maintenance`**, so this is not the cross-domain join D4 rejects.
+        An `OTHER` row comes back with `OwnerApprovalListItem.incident = None`.
+
+        **This port does not resolve property names, and does not know whether a
+        `property_id` resolves inside the tenant** — it never queries `properties`, the
+        cross-domain join D4 rejects by name. Every returned item's `property` field is
+        therefore a placeholder: `OwnerApprovalPropertyRef(id=<the approval's property_id>,
+        name="", internal_code="")`, carrying only the id forward. **The caller — the use
+        case, per D4 — must replace it** with the result of one batched
+        `PropertyRepository.list_for_ids` call and **drop** any item whose `property_id` does
+        not come back from that call, logging `maintenance.owner_approval_property_unresolved`
+        the way `GetIncidentContextUseCase` logs the identical anomaly for `IncidentContext`.
+        This mirrors `reservation-property-identity` D2's split exactly: the reader yields a
+        page keyed by id, the use case resolves identity in one more statement. `total` is
+        this reader's own count of matching rows and is **not** reduced by a later drop —
+        an unresolved property is rare enough that this port does not special-case it, the
+        same choice `dashboard-api` made for `IncidentReader.count_open_for_properties`.
         """
         ...
 

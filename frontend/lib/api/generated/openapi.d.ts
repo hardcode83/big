@@ -657,6 +657,13 @@ export interface paths {
      */
     get: operations["count_unread_notifications_api_v1_notifications_unread_count_get"];
   };
+  "/api/v1/owner-approvals": {
+    /**
+     * List the tenant's owner approvals
+     * @description Paginated with `page`/`per_page` (PRD §23), tenant-scoped from the token alone (R1.1). Omitting `status` returns only `PENDING` rows, oldest request first — the to-do-list default (R1.2); an answered status (`APPROVED`/`REJECTED`) returns newest-answered-first. `TENANT_OWNER` and `PROPERTY_MANAGER` only (R1.4) — a `TECHNICIAN` or `CLEANER` gets the same `403` `require()` gives for any permission they lack, with no hint of whether any approval exists (R1.5).
+     */
+    get: operations["list_owner_approvals_api_v1_owner_approvals_get"];
+  };
   "/api/v1/owner-approvals/{approval_id}/respond": {
     /**
      * The owner answers a pending approval
@@ -3138,7 +3145,7 @@ export interface components {
      * inherits these names.
      * @enum {string}
      */
-    NotificationType: "CLEANING_TASK_ASSIGNED" | "CLEANING_NO_RESPONSE" | "CLEANING_COMPLETED" | "CLEANING_FAILED" | "INCIDENT_CREATED_CRITICAL" | "INCIDENT_CREATED_HIGH" | "OWNER_APPROVAL_REQUIRED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_NO_RESPONSE" | "GUEST_ESCALATION" | "LOCK_ALERT" | "CHECKIN_REMINDER_24H" | "CHECKIN_REMINDER_2H" | "CHECKOUT_REMINDER" | "PRICE_RECOMMENDATION" | "SLA_BREACH" | "REVIEW_RESPONSE_APPROVED" | "PASSWORD_RESET_REQUESTED" | "CLEANING_TASK_MESSAGE" | "INCIDENT_MESSAGE" | "GUEST_PORTAL_LINK_DELIVERED";
+    NotificationType: "CLEANING_TASK_ASSIGNED" | "CLEANING_NO_RESPONSE" | "CLEANING_COMPLETED" | "CLEANING_FAILED" | "INCIDENT_CREATED_CRITICAL" | "INCIDENT_CREATED_HIGH" | "OWNER_APPROVAL_REQUIRED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_NO_RESPONSE" | "GUEST_ESCALATION" | "LOCK_ALERT" | "CHECKIN_REMINDER_24H" | "CHECKIN_REMINDER_2H" | "CHECKOUT_REMINDER" | "PRICE_RECOMMENDATION" | "SLA_BREACH" | "REVIEW_RESPONSE_APPROVED" | "PASSWORD_RESET_REQUESTED" | "CLEANING_TASK_MESSAGE" | "INCIDENT_MESSAGE" | "OWNER_APPROVAL_APPROVED" | "OWNER_APPROVAL_REJECTED" | "GUEST_PORTAL_LINK_DELIVERED";
     /**
      * OccupancyPointResponse
      * @description One day of the weekly occupancy series (`dashboard-occupancy-series` R1.2, R1.4).
@@ -3197,6 +3204,99 @@ export interface components {
       /** Upcoming Checkins */
       upcoming_checkins: number | null;
     };
+    /**
+     * OwnerApprovalIncidentRefResponse
+     * @description The originating incident, in the form `GET /owner-approvals` names it (R1.3).
+     *
+     * Four fields — enough for the owner to recognise which fault this money answers for,
+     * the same narrowing `OwnerApprovalIncidentRef` already applies at the domain layer.
+     * `None` on the parent row's `incident` (never this type with blank fields) is how an
+     * `OTHER`-related approval is told apart from one whose incident failed to resolve.
+     */
+    OwnerApprovalIncidentRefResponse: {
+      category: components["schemas"]["IncidentCategory"];
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      severity: components["schemas"]["IncidentSeverity"];
+      /** Title */
+      title: string;
+    };
+    /**
+     * OwnerApprovalListItemResponse
+     * @description One row of `GET /owner-approvals` (R1.3, design D2).
+     *
+     * **No free text**: neither `reason` nor `response_notes` is a field here, the same
+     * closed-form rule `RespondOwnerApprovalRequest`'s own docstring notes for the dashboard
+     * card. `property` is always populated by this point — `ListOwnerApprovalsUseCase` has
+     * already dropped any row whose property did not resolve inside the tenant before this
+     * model is built, so there is no placeholder to guard against here.
+     */
+    OwnerApprovalListItemResponse: {
+      /** Amount */
+      amount: string;
+      /** Currency */
+      currency: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      incident: components["schemas"]["OwnerApprovalIncidentRefResponse"] | null;
+      property: components["schemas"]["OwnerApprovalPropertyRefResponse"];
+      related_type: components["schemas"]["OwnerApprovalRelatedType"];
+      /**
+       * Requested At
+       * Format: date-time
+       */
+      requested_at: string;
+      /** Responded At */
+      responded_at: string | null;
+      status: components["schemas"]["OwnerApprovalStatus"];
+    };
+    /**
+     * OwnerApprovalPageResponse
+     * @description The envelope `IncidentPageResponse` already establishes for a paginated listing.
+     *
+     * `total` is the reader's own row count and is **not** reduced when the use case drops a
+     * row for an unresolved property (design D4) — so `len(items)` can be smaller than `total`
+     * minus what earlier pages already returned, on the rare row with a crossed property
+     * pointer. That is accepted, not a bug this schema needs to paper over.
+     */
+    OwnerApprovalPageResponse: {
+      /** Items */
+      items: components["schemas"]["OwnerApprovalListItemResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+    };
+    /**
+     * OwnerApprovalPropertyRefResponse
+     * @description The vivienda in the form a person reads, never a bare UUID (R1.3).
+     */
+    OwnerApprovalPropertyRefResponse: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Internal Code */
+      internal_code: string;
+      /** Name */
+      name: string;
+    };
+    /**
+     * OwnerApprovalRelatedType
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (OwnerApproval.related_type) without a named block (§7.19).
+     * @enum {string}
+     */
+    OwnerApprovalRelatedType: "INCIDENT" | "MAINTENANCE_COST" | "OTHER";
     /**
      * OwnerApprovalStatus
      * @description ASSUMPTION: name invented — the PRD declares this enum inline
@@ -8640,6 +8740,45 @@ export interface operations {
       };
       /** @description Authenticated, but the role lacks the required permission. */
       403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List the tenant's owner approvals
+   * @description Paginated with `page`/`per_page` (PRD §23), tenant-scoped from the token alone (R1.1). Omitting `status` returns only `PENDING` rows, oldest request first — the to-do-list default (R1.2); an answered status (`APPROVED`/`REJECTED`) returns newest-answered-first. `TENANT_OWNER` and `PROPERTY_MANAGER` only (R1.4) — a `TECHNICIAN` or `CLEANER` gets the same `403` `require()` gives for any permission they lack, with no hint of whether any approval exists (R1.5).
+   */
+  list_owner_approvals_api_v1_owner_approvals_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        status?: components["schemas"]["OwnerApprovalStatus"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["OwnerApprovalPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };

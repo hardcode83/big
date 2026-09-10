@@ -58,6 +58,14 @@ class NotificationType(str, enum.Enum):
     # body of each carries only ids and a constant text — never the message's `content` (R4).
     CLEANING_TASK_MESSAGE = "CLEANING_TASK_MESSAGE"
     INCIDENT_MESSAGE = "INCIDENT_MESSAGE"
+    # `approvals-web` design D6 (R4.2), amended at the design gate: **two** members, not one —
+    # the inbox renders its text from the type alone, so a single member could not say whether
+    # the owner approved or rejected the expense. Neither carries an `sla_deadline_at` and
+    # neither gets an `escalation_for` rule, the same reasoning `owner_approval_notification`
+    # already records: nobody is late for reading an outcome, and a deadline with no escalation
+    # policy would mark the row breached and escalate to nobody.
+    OWNER_APPROVAL_APPROVED = "OWNER_APPROVAL_APPROVED"
+    OWNER_APPROVAL_REJECTED = "OWNER_APPROVAL_REJECTED"
     # `guest-link-delivery` R4.1. The same kind of divergence as the three above: an operator
     # choosing to send the guest their portal link is not one of PRD §14's sixteen operational
     # events (cleanings, incidents, technicians, guests-as-recipients-of-price-or-SLA-events,

@@ -4525,6 +4525,8 @@
           "PASSWORD_RESET_REQUESTED",
           "CLEANING_TASK_MESSAGE",
           "INCIDENT_MESSAGE",
+          "OWNER_APPROVAL_APPROVED",
+          "OWNER_APPROVAL_REJECTED",
           "GUEST_PORTAL_LINK_DELIVERED"
         ],
         "title": "NotificationType",
@@ -4653,6 +4655,169 @@
         ],
         "title": "OperationalKpisResponse",
         "type": "object"
+      },
+      "OwnerApprovalIncidentRefResponse": {
+        "description": "The originating incident, in the form `GET /owner-approvals` names it (R1.3).\n\nFour fields — enough for the owner to recognise which fault this money answers for,\nthe same narrowing `OwnerApprovalIncidentRef` already applies at the domain layer.\n`None` on the parent row's `incident` (never this type with blank fields) is how an\n`OTHER`-related approval is told apart from one whose incident failed to resolve.",
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/IncidentCategory"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/IncidentSeverity"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "category",
+          "severity"
+        ],
+        "title": "OwnerApprovalIncidentRefResponse",
+        "type": "object"
+      },
+      "OwnerApprovalListItemResponse": {
+        "description": "One row of `GET /owner-approvals` (R1.3, design D2).\n\n**No free text**: neither `reason` nor `response_notes` is a field here, the same\nclosed-form rule `RespondOwnerApprovalRequest`'s own docstring notes for the dashboard\ncard. `property` is always populated by this point — `ListOwnerApprovalsUseCase` has\nalready dropped any row whose property did not resolve inside the tenant before this\nmodel is built, so there is no placeholder to guard against here.",
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "incident": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OwnerApprovalIncidentRefResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "property": {
+            "$ref": "#/components/schemas/OwnerApprovalPropertyRefResponse"
+          },
+          "related_type": {
+            "$ref": "#/components/schemas/OwnerApprovalRelatedType"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "responded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responded At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OwnerApprovalStatus"
+          }
+        },
+        "required": [
+          "id",
+          "related_type",
+          "status",
+          "amount",
+          "currency",
+          "requested_at",
+          "responded_at",
+          "incident",
+          "property"
+        ],
+        "title": "OwnerApprovalListItemResponse",
+        "type": "object"
+      },
+      "OwnerApprovalPageResponse": {
+        "description": "The envelope `IncidentPageResponse` already establishes for a paginated listing.\n\n`total` is the reader's own row count and is **not** reduced when the use case drops a\nrow for an unresolved property (design D4) — so `len(items)` can be smaller than `total`\nminus what earlier pages already returned, on the rare row with a crossed property\npointer. That is accepted, not a bug this schema needs to paper over.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OwnerApprovalListItemResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page"
+        ],
+        "title": "OwnerApprovalPageResponse",
+        "type": "object"
+      },
+      "OwnerApprovalPropertyRefResponse": {
+        "description": "The vivienda in the form a person reads, never a bare UUID (R1.3).",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "internal_code": {
+            "title": "Internal Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "internal_code"
+        ],
+        "title": "OwnerApprovalPropertyRefResponse",
+        "type": "object"
+      },
+      "OwnerApprovalRelatedType": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(OwnerApproval.related_type) without a named block (§7.19).",
+        "enum": [
+          "INCIDENT",
+          "MAINTENANCE_COST",
+          "OTHER"
+        ],
+        "title": "OwnerApprovalRelatedType",
+        "type": "string"
       },
       "OwnerApprovalStatus": {
         "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(OwnerApproval.status) without a named block (§7.19).",
@@ -16031,6 +16196,105 @@
         "summary": "Acknowledge one of the caller's own notifications",
         "tags": [
           "notifications"
+        ]
+      }
+    },
+    "/api/v1/owner-approvals": {
+      "get": {
+        "description": "Paginated with `page`/`per_page` (PRD §23), tenant-scoped from the token alone (R1.1). Omitting `status` returns only `PENDING` rows, oldest request first — the to-do-list default (R1.2); an answered status (`APPROVED`/`REJECTED`) returns newest-answered-first. `TENANT_OWNER` and `PROPERTY_MANAGER` only (R1.4) — a `TECHNICIAN` or `CLEANER` gets the same `403` `require()` gives for any permission they lack, with no hint of whether any approval exists (R1.5).",
+        "operationId": "list_owner_approvals_api_v1_owner_approvals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OwnerApprovalStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnerApprovalPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the tenant's owner approvals",
+        "tags": [
+          "maintenance"
         ]
       }
     },

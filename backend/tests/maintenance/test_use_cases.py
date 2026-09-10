@@ -23,6 +23,7 @@ from app.auth.infrastructure.models import UserModel
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.maintenance.application.use_cases import (
     IncidentActor,
+    ListOwnerApprovalsUseCase,
     _load_incident_in_scope,
 )
 from app.maintenance.domain.enums import (
@@ -41,8 +42,9 @@ from app.maintenance.domain.exceptions import (
     MaintenanceValidationError,
     OwnerApprovalNotFoundError,
 )
-from app.maintenance.domain.repositories import IncidentFilters
+from app.maintenance.domain.repositories import IncidentFilters, OwnerApprovalFilters
 from app.maintenance.infrastructure.models import IncidentModel, OwnerApprovalModel
+from app.maintenance.infrastructure.repositories import SqlAlchemyOwnerApprovalReader
 from app.notifications.domain.enums import NotificationChannel, NotificationStatus, NotificationType
 from app.notifications.infrastructure.models import NotificationLogModel
 from app.tenants.infrastructure.models import TenantModel
@@ -52,6 +54,7 @@ from app.properties.infrastructure.models import (
     PropertyModel,
     PropertyStateTransitionModel,
 )
+from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType
 from app.timeline.infrastructure.models import TimelineEventModel
 from tests.maintenance.conftest import (
@@ -654,6 +657,207 @@ async def test_an_unknown_approval_is_not_found(flow, world) -> None:
             actor=owner(world),
             now=LATER,
         )
+
+
+# --- The technician learns the answer (`approvals-web` R4, design D7) -------------------
+
+
+async def _answer_notifications(db_session, tenant_id, notification_type: str) -> list:
+    """Rows of one notification type for one tenant — the same shape `_severity_alerts`
+    (below in this file) uses for the severity alert, named here for these answer tests."""
+    rows = await db_session.execute(
+        select(NotificationLogModel).where(
+            NotificationLogModel.tenant_id == tenant_id,
+            NotificationLogModel.notification_type == notification_type,
+        )
+    )
+    return list(rows.scalars())
+
+
+async def test_approving_notifies_the_assigned_technician(flow, world, db_session) -> None:
+    """R4.1 — the technician who is waiting on the answer is the one told."""
+    incident = await _in_progress(flow, world, db_session)
+    await flow.resolve.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        final_cost=Decimal("500.00"),
+        actor=technician(world),
+        now=LATER,
+    )
+    approval = (await db_session.execute(select(OwnerApprovalModel))).scalars().one()
+
+    await flow.respond.execute(
+        tenant_id=world.tenant.id,
+        approval_id=approval.id,
+        status=OwnerApprovalStatus.APPROVED,
+        response_notes="Adelante.",
+        actor=owner(world),
+        now=LATER,
+    )
+
+    rows = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_APPROVED.value
+    )
+    assert [row.recipient_user_id for row in rows] == [world.technician.id]
+    rejected = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_REJECTED.value
+    )
+    assert rejected == []
+
+
+async def test_rejecting_notifies_the_assigned_technician(flow, world, db_session) -> None:
+    """R4.1 — a rejection is as much news as being unblocked (design D7)."""
+    incident = await _in_progress(flow, world, db_session)
+    await flow.resolve.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        final_cost=Decimal("500.00"),
+        actor=technician(world),
+        now=LATER,
+    )
+    approval = (await db_session.execute(select(OwnerApprovalModel))).scalars().one()
+
+    await flow.respond.execute(
+        tenant_id=world.tenant.id,
+        approval_id=approval.id,
+        status=OwnerApprovalStatus.REJECTED,
+        response_notes="Demasiado caro.",
+        actor=owner(world),
+        now=LATER,
+    )
+
+    rows = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_REJECTED.value
+    )
+    assert [row.recipient_user_id for row in rows] == [world.technician.id]
+    approved = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_APPROVED.value
+    )
+    assert approved == []
+
+
+async def test_an_incident_with_no_assigned_technician_writes_no_notification(
+    flow, world, db_session
+) -> None:
+    """R4.3 — no assignee, no notification, and the answer itself must not fail."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+    await flow.triage.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=manager(world),
+        now=LATER,
+        estimated_cost=Decimal("450.00"),
+    )
+    approval = (await db_session.execute(select(OwnerApprovalModel))).scalars().one()
+
+    result = await flow.respond.execute(
+        tenant_id=world.tenant.id,
+        approval_id=approval.id,
+        status=OwnerApprovalStatus.APPROVED,
+        response_notes=None,
+        actor=owner(world),
+        now=LATER,
+    )
+
+    assert result.status is IncidentStatus.CLASSIFIED
+    approved = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_APPROVED.value
+    )
+    rejected = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_REJECTED.value
+    )
+    assert approved == []
+    assert rejected == []
+
+
+async def test_the_answer_notification_carries_no_reason_or_response_notes(
+    flow, world, db_session
+) -> None:
+    """R4.4 — the closed form: ids and a constant, never `OwnerApproval.reason` or the
+    owner's own `response_notes`."""
+    leaked_response_notes = "Aprobado porque el fontanero es de confianza."
+    incident = await _in_progress(flow, world, db_session)
+    await flow.resolve.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        final_cost=Decimal("500.00"),
+        actor=technician(world),
+        now=LATER,
+    )
+    approval = (await db_session.execute(select(OwnerApprovalModel))).scalars().one()
+
+    await flow.respond.execute(
+        tenant_id=world.tenant.id,
+        approval_id=approval.id,
+        status=OwnerApprovalStatus.APPROVED,
+        response_notes=leaked_response_notes,
+        actor=owner(world),
+        now=LATER,
+    )
+
+    rows = await _answer_notifications(
+        db_session, world.tenant.id, NotificationType.OWNER_APPROVAL_APPROVED.value
+    )
+    row = rows[0]
+    assert leaked_response_notes not in row.body
+    assert leaked_response_notes not in row.subject
+    assert approval.reason not in row.body
+
+
+async def test_the_answer_notification_reaches_the_same_commit_as_the_response(
+    flow, world, db_session
+) -> None:
+    """R4.5 — no window in which the response is recorded and the technician's notice is not.
+
+    Mirrors `test_the_alert_and_the_verdict_reach_the_same_commit`: wraps the use case's unit
+    of work and, at the moment `commit()` is called, asks whether the notification row is
+    already visible in the session.
+    """
+    incident = await _in_progress(flow, world, db_session)
+    await flow.resolve.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        final_cost=Decimal("500.00"),
+        actor=technician(world),
+        now=LATER,
+    )
+    approval = (await db_session.execute(select(OwnerApprovalModel))).scalars().one()
+
+    real_uow = flow.respond._uow
+    seen: list[bool] = []
+
+    class _WatchesTheCommit:
+        async def commit(self) -> None:
+            rows = await db_session.execute(
+                select(func.count())
+                .select_from(NotificationLogModel)
+                .where(
+                    NotificationLogModel.tenant_id == world.tenant.id,
+                    NotificationLogModel.related_id == incident.id,
+                    NotificationLogModel.notification_type
+                    == NotificationType.OWNER_APPROVAL_APPROVED.value,
+                )
+            )
+            seen.append(rows.scalar_one() == 1)
+            await real_uow.commit()
+
+        async def rollback(self) -> None:  # pragma: no cover - not reached here
+            await real_uow.rollback()
+
+    flow.respond._uow = _WatchesTheCommit()
+    try:
+        await flow.respond.execute(
+            tenant_id=world.tenant.id,
+            approval_id=approval.id,
+            status=OwnerApprovalStatus.APPROVED,
+            response_notes=None,
+            actor=owner(world),
+            now=LATER,
+        )
+    finally:
+        flow.respond._uow = real_uow
+
+    assert seen == [True]
 
 
 # --- Assignment and SLA (task 6.7; R3.1, R3.4, R3.5) ------------------------------------
@@ -2551,3 +2755,72 @@ async def test_a_confident_medium_verdict_announces_nothing(
         )
     )
     assert list(rows.scalars()) == []
+
+
+# --- ListOwnerApprovalsUseCase (`approvals-web` design D4) ------------------------------
+
+
+async def test_list_owner_approvals_drops_a_row_whose_property_does_not_resolve(
+    world, db_session, caplog
+) -> None:
+    """D4: `OwnerApprovalReader.list_for_tenant` never touches `properties`, so a property
+    that does not resolve *inside the tenant* only surfaces once this use case runs its own
+    batched `list_for_ids` — this is the one test that exercises that composition, the same
+    role `test_a_dangling_property_is_a_not_found_and_never_a_partial_answer` plays for
+    `GetIncidentContextUseCase`.
+
+    Such a row is dropped from the page and logged under
+    `maintenance.owner_approval_property_unresolved` (mirroring
+    `incident_context_property_unresolved`), and `page.total` — the reader's own count — is
+    NOT adjusted for the drop.
+    """
+    neighbour_tenant = TenantModel(name="TenantB", billing_email="b@example.com")
+    db_session.add(neighbour_tenant)
+    await db_session.flush()
+    theirs = PropertyModel(
+        tenant_id=neighbour_tenant.id, name="Otra", internal_code="OTRA"
+    )
+    db_session.add(theirs)
+    await db_session.flush()
+
+    incident = await make_incident(
+        db_session, world, status=IncidentStatus.AWAITING_OWNER_APPROVAL
+    )
+    approval = OwnerApprovalModel(
+        id=uuid.uuid4(),
+        tenant_id=world.tenant.id,
+        property_id=theirs.id,
+        related_type=OwnerApprovalRelatedType.INCIDENT,
+        related_id=incident.id,
+        amount=Decimal("450.00"),
+        reason="Maintenance expense above the tenant threshold.",
+        requested_at=NOW,
+    )
+    db_session.add(approval)
+    await db_session.flush()
+
+    use_case = ListOwnerApprovalsUseCase(
+        approvals=SqlAlchemyOwnerApprovalReader(db_session),
+        properties=SqlAlchemyPropertyRepository(db_session),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        page = await use_case.execute(
+            tenant_id=world.tenant.id,
+            filters=OwnerApprovalFilters(),
+            page=1,
+            per_page=10,
+        )
+
+    assert page.items == ()
+    assert page.total == 1
+
+    warnings = [
+        record
+        for record in caplog.records
+        if record.message == "maintenance.owner_approval_property_unresolved"
+    ]
+    assert len(warnings) == 1
+    assert warnings[0].tenant_id == str(world.tenant.id)
+    assert warnings[0].approval_id == str(approval.id)
+    assert warnings[0].property_id == str(theirs.id)

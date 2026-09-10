@@ -63,14 +63,19 @@ class Permission(str, enum.Enum):
     # `IncidentActor.restrict_to_technician_id`, which is what puts it in the repository
     # filter where no router can forget it (R5.3).
     #
-    # `RESPOND_OWNER_APPROVALS` is the owner's alone (R2.6). There is deliberately **no**
-    # `READ_OWNER_APPROVALS` and no listing route: the dashboard already exposes pending
-    # approvals per property, and this catalogue carries only the permissions a change
-    # actually applies.
+    # `RESPOND_OWNER_APPROVALS` is the owner's alone (R2.6): only she may accept or reject a
+    # pending expense.
+    #
+    # `READ_OWNER_APPROVALS` is `approvals-web` (R1.4, design D1): a new permission, not a
+    # reuse of `READ_INCIDENTS`, because `_INCIDENT_EXECUTE` carries `READ_INCIDENTS` and
+    # `UserRole.TECHNICIAN` holds `_INCIDENT_EXECUTE` — reusing it would show the technician
+    # the tenant's whole expense queue. Granted to `TENANT_OWNER` and `PROPERTY_MANAGER` only,
+    # backing the listing route this change adds.
     READ_INCIDENTS = "READ_INCIDENTS"
     MANAGE_INCIDENTS = "MANAGE_INCIDENTS"
     EXECUTE_INCIDENTS = "EXECUTE_INCIDENTS"
     RESPOND_OWNER_APPROVALS = "RESPOND_OWNER_APPROVALS"
+    READ_OWNER_APPROVALS = "READ_OWNER_APPROVALS"
 
     # Added by `access-notifications`.
     #
@@ -251,6 +256,11 @@ _INCIDENT_READ = frozenset({Permission.READ_INCIDENTS})
 _INCIDENT_MANAGE = frozenset({Permission.READ_INCIDENTS, Permission.MANAGE_INCIDENTS})
 _INCIDENT_EXECUTE = frozenset({Permission.READ_INCIDENTS, Permission.EXECUTE_INCIDENTS})
 _OWNER_APPROVAL_RESPOND = frozenset({Permission.RESPOND_OWNER_APPROVALS})
+# `approvals-web` D1. `TENANT_OWNER` and `PROPERTY_MANAGER` only (R1.4): the manager needs to
+# see why the flow is stopped even though `RESPOND_OWNER_APPROVALS` stays the owner's alone.
+# `CLEANER` and `TECHNICIAN` get neither — the tenant's expense queue is not part of doing a
+# cleaning or a repair.
+_OWNER_APPROVAL_READ = frozenset({Permission.READ_OWNER_APPROVALS})
 # `messaging-ai` D17. Reading is the owner's and the manager's; operating the inbox — creating
 # a conversation, writing into it, escalating, resolving — is the manager's alone.
 #
@@ -365,6 +375,7 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         # or assign, which PRD §12 and R1.4/R3.1 give to the manager.
         | _INCIDENT_READ
         | _OWNER_APPROVAL_RESPOND
+        | _OWNER_APPROVAL_READ
         # Sees what her guests are saying; does not answer them (D17).
         | _CONVERSATION_READ
         # Sets the box her own prices move in, and approves what comes out of it. The one
@@ -405,6 +416,9 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         # assignment, `_INCIDENT_EXECUTE` is R4.5's "para desatascar".
         | _INCIDENT_MANAGE
         | _INCIDENT_EXECUTE
+        # R1.4: the manager needs to see why the flow is stopped, even without
+        # `RESPOND_OWNER_APPROVALS` — that stays the owner's alone.
+        | _OWNER_APPROVAL_READ
         # PRD §6: "operar reservas, limpiezas, incidencias, **conversaciones**".
         | _CONVERSATION_MANAGE
         # Operates pricing day to day: writes the rules and forces a regeneration after
