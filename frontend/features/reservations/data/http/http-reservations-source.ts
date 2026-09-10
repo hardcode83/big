@@ -4,10 +4,12 @@ import type { components } from "@/lib/api/generated/openapi";
 import type {
   GuestAccessTokenStatusDto,
   GuestSummaryDto,
+  CreateReservationInput,
   ReservationDetailDto,
   ReservationFilters,
   ReservationList,
   ReservationSummaryDto,
+  UpdateReservationInput,
 } from "../dto";
 
 type ReservationResponse = components["schemas"]["ReservationResponse"];
@@ -19,6 +21,13 @@ type GuestAccessTokenIssuedResponse =
   components["schemas"]["GuestAccessTokenIssuedResponse"];
 type GuestAccessTokenSentResponse =
   components["schemas"]["GuestAccessTokenSentResponse"];
+
+/** Keep optional blank form values out of mutation bodies without changing null clears. */
+function omitBlankOptionals<T extends Record<string, unknown>>(input: T): T {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined && value !== ""),
+  ) as T;
+}
 
 /** Map `GuestSummaryResponse` (snake_case, no PII) to the UI DTO (camelCase). */
 function mapGuestSummary(value: GuestSummaryResponse): GuestSummaryDto {
@@ -145,6 +154,46 @@ export class HttpReservationsSource {
       { pathParams: { reservation_id: reservationId } },
     );
     return mapReservationDetail(response as ReservationDetailResponse);
+  }
+
+  /** Create a manual reservation and map the response to the shared read summary. */
+  async createReservation(
+    _tenantId: string,
+    input: CreateReservationInput,
+  ): Promise<ReservationSummaryDto> {
+    const response = await this.client.request("/api/v1/reservations", {
+      method: "POST",
+      body: omitBlankOptionals(input),
+    });
+    return mapReservationSummary(response as ReservationResponse);
+  }
+
+  /** Apply only the supplied reservation fields and return the recalculated summary. */
+  async updateReservation(
+    _tenantId: string,
+    reservationId: string,
+    input: UpdateReservationInput,
+  ): Promise<ReservationSummaryDto> {
+    const response = await this.client.request(
+      "/api/v1/reservations/{reservation_id}",
+      {
+        method: "PATCH",
+        pathParams: { reservation_id: reservationId },
+        body: omitBlankOptionals(input),
+      },
+    );
+    return mapReservationSummary(response as ReservationResponse);
+  }
+
+  /** Cancel without a request body; the API models cancellation as DELETE 204. */
+  async cancelReservation(
+    _tenantId: string,
+    reservationId: string,
+  ): Promise<void> {
+    await this.client.request(
+      "/api/v1/reservations/{reservation_id}",
+      { method: "DELETE", pathParams: { reservation_id: reservationId } },
+    );
   }
 
   /**

@@ -2,9 +2,9 @@
 
 ## 1. API source and DTO contracts
 
-- [ ] 1.1 Extend `frontend/features/reservations/data/dto.ts` with typed mutation inputs and `ReservationSummaryDto` response usage, keeping civil dates, nullable fields and guest input separate from read DTOs [R1, R2, R3]
-- [ ] 1.2 Add `createReservation`, `updateReservation` and `cancelReservation` to `frontend/features/reservations/data/http/http-reservations-source.ts`, using only generated OpenAPI request schemas, mapping POST/PATCH to summary DTOs and DELETE to `void` [R1, R3, R5]
-- [ ] 1.3 Add source tests for exact POST/PATCH/DELETE paths, methods, payload omission of empty optionals and no `guest_id` generation [R1, R2, R3]
+- [x] 1.1 Extend `frontend/features/reservations/data/dto.ts` with typed mutation inputs and `ReservationSummaryDto` response usage, keeping civil dates, nullable fields and guest input separate from read DTOs [R1, R2, R3]
+- [x] 1.2 Add `createReservation`, `updateReservation` and `cancelReservation` to `frontend/features/reservations/data/http/http-reservations-source.ts`, using only generated OpenAPI request schemas, mapping POST/PATCH to summary DTOs and DELETE to `void` [R1, R3, R5]
+- [x] 1.3 Add source tests for exact POST/PATCH/DELETE paths, methods, payload omission of empty optionals and no `guest_id` generation [R1, R2, R3]
 
 ## 2. Query mutations and authorization
 
@@ -42,3 +42,6 @@
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
+- `HttpReservationsSource` mutation responses map to `ReservationSummaryDto`; detail refresh remains query-owned.
+- `CreateReservationInput` and `UpdateReservationInput` omit `guest_id` at the type boundary.
+- `npm install --ignore-scripts` was required locally because locked Vitest browser dependency was absent from node_modules.

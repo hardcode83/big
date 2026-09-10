@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ApiError, type ApiClient } from "@/lib/api";
 
+import type { CreateReservationInput, UpdateReservationInput } from "../dto";
 import { HttpReservationsSource } from "./http-reservations-source";
 
 function sourceWith(response: unknown): {
@@ -306,6 +307,89 @@ describe("HttpReservationsSource — getReservation", () => {
       propertyInternalCode: null,
       guestFullName: null,
     });
+  });
+});
+
+describe("HttpReservationsSource — reservation mutations (R1, R2, R3, D4)", () => {
+  const response = {
+    id: "reservation-created",
+    property_id: "property-1",
+    status: "PENDING",
+    check_in_date: "2026-09-12",
+    check_out_date: "2026-09-15",
+    nights: 3,
+    total_guests: 2,
+    guest_id: "guest-resolved",
+    channel: "MANUAL",
+    currency: "EUR",
+    gross_amount: null,
+    payment_status: "PENDING",
+    property_name: "Hotel Sol",
+    property_internal_code: "HS-01",
+    guest_full_name: "Laura Gómez",
+  };
+
+  it("posts the generated create shape, omits blank optionals, and never creates guest_id", async () => {
+    const { source, request } = sourceWith(response);
+    const input: CreateReservationInput = {
+      property_id: "property-1",
+      check_in_date: "2026-09-12",
+      check_out_date: "2026-09-15",
+      channel: "MANUAL",
+      check_in_time: "",
+      check_out_time: undefined,
+      internal_notes: "",
+      guest: { full_name: "Laura Gómez", email: "laura@example.com" },
+    };
+
+    await expect(source.createReservation(TENANT, input)).resolves.toMatchObject({
+      id: "reservation-created",
+      guestId: "guest-resolved",
+    });
+    expect(request).toHaveBeenCalledWith("/api/v1/reservations", {
+      method: "POST",
+      body: {
+        property_id: "property-1",
+        check_in_date: "2026-09-12",
+        check_out_date: "2026-09-15",
+        channel: "MANUAL",
+        guest: { full_name: "Laura Gómez", email: "laura@example.com" },
+      },
+    });
+    expect(request.mock.calls[0][1].body).not.toHaveProperty("guest_id");
+  });
+
+  it("patches the exact reservation path and preserves explicit nullable values", async () => {
+    const { source, request } = sourceWith(response);
+    const input: UpdateReservationInput = {
+      check_out_date: "2026-09-16",
+      internal_notes: null,
+      special_requests: "",
+    };
+
+    await source.updateReservation(TENANT, "reservation-1", input);
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/reservations/{reservation_id}",
+      {
+        method: "PATCH",
+        pathParams: { reservation_id: "reservation-1" },
+        body: { check_out_date: "2026-09-16", internal_notes: null },
+      },
+    );
+    expect(request.mock.calls[0][1].body).not.toHaveProperty("guest_id");
+  });
+
+  it("deletes the exact reservation path without a body and resolves void", async () => {
+    const { source, request } = sourceWith(undefined);
+
+    await expect(
+      source.cancelReservation(TENANT, "reservation-1"),
+    ).resolves.toBeUndefined();
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/reservations/{reservation_id}",
+      { method: "DELETE", pathParams: { reservation_id: "reservation-1" } },
+    );
+    expect(request.mock.calls[0][1]).not.toHaveProperty("body");
   });
 });
 
