@@ -41,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import async_session_factory, bind_session_to_tenant
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
+from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.integrations.application.ingest import IngestReport
 from app.integrations.domain.enums import PMSProvider
@@ -143,6 +144,7 @@ async def sync_with_session(
         timeline=SqlAlchemyTimelineEventRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
         audit=SqlAlchemyAuditLogRepository(session),
+        email_exclusion=PostgresGuestEmailExclusion(session),
     )
     report = await use_case.execute(
         tenant_id=tenant_id,

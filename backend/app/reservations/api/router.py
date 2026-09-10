@@ -95,7 +95,10 @@ async def list_reservations(
     description=(
         "For bookings that do not come from the PMS. `nights` and `total_guests` are "
         "derived from the dates and the party, never accepted from the caller. Answers "
-        "`404` when the property is not the caller's tenant's."
+        "`404` when the property is not the caller's tenant's. `guest_id` may reference "
+        "an existing guest, `guest` resolves or creates one by email, or both may be omitted "
+        "for a guest-less reservation; sending both answers `422`. The response keeps "
+        "`guest_id` nullable or returns the resolved id."
     ),
 )
 async def create_reservation(
@@ -114,6 +117,7 @@ async def create_reservation(
             adults=body.adults,
             children=body.children,
             guest_id=body.guest_id,
+            guest=body.guest.to_application_input() if body.guest is not None else None,
             check_in_time=body.check_in_time,
             check_out_time=body.check_out_time,
             gross_amount=body.gross_amount,

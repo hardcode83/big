@@ -17,6 +17,7 @@ from app.core import crypto
 from app.core.crypto import SecretDecryptionError
 from app.core.unit_of_work import UnitOfWork
 from app.guests.domain.repositories import GuestRepository
+from app.guests.domain.ports import GuestEmailExclusion
 from app.integrations.application.ingest import (
     IngestReport,
     IngestRow,
@@ -90,6 +91,7 @@ class SyncReservationsFromPmsUseCase:
         timeline: TimelineEventRepository,
         uow: UnitOfWork,
         audit: AuditLogRepository,
+        email_exclusion: GuestEmailExclusion,
     ) -> None:
         # A FACTORY, not an adapter. ADR 0006 decision 7 is explicit that use cases must never
         # receive an adapter injected as a singleton, because that is precisely what makes
@@ -97,7 +99,10 @@ class SyncReservationsFromPmsUseCase:
         self._factory = factory
         self._properties = properties
         self._ingestor = ReservationIngestor(
-            reservations=reservations, guests=guests, timeline=timeline
+            reservations=reservations,
+            guests=guests,
+            timeline=timeline,
+            email_exclusion=email_exclusion,
         )
         self._uow = uow
         # REQUIRED, not optional. It defaulted to `None` and `_record_credential_reads` returned
@@ -631,11 +636,15 @@ class ImportReservationsFromCsvUseCase:
         timeline: TimelineEventRepository,
         uow: UnitOfWork,
         max_rows: int,
+        email_exclusion: GuestEmailExclusion,
     ) -> None:
         self._parser = parser
         self._properties = properties
         self._ingestor = ReservationIngestor(
-            reservations=reservations, guests=guests, timeline=timeline
+            reservations=reservations,
+            guests=guests,
+            timeline=timeline,
+            email_exclusion=email_exclusion,
         )
         self._uow = uow
         self._max_rows = max_rows

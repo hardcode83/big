@@ -25,6 +25,13 @@ from app.reservations.domain.repositories import Page, ReservationFilters
 from app.timeline.domain.entities import TimelineEvent
 
 
+class FakeGuestEmailExclusion:
+    """Explicit transaction-exclusion fake for reservation use-case tests."""
+
+    async def acquire(self, tenant_id: uuid.UUID, normalized_email: str) -> None:
+        return None
+
+
 @dataclass
 class FakePropertyRepository:
     properties: dict[uuid.UUID, Property] = field(default_factory=dict)

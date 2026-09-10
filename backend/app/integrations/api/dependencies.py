@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.db import get_db_session
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
+from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.core.redis import get_redis
 from app.integrations.application.use_cases import (
     CreateWebhookEndpointUseCase,
@@ -47,6 +48,7 @@ def get_import_csv_use_case(session: SessionDep) -> ImportReservationsFromCsvUse
         guests=SqlAlchemyGuestRepository(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
+        email_exclusion=PostgresGuestEmailExclusion(session),
     )
 
 

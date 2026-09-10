@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db_session
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
+from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
 from app.reservations.application.use_cases import (
     CancelReservationUseCase,
@@ -34,6 +35,7 @@ def get_create_reservation_use_case(session: SessionDep) -> CreateReservationUse
         guests=SqlAlchemyGuestRepository(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
+        guest_email_exclusion=PostgresGuestEmailExclusion(session),
     )
 
 

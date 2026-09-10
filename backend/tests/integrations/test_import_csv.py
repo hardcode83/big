@@ -53,6 +53,20 @@ class TestHappyPath:
         assert row.guest_id is not None
 
     @pytest.mark.asyncio
+    async def test_whitespace_only_guest_email_keeps_reservation_guestless(
+        self, api, manager, property_a, db_session
+    ) -> None:
+        row = "REDES11,AIRBNB,2026-08-01,2026-08-04,2,   ,   ,CSV-WHITESPACE\n"
+        response = await api.post(
+            ENDPOINT, files=_upload(HEADER + row), headers=auth_header(api, manager)
+        )
+
+        assert response.status_code == 200
+        assert response.json()["created"] == 1
+        reservation = (await db_session.execute(select(ReservationModel))).scalar_one()
+        assert reservation.guest_id is None
+
+    @pytest.mark.asyncio
     async def test_the_event_is_attributed_to_the_uploader(
         self, api, manager, property_a, db_session
     ) -> None:

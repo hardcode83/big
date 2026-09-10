@@ -13,6 +13,7 @@ from app.core.db import bind_session_to_tenant
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.models import GuestModel
+from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
 from app.integrations.domain.dtos import PmsFetchResult, PmsRowFailure
@@ -74,6 +75,7 @@ def _build(db_session, factory) -> SyncReservationsFromPmsUseCase:
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
         audit=SqlAlchemyAuditLogRepository(db_session),
+        email_exclusion=PostgresGuestEmailExclusion(db_session),
     )
 
 
@@ -196,6 +198,31 @@ async def test_an_existing_guest_of_the_tenant_is_linked_instead_of_duplicated(
         select(ReservationModel.guest_id).where(ReservationModel.external_pms_id == "MOCK-PMS-0001")
     )
     assert linked == existing.id
+
+
+@pytest.mark.asyncio
+async def test_reusing_an_existing_guest_does_not_update_its_contact_fields(
+    db_session, tenant_a, property_a
+) -> None:
+    existing = GuestModel(
+        tenant_id=tenant_a.id,
+        full_name="Canonical Name",
+        email="john.smith@example.com",
+        phone="+34611111111",
+        preferred_language="en",
+    )
+    db_session.add(existing)
+    await db_session.flush()
+
+    await _use_case(db_session, include_broken_rows=False).execute(
+        tenant_id=tenant_a.id, since=SINCE, now=NOW
+    )
+    await db_session.refresh(existing)
+
+    assert existing.full_name == "Canonical Name"
+    assert existing.email == "john.smith@example.com"
+    assert existing.phone == "+34611111111"
+    assert existing.preferred_language == "en"
 
 
 @pytest.mark.asyncio

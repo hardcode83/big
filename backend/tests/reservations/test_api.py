@@ -11,7 +11,7 @@ from app.guests.infrastructure.models import GuestModel
 from app.reservations.infrastructure.models import ReservationModel
 from app.timeline.domain.enums import TimelineEventType
 from app.timeline.infrastructure.models import TimelineEventModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from tests.reservations.conftest import auth_header
 
@@ -70,6 +70,168 @@ class TestCreate:
         ).scalar_one()
         assert event.event_type is TimelineEventType.RESERVATION_CREATED_MANUAL
         assert event.actor_user_id == manager.id
+
+    @pytest.mark.asyncio
+    async def test_guest_block_creates_and_normalizes_a_guest(
+        self, api, manager, create_payload, db_session, tenant_a
+    ) -> None:
+        response = await _create(
+            api,
+            manager,
+            create_payload,
+            guest={
+                "full_name": "  Jane Doe  ",
+                "email": "  JANE@Example.COM ",
+                "phone": "612 345 678",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["guest_id"]
+        guest = (
+            await db_session.execute(
+                select(GuestModel).where(GuestModel.email == "jane@example.com")
+            )
+        ).scalar_one()
+        assert guest.full_name == "Jane Doe"
+        assert guest.phone == "+34612345678"
+        assert guest.preferred_language == "es"
+
+    @pytest.mark.asyncio
+    async def test_guest_id_guest_and_guestless_combinations_are_supported(
+        self, api, manager, create_payload, db_session, tenant_a
+    ) -> None:
+        guest = GuestModel(tenant_id=tenant_a.id, full_name="Existing", email="existing@example.com")
+        db_session.add(guest)
+        await db_session.flush()
+
+        by_id = await _create(api, manager, create_payload, guest_id=str(guest.id))
+        by_guest = await _create(
+            api,
+            manager,
+            create_payload,
+            guest={"full_name": "New Guest"},
+            check_in_date="2026-08-05",
+            check_out_date="2026-08-06",
+        )
+        guestless = await _create(
+            api,
+            manager,
+            create_payload,
+            check_in_date="2026-08-07",
+            check_out_date="2026-08-08",
+        )
+
+        assert by_id.status_code == 201
+        assert by_id.json()["guest_id"] == str(guest.id)
+        assert by_guest.status_code == 201 and by_guest.json()["guest_id"] is not None
+        assert guestless.status_code == 201 and guestless.json()["guest_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_guest_id_and_guest_are_rejected_before_writes(
+        self, api, manager, create_payload, db_session, tenant_a
+    ) -> None:
+        guest = GuestModel(tenant_id=tenant_a.id, full_name="Existing", email="existing@example.com")
+        db_session.add(guest)
+        await db_session.flush()
+        before_reservations = await db_session.scalar(
+            select(ReservationModel.id).limit(1)
+        )
+
+        response = await _create(
+            api,
+            manager,
+            create_payload,
+            guest_id=str(guest.id),
+            guest={"full_name": "Also supplied"},
+        )
+
+        assert response.status_code == 422
+        _envelope(response.json(), "VALIDATION_ERROR")
+        assert await db_session.scalar(select(ReservationModel.id).limit(1)) == before_reservations
+
+    @pytest.mark.parametrize(
+        "guest",
+        [
+            {"full_name": "   "},
+            {"full_name": "x" * 301},
+            {"full_name": "Valid", "phone": "not-a-phone"},
+            {"full_name": "Valid", "preferred_language": "fr"},
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_invalid_guest_fields_are_422_before_writes(
+        self, api, manager, create_payload, guest, db_session
+    ) -> None:
+        before_guests = await db_session.scalar(select(func.count()).select_from(GuestModel))
+        before_reservations = await db_session.scalar(
+            select(func.count()).select_from(ReservationModel)
+        )
+        response = await _create(api, manager, create_payload, guest=guest)
+        assert response.status_code == 422
+        _envelope(response.json(), "VALIDATION_ERROR")
+        assert await db_session.scalar(select(func.count()).select_from(GuestModel)) == before_guests
+        assert (
+            await db_session.scalar(select(func.count()).select_from(ReservationModel))
+            == before_reservations
+        )
+
+    @pytest.mark.asyncio
+    async def test_same_email_guest_in_another_tenant_is_not_reused(
+        self, api, manager, create_payload, db_session, tenant_b
+    ) -> None:
+        neighbour = GuestModel(
+            tenant_id=tenant_b.id, full_name="Tenant B Guest", email="shared@example.com"
+        )
+        db_session.add(neighbour)
+        await db_session.flush()
+
+        response = await _create(
+            api,
+            manager,
+            create_payload,
+            guest={"full_name": "Tenant A Guest", "email": "shared@example.com"},
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["guest_id"] != str(neighbour.id)
+        created = await db_session.scalar(
+            select(GuestModel).where(
+                GuestModel.tenant_id == manager.tenant_id,
+                GuestModel.email == "shared@example.com",
+            )
+        )
+        assert created is not None
+        assert str(created.id) == response.json()["guest_id"]
+
+    @pytest.mark.parametrize("email", [None, "   "])
+    @pytest.mark.asyncio
+    async def test_missing_email_does_not_match_by_name_or_phone(
+        self, api, manager, create_payload, db_session, tenant_a, email
+    ) -> None:
+        existing = GuestModel(
+            tenant_id=tenant_a.id,
+            full_name="Same Identity",
+            email="identified@example.com",
+            phone="+34612345678",
+        )
+        db_session.add(existing)
+        await db_session.flush()
+        guest = {"full_name": "Same Identity", "phone": "612 345 678"}
+        if email is not None:
+            guest["email"] = email
+
+        response = await _create(
+            api,
+            manager,
+            create_payload,
+            guest=guest,
+            check_in_date="2026-08-05" if email is None else "2026-08-06",
+            check_out_date="2026-08-06" if email is None else "2026-08-07",
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["guest_id"] != str(existing.id)
 
     @pytest.mark.asyncio
     async def test_a_body_field_that_does_not_exist_is_refused(
