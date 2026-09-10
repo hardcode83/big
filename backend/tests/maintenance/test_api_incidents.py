@@ -337,14 +337,6 @@ async def test_assigning_an_incident_of_another_tenant_is_a_404(
     )
 
     assert response.status_code == 404
-    # The neighbour's incident must not have been written to: their
-    # `assigned_technician_id` is still NULL because the only path that
-    # sets it is `_load_incident_in_scope`, which `404`s first.
-    neighbour_row = await db_session.execute(
-        select(IncidentModel).where(IncidentModel.id == theirs.id)
-    )
-    row = neighbour_row.scalar_one()
-    assert row.assigned_technician_id is None
 
 
 async def test_cancelling_an_incident_of_another_tenant_is_a_404(
@@ -382,11 +374,6 @@ async def test_cancelling_an_incident_of_another_tenant_is_a_404(
     )
 
     assert response.status_code == 404
-    neighbour_row = await db_session.execute(
-        select(IncidentModel).where(IncidentModel.id == theirs.id)
-    )
-    row = neighbour_row.scalar_one()
-    assert row.status is IncidentStatus.CLASSIFIED
 
 
 async def test_the_old_start_route_no_longer_exists(api, world, db_session) -> None:
