@@ -29,6 +29,7 @@ una conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   | Operación | Orígenes admitidos | Destino |
   |---|---|---|
   | `classify` | `OPEN` | `CLASSIFIED` |
+  | `classify_by_triage` | `OPEN` | `CLASSIFIED` |
   | `require_owner_approval` | `CLASSIFIED`, `IN_PROGRESS` | `AWAITING_OWNER_APPROVAL` |
   | `resume_after_approval:INCIDENT` | `AWAITING_OWNER_APPROVAL` | `CLASSIFIED` |
   | `resume_after_approval:MAINTENANCE_COST` | `AWAITING_OWNER_APPROVAL` | `IN_PROGRESS` |
@@ -320,7 +321,13 @@ una conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   SHALL escribir `current_operational_state` directamente
   ([`timeline-state-machine.md`](timeline-state-machine.md)).
 - THE SYSTEM NEVER SHALL disparar nada al triar, asignar, aceptar, empezar, esperar piezas,
-  reanudar, ni al abrir cualquiera de las dos puertas de aprobación, ni al aprobarla.
+  reanudar, ni al abrir cualquiera de las dos puertas de aprobación, ni al aprobarla — con la
+  **única** excepción de `classify_by_triage` (`PATCH /incidents/{id}` que fija
+  simultáneamente `category` y `severity` sobre una incidencia `OPEN`): esa vía **sí** dispara
+  `INCIDENT_HIGH` o `INCIDENT_CRITICAL` a través de `PropertyStateMachine`, igual que la
+  clasificación automática, porque cierra el mismo hueco que ella (R3.5, design D5). El resto
+  de los triajes —los que no completan la clasificación— se limitan a anotar categoría,
+  severidad o coste sin tocar el estado operacional de la vivienda.
 - IF la máquina rechaza la transición por no haber cambio de estado o por no existir fila de
   política —por ejemplo con la propiedad en `BLOCKED_BY_OWNER` u `OUT_OF_SERVICE`—, THEN THE SYSTEM
   SHALL registrar `maintenance.transition_refused` y **mantener el cambio de la incidencia**: la
@@ -536,7 +543,11 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   módulo que admite actor ausente; cualquier otra sin actor SHALL fallar, incluida el alta genérica.
   Lo que concede la excepción es la ausencia de **decisión**, no la de petición: una clasificación
   manual por `POST /incidents/{id}/classify` lleva su actor aunque la lance un operador, y ningún
-  otro comando queda eximido por ser un comando.
+  otro comando queda eximido por ser un comando. WHEN la clasificación la dispara una persona que
+  corrige la categoría y la severidad sobre un incidente `OPEN` mediante
+  `classify_by_triage` (`PATCH /incidents/{id}` con `category` y `severity`), THE SYSTEM SHALL
+  escribir la fila `INCIDENT_CLASSIFIED` con el actor del llamante (`actor = USER`): la decisión
+  la toma la persona, no el clasificador, así que la excepción del párrafo anterior no se aplica.
 - WHEN se crea una incidencia por el alta genérica, THE SYSTEM SHALL escribir su `AuditLog`
   `INCIDENT_CREATED` con un `ChangeSet` que sólo difiere `source` y `status`, y su `TimelineEvent`
   `INCIDENT_CREATED` con actor `USER`, título constante y metadatos sólo con identificadores.

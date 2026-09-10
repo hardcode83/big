@@ -32,9 +32,21 @@ export {
 // two screens sends.
 export { useResolveIncident } from "./hooks/use-resolve-incident";
 export type { ResolveIncidentInput } from "./hooks/use-resolve-incident";
+export {
+  useTechnicianDirectory,
+  useClassifyIncident,
+  useTriageIncident,
+  useAssignIncident,
+  useCancelIncident,
+  type ClassifyIncidentVariables,
+  type TriageIncidentVariables,
+  type AssignIncidentVariables,
+  type CancelIncidentVariables,
+} from "./hooks/use-incident-management";
 export { incidentsKeys } from "./hooks/query-keys";
 export { mapIncidentsError } from "./lib/error-mapping";
 export { conflictReason, type ConflictReason } from "./lib/conflict-reason";
+export { isPositiveDecimal } from "./lib/cost-format";
 export { severityColorGroup } from "./lib/severity-tone";
 export { getIncidentsDataSource } from "./data";
 export type * from "./data";

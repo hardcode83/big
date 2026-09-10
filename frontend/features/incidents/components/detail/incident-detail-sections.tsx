@@ -126,21 +126,32 @@ export function DetailIdentifyingBlock({
   );
 }
 
+/**
+ * The assigned-technician block (R2.6, design D10). `assignedTechnicianId`
+ * decides whether the section renders at all (unassigned incidents show
+ * nothing here, same as before); `technicianName` is the value the caller
+ * already resolved against the technician roster (`useTechnicianDirectory`)
+ * — `null` while the roster query is loading, the roster does not contain
+ * this id, or the query failed, in which case the localized "not available"
+ * text renders instead. The UUID itself is NEVER printed (R2.6): this
+ * component no longer receives it as a value to show, only as the switch
+ * that decides visibility.
+ */
 export function DetailAssignedTechnicianBlock({
   assignedTechnicianId,
-}: Pick<IncidentDetailDto, "assignedTechnicianId">) {
+  technicianName,
+}: Pick<IncidentDetailDto, "assignedTechnicianId"> & {
+  technicianName: string | null;
+}) {
   const { t } = useTranslation("incidents");
   if (!assignedTechnicianId) return null;
   return (
     <section aria-label={t("fields.assignedTechnician")} className="border-b border-border py-4">
       <dl>
         <DetailField label={t("fields.assignedTechnician")}>
-          {assignedTechnicianId}
+          {technicianName ?? t("fields.technicianNotAvailable")}
         </DetailField>
       </dl>
-      <p role="note" className="mt-2 text-body-base text-muted-foreground">
-        {t("fields.assignedTechnicianNote")}
-      </p>
     </section>
   );
 }

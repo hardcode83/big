@@ -50,7 +50,7 @@
     "property": "Propiedad",
     "reservation": "Reserva",
     "assignedTechnician": "Técnico asignado",
-    "assignedTechnicianNote": "El identificador no se puede resolver a nombre dentro de esta vista",
+    "technicianNotAvailable": "No disponible",
     "aiSummary": "Resumen del clasificador",
     "description": "Descripción",
     "estimatedCost": "Coste estimado",
@@ -67,5 +67,73 @@
     "nextPage": "Página siguiente",
     "forbidden": "No tienes permiso para ver esta incidencia",
     "validation": "Los datos enviados no son válidos"
+  },
+  "manager": {
+    "title": "Acciones",
+    "none": "No hay acciones disponibles para esta incidencia.",
+    "actions": {
+      "classify": "Relanzar clasificador",
+      "assign": "Asignar técnico",
+      "reassign": "Reasignar técnico",
+      "triage": "Triar",
+      "cancel": "Cancelar incidencia",
+      "sending": "Enviando…"
+    },
+    "statusNote": {
+      "awaiting-owner": "La incidencia espera la respuesta de la propietaria en /approvals."
+    },
+    "assign": {
+      "title": "Asignar técnico",
+      "titleReassign": "Reasignar técnico",
+      "technicianLabel": "Técnico",
+      "technicianPlaceholder": "Selecciona un técnico",
+      "noteLabel": "Nota de asignación (opcional)",
+      "notePlaceholder": "Añade contexto para el técnico…",
+      "noteHelp": "Hasta 2000 caracteres.",
+      "reassignWarning": "Reasignar sustituye la ETA y la nota de la asignación vigente: se perderán.",
+      "confirm": "Confirmar",
+      "sending": "Asignando…",
+      "errors": {
+        "noteTooLong": "La nota supera los 2000 caracteres.",
+        "noteControlChars": "La nota contiene caracteres no permitidos."
+      }
+    },
+    "triage": {
+      "title": "Triar incidencia",
+      "categoryLabel": "Categoría",
+      "severityLabel": "Severidad",
+      "costLabel": "Coste estimado",
+      "costPlaceholder": "0.00",
+      "costHelp": "Decimal positivo con hasta dos decimales.",
+      "confirm": "Guardar",
+      "sending": "Guardando…",
+      "errors": {
+        "invalidCost": "El coste debe ser un decimal positivo con hasta dos decimales."
+      }
+    },
+    "cancel": {
+      "title": "Cancelar incidencia",
+      "body": "Esta acción es terminal e irreversible: la incidencia pasará a Cancelada y el estado de la vivienda se recompondrá. ¿Seguro que quieres continuar?",
+      "confirm": "Sí, cancelar",
+      "keep": "Volver",
+      "sending": "Cancelando…"
+    },
+    "conflict": {
+      "closed": "La incidencia ya está cerrada y no admite esta acción.",
+      "awaiting-owner": "La incidencia espera la respuesta de la propietaria y no admite esta acción.",
+      "out-of-order": "El estado de la incidencia ha cambiado; recarga para ver el estado actual.",
+      "triage-not-classified": "Antes de fijar un coste hay que clasificar la incidencia: fija categoría y severidad."
+    },
+    "errors": {
+      "invalid-technician": "El técnico elegido ya no está disponible en el tenant.",
+      "invalid-cost": "El coste enviado no es válido."
+    },
+    "postClassify": {
+      "stillOpen": "El clasificador no alcanzó el umbral de confianza. Usa el triaje manual para fijar categoría y severidad."
+    },
+    "postTriage": {
+      "awaitingApproval": "El coste estimado superó el umbral del tenant: la incidencia espera la respuesta de la propietaria.",
+      "stillOpen": "La incidencia sigue pendiente de clasificar. Para clasificarla, fija categoría y severidad."
+    }
   }
 }

@@ -505,6 +505,208 @@ async def test_triage_is_refused_on_a_closed_incident(flow, world, db_session) -
         )
 
 
+# --- Triage that classifies (R3.5, design D1/D2/D4/D5) ----------------------------------
+
+
+async def _triage_open(flow, world, db_session, **fields):
+    """One `OPEN` incident triaged by the manager, which is every case of R3.5."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.OPEN)
+    result = await flow.triage.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=manager(world),
+        now=LATER,
+        **fields,
+    )
+    return incident, result
+
+
+async def test_a_triage_with_category_and_severity_classifies_an_open_incident(
+    flow, world, db_session
+) -> None:
+    """R3.5 — the human path out of `OPEN` the automatic classifier could not always give."""
+    incident, result = await _triage_open(
+        flow,
+        world,
+        db_session,
+        category=IncidentCategory.PLUMBING,
+        severity=IncidentSeverity.MEDIUM,
+    )
+
+    assert result.status is IncidentStatus.CLASSIFIED
+    db_session.expunge_all()
+    stored = await db_session.get(IncidentModel, incident.id)
+    assert stored.status is IncidentStatus.CLASSIFIED
+
+
+async def test_the_triage_audit_row_carries_the_status_it_moved(
+    flow, world, db_session
+) -> None:
+    """D4 — one `INCIDENT_TRIAGED` row whose `ChangeSet` shows the move, and never a
+    second `INCIDENT_CLASSIFIED` audit row for the same triage."""
+    incident, _ = await _triage_open(
+        flow,
+        world,
+        db_session,
+        category=IncidentCategory.PLUMBING,
+        severity=IncidentSeverity.MEDIUM,
+    )
+
+    changes = await audit_changes_for(db_session, incident.id, audit_actions.INCIDENT_TRIAGED)
+    assert changes["status"]["old"] == IncidentStatus.OPEN.value
+    assert changes["status"]["new"] == IncidentStatus.CLASSIFIED.value
+    assert await audit_actions_for(db_session, incident.id) == [
+        audit_actions.INCIDENT_TRIAGED
+    ]
+
+
+async def test_a_triage_that_does_not_classify_leaves_the_status_where_it_was(
+    flow, world, db_session
+) -> None:
+    """R3.5's negative case, at the use-case level: one field only, `OPEN` throughout."""
+    incident, result = await _triage_open(
+        flow, world, db_session, severity=IncidentSeverity.CRITICAL
+    )
+
+    assert result.status is IncidentStatus.OPEN
+    changes = await audit_changes_for(db_session, incident.id, audit_actions.INCIDENT_TRIAGED)
+    assert changes["status"]["old"] == changes["status"]["new"] == IncidentStatus.OPEN.value
+    assert TimelineEventType.INCIDENT_CLASSIFIED.value not in await timeline_types_for(
+        db_session, world.tenant.id
+    )
+
+
+async def test_a_triage_that_classifies_writes_the_milestone_as_a_person(
+    flow, world, db_session
+) -> None:
+    """D4 — actor `USER`: R9's missing-actor exception is the automatic path's alone."""
+    await _triage_open(
+        flow,
+        world,
+        db_session,
+        category=IncidentCategory.PLUMBING,
+        severity=IncidentSeverity.MEDIUM,
+    )
+
+    events = await db_session.execute(
+        select(TimelineEventModel).where(
+            TimelineEventModel.event_type == TimelineEventType.INCIDENT_CLASSIFIED
+        )
+    )
+    event = events.scalars().one()
+    assert event.actor_type is TimelineActorType.USER
+    assert event.actor_user_id == world.manager.id
+
+
+@pytest.mark.parametrize(
+    ("severity", "trigger", "state"),
+    [
+        (
+            IncidentSeverity.HIGH,
+            PropertyStateTrigger.INCIDENT_HIGH,
+            PropertyOperationalState.MAINTENANCE_REQUIRED,
+        ),
+        (
+            IncidentSeverity.CRITICAL,
+            PropertyStateTrigger.INCIDENT_CRITICAL,
+            PropertyOperationalState.CRITICAL_INCIDENT,
+        ),
+    ],
+)
+async def test_classifying_by_triage_fires_the_same_trigger_as_the_automatic_path(
+    flow, world, db_session, severity, trigger, state
+) -> None:
+    """D5/R3.5 — "el mismo disparador que usa la vía automática", asserted on the
+    transition row's own `trigger` and on the state it left the property in."""
+    await _triage_open(
+        flow, world, db_session, category=IncidentCategory.PLUMBING, severity=severity
+    )
+
+    rows = await db_session.execute(select(PropertyStateTransitionModel))
+    transition = rows.scalars().one()
+    assert transition.metadata_["trigger"] == trigger.value
+    assert await state_of(db_session, world.property.id) is state
+
+
+@pytest.mark.parametrize("severity", [IncidentSeverity.MEDIUM, IncidentSeverity.LOW])
+async def test_classifying_a_mild_incident_by_triage_fires_nothing(
+    flow, world, db_session, severity
+) -> None:
+    """R3.5 — "NEVER SHALL disparar nada para `MEDIUM` ni `LOW`", asserted as an absence."""
+    _, result = await _triage_open(
+        flow, world, db_session, category=IncidentCategory.PLUMBING, severity=severity
+    )
+
+    assert result.status is IncidentStatus.CLASSIFIED
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(PropertyStateTransitionModel)
+        )
+        == 0
+    )
+    assert await state_of(db_session, world.property.id) is (
+        PropertyOperationalState.VACANT_READY
+    )
+
+
+async def test_a_triage_that_only_prices_the_job_fires_nothing_and_stays_open(
+    flow, world, db_session
+) -> None:
+    """R3.5 — the trigger "SHALL ser exclusivo de esta transición": a triage that does not
+    classify never asks the property state machine for anything, whatever the severity."""
+    incident = await make_incident(
+        db_session, world, status=IncidentStatus.OPEN, severity=IncidentSeverity.CRITICAL
+    )
+
+    result = await flow.triage.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=manager(world),
+        now=LATER,
+        estimated_cost=Decimal("40.00"),
+    )
+
+    assert result.status is IncidentStatus.OPEN
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(PropertyStateTransitionModel)
+        )
+        == 0
+    )
+    assert await state_of(db_session, world.property.id) is (
+        PropertyOperationalState.VACANT_READY
+    )
+
+
+async def test_one_triage_can_classify_and_open_the_budget_gate_at_once(
+    flow, world, db_session
+) -> None:
+    """R3.5's last clause — `AWAITING_OWNER_APPROVAL` "pasando por `CLASSIFIED`".
+
+    The order is the assertion and not an implementation detail:
+    `require_owner_approval` admits `CLASSIFIED` and `IN_PROGRESS` as origins and nothing
+    else, so an incident that starts `OPEN` and ends `AWAITING_OWNER_APPROVAL` can only have
+    got there through the classification `set_triage` did first.
+    """
+    incident, result = await _triage_open(
+        flow,
+        world,
+        db_session,
+        category=IncidentCategory.PLUMBING,
+        severity=IncidentSeverity.MEDIUM,
+        estimated_cost=Decimal("450.00"),
+    )
+
+    assert result.status is IncidentStatus.AWAITING_OWNER_APPROVAL
+    assert result.owner_approval_required is True
+    assert TimelineEventType.INCIDENT_CLASSIFIED.value in await timeline_types_for(
+        db_session, world.tenant.id
+    )
+    changes = await audit_changes_for(db_session, incident.id, audit_actions.INCIDENT_TRIAGED)
+    assert changes["status"]["old"] == IncidentStatus.OPEN.value
+    assert changes["status"]["new"] == IncidentStatus.AWAITING_OWNER_APPROVAL.value
+
+
 # --- Answering the approval (task 6.6; R2.4, R2.5, R2.6) --------------------------------
 
 

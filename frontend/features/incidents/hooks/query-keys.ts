@@ -32,4 +32,7 @@ export const incidentsKeys = {
   /** Prefix of `list`, so one invalidation reaches every filter/page combination. */
   listPrefix: (tenantId: string): QueryKey =>
     tenantScopedKey(tenantId, "incidents-list"),
+  /** The tenant's technician roster (R2.1), read by `useTechnicianDirectory`. */
+  technicians: (tenantId: string): QueryKey =>
+    tenantScopedKey(tenantId, "incidents-technicians"),
 } as const;
