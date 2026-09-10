@@ -236,15 +236,15 @@
 - [x] 8.5 Contract in sync: `git status` shows `backend/openapi.json` and
       `frontend/lib/api/generated/openapi.d.ts` committed together (from section 3.6); re-run
       `npm run api:check` if the worktree workaround was used, to confirm no drift.
-- [ ] 8.6 <!-- manual --> Manual end-to-end pass (needs an **assigned** incident — start from `make bootstrap` /
+- [x] 8.6 <!-- manual --> Manual end-to-end pass (needs an **assigned** incident — start from `make bootstrap` /
       `seed_demo` or the CLI, per the proposal's `ASSUMPTION`; the UI has no assign action yet):
       resolve an incident with a final cost above the tenant's threshold → it appears in
       `/approvals` → the owner approves (or rejects) with a note → the technician sees the
       incident unblocked (or cancelled) in `/tech` and the bell notification leads to
       `/tech/incidents/{id}`; the owner's own bell notification for a *new* approval leads to
       `/approvals`; the property detail's approvals block link opens `/approvals`.
-      **Partially done, left unchecked — see notes below for exactly what's verified vs. still
-      pending, and how to finish it.**
+      **Completed at archive time (2026-09-10), closing the technician-side gap left open by the
+      original pass — see notes below.**
 
 ## Implementation Notes
 
@@ -910,3 +910,19 @@ surfaced two real findings, both fixed here:
   of approving this same one to exercise the cancellation half too, which this pass did not touch
   either). Demo credentials (dev-only, not secrets) are in `.env`: `owner@demo.local` /
   `DemoOwnerPass123!`, `technician@demo.local` / `DemoTechnicianPass123!`.
+- **8.6 — technician-side half, closed out at archive time (2026-09-10).** PR #175 was already
+  merged; this closes the one gap the manual pass above left open, using the same seeded
+  `REDES11` incident (already resolved/approved from the earlier pass, so no re-seed needed —
+  `make bootstrap`/`seed-demo` on the already-populated volume reported "created 0", confirming
+  the prior state was intact) via `make up PORT_OFFSET=40` in the `approvals-web` worktree and a
+  headless-browser pass (browser-automation skill). Logged in as
+  `technician@demo.local`, `/tech` listed the `REDES11` incident ("Alta · En curso" — resumed,
+  not blocked). The bell showed "Notificaciones, 2 sin leer"; opening it showed "La propietaria
+  ha aprobado el gasto de tu incidencia" (**R5.2/R4 confirmed**), linking to
+  `/tech/incidents/60ad929a-a57c-4941-909a-9a34c9eb51b0` — the same incident id from the original
+  pass. Following that link loaded the detail page correctly: "Alta En curso", "Coste aprobado
+  150,00", "Coste final 150,00", "Necesita aprobación de la propietaria: Sí". Both remaining
+  R5.2/R4 assertions (unblocked in `/tech`, bell → `/tech/incidents/{id}`) are now confirmed live,
+  completing 8.6 in full. (One unrelated `net::ERR_ABORTED` on the
+  `POST /api/v1/notifications/{id}/read` call was observed, coincident with the page navigation
+  away from the notifications panel — not investigated further as out of scope for this task.)
