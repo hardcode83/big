@@ -295,11 +295,12 @@ asignable basta con ser `CLEANER` y estar `ACTIVE`.
 
 **Después, una estancia que termine.** Aquí están los cuatro tropiezos:
 
-1. **No existe la reserva de un solo día.** `check_out_date` tiene que ser estrictamente posterior a
-   `check_in_date` (`reservations/domain/entities.py`), y a la vez el trigger `CHECKIN_WINDOW_OPENED`
-   exige que el check-in sea **hoy** (`state_machine.py`). Así que se crea hoy→mañana y luego se
-   mueven las fechas un día atrás con un `PATCH`, cuando la vivienda ya está ocupada y el trigger de
-   check-in ya no hace falta.
+1. **No hace falta fingir que es hoy.** `check_out_date` tiene que ser estrictamente posterior a
+   `check_in_date` (`reservations/domain/entities.py`), y el trigger `CHECKIN_WINDOW_OPENED` exige
+   que el check-in sea **hoy** (`state_machine.py`) — pero «hoy» lo decide `--at`, no el reloj de la
+   VM. Crea la reserva directamente con sus fechas reales (hoy→mañana) y no toques `check_in_date` /
+   `check_out_date` después: `sim-advance` avanza pasándole `--at` en el instante de check-in y luego
+   en el de check-out (§ más abajo), así que no hace falta ningún `PATCH` de fechas.
 2. **Las horas se interpretan en la zona de la vivienda** (`Europe/Madrid`), no en UTC. La VM está en
    UTC: calcúlalas con `TZ=Europe/Madrid date`, o en verano te salen dos horas en el pasado y la
    cadena no arranca.
@@ -308,18 +309,26 @@ asignable basta con ser `CLEANER` y estar `ACTIVE`.
 4. **`channel` debe ser `DIRECT` o `MANUAL`**: un canal de OTA se rechaza porque esa vía es la del
    PMS y su clave de idempotencia.
 
-**Y los tres jobs, a mano.** No hay que esperar a `beat`: son tareas Celery cuya lógica corre
-síncrona, así que se invocan directamente y además devuelven su informe, que es lo que dice si la
-transición se rechazó y por qué.
+**Y los tres jobs, con `sim-advance`.** No hay que esperar a `beat` ni invocar las tareas Celery una
+a una: `sim-advance` (change `sim-advance`) corre `check_checkin_windows` → `mark_occupied_estimated`
+→ `process_checkouts` en orden, compartiendo un único `--at`, y devuelve su informe por línea — lo
+que dice si la transición se rechazó y por qué. En local es `make sim-advance TENANT=<uuid>
+AT=<iso>`; contra esta VM el literal equivalente es:
 
 ```bash
-docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml exec -T backend python - <<'JOBS'
-from app.scheduler.tasks import check_checkin_windows, mark_occupied_estimated, process_checkouts
-print(check_checkin_windows())
-print(mark_occupied_estimated())
-print(process_checkouts())
-JOBS
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml \
+  exec -T backend python -m app.cli.sim_advance --tenant <uuid> --at <instante-de-check-in>
+docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml \
+  exec -T backend python -m app.cli.sim_advance --tenant <uuid> --at <instante-de-check-out>
 ```
+
+**Dos invocaciones, no una**: la primera con `--at` en el instante de check-in (abre la ventana y
+deja la vivienda `OCCUPIED_ESTIMATED`), la segunda con `--at` en el de check-out (dispara
+`process_checkouts`). El comando se niega con exit 1 si `settings.environment` no es `local` ni
+`dev` (design D5) — y en esta VM **eso no bloquea nada**: `dev-runtime.env` (lo genera
+`.github/workflows/deploy-dev.yml`) nunca escribe `APP_ENVIRONMENT`, así que el proceso arranca con
+el default de `Settings` (`"local"`), que sí está en el conjunto permitido. La guarda frena un
+despliegue que declare `staging`/`production`, no éste.
 
 La secuencia de la vivienda es `VACANT_READY` → `AWAITING_CHECKIN` → `OCCUPIED_ESTIMATED` →
 `AWAITING_CLEANING`, y en ese último salto `process_checkouts` crea la tarea en la misma
@@ -327,5 +336,13 @@ transacción: `transitioned: 1` con `transitioned_without_task: 0` es la prueba 
 Con dos limpiadoras activas la tarea queda **`CREATED` sin asignar** — y entonces sí, el botón de
 `/cleaning` se habilita y la asignación pasa.
 
-Un `not_eligible: 1` en `process_checkouts` no es un fallo del job: es que la hora de salida aún no
-ha pasado. Mueve `check_out_time` al pasado y vuelve a lanzarlo.
+Un `not_eligible: 1` en la segunda invocación no es un fallo del comando: es que el `--at` que le
+diste es anterior al `check_out_time` real. Repite con un `--at` posterior — no hace falta tocar la
+reserva.
+
+**Por qué esto ya no corrompe fechas.** La receta anterior de este runbook creaba la reserva
+hoy→mañana y luego le movía `check_in_date`/`check_out_date` un día atrás con un `PATCH`, para que
+el reloj de la VM viera un check-in ya pasado: un efecto colateral sobre un dato real, sólo para
+poder engañar al reloj del sistema. `sim-advance` no lo necesita porque no es el reloj del sistema
+lo que hay que mover — es `--at`, el `now` que ven los tres jobs, sin tocar ninguna fila de
+`reservations`.
