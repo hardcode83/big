@@ -115,6 +115,17 @@ def _build_parser() -> argparse.ArgumentParser:
             "CHECKOUT_TIME_REACHED in order, each in its own marked session and "
             "commit, sharing the resolved `--at` (or `datetime.now(UTC)`)."
         ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Two traps with --at (R1.8):\n"
+            "  1. --at is clamped to a window around each reservation's stay: at most 30\n"
+            "     days BEFORE check-in/check-out and at most 2 days AHEAD of it. An --at\n"
+            "     outside that window simply finds no candidate for that reservation.\n"
+            "  2. \"today\" is evaluated in the PROPERTY's own local timezone, not UTC. An\n"
+            "     --at at 23:00 UTC the day before check-in will NOT open the check-in\n"
+            "     window even if it is already \"today\" in UTC, if the property's local\n"
+            "     date has not rolled over yet."
+        ),
     )
     parser.add_argument(
         "--tenant",
@@ -268,7 +279,10 @@ async def _run(argv: list[str] | None = None) -> int:
     now: datetime = args.at if args.at is not None else datetime.now(UTC)
 
     # R1: the first line of output is the resolved now, regardless of what follows.
-    print(f"sim-advance: now = {now.isoformat()}")
+    # R1.3: the suffix names whether the real clock or `--at` produced it, so an operator
+    # skimming a log can tell the two cases apart without checking argv.
+    now_source = "--at" if args.at is not None else "live clock"
+    print(f"sim-advance: now = {now.isoformat()} ({now_source})")
 
     guard = _env_guard()
     if guard is not None:

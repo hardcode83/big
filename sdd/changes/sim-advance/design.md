@@ -241,6 +241,17 @@ no se introduce un evento nuevo.
   al mismo `AdvancePropertyStatesUseCase`). Refactorizarla es trabajo de un change
   posterior; este se limita a abrir la segunda puerta y dejar la nota de D2.
 
+- **R5 — Un futuro `deploy-staging.yml`/`deploy-prod.yml` podría olvidar fijar
+  `APP_ENVIRONMENT`, dejando que el guard evalúe el default permisivo de `Settings`
+  (`"local"`) en un entorno real.** Mitigación: `docker-compose.deploy.yml` declara
+  `APP_ENVIRONMENT` como variable **obligatoria** (`:?`) en `backend`/`worker`/`beat`, el
+  mismo fichero de compose que cualquier entorno futuro reutilizará (steering/infra.md,
+  módulos Terraform por entorno) — así que un pipeline que no la fije no despliega
+  silenciosamente en modo permisivo: el contenedor se niega a arrancar. El riesgo residual
+  queda acotado a que ese futuro pipeline recuerde poner el valor correcto (`staging`,
+  `production`, fuera de `{local, dev}`) en su propio paso de render, siguiendo el patrón
+  que `deploy-dev.yml` ya establece con el literal `dev`.
+
 ## Open questions
 
 Ninguna. Las decisiones D1-D6 son las que el design skill dice resolver con recomendación y

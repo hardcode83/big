@@ -15,6 +15,7 @@ same engine — `db_session` shares one transaction for the whole test, and a ro
 the CLI's other session needs that fresh eye to be visible without re-querying.
 """
 
+import logging
 import uuid
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -27,6 +28,7 @@ from app.cleaning.infrastructure.models import CleaningChecklistTemplateModel
 from app.cli import sim_advance as cli
 from app.core.config import settings
 from app.properties.domain.enums import PropertyOperationalState
+from app.properties.domain.transition_enums import PropertyStateTrigger
 from app.properties.infrastructure.models import (
     PropertyModel,
     PropertyStateTransitionModel,
@@ -34,6 +36,7 @@ from app.properties.infrastructure.models import (
 from app.reservations.domain.enums import ReservationChannel, ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 from app.tenants.infrastructure.models import TenantConfigModel
+from app.timeline.domain.enums import TimelineEventType
 from app.timeline.infrastructure.models import TimelineEventModel
 from tests.auth.conftest import insert_tenant
 
@@ -140,6 +143,21 @@ def _report_line_for(captured: str, trigger_value: str) -> str:
     )
 
 
+# --- R1.8 — --help names the two --at traps ----------------------------------------
+
+
+def test_help_names_the_window_clamp_and_local_timezone_traps() -> None:
+    """R1.8: `--help` must warn the operator about the two traps that bite silently:
+    the 30-day-back/2-day-ahead window clamp (`clock_triggers.py:42,52,55`) and "today"
+    being evaluated in the property's own local timezone rather than UTC
+    (`clock_triggers.py:94-122`)."""
+    help_text = cli._build_parser().format_help()
+
+    assert "30" in help_text and "2 days" in help_text
+    assert "local timezone" in help_text or "local time" in help_text
+    assert "UTC" in help_text
+
+
 # --- R4.1 — check-in time reached drives VACANT_READY -> OCCUPIED_ESTIMATED --------
 
 
@@ -172,11 +190,11 @@ async def test_r41_checkin_time_advances_vacant_ready_to_occupied_estimated(
     )
     check_in_date_before = reservation.check_in_date
     check_out_date_before = reservation.check_out_date
+    reservation_created_at_before = reservation.created_at
     await db_session.commit()
 
-    rc = await cli._run(
-        ["--tenant", str(tenant.id), "--at", _at_utc(check_in_local + timedelta(minutes=1))]
-    )
+    at = check_in_local + timedelta(minutes=1)
+    rc = await cli._run(["--tenant", str(tenant.id), "--at", _at_utc(at)])
     captured = capsys.readouterr()
 
     assert rc == 0, f"unexpected non-zero exit; stderr:\n{captured.err}\nstdout:\n{captured.out}"
@@ -194,6 +212,29 @@ async def test_r41_checkin_time_advances_vacant_ready_to_occupied_estimated(
         ).scalar_one()
         assert res_row.check_in_date == check_in_date_before
         assert res_row.check_out_date == check_out_date_before
+        # R3.4: the CLI's `--at` must not touch `created_at` of a pre-existing row.
+        assert res_row.created_at == reservation_created_at_before
+
+        # R3.3 / design D6: `TimelineEvent.occurred_at` (rendered from the model's
+        # `created_at`, see `timeline/domain/rendering.py:342`) is set from the CLI's
+        # `--at`, not from the DB's own clock — proven against a row the CLI actually wrote
+        # here, unlike the R4.3 `not_eligible` path where nothing is written. Two
+        # `PROPERTY_STATE_CHANGED` events land in this run (`CHECKIN_WINDOW_OPENED` also
+        # transitions), so the one asserted on is picked by its `metadata_["trigger"]`.
+        event_rows = (
+            await fresh.execute(
+                select(TimelineEventModel).where(
+                    TimelineEventModel.property_id == prop.id,
+                    TimelineEventModel.event_type == TimelineEventType.PROPERTY_STATE_CHANGED,
+                )
+            )
+        ).scalars().all()
+        checkin_time_event = next(
+            e
+            for e in event_rows
+            if e.metadata_ is not None and e.metadata_["trigger"] == "CHECKIN_TIME_REACHED"
+        )
+        assert checkin_time_event.created_at == at
 
     line = _report_line_for(captured.out, "CHECKIN_TIME_REACHED")
     assert "transitioned=1" in line
@@ -390,3 +431,169 @@ async def test_r44_environment_staging_is_refused_before_any_write(
     assert events_after == 0, (
         f"guard ran after a timeline event; rows: {events_after}\nstdout:\n{captured.out}\nstderr:\n{captured.err}"
     )
+
+
+# --- exit code 2 — one job fails, the other two still commit -----------------------
+
+
+@pytest.mark.asyncio
+async def test_one_failing_job_exits_2_and_the_other_two_still_commit(
+    db_session,
+    test_engine,
+    test_factory,
+    monkeypatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`_run_one_job`'s exception branch and `_run`'s mixed success/failure exit code
+    (D4: 0 all OK, 1 ALL failed, 2 some but not all failed) had zero coverage.
+
+    Reuses the R4.1 setup (check-in today at 15:00 local, `--at` one minute after) so both
+    `CHECKIN_WINDOW_OPENED` and `CHECKIN_TIME_REACHED` would normally transition; `_advance`
+    is monkeypatched to raise only for `CHECKIN_TIME_REACHED`, delegating to the real
+    implementation for the other two triggers, so exactly one of the three jobs fails.
+    """
+    tenant = await insert_tenant(db_session)
+    await db_session.commit()
+    prop = await _insert_property(db_session, tenant_id=tenant.id)
+    check_in_local = _local(2026, 9, 10, 15, 0)
+    await _insert_reservation(
+        db_session,
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        check_in=check_in_local,
+        nights=2,
+    )
+    await db_session.commit()
+
+    original_advance = cli._advance
+
+    async def _advance_that_fails_checkin_time(session, tenant_id, now, *, trigger):
+        if trigger is PropertyStateTrigger.CHECKIN_TIME_REACHED:
+            raise RuntimeError("boom-mid-job")
+        return await original_advance(session, tenant_id, now, trigger=trigger)
+
+    monkeypatch.setattr(cli, "_advance", _advance_that_fails_checkin_time)
+
+    at = check_in_local + timedelta(minutes=1)
+    with caplog.at_level(logging.ERROR, logger="app.cli.sim_advance"):
+        rc = await cli._run(["--tenant", str(tenant.id), "--at", _at_utc(at)])
+    captured = capsys.readouterr()
+
+    assert rc == 2, f"stdout:\n{captured.out}\nstderr:\n{captured.err}"
+    assert "sim-advance: CHECKIN_TIME_REACHED FAILED: RuntimeError: boom-mid-job" in captured.err
+
+    # `logger.exception` fired for the failing job, with a traceback attached.
+    failure_records = [r for r in caplog.records if r.getMessage() == "sim_advance.job_failed"]
+    assert failure_records, f"no sim_advance.job_failed log record; caplog:\n{caplog.text}"
+    assert failure_records[0].exc_info is not None
+    assert getattr(failure_records[0], "task", None) == "mark_occupied_estimated"
+
+    # The other two jobs still ran and reported, unaffected by the middle one's exception.
+    window_line = _report_line_for(captured.out, "CHECKIN_WINDOW_OPENED")
+    assert "transitioned=1" in window_line
+    checkout_line = _report_line_for(captured.out, "CHECKOUT_TIME_REACHED")
+    assert "trigger=CHECKOUT_TIME_REACHED" in checkout_line
+
+    async with AsyncSession(test_engine, expire_on_commit=False) as fresh:
+        prop_row = (
+            await fresh.execute(select(PropertyModel).where(PropertyModel.id == prop.id))
+        ).scalar_one()
+        # The first job's transition (VACANT_READY -> AWAITING_CHECKIN) committed in its own
+        # session/transaction before the second job raised; the second job's own session was
+        # rolled back, so the property is stuck at the intermediate state rather than
+        # OCCUPIED_ESTIMATED.
+        assert prop_row.current_operational_state is PropertyOperationalState.AWAITING_CHECKIN
+
+
+# --- R1.5 — a syntactically valid but nonexistent tenant is refused -----------------
+
+
+@pytest.mark.asyncio
+async def test_nonexistent_tenant_uuid_exits_1_and_runs_no_job(
+    db_session, test_engine, test_factory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """R1.5: `_tenant_exists` refuses a well-formed UUID that matches no `tenants` row,
+    exit code 1, naming the tenant, before any job runs."""
+    ghost_tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
+    async def _count_transitions() -> int:
+        async with AsyncSession(test_engine, expire_on_commit=False) as fresh:
+            return int(
+                (
+                    await fresh.execute(
+                        select(func.count()).select_from(PropertyStateTransitionModel)
+                    )
+                ).scalar_one()
+            )
+
+    before = await _count_transitions()
+
+    rc = await cli._run(["--tenant", str(ghost_tenant_id)])
+    captured = capsys.readouterr()
+
+    assert rc == 1, f"stdout:\n{captured.out}\nstderr:\n{captured.err}"
+    assert str(ghost_tenant_id) in captured.err
+
+    after = await _count_transitions()
+    assert after == before, "a job ran despite the tenant not existing"
+
+
+# --- sdd/steering/security.md rule 1 — cross-tenant isolation for the new CLI -------
+
+
+@pytest.mark.asyncio
+async def test_a_tenant_never_sees_another_tenants_rows(
+    db_session, test_engine, test_factory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Mirrors `tests/scheduler/test_runner.py::test_a_tenant_never_sees_another_tenants_rows`
+    for this new module (sdd/steering/security.md rule 1): a new module gets a mandatory test
+    proving a tenant cannot access another tenant's data.
+
+    Two tenants, each with a property + a CONFIRMED reservation whose check-in is due at the
+    same `--at`. Running the CLI scoped to tenant A must transition A's property and leave
+    B's property and reservation byte-for-byte unchanged.
+    """
+    tenant_a = await insert_tenant(db_session)
+    tenant_b = await insert_tenant(db_session)
+    await db_session.commit()
+
+    check_in_local = _local(2026, 9, 10, 15, 0)
+    prop_a = await _insert_property(db_session, tenant_id=tenant_a.id, code="TEN-A")
+    prop_b = await _insert_property(db_session, tenant_id=tenant_b.id, code="TEN-B")
+    await _insert_reservation(
+        db_session, tenant_id=tenant_a.id, property_id=prop_a.id, check_in=check_in_local, nights=2
+    )
+    reservation_b = await _insert_reservation(
+        db_session, tenant_id=tenant_b.id, property_id=prop_b.id, check_in=check_in_local, nights=2
+    )
+    await db_session.commit()
+
+    prop_b_state_before = prop_b.current_operational_state
+    prop_b_updated_at_before = prop_b.updated_at
+    reservation_b_updated_at_before = reservation_b.updated_at
+
+    at = check_in_local + timedelta(minutes=1)
+    rc = await cli._run(["--tenant", str(tenant_a.id), "--at", _at_utc(at)])
+    captured = capsys.readouterr()
+
+    assert rc == 0, f"stdout:\n{captured.out}\nstderr:\n{captured.err}"
+
+    async with AsyncSession(test_engine, expire_on_commit=False) as fresh:
+        prop_a_row = (
+            await fresh.execute(select(PropertyModel).where(PropertyModel.id == prop_a.id))
+        ).scalar_one()
+        assert prop_a_row.current_operational_state is PropertyOperationalState.OCCUPIED_ESTIMATED
+
+        prop_b_row = (
+            await fresh.execute(select(PropertyModel).where(PropertyModel.id == prop_b.id))
+        ).scalar_one()
+        assert prop_b_row.current_operational_state == prop_b_state_before
+        assert prop_b_row.updated_at == prop_b_updated_at_before
+
+        reservation_b_row = (
+            await fresh.execute(
+                select(ReservationModel).where(ReservationModel.id == reservation_b.id)
+            )
+        ).scalar_one()
+        assert reservation_b_row.updated_at == reservation_b_updated_at_before
