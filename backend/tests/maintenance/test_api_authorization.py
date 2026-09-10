@@ -29,6 +29,12 @@ APPROVALS = "/api/v1/owner-approvals"
 ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", INCIDENTS),
     ("GET", INCIDENTS + "/{incident_id}"),
+    # `approvals-web` R1.1/R1.4. In this census for the reason `context` below is: a route
+    # left out of a list that claims to be "every route of D14" is how the `CLEANER`-refused
+    # and anonymous-refused sweeps quietly stop covering the surface. `READ_OWNER_APPROVALS`
+    # is a new permission, not a reuse of `READ_INCIDENTS` — `_call`'s formatting is a no-op
+    # here since this path carries no `{incident_id}`.
+    ("GET", APPROVALS),
     # `tech-incident-context` R4.1/R4.7. It belongs in this census and not only in its own
     # file: a route left out of a list that claims to be "every route of D14" is how the
     # `CLEANER`-refused and anonymous-refused sweeps stop covering the surface.

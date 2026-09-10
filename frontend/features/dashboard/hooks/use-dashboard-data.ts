@@ -4,6 +4,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 
 import { useAuth } from "@/lib/auth";
 import { retryPolicy } from "@/lib/api/retry-policy";
+import { useActiveLocale } from "@/lib/i18n/use-active-locale";
 
 import {
   getDashboardDataSource,
@@ -43,8 +44,9 @@ export function useDashboardCards(): UseQueryResult<
   PaginatedResponse<PropertyDashboardCard>
 > {
   const tenantId = useTenantId();
+  const locale = useActiveLocale();
   return useQuery({
-    queryKey: dashboardKeys.cards(tenantId),
+    queryKey: dashboardKeys.cards(tenantId, locale),
     queryFn: () => getDashboardDataSource().getDashboardCards(tenantId),
     retry: retryPolicy,
   });
@@ -54,8 +56,9 @@ export function usePropertyDetail(
   propertyId: string,
 ): UseQueryResult<PropertyDetail> {
   const tenantId = useTenantId();
+  const locale = useActiveLocale();
   return useQuery({
-    queryKey: dashboardKeys.propertyDetail(tenantId, propertyId),
+    queryKey: dashboardKeys.propertyDetail(tenantId, propertyId, locale),
     queryFn: () =>
       getDashboardDataSource().getPropertyDetail(tenantId, propertyId),
     retry: retryPolicy,
@@ -67,8 +70,14 @@ export function usePropertyTimeline(
   filters: TimelineFilters = {},
 ): UseQueryResult<PaginatedResponse<TimelineEntry>> {
   const tenantId = useTenantId();
+  const locale = useActiveLocale();
   return useQuery({
-    queryKey: dashboardKeys.propertyTimeline(tenantId, propertyId, filters),
+    queryKey: dashboardKeys.propertyTimeline(
+      tenantId,
+      propertyId,
+      filters,
+      locale,
+    ),
     queryFn: () =>
       getDashboardDataSource().getPropertyTimeline(
         tenantId,

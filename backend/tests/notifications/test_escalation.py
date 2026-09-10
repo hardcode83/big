@@ -46,6 +46,15 @@ DECLARED_DIVERGENCES = (
     # catalogue is about the operational event itself, not about staff discussing it.
     "CLEANING_TASK_MESSAGE",
     "INCIDENT_MESSAGE",
+    # `approvals-web` design D6 (R4.2): telling the technician which way the owner answered is
+    # not one of §14's operational events either — the catalogue has a slot for the *request*
+    # (`OWNER_APPROVAL_REQUIRED`) but none for its outcome, and one member could not carry both
+    # possible outcomes, hence two.
+    "OWNER_APPROVAL_APPROVED",
+    "OWNER_APPROVAL_REJECTED",
+    # `guest-link-delivery` R4.1: an operator sending the guest their portal link is not one of
+    # §14's sixteen operational events. No SLA, no escalation (R4.2) — see the test below.
+    "GUEST_PORTAL_LINK_DELIVERED",
 )
 
 
@@ -137,6 +146,16 @@ def test_the_technician_escalation_does_not_itself_escalate() -> None:
     filling in PRD §14's "etc.".
     """
     assert escalation_for("TECHNICIAN_NO_RESPONSE") is None
+
+
+def test_a_delivered_guest_portal_link_does_not_escalate() -> None:
+    """`guest-link-delivery` R4.2 — a link the operator chose to send has no SLA to breach.
+
+    Pinned explicitly, like the technician case above, rather than left to the exhaustive
+    test below alone: "there is no `_POLICY` entry" is exactly the guarantee a later change
+    closes by accident while filling in an SLA the catalogue never asked for.
+    """
+    assert escalation_for("GUEST_PORTAL_LINK_DELIVERED") is None
 
 
 def test_every_type_without_a_defined_escalation_returns_none() -> None:

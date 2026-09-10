@@ -20,6 +20,9 @@
     "REVIEW_RESPONSE_APPROVED": "Una respuesta a una reseña ha sido aprobada",
     "CLEANING_TASK_MESSAGE": "Nuevo mensaje en una tarea de limpieza",
     "INCIDENT_MESSAGE": "Nuevo mensaje en una incidencia",
+    "OWNER_APPROVAL_APPROVED": "La propietaria ha aprobado el gasto de tu incidencia",
+    "OWNER_APPROVAL_REJECTED": "La propietaria ha rechazado el gasto de tu incidencia",
+    "GUEST_PORTAL_LINK_DELIVERED": "Enlace del portal del huésped entregado",
     "unknown": "Aviso del sistema"
   },
   "bell": {

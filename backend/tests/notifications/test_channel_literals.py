@@ -1,8 +1,9 @@
 """The AST guard for `NotificationChannel.<X>` literals (`notification-channel-routing` D6).
 
-A literal of the channel enum must only appear in the six sites the design names
+A literal of the channel enum must only appear in the seven sites the design names
 verbatim: the resolver, the dispatcher, the adapter registry, the conversation
-channels, the recovery exception, and **the guard itself**. The earlier census of R6
+channels, the recovery exception, the guest-link-delivery send exception, and **the
+guard itself**. The earlier census of R6
 (pin a literal in every module that writes a row, design D4 of
 `notification-writers-gap`) made the writer set measurable; this guard makes the
 **literal set** measurable, because the change that adds the resolver also retires the
@@ -57,6 +58,12 @@ CHANNEL_LITERAL_WHITELIST = frozenset(
         "app/notifications/application/channel_dispatch.py",
         # Auth recovery — the R6-declared exception, still literal `EMAIL`.
         "app/auth/application/recovery.py",
+        # Guest link delivery — `guest-link-delivery` design D4 mirrors
+        # `RequestPasswordResetUseCase` field for field: a second synchronous-adapter
+        # exception to the same rule, same reason (the payload the row must never
+        # persist is per-recipient, so the send cannot go through the dispatcher's
+        # queued path), same literal `EMAIL`.
+        "app/guests/application/portal.py",
         # Adapter registry — no row, no writer, but the enum must appear in the
         # dispatch table by name.
         "app/notifications/infrastructure/adapters.py",
@@ -167,6 +174,7 @@ class TestChannelLiterals:
                 "app/notifications/domain/channel_resolver.py",
                 "app/notifications/application/channel_dispatch.py",
                 "app/auth/application/recovery.py",
+                "app/guests/application/portal.py",
                 "app/notifications/infrastructure/adapters.py",
                 "app/messaging/infrastructure/channels.py",
                 "app/cleaning/domain/notifications.py",

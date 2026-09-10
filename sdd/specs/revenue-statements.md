@@ -253,8 +253,17 @@ de tablas locales, igual que `revenue-pricing`. La pantalla `/statements` queda 
 - THE SYSTEM SHALL proteger las once rutas con dos permisos —`READ_OWNER_STATEMENTS` y
   `MANAGE_OWNER_STATEMENTS`—, concediendo `READ` a `TENANT_OWNER` y `PROPERTY_MANAGER`,
   y `MANAGE` sólo a `PROPERTY_MANAGER`. `CLEANER`, `TECHNICIAN` y `SUPER_ADMIN` no
-  reciben ninguno. `RESPOND_OWNER_APPROVALS`, ya existente, sigue siendo el permiso con
-  el que el owner responde las aprobaciones de umbral que D4 genera.
+  reciben ninguno.
+- **Corrección medida en `approvals-web` (design D11, 2026-09-10), no en la frase de
+  arriba porque no es cuestión de permisos sino de ruta.** `RESPOND_OWNER_APPROVALS` sigue
+  siendo el único permiso de escritura sobre una `OwnerApproval`, pero
+  `POST /api/v1/owner-approvals/{id}/respond` **no sirve** las aprobaciones
+  `related_type = OTHER` que D4 genera para un `Expense`: `RespondOwnerApprovalUseCase`
+  carga la incidencia desde `approval.related_id` sin condición y responde `404`
+  (`IncidentNotFoundError`) cuando no existe, y en una aprobación `OTHER` ese `related_id`
+  es un id de `Expense`, no de incidencia. Hoy **no hay ninguna ruta** por la que la
+  propietaria responda una `OwnerApproval(OTHER)` desde la API; la entrada de roadmap
+  `expense-approval-response` recoge el hueco.
 - THE SYSTEM SHALL resolver el tenant siempre desde la sesión autenticada (nunca del
   cuerpo ni de la query) y comprobar en el repositorio que la entidad pertenece a ese
   tenant antes de leer o mutar.
@@ -294,7 +303,12 @@ de tablas locales, igual que `revenue-pricing`. La pantalla `/statements` queda 
 - **`RESPOND_OWNER_APPROVALS` sobre `Expense`**: el endpoint de respuesta de
   `maintenance` no se toca; la integración pasa por el `OwnerApproval(related_type=OTHER)`
   canónico y el job de reconciliación, sin acoplar `maintenance.application` a
-  `Expense`.
+  `Expense`. **Esta decisión no tocar el endpoint es correcta y sigue vigente; lo que era
+  falso es la frase que solía seguir aquí, afirmando que ese endpoint sin tocar ya
+  servía la respuesta — no la sirve (ver §«Permisos, aislamiento, auditoría», corrección
+  de `approvals-web` D11): hoy no hay ninguna ruta que responda una `OwnerApproval(OTHER)`,
+  y ese hueco es justamente lo que queda fuera de alcance aquí y lo que recoge la
+  entrada de roadmap `expense-approval-response`.**
 
 ## Estado y deuda conocida
 
@@ -302,14 +316,21 @@ de tablas locales, igual que `revenue-pricing`. La pantalla `/statements` queda 
   diferencia de lo que sugiere R7.7 del proposal ("traducir todos los mensajes de error
   al locale de la sesión en ES y EN"), `app/statements/api/errors.py` — igual que
   `app/pricing/api/errors.py`, el precedente que sigue — renderiza `str(exc)` de
-  mensajes constantes en inglés; no existe ningún módulo `backend/app/core/i18n/` ni
-  mecanismo de traducción por `Accept-Language` o locale de usuario en el backend de
-  este proyecto. El patrón real del proyecto (fijado por `revenue-pricing` →
-  `pricing-web`, sección "Errores por status") es que el **frontend** elige la copia
-  ES/EN por status HTTP y nunca expone el cuerpo del backend — pero como
-  `/statements` queda `RoutePlaceholder` en este change, esa capa de traducción no
-  existe todavía para `owner-statements`/`expenses`. La tarea 10.1 de `tasks.md`, que
-  se marcó completa, no encontró ningún módulo i18n backend real que extender.
+  mensajes constantes en inglés. Sí existe un mecanismo de traducción por idioma en el
+  backend de este proyecto (`backend/app/core/i18n.py`: `Locale`, `Catalog` y
+  `resolve_locale`, que resuelve el idioma que declara la petición vía `X-Locale`,
+  degradando a `preferred_language` y luego a `es`), pero está acotado a componer el
+  `title` de timeline y las etiquetas de card del dashboard — no alcanza, ni se ha
+  extendido, a los mensajes de error de ningún módulo, `statements` incluido. El patrón
+  real del proyecto (fijado por `revenue-pricing` → `pricing-web`, sección "Errores por
+  status") es que el **frontend** elige la copia ES/EN por status HTTP y nunca expone
+  el cuerpo del backend — pero como `/statements` queda `RoutePlaceholder` en este
+  change, esa capa de traducción no existe todavía para `owner-statements`/`expenses`.
+  La tarea 10.1 de `tasks.md`, que se marcó completa, no encontró ningún módulo i18n
+  backend real que extender — no porque no existiera (`backend/app/core/i18n.py` es de
+  `dashboard-api`, 2026-08-09, tres semanas antes), sino porque lo que existe compone
+  `title` de timeline y etiquetas de card, nunca mensajes de error, así que no había nada
+  ahí aplicable a extender.
 - **El `_MAPPING` de `app/statements/api/errors.py` no está wireado en la guarda de
   `backend/tests/test_openapi_contract.py`.** Es un duodécimo caso del mismo hueco que
   `sdd/specs/api-contract.md` ya documenta para `access`, `guests`, `maintenance`,

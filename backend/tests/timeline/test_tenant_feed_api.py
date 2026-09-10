@@ -192,6 +192,58 @@ async def test_the_title_is_composed_in_the_users_language(
     assert entry["title"] != "Stored English title"
 
 
+#: `frontend-verification-fixes` R1.1/R1.8, same matrix as the per-property sibling
+#: (`tests/timeline/test_api.py`) — the two mixed rows are the ones that carry the
+#: requirement.
+LOCALE_MATRIX = [
+    ("es", "es", "Limpieza completada"),
+    ("es", "en", "Limpieza completada"),
+    ("en", "es", "Cleaning completed"),
+    ("en", "en", "Cleaning completed"),
+]
+LOCALE_MATRIX_IDS = [f"asks-{asked}-row-{stored}" for asked, stored, _ in LOCALE_MATRIX]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("asked", "stored_language", "expected"), LOCALE_MATRIX, ids=LOCALE_MATRIX_IDS)
+async def test_the_title_is_composed_in_the_language_the_request_asked_for(
+    api,
+    db_session,
+    tenant_a,
+    property_a,
+    asked: str,
+    stored_language: str,
+    expected: str,
+) -> None:
+    """`frontend-verification-fixes` R1: this route merged into `main` after that change
+    forked, still reading `preferred_language` directly. Same fix applied here on catch-up
+    — `X-Locale` must win, matching the per-property sibling's full 4-combination matrix,
+    not just the one mismatch direction a first pass covered."""
+    user = await insert_user(db_session, tenant=tenant_a, preferred_language=stored_language)
+    await _add_event(db_session, tenant_a, property_a)
+
+    response = await api.get(URL, headers={**auth_header(api, user), "X-Locale": asked})
+
+    entry = response.json()["data"][0]
+    assert entry["title"] == expected
+
+
+@pytest.mark.asyncio
+async def test_it_is_not_cacheable_by_a_shared_cache(
+    api, db_session, tenant_a, property_a, users_by_role_a
+) -> None:
+    """Same reasoning as the other three locale-dependent routes (security review,
+    round 6/8): `title` varies on `X-Locale`, so the response must not be cacheable by
+    anything but the requester's own client."""
+    await _add_event(db_session, tenant_a, property_a)
+
+    response = await api.get(
+        URL, headers=auth_header(api, users_by_role_a[UserRole.TENANT_OWNER])
+    )
+
+    assert response.headers["cache-control"] == "private, no-store"
+
+
 @pytest.mark.asyncio
 async def test_the_description_is_returned_verbatim(
     api, db_session, tenant_a, users_by_role_a, property_a

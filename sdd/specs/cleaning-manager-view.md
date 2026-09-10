@@ -104,6 +104,87 @@ la única autoridad. Un `TENANT_OWNER` ve la misma lista sin el control de asign
 - THE SYSTEM SHALL derivar esa condición del campo `assignment_blocked_by` que **ya viene en la
   respuesta del listado**, sin petición adicional por fila y **sin calcular nada en el componente**:
   la vista no conoce la matriz de estados de la vivienda y no debe aprenderla.
+
+### Crear una limpieza a mano
+
+- WHEN un usuario con `MANAGE_CLEANING_TASKS` abre `/cleaning`, THE SYSTEM SHALL ofrecer un control de
+  creación de limpieza en una barra por encima de `CleaningFilters`. El control despliega un panel
+  **en el flujo del documento** (disclosure), no un overlay: el resultado se anuncia por la región
+  viva única de la vista y un Sheet lo ocultaría, lo que obligaría a duplicar la región dentro del
+  overlay.
+- WHEN el usuario abre el panel, THE SYSTEM SHALL pedir una **vivienda** del catálogo del tenant
+  (obligatoria) y una **ventana programada** `scheduled_start`/`scheduled_end` (opcionales), y ningún
+  otro campo. `reservation_id` no se ofrece nunca desde esta pantalla.
+- WHEN el usuario confirma, THE SYSTEM SHALL llamar a `POST /api/v1/cleaning-tasks` con exactamente
+  `property_id` y, si están definidos, `scheduled_start`/`scheduled_end`. Un campo vacío se omite del
+  cuerpo, no se envía `null`.
+- WHEN la vivienda elegida tiene `currentOperationalState` que **no** está en
+  `ASSIGNABLE_PROPERTY_STATES` (`["AWAITING_CLEANING"]`), THE SYSTEM SHALL mostrar un aviso que diga
+  que la tarea se creará pero no podrá asignarse hasta que la vivienda esté en `AWAITING_CLEANING`.
+  El aviso es **cortesía**: WHILE está visible, THE SYSTEM SHALL seguir permitiendo crear la tarea.
+- IF el catálogo no permite resolver el `currentOperationalState` de la vivienda elegida, THEN THE
+  SYSTEM SHALL **no** mostrar el aviso y permitir crear — *fail open*, el backend es la autoridad.
+- THE SYSTEM SHALL **no** ofrecer ninguna transición manual del estado operacional de la vivienda
+  desde esta pantalla: no existe ruta de API para eso.
+- THE SYSTEM SHALL derivar `ASSIGNABLE_PROPERTY_STATES` de una **constante local** del módulo
+  `lib/assignable-property-state.ts`, aliada en tipo al contrato generado
+  (`components["schemas"]["PropertyOperationalState"]`). Un **renombrado** de estado en el backend
+  rompe el typecheck; **añadir una segunda fila a `PropertyStateMachine._POLICY`** no lo rompe y es la
+  deriva aceptada a cambio de que el aviso sea cortesía.
+- IF la llamada falla, THEN THE SYSTEM SHALL anunciar el error con un mensaje elegido **por código de
+  estado HTTP** (tabla `CREATE_ERROR_TABLE` en `lib/manage-error.ts`), nunca tomado de
+  `ApiError.message`. En particular: `403` sin permiso, `404` vivienda inexistente **o** sin plantilla
+  de checklist activa (la copia nombra las dos causas porque el cliente no puede distinguirlas sin
+  un cambio de backend), `409` conflicto de plantilla, `422` cuerpo inválido, genérico para el resto.
+- WHEN la creación termina —con éxito o con error—, THE SYSTEM SHALL anunciarlo por la región viva
+  única de la vista (`role="status" aria-live="polite"`), sin añadir una segunda región. El éxito
+  invalida el prefijo de clave de las tareas para que la nueva fila aparezca sin recargar la página.
+- THE SYSTEM SHALL no reintentar la creación.
+
+### Validar una limpieza terminada
+
+- THE SYSTEM SHALL ofrecer dos botones de veredicto («Validar» → `PASSED`, «No pasa» → `FAILED`) en las
+  filas cuyo `status` sea `COMPLETED`, con o sin veredicto previo. El control **sobrevive al primer
+  veredicto** para permitir corregir un «No pasa» mal pulsado — revalidar no estrena ruta ni relaja
+  regla alguna: `record_manual_validation` sólo exige `COMPLETED` y rechaza `PENDING` como veredicto,
+  no comprueba el `validation_status` previo.
+- THE SYSTEM SHALL deshabilitar el botón cuyo veredicto ya es el vigente: reenviar `FAILED` volvería a
+  notificar a la limpiadora y a escribir otra fila de auditoría.
+- THE SYSTEM SHALL **no** ofrecer el veredicto `WAIVED`: el PRD no le declara semántica.
+- WHEN el usuario emite un veredicto, THE SYSTEM SHALL llamar a
+  `POST /api/v1/cleaning-tasks/{task_id}/validate` con `{ validation_status }` y, al recibir `200`,
+  invalidar el prefijo de clave de las tareas.
+- WHERE la fila tiene `completed_at` no nulo o `validation_status` distinto de `PENDING`, THE SYSTEM
+  SHALL pintar el `validation_status` vigente y, si existe, `validated_at` — el dato que el backend ya
+  publica y que el DTO anterior descartaba. En las demás filas el campo no se pinta: «Pendiente de
+  validación» sobre una tarea `CREATED` que nadie ha limpiado todavía se lee como una tarea atascada.
+- THE SYSTEM SHALL **no** afirmar en ningún texto que validar cambia el estado de la vivienda:
+  `ValidateCleaningTaskUseCase` no ejecuta ninguna transición de propiedad. Un texto estático bajo los
+  botones lo deja escrito.
+- IF la llamada falla, THEN THE SYSTEM SHALL anunciar el error por código de estado HTTP (tabla
+  `VALIDATE_ERROR_TABLE` en `lib/manage-error.ts`): `403` sin permiso, `404` tarea inexistente,
+  `409` la tarea ya no está `COMPLETED`, genérico para el resto.
+- THE SYSTEM SHALL no reintentar la validación.
+
+### Cancelar desde la lista, no sólo desde el dashboard
+
+- THE SYSTEM SHALL ofrecer el control de cancelación en las filas cuyo estado sea *vivo* (no terminal)
+  — `CREATED`, `ASSIGNED`, `ACCEPTED`, `IN_PROGRESS`, `PENDING_REVIEW`, `REJECTED`, `COMPLETED`. No se
+  ofrece en `CANCELLED` ni en `FAILED`. La mutación es `useCancelCleaningTask` ya existente, reutilizada
+  sin duplicarla; el diálogo (`CancelCleaningTaskDialog`) es propio de `features/cleaning`, distinto
+  del del dashboard en namespace y vocabulario de error.
+- WHEN el usuario cancela, THE SYSTEM SHALL exigir un motivo no vacío de como máximo 500 caracteres y
+  enviarlo en el cuerpo como `{ reason }`; THE SYSTEM SHALL **no** añadir ningún otro campo.
+- WHEN la cancelación tiene éxito, THE SYSTEM SHALL invalidar el prefijo de clave de las tareas, de
+  modo que tanto la tarea cancelada como su tarea de reemplazo —que el backend crea salvo que haya un
+  huésped dentro— queden reflejadas.
+- THE SYSTEM SHALL advertir en el diálogo que la cancelación puede generar una tarea de reemplazo,
+  para que la aparición de una fila nueva no se lea como un fallo.
+- WHILE el diálogo está abierto, la cancelación se anuncia `role="alert"` **dentro** del diálogo (que
+  permanece abierto tras un fallo). El éxito lo anuncia la región viva de la vista, no el diálogo.
+- IF la tarea ya es terminal y el backend responde `409`, THEN THE SYSTEM SHALL anunciarlo dentro del
+  diálogo con un mensaje propio de esa causa (tabla `CANCEL_ERROR_TABLE` en `lib/manage-error.ts`).
+- THE SYSTEM SHALL no reintentar la cancelación.
 - THE SYSTEM SHALL mantener el `<select>` habilitado aunque el botón esté deshabilitado por ese
   motivo —solo lo deshabilita la mutación en vuelo de su propia fila—, porque deshabilitar un
   elemento que tiene el foco lo manda al `<body>`.
@@ -141,8 +222,12 @@ la única autoridad. Un `TENANT_OWNER` ve la misma lista sin el control de asign
 
 - THE SYSTEM SHALL declarar en el frontend un único permiso de UI, `MANAGE_CLEANING_TASKS`, concedido
   **solo** a `PROPERTY_MANAGER`; `SUPER_ADMIN`, `TENANT_OWNER`, `CLEANER` y `TECHNICIAN` no lo tienen.
-- IF el usuario autenticado no tiene `MANAGE_CLEANING_TASKS`, THEN THE SYSTEM SHALL ocultar el control
-  de asignación y mostrar la asignación como texto de solo lectura, conservando el resto de la fila.
+- THE SYSTEM SHALL condicionar **los cuatro controles** de la vista (asignar, crear, validar, cancelar)
+  a `useHasPermission("MANAGE_CLEANING_TASKS")`. La fila generaliza los tres booleanos por-control a un
+  único `canManage` que comparte con la vista para el panel de creación.
+- IF el usuario autenticado no tiene `MANAGE_CLEANING_TASKS`, THEN THE SYSTEM SHALL ocultar los cuatro
+  controles y mostrar la asignación como texto de solo lectura, conservando el resto de la fila. La
+  lista y **todos** los datos —`validation_status` incluido— se siguen viendo.
 - THE SYSTEM SHALL tratar ese mapa como **pista de UX deliberadamente parcial y nunca como control de
   acceso**: el backend emite su `403` igual ante una petición directa, y ocultar el control no
   autoriza nada.
@@ -185,16 +270,20 @@ la única autoridad. Un `TENANT_OWNER` ve la misma lista sin el control de asign
 
 ### Frontera con el backend
 
-- THE SYSTEM SHALL consumir únicamente endpoints que ya existían —`GET /cleaning-tasks`,
-  `PATCH /cleaning-tasks/{task_id}`, `GET /users?role=CLEANER` y `GET /properties`—, sin estrenar
-  ninguna ruta.
-- **El contrato sí ha cambiado una vez, y por una necesidad de esta pantalla.** Esta capacidad se
-  entregó sin tocarlo, pero `cleaning-assign-preconditions` amplió el item del listado con
-  `assignment_blocked_by` precisamente para que la vista pudiera saber si una tarea es asignable
-  ahora sin derivar reglas de negocio en el cliente. THE SYSTEM SHALL regenerar `backend/openapi.json`
-  y `frontend/lib/api/generated/openapi.d.ts` en el mismo Pull Request que cambie esa forma —son las
-  dos mitades del mismo puente, cada una con su workflow— y no SHALL declarar que esta capacidad
-  vive sobre un contrato congelado.
+- THE SYSTEM SHALL consumir los endpoints que publica `cleaning.md` —`GET /cleaning-tasks`,
+  `POST /cleaning-tasks`, `POST /cleaning-tasks/{task_id}/validate`,
+  `POST /cleaning-tasks/{task_id}/cancel`, `PATCH /cleaning-tasks/{task_id}`,
+  `GET /users?role=CLEANER` y `GET /properties`—, sin estrenar ninguna ruta.
+- **El contrato no se ha tocado en este change.** Los cuatro campos que el DTO empieza a leer —
+  `completed_at`, `validation_status`, `validated_at` en el ítem de listado y
+  `current_operational_state` en el ítem de propiedad— ya venían publicados en
+  `CleaningTaskListItemResponse` y `PropertyListItemResponse`. La forma del contrato cambió una vez
+  por `cleaning-assign-preconditions` (que añadió `assignment_blocked_by` al ítem de listado
+  precisamente para que esta vista pudiera saber si una tarea es asignable ahora sin derivar reglas
+  de negocio en el cliente). THE SYSTEM SHALL regenerar `backend/openapi.json` y
+  `frontend/lib/api/generated/openapi.d.ts` en el mismo Pull Request que cambie esa forma —son las dos
+  mitades del mismo puente, cada una con su workflow— y no SHALL declarar que esta capacidad vive
+  sobre un contrato congelado.
 - THE SYSTEM SHALL mantener las claves de consulta acotadas por tenant, aunque la fuente de datos no
   use el `tenantId` en la petición: la acotación real la hace el backend con el JWT verificado, y el
   parámetro existe para que la caché no cruce tenants.
@@ -229,28 +318,41 @@ la única autoridad. Un `TENANT_OWNER` ve la misma lista sin el control de asign
   `CleaningView`. Ya no importa `RoutePlaceholder`.
 - `frontend/features/cleaning/index.ts` — única exportación pública de la capacidad (`CleaningView`).
 - `frontend/features/cleaning/components/` — `cleaning-view.tsx` (orquesta consultas, filtros,
-  paginación, región viva), `cleaning-task-row.tsx` (tarjeta de tarea, `IdentityValue`, badge de
-  estado), `cleaning-filters.tsx`, `cleaning-pagination.tsx`, `assign-cleaner-control.tsx`.
-- `frontend/features/cleaning/data/` — `cleaning-source.ts` (interfaz `CleaningDataSource`), `dto.ts`
-  (tipos, con `CleaningTaskStatus` aliasado al contrato generado, y `CleaningTaskListItem` sobre
-  `CleaningTask` con `assignmentBlockedBy`), `http/http-cleaning-source.ts`
-  (endpoints, parámetros y mapeo snake_case→camelCase con `mapTask`/`mapListItem`,
-  `TASKS_PER_PAGE`/`CATALOG_PER_PAGE`), `index.ts` (composición de la fuente única).
-  **Cuidado al propagar un campo nuevo del listado**: `CleaningTaskListItem` es un supertipo por
-  ampliación y TypeScript es estructural, así que el typecheck se rompe en el mapeador y **solo
-  ahí**; un consumidor que siga anotado con el tipo base compila igual aunque nunca lea el campo.
-  Lo que cubre ese tramo son los tests que fijan que la fila bloqueada deshabilita el botón, no el
-  compilador.
+  paginación, las cuatro mutaciones, región viva por precedencia), `cleaning-task-row.tsx`
+  (tarjeta de tarea, `IdentityValue`, badge de estado, `canManage`, campo de validación,
+  `ValidateCleaningControl` y botón de cancelar), `cleaning-filters.tsx`, `cleaning-pagination.tsx`,
+  `assign-cleaner-control.tsx`, `create-cleaning-task-panel.tsx` (formulario de creación con
+  disclosure, aviso de no-asignabilidad), `validate-cleaning-control.tsx` (dos botones de veredicto),
+  `cancel-cleaning-task-dialog.tsx` (Sheet con motivo de hasta 500 caracteres).
+- `frontend/features/cleaning/data/` — `cleaning-source.ts` (interfaz `CleaningDataSource` con
+  `createTask`/`validateTask`), `dto.ts` (tipos, con `CleaningTaskStatus`/`PropertyOperationalState`
+  aliasados al contrato generado, `CleaningTask` con `completedAt`/`validationStatus`/`validatedAt`,
+  `PropertySummary` con `currentOperationalState`, `CreateCleaningTaskInput`),
+  `http/http-cleaning-source.ts` (endpoints, parámetros y mapeo snake_case→camelCase con `mapTask`/
+  `mapProperty`/`mapListItem`, `TASKS_PER_PAGE`/`CATALOG_PER_PAGE`), `index.ts` (composición de la
+  fuente única).
+  **Cuidado al propagar un campo nuevo del listado**: `CleaningTask` es un supertipo por ampliación y
+  TypeScript es estructural, así que el typecheck se rompe en el mapeador y **solo ahí**; un
+  consumidor que siga anotado con el tipo base compila igual aunque nunca lea el campo. Lo que cubre
+  ese tramo son los tests que fijan el comportamiento del campo (por ejemplo, que la fila bloqueada
+  deshabilita el botón de asignación o que el campo de validación se pinta en el momento correcto),
+  no el compilador.
 - `frontend/features/cleaning/hooks/` — `query-keys.ts` (claves acotadas por tenant),
   `use-cleaning-data.ts` (tareas + los dos catálogos cacheados), `use-assign-cleaning-task.ts`
-  (mutación, `retry: false`, invalidación en `onSettled`).
+  (mutación, `retry: false`, invalidación en `onSettled`), `use-create-cleaning-task.ts` y
+  `use-validate-cleaning-task.ts` (mutaciones con la misma forma).
 - `frontend/features/cleaning/lib/` — `task-status.ts` (mapa exhaustivo estado→color y clases de
   badge), `directory.ts` (índice de catálogo y las cuatro formas de identidad), `assign-error.ts`
-  (estado HTTP→clave de traducción, más la tabla por código consultada solo dentro del `409`).
+  (estado HTTP→clave de traducción, más la tabla por código consultada solo dentro del `409` —
+  específico de la asignación, intacto), `assignable-property-state.ts` (constante de estados
+  asignables y `warnsNotAssignable`, con el aviso de deriva documentado), `manage-error.ts`
+  (resolvedor `keyForStatus` con tres tablas —`CREATE_ERROR_TABLE`, `VALIDATE_ERROR_TABLE`,
+  `CANCEL_ERROR_TABLE`— y tres claves genéricas, una por operación).
 - `frontend/features/cleaning/state/use-cleaning-filters-store.ts` — store Zustand de filtros, página
   y tenant adoptado.
 - `frontend/lib/auth/permissions.ts` — `Permission`, `ROLE_UI_PERMISSIONS`, `useHasPermission`;
   reexportados en `frontend/lib/auth/index.ts`.
 - `frontend/locales/{es,en}/cleaning.json` — catálogo de la vista, registrado en
-  `frontend/lib/i18n/resources.ts`.
+  `frontend/lib/i18n/resources.ts`. Mismo juego de claves en los dos idiomas, con las nuevas bajo
+  `create.*`, `validate.*`, `cancel.*`, `columns.validation`, `columns.completedAt`, `validation.*`.
 - Comportamiento del backend que consume: `cleaning.md`. Cómo se opera: `docs/cleaning.md`.

@@ -1,0 +1,48 @@
+{
+  "queue": {
+    "title": "Pending approvals",
+    "columns": {
+      "property": "Property",
+      "request": "Request",
+      "amount": "Amount",
+      "waiting": "Waiting since",
+      "actions": "Decision"
+    },
+    "otherNote": "This expense is answered on another screen",
+    "notesLabel": "Notes (optional)",
+    "notesPlaceholder": "Add a note for your decision (optional)",
+    "approve": "Approve",
+    "reject": "Reject",
+    "rejectWarning": "Rejecting cancels the incident and cannot be undone from this screen.",
+    "waitingSince": {
+      "minutes_one": "{{count}} minute ago",
+      "minutes_other": "{{count}} minutes ago",
+      "hours_one": "{{count}} hour ago",
+      "hours_other": "{{count}} hours ago",
+      "days_one": "{{count}} day ago",
+      "days_other": "{{count}} days ago"
+    }
+  },
+  "history": {
+    "title": "Recent history",
+    "empty": "No responses recorded yet",
+    "resultLabel": "Result",
+    "respondedOn": "Answered on {{date}}"
+  },
+  "relatedType": {
+    "INCIDENT": "Incident",
+    "MAINTENANCE_COST": "Maintenance cost",
+    "OTHER": "Other"
+  },
+  "status": {
+    "PENDING": "Pending",
+    "APPROVED": "Approved",
+    "REJECTED": "Rejected",
+    "EXPIRED": "Expired"
+  },
+  "fields": {
+    "forbidden": "You do not have permission to view approvals",
+    "validation": "The submitted data is not valid",
+    "alreadyAnswered": "This approval has already been answered. The queue has been refreshed."
+  }
+}

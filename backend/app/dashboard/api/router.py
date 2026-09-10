@@ -22,9 +22,14 @@ import uuid
 from datetime import UTC, date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
-from app.auth.api.dependencies import AuthenticatedRequest, now_utc, require
+from app.auth.api.dependencies import (
+    AuthenticatedRequest,
+    RequestLocaleDep,
+    now_utc,
+    require,
+)
 from app.auth.domain.policy import Permission
 from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.dashboard.api.dependencies import (
@@ -79,8 +84,9 @@ TodayDep = Annotated[date, Depends(_today)]
         "`GET /api/v1/properties`. Resolved in a fixed number of queries whatever the page "
         "size — never one per property. `operational_state` is the canonical literal and "
         "carries no colour: the colour mapping belongs to the client. `cleaning_status`, "
-        "`next_action.label` and `last_event_label` arrive already composed in the "
-        "authenticated user's language. A block whose source the caller's role may not read "
+        "`next_action.label` and `last_event_label` arrive already composed in the language "
+        "the request states in its `X-Locale` header, falling back to the authenticated "
+        "user's stored preference and then to Spanish. A block whose source the caller's role may not read "
         "comes back `null`, indistinguishable from having none — `current_or_next_reservation` "
         "is always present as a key, `null` included. Amounts are decimal strings so no cent "
         "is lost to a float. This route is not in PRD §23; it is an explicit extension, which "
@@ -88,16 +94,23 @@ TodayDep = Annotated[date, Depends(_today)]
     ),
 )
 async def list_dashboard_cards(
+    response: Response,
     authenticated: ReadDep,
+    locale: RequestLocaleDep,
     today: TodayDep,
     use_case: Annotated[GetDashboardCardsUseCase, Depends(get_dashboard_cards_use_case)],
     page: Annotated[int, Query(ge=1, le=MAX_PAGE)] = 1,
     per_page: Annotated[int, Query(ge=1, le=MAX_PER_PAGE)] = 20,
 ) -> PropertyDashboardPageResponse:
+    # Composed text varies on the `X-Locale` request header (D3/R1); a shared cache keyed
+    # on the URL alone could serve one reader's language to another. `no-store` is what
+    # keeps this response out of the Cloudflare edge in front of dev
+    # (sdd/specs/ingress-https-dev.md), not a precaution against a hypothetical CDN.
+    response.headers["Cache-Control"] = "private, no-store"
     result = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         role=authenticated.context.role,
-        locale=authenticated.context.preferred_language,
+        locale=locale,
         page=page,
         per_page=per_page,
         today=today,
@@ -115,7 +128,9 @@ async def list_dashboard_cards(
         "The aggregate of PRD §9.2: reservation, guest, access, cleaning, incidents, "
         "financial, notes and pending approvals in one call. The guest is a name and the "
         "access a status label — never a document number, never an access code in any form, "
-        "masked included. `last_cleaning_photos` is always empty until signed URLs exist; "
+        "masked included. Every composed label in the aggregate arrives in the language the "
+        "request states in its `X-Locale` header, falling back to the authenticated user's "
+        "stored preference and then to Spanish. `last_cleaning_photos` is always empty until signed URLs exist; "
         "the blocks whose writing domain has not shipped yet (`incidents`, "
         "`owner_approvals`, `expenses`) query their real tables and come back empty, so the "
         "contract will not change when those changes land. `notes` is always `null` for now "
@@ -126,17 +141,20 @@ async def list_dashboard_cards(
 )
 async def get_property_dashboard(
     property_id: uuid.UUID,
+    response: Response,
     authenticated: ReadDep,
+    locale: RequestLocaleDep,
     today: TodayDep,
     use_case: Annotated[
         GetPropertyDashboardUseCase, Depends(get_property_dashboard_use_case)
     ],
 ) -> PropertyDetailResponse:
+    response.headers["Cache-Control"] = "private, no-store"
     detail = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         property_id=property_id,
         role=authenticated.context.role,
-        locale=authenticated.context.preferred_language,
+        locale=locale,
         today=today,
     )
     return PropertyDetailResponse.from_domain(detail)

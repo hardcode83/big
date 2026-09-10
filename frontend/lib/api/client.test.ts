@@ -211,7 +211,6 @@ describe("createApiClient (D12)", () => {
   it.each([
     "/api/v1/auth/login",
     "/api/v1/auth/refresh",
-    "/api/v1/auth/logout",
   ] as const)("excludes %s from automatic recovery", async (path) => {
     const onUnauthorized = vi.fn().mockResolvedValue(true);
     const fetchImpl = vi.fn().mockResolvedValue(
@@ -228,11 +227,39 @@ describe("createApiClient (D12)", () => {
     });
 
     await client
-      .request(path, { method: "POST", body: path.endsWith("login") ? { email: "a", password: "b" } : path.endsWith("refresh") ? { refresh_token: "refresh" } : undefined } as never)
+      .request(path, { method: "POST", body: path.endsWith("login") ? { email: "a", password: "b" } : undefined } as never)
       .catch(() => undefined);
 
     expect(onUnauthorized).not.toHaveBeenCalled();
     expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("recovers a 401 on logout exactly like any other authenticated endpoint (auth-session-persistence R3, R6.2)", async () => {
+    // logout still needs `credentials: "include"` to carry/clear the cookie, but a 401
+    // here means an ordinary expired access token — excluding it from recovery used to
+    // leave the server-side session and its cookie alive whenever the caller's Bearer
+    // token had already expired.
+    const onUnauthorized = vi.fn().mockResolvedValue(true);
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: "UNAUTHENTICATED", message: "expired" } },
+          { status: 401 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = createApiClient({
+      baseUrl: "https://api",
+      fetchImpl,
+      getHeaders: () => ({ Authorization: "Bearer access" }),
+      onUnauthorized,
+    });
+
+    await client.request("/api/v1/auth/logout", { method: "POST" } as never);
+
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("does not retry the original request twice", async () => {
@@ -324,6 +351,37 @@ describe("createApiClient (D12)", () => {
     const retryInit = fetchImpl.mock.calls[1][1] as RequestInit;
     expect(retryInit.body).toBe(formData);
     expect(new Headers(retryInit.headers).has("Content-Type")).toBe(false);
+  });
+
+  it.each([
+    "/api/v1/auth/login",
+    "/api/v1/auth/refresh",
+    "/api/v1/auth/logout",
+  ] as const)("sends credentials: include for %s (D9)", async (path) => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, { status: 201 }));
+    const client = createApiClient({ baseUrl: "https://api", fetchImpl });
+
+    await client
+      .request(path, {
+        method: "POST",
+        body: path.endsWith("login")
+          ? { email: "a", password: "b" }
+          : undefined,
+      } as never)
+      .catch(() => undefined);
+
+    const init = fetchImpl.mock.calls[0][1] as RequestInit;
+    expect(init.credentials).toBe("include");
+  });
+
+  it("does not send credentials on an arbitrary non-auth path", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ ok: 1 }));
+    const client = createApiClient({ baseUrl: "https://api", fetchImpl });
+
+    await client.request("/health");
+
+    const init = fetchImpl.mock.calls[0][1] as RequestInit;
+    expect(init.credentials).toBeUndefined();
   });
 
   it("leaves an existing JSON request untouched (no regression from D2)", async () => {

@@ -242,20 +242,27 @@ INCIDENT_PERMISSIONS = (
     Permission.MANAGE_INCIDENTS,
     Permission.EXECUTE_INCIDENTS,
     Permission.RESPOND_OWNER_APPROVALS,
+    Permission.READ_OWNER_APPROVALS,
 )
 
-#: The whole table of D13, written out rather than derived: the interesting content is the
-#: **exclusions**, and a derived expectation would restate the implementation.
+#: The whole table of D13 (plus `approvals-web` D1's `READ_OWNER_APPROVALS`), written out
+#: rather than derived: the interesting content is the **exclusions**, and a derived
+#: expectation would restate the implementation.
 EXPECTED_INCIDENT_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
     UserRole.SUPER_ADMIN: frozenset(),
     UserRole.TENANT_OWNER: frozenset(
-        {Permission.READ_INCIDENTS, Permission.RESPOND_OWNER_APPROVALS}
+        {
+            Permission.READ_INCIDENTS,
+            Permission.RESPOND_OWNER_APPROVALS,
+            Permission.READ_OWNER_APPROVALS,
+        }
     ),
     UserRole.PROPERTY_MANAGER: frozenset(
         {
             Permission.READ_INCIDENTS,
             Permission.MANAGE_INCIDENTS,
             Permission.EXECUTE_INCIDENTS,
+            Permission.READ_OWNER_APPROVALS,
         }
     ),
     UserRole.TECHNICIAN: frozenset(
@@ -295,6 +302,18 @@ def test_the_technician_may_execute_but_never_manage() -> None:
     assert is_allowed(UserRole.TECHNICIAN, Permission.EXECUTE_INCIDENTS)
     assert not is_allowed(UserRole.TECHNICIAN, Permission.MANAGE_INCIDENTS)
     assert not is_allowed(UserRole.TECHNICIAN, Permission.RESPOND_OWNER_APPROVALS)
+    assert not is_allowed(UserRole.TECHNICIAN, Permission.READ_OWNER_APPROVALS)
+
+
+def test_read_owner_approvals_is_the_owner_and_the_managers_alone() -> None:
+    """`approvals-web` R1.4: the manager needs to see why the flow is stopped, but only the
+    owner may answer it — `RESPOND_OWNER_APPROVALS` stays hers alone (measured false: reusing
+    `READ_INCIDENTS` would grant this to `TECHNICIAN` via `_INCIDENT_EXECUTE`)."""
+    assert is_allowed(UserRole.TENANT_OWNER, Permission.READ_OWNER_APPROVALS)
+    assert is_allowed(UserRole.PROPERTY_MANAGER, Permission.READ_OWNER_APPROVALS)
+    assert not is_allowed(UserRole.PROPERTY_MANAGER, Permission.RESPOND_OWNER_APPROVALS)
+    for role in (UserRole.SUPER_ADMIN, UserRole.TECHNICIAN, UserRole.CLEANER):
+        assert not is_allowed(role, Permission.READ_OWNER_APPROVALS)
 
 
 # --- Pricing (`revenue-pricing` R1.1, R1.2, R5.2, design D11) --------------------------

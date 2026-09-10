@@ -11,6 +11,7 @@ from app.auth.api.dependencies import (
     get_password_hasher,
     get_token_codec,
 )
+from app.auth.api.schemas import SESSION_REFRESH_COOKIE
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.infrastructure.password_hasher import BcryptPasswordHasher
 from app.auth.infrastructure.token_codec import JwtTokenCodec
@@ -58,21 +59,73 @@ def _assert_envelope(payload, code: str) -> None:
 
 @pytest.mark.asyncio
 async def test_login_returns_a_token_pair(api, db_session, tenant_a) -> None:
+    """`auth-session-persistence` R1: the refresh token travels only via the cookie."""
     await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
 
     response = await _login(api)
 
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == {"access_token", "refresh_token", "token_type", "expires_in"}
+    assert set(body) == {"access_token", "token_type", "expires_in"}
     assert body["token_type"] == "bearer"
     assert body["expires_in"] == 900
+
+    cookie_header = response.headers.get("set-cookie")
+    assert cookie_header is not None
+    assert cookie_header.startswith("autohostai.session.refresh=")
+    assert "HttpOnly" in cookie_header
+    assert "samesite=strict" in cookie_header.lower()
+    assert "Path=/api/v1/auth" in cookie_header
+    assert "Max-Age=604800" in cookie_header
+
+
+@pytest.mark.asyncio
+async def test_login_logs_the_resolved_cookie_secure_decision(
+    api, db_session, tenant_a, caplog
+) -> None:
+    """`auth-session-persistence` R7.2: the `Secure` decision is recorded for audit."""
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+
+    with caplog.at_level("INFO", logger="app.auth.api.router"):
+        response = await _login(api)
+
+    assert response.status_code == 200
+    records = [
+        r for r in caplog.records if r.getMessage() == "auth.refresh_cookie_issued"
+    ]
+    assert len(records) == 1
+    assert records[0].secure is False
+    assert records[0].endpoint == "login"
+
+
+@pytest.mark.asyncio
+async def test_refresh_logs_the_resolved_cookie_secure_decision(
+    api, db_session, tenant_a, caplog
+) -> None:
+    """`auth-session-persistence` R7.2: same audit log, on the rotation path."""
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    await _login(api)
+
+    with caplog.at_level("INFO", logger="app.auth.api.router"):
+        response = await api.post("/api/v1/auth/refresh", json={})
+
+    assert response.status_code == 200
+    records = [
+        r for r in caplog.records if r.getMessage() == "auth.refresh_cookie_issued"
+    ]
+    assert len(records) == 1
+    assert records[0].secure is False
+    assert records[0].endpoint == "refresh"
 
 
 @pytest.mark.asyncio
 async def test_the_whole_flow_login_me_refresh_logout(api, db_session, tenant_a) -> None:
+    """`auth-session-persistence` R2, R3: refresh reads the cookie, logout purges it."""
     user = await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
-    tokens = (await _login(api)).json()
+    login_response = await _login(api)
+    tokens = login_response.json()
+    initial_cookie = login_response.cookies.get(SESSION_REFRESH_COOKIE)
+    assert initial_cookie is not None
 
     me = await api.get(
         "/api/v1/auth/me", headers={"Authorization": f"Bearer {tokens['access_token']}"}
@@ -80,11 +133,21 @@ async def test_the_whole_flow_login_me_refresh_logout(api, db_session, tenant_a)
     assert me.status_code == 200
     assert me.json()["id"] == str(user.id)
 
-    rotated = await api.post(
-        "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
-    )
+    # No body needed: the same `api` client instance carries the cookie login set.
+    rotated = await api.post("/api/v1/auth/refresh", json={})
     assert rotated.status_code == 200
-    assert rotated.json()["refresh_token"] != tokens["refresh_token"]
+    rotated_cookie = rotated.cookies.get(SESSION_REFRESH_COOKIE)
+    assert rotated_cookie is not None
+    assert rotated_cookie != initial_cookie
+    # The rotated body carries no `refresh_token` field at all (R1.2/R2.3).
+    assert "refresh_token" not in rotated.json()
+    # Same raw-header shape as the login cookie (R1/R2): the refresh endpoint's own
+    # `Set-Cookie` is not just "present", it carries the same attributes.
+    rotated_set_cookie = rotated.headers.get("set-cookie")
+    assert rotated_set_cookie is not None
+    assert "Max-Age=604800" in rotated_set_cookie
+    assert "HttpOnly" in rotated_set_cookie
+    assert "Path=/api/v1/auth" in rotated_set_cookie
 
     logout = await api.post(
         "/api/v1/auth/logout",
@@ -92,19 +155,281 @@ async def test_the_whole_flow_login_me_refresh_logout(api, db_session, tenant_a)
     )
     assert logout.status_code == 204
     assert logout.content == b""
+    logout_set_cookie = logout.headers.get("set-cookie")
+    assert logout_set_cookie is not None
+    assert logout_set_cookie.startswith("autohostai.session.refresh=")
+    assert "Max-Age=0" in logout_set_cookie
 
-    reused = await api.post(
-        "/api/v1/auth/refresh", json={"refresh_token": rotated.json()["refresh_token"]}
-    )
+    # Presenting the rotated (never-used) token again after logout still fails: the
+    # cookie jar deleted it, so this exercises the "no cookie" 401 path.
+    reused = await api.post("/api/v1/auth/refresh", json={})
     assert reused.status_code == 401
+    assert "set-cookie" not in reused.headers
+
+    # Explicitly presenting the rotated value (simulating a stale client that still
+    # holds it) is rejected too: the family was revoked by logout (R3.1).
+    api.cookies.set(SESSION_REFRESH_COOKIE, rotated_cookie)
+    reused_explicit = await api.post("/api/v1/auth/refresh", json={})
+    assert reused_explicit.status_code == 401
+    # R2.2: a revoked-cookie 401 emits no `Set-Cookie` either — same as the absent-cookie
+    # case above, just reached through a different route (a stale but well-formed value
+    # instead of nothing at all).
+    assert "set-cookie" not in reused_explicit.headers
+
+    # Idempotent logout (R3.2): calling it again on a client with no cookie left in the
+    # jar (the first logout already purged it) still answers 204 and still emits the
+    # purge header — the endpoint never branches on "was there anything to revoke".
+    second_logout = await api.post(
+        "/api/v1/auth/logout",
+        headers={"Authorization": f"Bearer {rotated.json()['access_token']}"},
+    )
+    assert second_logout.status_code == 204
+    second_logout_set_cookie = second_logout.headers.get("set-cookie")
+    assert second_logout_set_cookie is not None
+    assert second_logout_set_cookie.startswith("autohostai.session.refresh=")
+    assert "Max-Age=0" in second_logout_set_cookie
+
+
+@pytest.mark.asyncio
+async def test_logout_with_no_bearer_revokes_via_the_refresh_cookie(
+    api, db_session, tenant_a
+) -> None:
+    """`auth-session-persistence` R6.2 (review: sdd-security): the cookie is a credential.
+
+    No `Authorization` header is ever sent — the client's in-memory access token is
+    "empty", the case `use-logout-mutation.ts` hits after a reload with no mount-refresh
+    yet, or a session-expired reset. The refresh cookie alone must still end the session,
+    with no prior `POST /auth/refresh` needed to obtain a Bearer.
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    login_response = await _login(api)
+    cookie = login_response.cookies.get(SESSION_REFRESH_COOKIE)
+    assert cookie is not None
+
+    logout = await api.post("/api/v1/auth/logout")
+
+    assert logout.status_code == 204
+    assert logout.content == b""
+    logout_set_cookie = logout.headers.get("set-cookie")
+    assert logout_set_cookie is not None
+    assert logout_set_cookie.startswith("autohostai.session.refresh=")
+    assert "Max-Age=0" in logout_set_cookie
+
+    # Proof the family was actually revoked, not just that the local cookie was purged:
+    # explicitly presenting the same (captured) cookie value to /auth/refresh is rejected.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie)
+    reused = await api.post("/api/v1/auth/refresh", json={})
+    assert reused.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_with_no_bearer_only_revokes_the_presenting_tenants_family(
+    api, db_session, tenant_a, tenant_b
+) -> None:
+    """`steering/security.md` rule 1: a tenant's cookie must not revoke another
+    tenant's session (review: sdd-review-tenancy).
+
+    `get_logout_subject`'s cookie-only branch decodes `tenant_id` and `family_id` from
+    the SAME signed refresh token, with no repository lookup — this proves that
+    coupling holds end to end: tenant A's cookie, presented with no Bearer, revokes
+    tenant A's family only, and tenant B's own (distinct, still-live) session survives.
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner-a@example.com")
+    await insert_user(db_session, tenant=tenant_b, email="owner-b@example.com")
+
+    login_a = await _login(api, email="owner-a@example.com")
+    cookie_a = login_a.cookies.get(SESSION_REFRESH_COOKIE)
+    assert cookie_a is not None
+
+    # A separate login for tenant B's session — captured from the response directly
+    # (not the jar, which this second login already overwrote).
+    login_b = await _login(api, email="owner-b@example.com")
+    cookie_b = login_b.cookies.get(SESSION_REFRESH_COOKIE)
+    assert cookie_b is not None
+    assert cookie_b != cookie_a
+
+    # The jar now carries tenant B's cookie from the second login; swap in tenant A's
+    # captured value explicitly so THIS call presents tenant A's credential alone.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie_a)
+    logout = await api.post("/api/v1/auth/logout")
+    assert logout.status_code == 204
+
+    # `get_logout_subject`'s cookie branch now marks the (test-shared) `db_session` to
+    # tenant A (review: sdd-security) — in production this is a fresh session per
+    # request and the mark dies with it, but this test reuses one `db_session` across
+    # calls, so it must be reset the same way `test_isolation.py`'s cross-tenant tests
+    # already do before the next call touches a different tenant.
+    db_session.info.pop(TENANT_ID_SESSION_KEY, None)
+
+    # Tenant A's family is gone.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie_a)
+    reused_a = await api.post("/api/v1/auth/refresh", json={})
+    assert reused_a.status_code == 401
+
+    # Tenant B's family is untouched — proof the revoke never crossed tenants.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie_b)
+    still_valid_b = await api.post("/api/v1/auth/refresh", json={})
+    assert still_valid_b.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_logout_with_a_stale_bearer_still_revokes_via_the_refresh_cookie(
+    api, db_session, tenant_a
+) -> None:
+    """`auth-session-persistence` R3.1 (review: sdd-security, second re-review of
+    `get_logout_subject` itself): a PRESENT-but-invalid Bearer must not stop the
+    cookie fallback from running.
+
+    The common real case is an access token that expired without ever being
+    cleared — the client still sends `Authorization: Bearer <stale>`. Without this,
+    the request 401s, and the client's ordinary 401-recovery calls `refreshSession()`
+    before retrying — rotating and re-extending the cookie by a fresh week before any
+    revoke is attempted, reopening the exact window the cookie-only fallback exists
+    to close (just reached through a stale Bearer instead of an empty store).
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    login_response = await _login(api)
+    cookie = login_response.cookies.get(SESSION_REFRESH_COOKIE)
+    assert cookie is not None
+
+    logout = await api.post(
+        "/api/v1/auth/logout",
+        headers={"Authorization": "Bearer not.a.jwt"},
+    )
+
+    assert logout.status_code == 204
+    assert logout.content == b""
+
+    # Proof the family was actually revoked via the cookie, not silently skipped.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie)
+    reused = await api.post("/api/v1/auth/refresh", json={})
+    assert reused.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_with_a_stale_bearer_and_no_cookie_is_a_no_op(api) -> None:
+    """The stale-Bearer fallback is still idempotent (R3.2): nothing to revoke on
+    either credential answers the same 204, not a 401."""
+    response = await api.post(
+        "/api/v1/auth/logout",
+        headers={"Authorization": "Bearer not.a.jwt"},
+    )
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+@pytest.mark.asyncio
+async def test_logout_with_no_bearer_and_no_cookie_is_a_no_op(api) -> None:
+    """R3.2's idempotency extends to the cookie-only path: nothing to revoke is not
+    an error — same 204 as the authenticated "already logged out" case."""
+    response = await api.post("/api/v1/auth/logout")
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+@pytest.mark.asyncio
+async def test_logout_with_no_bearer_and_a_garbage_cookie_is_a_no_op(api) -> None:
+    """A cookie that fails to decode (tampered, wrong signature, expired) does not turn
+    into a distinguishable error — it is treated the same as no cookie at all (R3.2)."""
+    api.cookies.set(SESSION_REFRESH_COOKIE, "not.a.jwt")
+
+    response = await api.post("/api/v1/auth/logout")
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+ALLOWED_ORIGIN = "http://localhost:3000"
+# Same-site (shares the `digitalsec.work` registrable domain) but cross-origin — the
+# case `SameSite=Lax`/`Strict` cannot distinguish from the real frontend, and the one
+# `enforce_same_origin`/`get_logout_subject`'s inline check exist to reject (design D6c).
+SIBLING_ORIGIN = "https://evil.digitalsec.work"
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_a_disallowed_cross_origin_caller(
+    api, db_session, tenant_a
+) -> None:
+    """`auth-session-persistence` design D6c (review: sdd-security, CSRF finding).
+
+    CORS alone would not stop this: a cross-origin `POST` with a simple body skips
+    preflight and reaches the handler regardless of `Access-Control-Allow-Origin`.
+    `enforce_same_origin` closes it explicitly, with the same `401` shape a
+    missing/invalid cookie already gets — no new, distinguishable error surface.
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    await _login(api)
+
+    response = await api.post(
+        "/api/v1/auth/refresh", json={}, headers={"Origin": SIBLING_ORIGIN}
+    )
+
+    assert response.status_code == 401
+    assert "set-cookie" not in response.headers
+
+
+@pytest.mark.asyncio
+async def test_refresh_allows_the_frontends_own_origin(api, db_session, tenant_a) -> None:
+    """The real frontend's own `Origin` (on the CORS allowlist) is unaffected by D6c."""
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    await _login(api)
+
+    response = await api.post(
+        "/api/v1/auth/refresh", json={}, headers={"Origin": ALLOWED_ORIGIN}
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_logout_with_no_bearer_and_a_disallowed_origin_cookie_is_a_no_op(
+    api, db_session, tenant_a
+) -> None:
+    """`auth-session-persistence` design D6c: a same-site sibling forcing a `POST
+    /auth/logout` with the victim's cookie must not actually revoke the session —
+    and, since review round 6's fix, must not evict the victim's cookie either.
+
+    Unlike `/auth/refresh`, `/auth/logout` cannot answer `401` for this (D6/D6b's
+    never-401 invariant) — the disallowed `Origin` is folded into "nothing to revoke"
+    instead, so the response is still the ordinary idempotent `204`, but the family
+    is proven untouched: the same cookie still refreshes successfully afterwards.
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    login_response = await _login(api)
+    cookie = login_response.cookies.get(SESSION_REFRESH_COOKIE)
+    assert cookie is not None
+
+    logout = await api.post("/api/v1/auth/logout", headers={"Origin": SIBLING_ORIGIN})
+
+    assert logout.status_code == 204
+    assert logout.content == b""
+    # The other half of the round-6 fix: a disallowed Origin must not purge the
+    # cookie either, or a CSRF attacker could still force a re-login even though
+    # the session survives server-side. No Set-Cookie at all on this response —
+    # neither a rotation (there's nothing to rotate on logout) nor a deletion.
+    assert "set-cookie" not in logout.headers
+    # httpx's cookie jar never saw a deletion to apply, so this holds even without
+    # re-setting it — kept explicit so the test still passes if the client ever
+    # stops tracking cookies across requests within the same test.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie)
+
+    # Proof nothing was actually revoked: the same cookie the forged request carried
+    # still rotates cleanly through a legitimate (no cross-origin Origin) refresh.
+    still_valid = await api.post("/api/v1/auth/refresh", json={})
+    assert still_valid.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_the_whole_flow_login_me_refresh_logout_for_a_super_admin(api, db_session) -> None:
     """`super-admin-identity` R2: none of the four answers `500` for a tenantless account."""
     await insert_user(db_session, tenant=None, role=UserRole.SUPER_ADMIN, email="root@example.com")
-    tokens = (await _login(api, email="root@example.com")).json()
+    login_response = await _login(api, email="root@example.com")
+    tokens = login_response.json()
     assert "access_token" in tokens
+    initial_cookie = login_response.cookies.get(SESSION_REFRESH_COOKIE)
+    assert initial_cookie is not None
 
     me = await api.get(
         "/api/v1/auth/me", headers={"Authorization": f"Bearer {tokens['access_token']}"}
@@ -113,11 +438,16 @@ async def test_the_whole_flow_login_me_refresh_logout_for_a_super_admin(api, db_
     assert me.json()["tenant_id"] is None
     assert me.json()["role"] == UserRole.SUPER_ADMIN.value
 
-    rotated = await api.post(
-        "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
-    )
+    rotated = await api.post("/api/v1/auth/refresh", json={})
     assert rotated.status_code == 200
-    assert rotated.json()["refresh_token"] != tokens["refresh_token"]
+    rotated_cookie = rotated.cookies.get(SESSION_REFRESH_COOKIE)
+    assert rotated_cookie is not None
+    assert rotated_cookie != initial_cookie
+    rotated_set_cookie = rotated.headers.get("set-cookie")
+    assert rotated_set_cookie is not None
+    assert "Max-Age=604800" in rotated_set_cookie
+    assert "HttpOnly" in rotated_set_cookie
+    assert "Path=/api/v1/auth" in rotated_set_cookie
 
     logout = await api.post(
         "/api/v1/auth/logout",
@@ -161,6 +491,9 @@ async def test_wrong_credentials_answer_the_envelope(api, db_session, tenant_a) 
     assert response.status_code == 401
     _assert_envelope(response.json(), "INVALID_CREDENTIALS")
     assert response.headers.get("WWW-Authenticate") == "Bearer"
+    # `auth-session-persistence` R1.3: a failed login never sets the refresh cookie —
+    # the exception raised inside `execute` propagates before `emit_refresh_cookie` runs.
+    assert "set-cookie" not in response.headers
 
 
 @pytest.mark.asyncio
@@ -198,10 +531,12 @@ async def test_a_non_bearer_scheme_is_rejected(api, db_session, tenant_a) -> Non
 @pytest.mark.asyncio
 async def test_a_refresh_token_is_not_accepted_as_a_bearer(api, db_session, tenant_a) -> None:
     await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
-    tokens = (await _login(api)).json()
+    login_response = await _login(api)
+    refresh_token = login_response.cookies.get(SESSION_REFRESH_COOKIE)
+    assert refresh_token is not None
 
     response = await api.get(
-        "/api/v1/auth/me", headers={"Authorization": f"Bearer {tokens['refresh_token']}"}
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {refresh_token}"}
     )
 
     assert response.status_code == 401
@@ -271,10 +606,92 @@ async def test_an_access_token_still_works_after_logout_through_the_real_boundar
     # Still 200: there is no access-token revocation list, by decision. The window is
     # bounded by the token lifetime.
     assert (await api.get("/api/v1/auth/me", headers=headers)).status_code == 200
-    # But the session is gone, so it cannot be renewed.
-    assert (
-        await api.post("/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
-    ).status_code == 401
+    # But the session is gone, so it cannot be renewed — the cookie itself was purged
+    # by logout, so this hits the "no cookie" 401 path.
+    assert (await api.post("/api/v1/auth/refresh", json={})).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_with_no_cookie_at_all_is_rejected(api) -> None:
+    """`auth-session-persistence` R2.2: an absent cookie is a 401, and no `Set-Cookie`."""
+    response = await api.post("/api/v1/auth/refresh", json={})
+
+    assert response.status_code == 401
+    _assert_envelope(response.json(), "INVALID_TOKEN")
+    assert "set-cookie" not in response.headers
+
+
+@pytest.mark.asyncio
+async def test_refresh_ignores_a_refresh_token_in_the_body(api, db_session, tenant_a) -> None:
+    """`auth-session-persistence` R2.3: a body `refresh_token` is not read as a fallback.
+
+    A valid refresh cookie exists (from login), but this client never sends it — instead
+    it sends a JSON body naming a refresh token. That value must be ignored, not read as
+    a fallback, so the request is treated exactly as if the cookie were absent: 401.
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    login_response = await _login(api)
+    real_cookie = login_response.cookies.get(SESSION_REFRESH_COOKIE)
+    assert real_cookie is not None
+    # The client's jar would otherwise carry the real cookie from login too — delete it
+    # so this request truly has no cookie, only the body.
+    api.cookies.delete(SESSION_REFRESH_COOKIE)
+
+    response = await api.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": real_cookie},
+    )
+
+    assert response.status_code == 401
+    _assert_envelope(response.json(), "INVALID_TOKEN")
+
+
+@pytest.mark.asyncio
+async def test_refresh_uses_the_cookie_even_when_the_body_also_carries_a_valid_token(
+    api, db_session, tenant_a
+) -> None:
+    """`auth-session-persistence` R2.3: with BOTH present, the cookie wins outright.
+
+    Two distinct sessions exist, each with its own valid refresh token. The request's
+    cookie names one; the body's `refresh_token` names the other, unrelated one. If the
+    body were ever consulted — as a fallback, a cross-check, anything — the wrong
+    session would be touched. Proof: after the call, the body's token is still fully
+    valid and rotates cleanly on its own, so it was never read, let alone spent.
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    await insert_user(db_session, tenant=tenant_a, email="second@example.com")
+
+    cookie_login = await _login(api, email="owner@example.com")
+    cookie_token = cookie_login.cookies.get(SESSION_REFRESH_COOKIE)
+    assert cookie_token is not None
+
+    # A separate login for a second, unrelated session — captured from the response
+    # directly (not the jar, which the next login would overwrite anyway).
+    api.cookies.delete(SESSION_REFRESH_COOKIE)
+    body_login = await _login(api, email="second@example.com")
+    body_token = body_login.cookies.get(SESSION_REFRESH_COOKIE)
+    assert body_token is not None
+    assert body_token != cookie_token
+
+    # The jar carries the first session's cookie; the body names the second, different
+    # session's token.
+    api.cookies.set(SESSION_REFRESH_COOKIE, cookie_token)
+    response = await api.post(
+        "/api/v1/auth/refresh", json={"refresh_token": body_token}
+    )
+
+    assert response.status_code == 200
+    rotated_cookie = response.cookies.get(SESSION_REFRESH_COOKIE)
+    assert rotated_cookie is not None
+    assert rotated_cookie != cookie_token
+    # Not the body's token either: it was rotated FROM the cookie, not from the body.
+    assert rotated_cookie != body_token
+
+    # The body's token was never touched: it is still live and rotates cleanly on its
+    # own, proving the endpoint never read it.
+    api.cookies.set(SESSION_REFRESH_COOKIE, body_token)
+    still_valid = await api.post("/api/v1/auth/refresh", json={})
+    assert still_valid.status_code == 200
 
 
 @pytest.mark.asyncio

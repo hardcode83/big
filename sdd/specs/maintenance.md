@@ -166,6 +166,49 @@ una conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
 - THE SYSTEM SHALL admitir como respuesta únicamente `APPROVED` y `REJECTED`. `PENDING` y `EXPIRED`
   NEVER SHALL ser respuestas válidas; ningún camino de código escribe `EXPIRED`, y la expiración
   automática queda fuera de esta capability.
+- THE SYSTEM SHALL exponer `GET /api/v1/owner-approvals`, bajo `READ_OWNER_APPROVALS`, que lista
+  las aprobaciones **del tenant del token** — nunca de un parámetro — paginadas
+  (`page`/`per_page`, por defecto 1 y 20). WHEN no se indica `status`, THE SYSTEM SHALL devolver
+  sólo las `PENDING`, ordenadas `requested_at` ascendente (la misma disciplina que
+  `OwnerApprovalReader.list_pending_for_property` ya declara para el dashboard); WHEN se pide
+  cualquier estado ya respondido, THE SYSTEM SHALL ordenar `responded_at` descendente — un
+  histórico, no una lista de tareas ([`approvals-web`](approvals-web.md) R1, R2.3).
+- THE SYSTEM SHALL incluir en cada fila lo necesario para decidir sin navegar: id de la
+  aprobación, `related_type`, `status`, importe, `requested_at`/`responded_at`, la incidencia que
+  la origina (id, título, categoría, severidad) cuando `related_type` no es `OTHER`, y la vivienda
+  en forma legible —nombre y código interno, nunca sólo el UUID. `currency` es siempre la
+  constante `OWNER_APPROVAL_CURRENCY = "EUR"` (`read_models.py`): `owner_approvals` no tiene
+  columna de moneda, y el umbral del que deriva todo este flujo
+  (`owner_approval_threshold_eur`) ya está denominado en EUR.
+- THE SYSTEM SHALL resolver la incidencia de cada fila con un único `LEFT OUTER JOIN` contra
+  `incidents` —**ambas tablas de `maintenance`**— gateado a `related_type != OTHER`, y NEVER SHALL
+  reenganchar una incidencia a una fila `OTHER` por coincidencia de id. THE SYSTEM SHALL resolver
+  la vivienda de la página en **una sola** consulta adicional por lote
+  (`PropertyRepository.list_for_ids`), no una por fila. WHEN una vivienda de la página no resuelve
+  dentro del tenant, THE SYSTEM SHALL **omitir esa fila** de la página devuelta y registrar
+  `maintenance.owner_approval_property_unresolved`; `total` SHALL seguir siendo el recuento crudo
+  del `LEFT OUTER JOIN`, sin descontar la fila omitida.
+- THE SYSTEM SHALL incluir en la lista las aprobaciones `related_type = OTHER`: R1.1 pide «las
+  aprobaciones de su tenant» y ocultarlas mentiría sobre lo pendiente. THE SYSTEM SHALL seguir
+  respondiendo `404` a `POST /owner-approvals/{id}/respond` para una de ellas —`related_id` es un
+  id de `Expense`, no de incidencia, y la ruta de respuesta resuelve siempre por incidencia—: la
+  lista las hace **visibles** sin hacerlas **respondibles**, un vacío que sigue abierto hasta que
+  lo cierre la entrada de roadmap `expense-approval-response`.
+- WHEN la propietaria responde una aprobación cuya incidencia tiene técnico asignado, THE SYSTEM
+  SHALL escribir, **dentro de la misma transacción** que registra la respuesta, una notificación
+  al técnico con `notification_type = OWNER_APPROVAL_APPROVED` o `OWNER_APPROVAL_REJECTED` según
+  el resultado — dos tipos y no uno, porque la bandeja renderiza su texto sólo a partir del tipo y
+  uno solo no podría decir si el gasto se aprobó o se rechazó. IF la incidencia no tiene técnico
+  asignado, o el id no resuelve a un usuario, THEN THE SYSTEM SHALL no escribir notificación
+  alguna, no fallar, y registrar `maintenance.owner_approval_answer_without_recipient`. El cuerpo
+  de ambas notificaciones SHALL ser forma cerrada —constante más `incident_id`, `property_id` y
+  `approval_id`— y NEVER SHALL transportar `reason` ni `response_notes`. Ninguna de las dos lleva
+  `sla_deadline_at` ni tiene `escalation_for`: nadie llega tarde a leer un resultado ya decidido.
+- THE SYSTEM SHALL validar `response_notes` con la misma guarda `storable_text`
+  (`MultiLineText`, `max_length=2000`) que ya protege `materials` — antes era `str` con
+  `max_length` a secas, y un `U+0000` o un surrogate suelto llegaba a asyncpg como un `500` sin
+  declarar; ahora es un `422` declarado, `RespondOwnerApprovalRequest.response_notes` en
+  `maintenance/api/schemas.py` ([`approvals-web`](approvals-web.md) D12).
 
 ### R5 — Asignación y plazo de SLA
 
@@ -294,12 +337,14 @@ una conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
 
 ### R8 — API del módulo, permisos y aislamiento
 
-- THE SYSTEM SHALL exponer dieciocho rutas autenticadas, todas con permiso declarado: diecisiete
+- THE SYSTEM SHALL exponer diecinueve rutas autenticadas, todas con permiso declarado: diecisiete
   bajo `/api/v1/incidents` (`GET` de listado, `GET` de detalle, `GET` de contexto operativo, `GET` y
   `POST` de fotos, `GET` y `POST` del hilo de mensajes de personal (`staff-messaging` R2, ver
   [`staff-messaging.md`](staff-messaging.md)), `PATCH`
   de triaje y los `POST` de `classify`, `assign`, `accept`, `reject`, `en-route`, `wait-parts`,
-  `resume`, `resolve` y `cancel`) y `POST /api/v1/owner-approvals/{approval_id}/respond`.
+  `resume`, `resolve` y `cancel`) y **dos** bajo `/api/v1/owner-approvals` —
+  `GET ""` (lista, bajo `READ_OWNER_APPROVALS`, [`approvals-web`](approvals-web.md) R1) y
+  `POST /{approval_id}/respond` (bajo `RESPOND_OWNER_APPROVALS`).
 - THE SYSTEM SHALL exponer además **una** ruta **anónima** del módulo,
   `GET /api/v1/incident-photos/{photo_id}`, que sirve los bytes de una foto contra su firma HMAC
   porque un `<img src>` no puede mandar `Authorization`. Es la única del módulo sin permiso, cuelga
@@ -400,16 +445,23 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   `ai_classification` sin fijar, de modo que la recoja el job de R3 en su siguiente tick, y NEVER
   SHALL clasificarla en la misma petición. `title` sale de un catálogo cerrado de constantes y
   `description` es el mensaje del huésped literal.
-- THE SYSTEM SHALL conceder cuatro permisos —`READ_INCIDENTS`, `MANAGE_INCIDENTS`,
-  `EXECUTE_INCIDENTS`, `RESPOND_OWNER_APPROVALS`— repartidos así:
+- THE SYSTEM SHALL conceder cinco permisos —`READ_INCIDENTS`, `MANAGE_INCIDENTS`,
+  `EXECUTE_INCIDENTS`, `RESPOND_OWNER_APPROVALS`, `READ_OWNER_APPROVALS`— repartidos así:
 
   | Rol | Puede |
   |---|---|
-  | `TENANT_OWNER` | leer incidencias, **sus fotos** y **su hilo de mensajes**; responder aprobaciones |
-  | `PROPERTY_MANAGER` | leer, clasificar, triar, asignar, cancelar **y** todo el ciclo del técnico, **fotos y mensajes incluidos** |
+  | `TENANT_OWNER` | leer incidencias, **sus fotos** y **su hilo de mensajes**; leer **y** responder aprobaciones |
+  | `PROPERTY_MANAGER` | leer, clasificar, triar, asignar, cancelar **y** todo el ciclo del técnico, **fotos y mensajes incluidos**; leer aprobaciones (sin responder) |
   | `TECHNICIAN` | leer y ejecutar el ciclo (aceptar, empezar, esperar piezas, reanudar, resolver), **subir y ver las fotos** de las suyas, y **escribir y leer el hilo de mensajes** de las suyas |
   | `CLEANER` | abrir una incidencia desde una tarea de limpieza suya, y nada más — y esa alta vive **bajo `cleaning`** ([`cleaner-incident-report.md`](cleaner-incident-report.md)), no en este módulo |
   | `SUPER_ADMIN` | nada de este módulo |
+
+  `READ_OWNER_APPROVALS` es un permiso propio y no una reutilización de `READ_INCIDENTS`
+  ([`approvals-web`](approvals-web.md) D1, R1.4): `_INCIDENT_EXECUTE` incluye `READ_INCIDENTS` y
+  `UserRole.TECHNICIAN` tiene `_INCIDENT_EXECUTE`, así que reusarlo enseñaría al técnico la cola
+  de gastos entera del tenant. Lo tienen exactamente `TENANT_OWNER` y `PROPERTY_MANAGER`, y nadie
+  más — ni `TECHNICIAN` ni `CLEANER` (R1.4, R1.5: sin ese permiso la respuesta es `403` sin
+  revelar si existen aprobaciones).
 
 - THE SYSTEM SHALL conceder a `TECHNICIAN` exactamente lo que R5 y R6 necesitan y nada más: su
   conjunto completo es autoservicio (`READ_OWN_PROFILE`, `MANAGE_OWN_SESSION`,
@@ -587,8 +639,17 @@ in-app tenga algo que enseñar. No es un efecto colateral.
   automática quedó fuera a propósito: `OwnerApproval` es la única tabla editable del esquema sin
   `updated_at`, y expirar sin dejar rastro temporal es una decisión de columna que le toca a quien
   traiga la expiración.
-- **`OwnerApprovalRelatedType.OTHER` no reanuda ninguna incidencia**: responder una aprobación de ese
-  tipo levanta `MaintenanceValidationError`. No hay hoy quien cree aprobaciones `OTHER`.
+- **`OwnerApprovalRelatedType.OTHER` no puede responderse por esta ruta.** Medido, no supuesto
+  (`approvals-web` D11): `RespondOwnerApprovalUseCase` resuelve `related_id` como id de incidencia
+  antes de nada, y para una fila `OTHER` ese id es de un `Expense` — resuelve a `None` y levanta
+  `IncidentNotFoundError` (`404`), no `MaintenanceValidationError`. Y sí hay hoy quien cree
+  aprobaciones `OTHER`: `CreateExpenseUseCase` de `statements` las escribe en vivo cuando el
+  importe del gasto supera el umbral del tenant (`revenue-statements` D4) — su propia spec
+  (`sdd/specs/revenue-statements.md`) afirma que la propietaria las responde por esta misma ruta,
+  lo cual esta medición contradice; corregirlo es de la entrada de roadmap
+  `expense-approval-response`, no de este módulo. Lo que sí hace este módulo desde
+  [`approvals-web`](approvals-web.md): las lista (R1.1, sin excluir `OTHER`) sin ofrecer decisión
+  sobre ellas.
 - **`incidents.assignment_note` no pasa por `storable_text`.** Es el único sumidero de texto libre
   vivo del módulo declarado como `str` con `max_length` a secas: `materials` entró con
   `MultiLineText` desde el primer día, así que un `U+0000` en la nota de asignación llega a asyncpg
@@ -596,8 +657,6 @@ in-app tenga algo que enseñar. No es un efecto colateral.
   como `422`. No se cerró en este ciclo porque el cuerpo de `assign` no es suyo —lo sirve
   [`tech-incident-context`](tech-incident-context.md)— y cambiar la validación de una ruta ajena de
   paso habría ensanchado el change. Candidato: `assignment-note-storable-text`.
-- **No hay ruta de lectura de aprobaciones** ni permiso `READ_OWNER_APPROVALS`: la propietaria las
-  descubre por su notificación y las responde por id. Ensancharlo es de quien traiga su bandeja.
 - **El clasificador es de desarrollo.** El puerto se entrega con adaptador determinista, como manda
   el principio 3 de `steering/product.md`. El día que se enchufe un proveedor real, una incidencia
   cuya clasificación **falla** conserva `ai_classification` a `NULL` y vuelve a entrar en cada tick,

@@ -272,12 +272,19 @@ LEGAL_REGISTRATION_FAILED = "LEGAL_REGISTRATION_FAILED"
 # question "who touched this guest's document" across two actions, which is exactly what
 # this module's docstring says the closed vocabulary exists to prevent.
 #
-# The two token actions are minted and revoked by an **operator** through the JWT routes of
-# D14, so they are ordinary human actions with RBAC behind them. `AUDITABLE_FIELDS` gives
-# them `token_hash` and `revoked_at`, and `token_hash` is already on rule 11's denylist —
-# so `redacted()` is the only reachable form, exactly as for `WEBHOOK_ENDPOINT`.
+# The three token actions are minted, revoked and sent by an **operator** through the JWT
+# routes of D14 (`_SENT` added by `guest-link-delivery` R3.6), so they are ordinary human
+# actions with RBAC behind them. `AUDITABLE_FIELDS` gives them `token_hash` and `revoked_at`,
+# and `token_hash` is already on rule 11's denylist — so `redacted()` is the only reachable
+# form, exactly as for `WEBHOOK_ENDPOINT`.
 GUEST_ACCESS_TOKEN_ISSUED = "GUEST_ACCESS_TOKEN_ISSUED"
 GUEST_ACCESS_TOKEN_REVOKED = "GUEST_ACCESS_TOKEN_REVOKED"
+# `guest-link-delivery` R3.6: the send is a second write path onto the **same** credential
+# `GUEST_ACCESS_TOKEN_ISSUED` already names, not a new entity type — `SendGuestAccessTokenUseCase`
+# writes this row alongside the issue row that mint already produces, both pointing at the same
+# `entity_id` (the token's id), so `ix_audit_logs_tenant_id_entity_type_entity_id` keeps
+# answering "everything that happened to this credential" for the send too.
+GUEST_ACCESS_TOKEN_SENT = "GUEST_ACCESS_TOKEN_SENT"
 
 # Incidents (`guest-portal-api` D15, then `maintenance` D6). The creation is the guest
 # portal's, which was the first writer of `incidents`; rule 9 names the entity.
@@ -500,6 +507,7 @@ ACTIONS = frozenset(
         LEGAL_REGISTRATION_FAILED,
         GUEST_ACCESS_TOKEN_ISSUED,
         GUEST_ACCESS_TOKEN_REVOKED,
+        GUEST_ACCESS_TOKEN_SENT,
         INCIDENT_CREATED,
         INCIDENT_CLASSIFIED,
         INCIDENT_TRIAGED,

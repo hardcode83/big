@@ -14,6 +14,8 @@ const listCleaners = vi.hoisted(() => vi.fn());
 const listProperties = vi.hoisted(() => vi.fn());
 const assignTask = vi.hoisted(() => vi.fn());
 const cancelTask = vi.hoisted(() => vi.fn());
+const createTask = vi.hoisted(() => vi.fn());
+const validateTask = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ user: { tenant_id: "tenant-1" } }),
@@ -27,6 +29,8 @@ vi.mock("../data", async (importOriginal) => ({
     listProperties,
     assignTask,
     cancelTask,
+    createTask,
+    validateTask,
   }),
 }));
 
@@ -38,6 +42,9 @@ const task: CleaningTask = {
   scheduledStart: null,
   scheduledEnd: null,
   createdAt: "2026-08-19T18:00:00Z",
+  completedAt: null,
+  validationStatus: "PENDING",
+  validatedAt: null,
 };
 
 function harness() {

@@ -1,0 +1,48 @@
+{
+  "queue": {
+    "title": "Aprobaciones pendientes",
+    "columns": {
+      "property": "Vivienda",
+      "request": "Solicitud",
+      "amount": "Importe",
+      "waiting": "Esperando desde",
+      "actions": "Decisión"
+    },
+    "otherNote": "Este gasto se responde en otra pantalla",
+    "notesLabel": "Motivo (opcional)",
+    "notesPlaceholder": "Añade una nota para tu decisión (opcional)",
+    "approve": "Aprobar",
+    "reject": "Rechazar",
+    "rejectWarning": "Rechazar cancela la incidencia y no se puede deshacer desde esta pantalla.",
+    "waitingSince": {
+      "minutes_one": "Hace {{count}} minuto",
+      "minutes_other": "Hace {{count}} minutos",
+      "hours_one": "Hace {{count}} hora",
+      "hours_other": "Hace {{count}} horas",
+      "days_one": "Hace {{count}} día",
+      "days_other": "Hace {{count}} días"
+    }
+  },
+  "history": {
+    "title": "Historial reciente",
+    "empty": "Todavía no hay respuestas registradas",
+    "resultLabel": "Resultado",
+    "respondedOn": "Respondida el {{date}}"
+  },
+  "relatedType": {
+    "INCIDENT": "Incidencia",
+    "MAINTENANCE_COST": "Gasto de mantenimiento",
+    "OTHER": "Otro"
+  },
+  "status": {
+    "PENDING": "Pendiente",
+    "APPROVED": "Aprobada",
+    "REJECTED": "Rechazada",
+    "EXPIRED": "Caducada"
+  },
+  "fields": {
+    "forbidden": "No tienes permiso para ver las aprobaciones",
+    "validation": "Los datos enviados no son válidos",
+    "alreadyAnswered": "Esta aprobación ya ha sido respondida. La cola se ha actualizado."
+  }
+}

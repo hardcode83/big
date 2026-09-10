@@ -51,6 +51,9 @@ class FakeTokens:
     async def revoke_live_for_reservation(self, tenant_id, reservation_id, *, now):  # pragma: no cover
         raise AssertionError("the authoriser never revokes")
 
+    async def find_live_for_reservation(self, tenant_id, reservation_id):  # pragma: no cover
+        raise AssertionError("the authoriser never reads by reservation")
+
 
 @dataclass
 class FakeStays:
@@ -91,6 +94,7 @@ def _build(*, token: str, revoked_at=None, stay: PortalStay | None = _stay()):
         tenant_id=TENANT,
         reservation_id=RESERVATION,
         token_hash=hash_guest_token(token),
+        issued_at=datetime(2026, 9, 1, tzinfo=UTC),
         revoked_at=revoked_at,
     )
     stays = FakeStays()

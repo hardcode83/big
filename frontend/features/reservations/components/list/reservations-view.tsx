@@ -166,10 +166,12 @@ function ReservationRow({ row }: { row: ReservationSummaryDto }) {
           aria-label={t("fields.openReservation")}
           className="text-primary underline after:absolute after:inset-0 after:content-['']"
         >
-          {row.guestId ?? "—"}
+          {row.guestFullName ?? "—"}
         </Link>
       </td>
-      <td className="py-3 px-4">{row.propertyId}</td>
+      <td className="py-3 px-4" title={row.propertyName ?? undefined}>
+        {row.propertyInternalCode ?? "—"}
+      </td>
       <td className="py-3 px-4 whitespace-nowrap">
         {row.checkInDate} → {row.checkOutDate}
       </td>

@@ -498,10 +498,10 @@ mano, y el segundo paso del flujo de PRD §11 —cuando la asignación automáti
 limpiadora activa y la tarea «queda pendiente»— se rompía porque nadie tenía dónde recogerla.
 `/cleaning` es esa pantalla.
 
-Lo que **no** es: no valida limpiezas terminadas, no abre el detalle de una tarea (checklist,
-fotos), no crea tareas a mano y no edita plantillas. Todo eso sigue donde estaba —§«El ciclo»,
-§«Las fotos» y la app de la limpiadora— y las razones de dejarlo fuera están en el proposal del
-change.
+**Desde `cleaning-task-manage-web`, además crea, valida y cancela** — las tres, descritas en
+§«Crear, validar y cancelar desde la lista» más abajo. Lo que sigue sin ser: no abre el detalle
+de una tarea (checklist, fotos) ni edita plantillas. Eso sigue donde estaba —§«Las fotos» y la
+app de la limpiadora— y las razones de dejarlo fuera están en el proposal de ese change.
 
 ### Qué ve cada rol, y por qué
 
@@ -622,6 +622,48 @@ en `409`; un no-nulo obsoleto esconde un botón que habría funcionado hasta el 
 Nulo también es lo que se envía cuando la lectura de la página no resolvió el estado de esa
 vivienda: **falla abierto** a propósito, ofrece la acción y deja decidir al servidor.
 
+### Crear, validar y cancelar desde la lista
+
+Añadido por `cleaning-task-manage-web`, sobre la misma pantalla — sin estrenar ningún endpoint:
+las tres acciones consumen `POST /cleaning-tasks`, `POST /cleaning-tasks/{id}/validate` y
+`POST /cleaning-tasks/{id}/cancel`, que el backend ya exponía. El detalle EARS de las tres —
+qué campo pide cada una, qué responde cada estado HTTP, la precedencia entre las cuatro
+mutaciones que la pantalla puede tener en vuelo a la vez— está en
+`sdd/specs/cleaning-manager-view.md`; lo que sigue es cómo se opera.
+
+**Quién.** Las tres cuelgan del mismo permiso que asignar, `MANAGE_CLEANING_TASKS` — un
+`TENANT_OWNER` no ve ninguno de los tres controles, igual que ya no veía el de asignación.
+
+**Crear.** Un botón sobre los filtros («Nueva limpieza») despliega un formulario en el propio
+flujo del documento, no un diálogo modal: vivienda obligatoria —del mismo catálogo que ya
+alimenta el filtro y cada fila, sin petición nueva— y dos fechas `datetime-local` opcionales. No
+hay selector de reserva (`ASSUMPTION`: el proposal deja fuera de alcance elegir una reserva a
+mano). Si la vivienda escogida no está en un estado que admita asignar ahora mismo, el
+formulario lo avisa **sin bloquear el envío** — la tarea se crea igual, sin asignar, a la
+espera de que la vivienda llegue a `AWAITING_CLEANING` o de que el manager la asigne cuando
+proceda.
+
+**Validar.** Sobre toda tarea que ya se completó una vez —tenga o no ya un veredicto— aparecen
+dos botones, «Validar» y «No pasa». El control no desaparece tras el primer veredicto: corregir
+un `FAILED` puesto por error no abre una segunda ruta, se repite el mismo clic. El botón que
+coincide con el veredicto vigente sale deshabilitado, para no reenviar un no-op que no cambiaría
+nada. Las dos consecuencias se dicen siempre, como texto fijo y no como un tooltip que un móvil
+no puede mostrar: «No pasa» notifica a la limpiadora asignada, y validar —cualquiera de los dos
+veredictos— no mueve la vivienda.
+
+**Cancelar.** Un botón por fila, visible mientras la tarea siga en un estado vivo (desaparece en
+`COMPLETED`, `FAILED` y `CANCELLED`, los tres terminales), abre un formulario de motivo
+obligatorio de hasta 500 caracteres — el mismo contrato que ya exige el diálogo de cancelar del
+dashboard (`cleaning-stall-blocks-next-stay`), y de hecho el mismo hook `useCancelCleaningTask`
+reutilizado tal cual (misma lógica de envío e invalidación), sin una segunda implementación. El
+propio formulario avisa de que cancelar puede crear una
+tarea de reemplazo sin asignar (§«La salida de excepción» arriba explica cuándo sí y cuándo no),
+para que la aparición de una fila nueva tras confirmar no se lea como un fallo. Una tarea ya
+terminal responde `409`, y ese fallo se pinta **dentro** del propio formulario, que se queda
+abierto para que el manager lo lea y decida si reintenta o lo cierra sin más — solo un envío
+que tiene éxito cierra el formulario, y es entonces cuando la región de la lista anuncia el
+resultado.
+
 ## Entradas de roadmap relacionadas
 
 - `cleaning-photos-storage` — **ya entregada**: fotos, almacenamiento (`LOCAL`/`S3`), URL
@@ -635,3 +677,8 @@ vivienda: **falla abierto** a propósito, ofrece la acción y deja decidir al se
 - `cleaning-manager-view` — **ya entregada**: la pantalla del manager descrita arriba,
   §«Operar las limpiezas desde `/cleaning`». Cero cambios de backend; consume los cuatro
   endpoints que ya existían.
+- `cleaning-task-manage-web` — **ya entregada**: crear, validar y cancelar desde la misma
+  pantalla, §«Crear, validar y cancelar desde la lista». Tampoco cambia el backend; reutiliza
+  `POST /cleaning-tasks`, `.../validate` y `.../cancel`, este último reutilizando el mismo hook
+  (`useCancelCleaningTask`, misma lógica) que ya usaba el diálogo de cancelar del dashboard —
+  cada diálogo instancia su propia mutación en tiempo de ejecución, no una compartida.

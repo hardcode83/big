@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "@/lib/i18n/client-provider";
-import { getA11yViolations, render, screen } from "@/test/render";
+import { fireEvent, getA11yViolations, render, screen } from "@/test/render";
 
 const role = vi.hoisted(() => ({ current: "PROPERTY_MANAGER" }));
 const tenantId = vi.hoisted(() => ({ current: "tenant-1" }));
@@ -37,13 +37,21 @@ const task: CleaningTaskListItem = {
   scheduledStart: "2026-08-20T09:00:00Z",
   scheduledEnd: "2026-08-20T11:00:00Z",
   createdAt: "2026-08-19T18:00:00Z",
+  completedAt: null,
+  validationStatus: "PENDING",
+  validatedAt: null,
   // The default row is assignable, so the pre-existing tests keep describing the ordinary
   // case. The blocked shapes are posed explicitly by the tests that are about them.
   assignmentBlockedBy: null,
 };
 
 const properties: PropertySummary[] = [
-  { id: PROPERTY_UUID, name: "Redes 11", internalCode: "REDES11" },
+  {
+    id: PROPERTY_UUID,
+    name: "Redes 11",
+    internalCode: "REDES11",
+    currentOperationalState: "AWAITING_CLEANING",
+  },
 ];
 const cleaners: CleanerSummary[] = [
   { id: CLEANER_UUID, name: "Marta Ruiz", isActive: true },
@@ -327,5 +335,180 @@ describe("CleaningTaskRow passes the pre-flight through (R3.1, design D9)", () =
     });
 
     expect(await getA11yViolations(container)).toEqual([]);
+  });
+});
+
+describe("CleaningTaskRow — the validation field (R3.3, design D7)", () => {
+  it("says nothing about validation for a task nobody has cleaned yet", () => {
+    renderRow({
+      task: { ...task, status: "CREATED", completedAt: null, validationStatus: "PENDING" },
+    });
+    expect(screen.queryByText("Pendiente de validación")).not.toBeInTheDocument();
+  });
+
+  it("shows the current verdict once the task has completed at least once", () => {
+    renderRow({
+      task: {
+        ...task,
+        status: "COMPLETED",
+        completedAt: "2026-08-20T12:00:00Z",
+        validationStatus: "PENDING",
+      },
+    });
+    expect(screen.getByText("Pendiente de validación")).toBeInTheDocument();
+  });
+
+  it("shows the verdict even once the task moved past COMPLETED, as long as it was completed once", () => {
+    renderRow({
+      task: {
+        ...task,
+        status: "CANCELLED",
+        completedAt: "2026-08-20T12:00:00Z",
+        validationStatus: "FAILED",
+        validatedAt: "2026-08-20T13:00:00Z",
+      },
+    });
+    expect(screen.getByText("No conforme")).toBeInTheDocument();
+  });
+
+  it("shows the validation date only when it exists", () => {
+    renderRow({
+      task: {
+        ...task,
+        status: "COMPLETED",
+        completedAt: "2026-08-20T12:00:00Z",
+        validationStatus: "PASSED",
+        validatedAt: "2026-08-20T13:00:00Z",
+      },
+    });
+    expect(screen.getByText("Validada")).toBeInTheDocument();
+    expect(
+      screen.getByText(new Intl.DateTimeFormat("es", { dateStyle: "medium", timeStyle: "short" }).format(
+        new Date("2026-08-20T13:00:00Z"),
+      )),
+    ).toBeInTheDocument();
+  });
+
+  it("is shown to every role, control or not (R5.2)", () => {
+    role.current = "CLEANER";
+    renderRow({
+      task: {
+        ...task,
+        status: "COMPLETED",
+        completedAt: "2026-08-20T12:00:00Z",
+        validationStatus: "PENDING",
+      },
+    });
+    expect(screen.getByText("Pendiente de validación")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Validar" })).not.toBeInTheDocument();
+  });
+});
+
+describe("CleaningTaskRow — who gets the validate control (R5.1, R5.2)", () => {
+  const validate = { isPending: false, isBlocked: false, onValidate: vi.fn() };
+  const completedTask = {
+    ...task,
+    status: "COMPLETED" as const,
+    completedAt: "2026-08-20T12:00:00Z",
+    validationStatus: "PENDING" as const,
+  };
+
+  it("renders both buttons for a PROPERTY_MANAGER on a completed task", () => {
+    renderRow({ task: completedTask, validate });
+    expect(screen.getByRole("button", { name: "Validar" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "No pasa" })).toBeInTheDocument();
+  });
+
+  it("hides the control from a TENANT_OWNER", () => {
+    role.current = "TENANT_OWNER";
+    renderRow({ task: completedTask, validate });
+    expect(screen.queryByRole("button", { name: "Validar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "No pasa" })).not.toBeInTheDocument();
+  });
+
+  it("hides the control when the view offers no validation at all", () => {
+    renderRow({ task: completedTask });
+    expect(screen.queryByRole("button", { name: "Validar" })).not.toBeInTheDocument();
+  });
+
+  it("hides the control when the task is not COMPLETED, even for a manager", () => {
+    renderRow({ task: { ...completedTask, status: "ASSIGNED" }, validate });
+    expect(screen.queryByRole("button", { name: "Validar" })).not.toBeInTheDocument();
+  });
+
+  it("forwards the task id and current verdict so the control can disable the vigent one", () => {
+    renderRow({
+      task: { ...completedTask, validationStatus: "PASSED" },
+      validate,
+    });
+    expect(screen.getByRole("button", { name: "Validar" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "No pasa" })).toBeEnabled();
+  });
+
+  it("has no accessibility violations with the validate control rendered", async () => {
+    const { container } = renderRow({ task: completedTask, validate });
+    expect(await getA11yViolations(container)).toEqual([]);
+  });
+});
+
+describe("CleaningTaskRow — who gets the cancel control (R4.1, R5.1)", () => {
+  const cancel = { onOpen: vi.fn(), isBlocked: false };
+
+  beforeEach(() => {
+    cancel.onOpen.mockReset();
+  });
+
+  it("renders the control for a PROPERTY_MANAGER on a live task", () => {
+    renderRow({ task: { ...task, status: "ASSIGNED" }, cancel });
+    expect(screen.getByRole("button", { name: "Cancelar" })).toBeInTheDocument();
+  });
+
+  it("hides the control from a TENANT_OWNER", () => {
+    role.current = "TENANT_OWNER";
+    renderRow({ task: { ...task, status: "ASSIGNED" }, cancel });
+    expect(screen.queryByRole("button", { name: "Cancelar" })).not.toBeInTheDocument();
+  });
+
+  it("hides the control when the view offers no cancellation at all", () => {
+    renderRow({ task: { ...task, status: "ASSIGNED" } });
+    expect(screen.queryByRole("button", { name: "Cancelar" })).not.toBeInTheDocument();
+  });
+
+  it.each(["COMPLETED", "FAILED", "CANCELLED"] as const)(
+    "hides the control once the task is terminal (%s), even for a manager",
+    (status) => {
+      renderRow({ task: { ...task, status }, cancel });
+      expect(screen.queryByRole("button", { name: "Cancelar" })).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(["CREATED", "ASSIGNED", "ACCEPTED", "IN_PROGRESS", "REJECTED", "PENDING_REVIEW"] as const)(
+    "shows the control for every live status (%s)",
+    (status) => {
+      renderRow({ task: { ...task, status }, cancel });
+      expect(screen.getByRole("button", { name: "Cancelar" })).toBeInTheDocument();
+    },
+  );
+
+  it("opens the dialog with this row's task id when clicked", () => {
+    renderRow({ task: { ...task, id: "task-42", status: "ASSIGNED" }, cancel });
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(cancel.onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("has no accessibility violations with the cancel control rendered", async () => {
+    const { container } = renderRow({ task: { ...task, status: "ASSIGNED" }, cancel });
+    expect(await getA11yViolations(container)).toEqual([]);
+  });
+
+  it("disables the open button while a cancellation is in flight elsewhere (fix round, Finding 1, D4)", () => {
+    // The view owns one shared `useCancelCleaningTask()` instance across every row
+    // (design D4); `isBlocked` says a cancellation — this row's or another's — is
+    // currently in flight against it, so opening a second row's dialog has to wait.
+    renderRow({
+      task: { ...task, status: "ASSIGNED" },
+      cancel: { onOpen: vi.fn(), isBlocked: true },
+    });
+    expect(screen.getByRole("button", { name: "Cancelar" })).toBeDisabled();
   });
 });

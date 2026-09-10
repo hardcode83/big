@@ -117,7 +117,13 @@ class Flow:
             configs=configs,
             **common,
         )
-        self.respond = RespondOwnerApprovalUseCase(approvals=self.approvals, **common)
+        self.respond = RespondOwnerApprovalUseCase(
+            approvals=self.approvals,
+            users=users,
+            notifications=self.notifications,
+            configs=configs,
+            **common,
+        )
         self.assign = AssignIncidentUseCase(
             users=users, notifications=self.notifications, configs=configs, **common
         )

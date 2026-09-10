@@ -38,24 +38,54 @@ en CI y rojo en local, y el rojo le habría caído a la siguiente Pull Request q
 - THE SYSTEM SHALL conseguirlo **sin `paths:` en `on:`**, por el motivo que
   [`specs/backend-ci.md`](backend-ci.md) fija para todo el repositorio: un filtro de rutas a nivel
   de disparador no produce check alguno en los PR que no tocan esas rutas.
-- THE SYSTEM SHALL ejecutarlo **sin puerta de área de ninguna clase**, ni en el disparador ni
-  dentro del workflow. **Y hoy esto no lo impone ninguna prueba**, a diferencia del alcance más
-  abajo: es una norma escrita que un revisor humano tiene que sostener. Anclarla
-  mecánicamente se intentó y no convergió —el detalle y las tres vías medidas están en el
-  candidato de roadmap del change `rule11-guard-trigger-and-scope`—, así que el hueco se
-  declara aquí en vez de darse por cerrado. No es comodidad: una puerta de área sería **un segundo sitio donde
-  equivocarse sobre el alcance**, que es exactamente el defecto que esta capacidad corrige.
-  Ejecutar siempre satisface el requisito por construcción y no por acierto, y el escaneo cuesta
-  alrededor de un segundo sobre el árbol entero.
-- WHERE el diff de un Pull Request no toque ninguna ruta que el guardián recorra, THE SYSTEM SHALL
-  ejecutarlo igualmente y reportar verde. El coste de esa ejecución de más es el precio de no
-  tener una segunda declaración de alcance que mantener sincronizada con la primera.
+- THE SYSTEM SHALL **reportar siempre un resultado del check `rule11-ownership`**, toque el diff
+  el censo de la regla 11 o no — mismo invariante que `backend-tests` y `frontend-tests`.
+- THE SYSTEM SHALL estructurarlo en tres jobs (change `ci-pr-gates-optimization`, revirtiendo la
+  decisión "sin puerta de área de ninguna clase" que este spec fijaba antes de él):
+  `rule11-ownership-detect` decide el área a partir del diff, `rule11-ownership-suite` corre el
+  guardián y su suite **solo si** la detección dice que el diff toca el censo,
+  y `rule11-ownership` publica el resultado con `if: always()`.
+- THE SYSTEM SHALL anclar en `rule11-ownership-detect` las doce rutas siguientes (`design.md`
+  D1.1 del change `ci-pr-gates-optimization`: el detect debe ser un superconjunto de la
+  superficie de dependencias de `rule11-ownership-suite` — tanto el censo que el guardián
+  camina como el código de guard que la suite ejecuta): `sdd/steering/*`, `sdd/specs/*`,
+  `sdd/project.md`, `sdd/README.md`, `sdd/metrics.md`, `docs/*`, `backend/app/*`,
+  `backend/alembic/versions/*`, `backend/tests/*`, `scripts/*`, `Makefile` y el propio
+  workflow.
+- WHEN la detección concluye que el diff **no** toca ninguna de esas doce rutas, THE SYSTEM
+  SHALL saltarse la suite y publicar el check en verde con el motivo.
+- IF la detección falla o no puede determinar el área, THEN THE SYSTEM SHALL decidir a favor de
+  ejecutar la suite (fail-open) — mismo criterio que el resto de detectores del repositorio.
+- THE SYSTEM SHALL derivar el área de detección de las **mismas rutas** que gobierna `SCOPE` en
+  `scripts/rule11-ownership.py` (ver § «Alcance recorrido»), para que la detección de área y el
+  alcance real del guardián no puedan discrepar en silencio: una ruta que el guardián recorre
+  pero que la detección no reconoce reproduciría exactamente el defecto original —un commit
+  que toca esa ruta y no dispara la suite—, solo que ahora en un mecanismo nuevo.
+- THE SYSTEM SHALL hacer esta relación **machine-checked** (`design.md` D1.1.a):
+  `scripts/test_rule11_ownership.py` incluye
+  `test_rule11_detect_surface_covers_walked_scope` y
+  `test_rule11_detect_surface_invariant_catches_a_new_sdd_subtree`, que construyen la
+  superficie recorrida por la guardia (`prose_files` + `code_files` sobre `SCOPE`) y las
+  anclas del `case` on-disk, y fallan si aparece una ruta bajo `sdd/` que la guardia recorrería
+  pero ninguna ancla cubre — la invariante
+  `relevant-SCOPE-walked-surface(rule11) ⊆ detect-anchor-surface(rule11)` no puede degradarse
+  en silencio cuando `SCOPE` crece.
+
+**Por qué esto sí resuelve lo que la nota de este spec declaraba pendiente.** La sección
+histórica de este spec explicaba que anclar una puerta de área mecánicamente "se intentó y no
+convergió" en el change `rule11-guard-trigger-and-scope`. Lo que cambia con
+`ci-pr-gates-optimization` no es esa conclusión sobre las tres vías que se probaron entonces,
+sino el punto donde se aplica el filtro: condicionar el **trabajo** (dentro del workflow, sobre
+la detección de un job previo) en vez del **disparo** (`paths:` en `on:`), que es precisamente
+el patrón que `backend-tests.yml` ya usaba y que este change replica.
 
 ### El check run
 
 - THE SYSTEM SHALL publicar el resultado como un check run **propio**, llamado `rule11-ownership`,
-  distinto del de `backend-tests`. El nombre lo toma del **job** y no del workflow, así que el job
-  se llama igual que el workflow a propósito.
+  distinto del de `backend-tests`. El nombre lo toma del job **consolidador**
+  (`rule11-ownership`, `needs: [rule11-ownership-detect, rule11-ownership-suite]`,
+  `if: always()`), no del workflow ni del job de detección o de suite — que se llaman
+  `rule11-ownership-detect` y `rule11-ownership-suite` respectivamente.
 - **Estado del check.** WHILE el repositorio no disponga de protección de rama compatible, THE
   SYSTEM SHALL ejecutar y reportar `rule11-ownership` **sin** configurarlo como check obligatorio
   para fusionar — igual que `api-contract`, `compose-ports` y `frontend-tests`, y por el mismo
@@ -67,9 +97,9 @@ en CI y rojo en local, y el rojo le habría caído a la siguiente Pull Request q
 
 ### Independencia del entorno
 
-- WHERE el guardián se ejecute en CI, THE SYSTEM SHALL no requerir PostgreSQL, Redis, `.env` ni
-  ningún secret, y SHALL hacerlo **verificable leyendo el workflow**: sin `services:`, sin `env:` y
-  sin ninguna referencia a `secrets`.
+- WHERE el guardián se ejecute en CI (job `rule11-ownership-suite`), THE SYSTEM SHALL no
+  requerir PostgreSQL, Redis, `.env` ni ningún secret, y SHALL hacerlo **verificable leyendo el
+  workflow**: sin `services:`, sin `env:` y sin ninguna referencia a `secrets`.
 - THE SYSTEM SHALL implementarlo con biblioteca estándar exclusivamente, de forma que se ejecute
   con el `python3` del runner sin sincronizar el árbol de dependencias del backend.
 - WHEN alguien lo ejecute en local, THE SYSTEM SHALL ofrecer `make check-rule11-ownership`, que
@@ -223,6 +253,16 @@ podrá comprobar que se cumplió.
   pueden salir **`cancelled`** por `concurrency` cuando llega el siguiente, así que un
   `backend-tests-suite` en `cancelled` sobre una sonda no es una señal de nada — la fila que importa
   es la del check propio, y el área resuelta se lee en el log de `backend-tests-detect`.
+
+  **Tras `ci-pr-gates-optimization`, un `rule11-ownership-suite` `skipped` deja de ser en sí
+  mismo evidencia de defecto.** El contraste medido arriba —`backend-tests-suite` `skipped`
+  mientras el guardián de la regla 11 no tenía puerta de área y por tanto siempre corría— sigue
+  siendo el hecho histórico que motivó separar este workflow de `backend-tests.yml`; no se
+  reescribe. Lo que cambia es que ahora `rule11-ownership-suite` también puede salir `skipped`
+  legítimamente, cuando `rule11-ownership-detect` decide que el diff no toca el censo. La
+  distinción con el defecto original: el consolidador `rule11-ownership` reporta siempre,
+  `if: always()`, así que una omisión legítima de la suite sigue dejando un check verde con el
+  motivo nombrado — nunca la ausencia de check que describía el defecto de origen.
 - **El check en rojo por cada forma que dice cazar.** Un commit temporal con un bloque infractor en
   markdown y otro en un docstring o tirada de `#`, el id de run con el check en rojo, y el verde al
   revertirlo. Que la *función* y el *binario* los cazan se prueba en local con las meta-pruebas y con

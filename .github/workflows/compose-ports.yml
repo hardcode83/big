@@ -17,14 +17,31 @@ name: compose-ports
 # no contiene ningún valor del `.env` (medido). El runner de `ubuntu-latest` ya trae Docker con
 # el plugin `compose`, y `config` no habla con el daemon.
 #
-# Workflow propio y de UN SOLO job, copiando la forma de `api-contract.yml` y no el patrón de
-# tres jobs de `backend-tests.yml` (R1.2): esto tarda segundos, así que la complejidad de tres
-# jobs no se paga. El job se llama igual que el workflow **a propósito**: el check run toma el
-# nombre del *job*, no el del workflow.
+# --- Por qué son tres jobs (change `ci-pr-gates-optimization`) ---
 #
-# SIN filtro `paths:` (R1.3), prohibido por specs/backend-ci.md: un required check con filtro de
-# rutas no se ejecuta en los PR que no las tocan, y GitHub deja esos PR esperando para siempre un
-# check que no llegará.
+# Hasta este change era un único job (change original, R1.2), copiando la forma de
+# `api-contract.yml` a propósito por coste: la guardia tarda segundos y tres jobs no se pagaban.
+# `ci-pr-gates-optimization` reintroduce ese coste porque ya no es gratis dejarlo así: de los PR
+# que no tocan la familia de descubrimiento por defecto de Compose (`compose.*` con precedencia
+# sobre `docker-compose*`, más `scripts/*`, `Makefile` o este workflow) la guardia no puede decir
+# nada nuevo, y corría igual. El patrón es el mismo que adoptaron `backend-tests.yml` y
+# `frontend-tests.yml`:
+#
+#   compose-ports-detect  decide si el diff toca el área      (siempre corre, ~segundos)
+#   compose-ports-suite   la verificación de verdad           (corre si toca)
+#   compose-ports         consolida y reporta                 (siempre corre)
+#
+# SIGUE PROHIBIDO poner `paths:` en `on:` (R1.3), prohibido por specs/backend-ci.md: un required
+# check con filtro de rutas no se ejecuta en los PR que no las tocan, y GitHub deja esos PR
+# esperando para siempre un check que no llegará. Lo que se ha movido es *dónde* se decide: del
+# disparador (donde condicionar implica no reportar) al interior de la ejecución (donde se puede
+# condicionar el trabajo y reportar igualmente).
+#
+# El check run toma el nombre del JOB, no del workflow. `compose-ports` es por tanto el único
+# contexto marcable como obligatorio; `compose-ports-suite` se salta de forma legítima y
+# marcarlo reproduciría el bloqueo indefinido por otra puerta. El precedente literal es
+# `backend-tests.yml` (change `ci-backend-tests-conditional-gate`), del que este workflow copia
+# la lógica de detección, el fail-open ante diff ambiguo y la consolidación con `if: always()`.
 #
 # Y fuera de `backend/tests/` (R1.4): `backend-tests.yml` decide el área con
 # `case "$f" in backend/* | .github/workflows/backend-tests.yml)`, así que un PR que solo toque
@@ -44,9 +61,183 @@ permissions:
   contents: read
 
 jobs:
-  compose-ports:
+  # --- ¿Hay que ejecutar la suite? Se decide una vez, aquí, y se publica. -----------
+  # Sin dependencias: solo git. Es el job que hace que el camino corto cueste segundos.
+  compose-ports-detect:
+    runs-on: [self-hosted, dev]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      compose: ${{ steps.decide.outputs.compose }}
+      reason: ${{ steps.decide.outputs.reason }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Historia completa: el diff se calcula contra la base del PR (o el estado
+          # anterior de `main`), y un clon shallow no la contiene.
+          fetch-depth: 0
+          # Los pasos posteriores no necesitan Git autenticado.
+          persist-credentials: false
+
+      # Invariante temporal (design D1.1.c): la superficie de detección de ESTE job debe cubrir
+      # toda la superficie de entrada de `compose-ports-suite`. Corre SIEMPRE y ANTES de `decide`
+      # (fuera de su `set +e`, bajo el `bash -e` por defecto), así que si alguien amplía la suite
+      # sin ampliar el `case` de abajo, este paso ABORTA el job en el mismo PR que abre la brecha
+      # —no un PR después—. Un fallo aquí es un error de configuración del gate: el consolidador
+      # lo ve como `DETECT_RESULT != success` y reporta **fail-closed** (rojo), distinto del
+      # fail-open ante un diff ambiguo (que sí ejecuta la suite). Es stdlib puro (`python3` del
+      # runner, sin `uv`).
+      - name: Verificar superficie de detección
+        run: python3 scripts/check-detect-surface.py compose
+
+      - name: ¿El diff toca la configuración de compose?
+        id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        # Aquí un fallo inesperado NO debe abortar el paso: si el diff no se puede
+        # determinar, el requisito (R5.4) es ejecutar la suite completa, no dejar el
+        # check en rojo — la duda se resuelve verificando. Por eso cada comando que
+        # puede fallar se comprueba explícitamente y `compose` arranca en `true`: solo
+        # una ruta afirmativa lo baja a `false`.
+        run: |
+          # `set +e` explícito porque GitHub invoca los `run:` con `bash -e {0}`: `-e`
+          # está activo por defecto y un `set -uo pipefail` NO lo desactiva.
+          #
+          # Es una medida defensiva, no la que hace funcionar el fail-open de R5.4 hoy.
+          # Comprobado: `-e` queda suspendido en todo el cuerpo de una función invocada
+          # como test de un `if`/`elif` (o negada con `!`), y ahora mismo TODOS los
+          # comandos que pueden fallar —`git cat-file`, `read_diff`— se invocan así, de
+          # modo que ya degradaban correctamente sin esta línea. Lo que `set +e` cubre es
+          # el futuro: el día que alguien añada aquí un comando fuera de un condicional,
+          # su fallo abortaría el paso y el gate reportaría rojo en vez de caer al camino
+          # completo, que es lo contrario de lo que R5.4 pide.
+          set +e
+          set -uo pipefail
+
+          compose=true
+          reason="unknown-event-defaults-to-full-suite"
+          files=()
+
+          # `core.quotePath=false` y `-z` no son cosmética. Por defecto git ESCAPA las
+          # rutas no ASCII y las envuelve en comillas, con lo que un patrón anclado no
+          # casa: un PR cuyo único cambio fuese un fichero con acento se saltaría la
+          # suite y el check saldría VERDE. Con el quoting desactivado las rutas llegan
+          # literales, y `-z` las separa por NUL, que es lo único seguro con nombres que
+          # llevan espacios o saltos de línea.
+          # `--no-renames` NO es un detalle de rendimiento. Git detecta renombrados por
+          # defecto, y con `--name-only` un movimiento COLAPSA a una sola línea con la
+          # ruta destino. Sin este flag, un PR que renombra `docker-compose.yml` fuera
+          # de sitio se juzga «no toca el área», se salta la suite y el check sale
+          # VERDE. Con el flag salen ambas rutas.
+          read_diff() {
+            local out rc
+            out="$(mktemp)"
+            git -c core.quotePath=false diff -z --no-renames --name-only "$@" >"$out" 2>/dev/null
+            rc=$?
+            if [ "$rc" -eq 0 ]; then
+              mapfile -d '' -t files <"$out"
+            fi
+            rm -f "$out"
+            return "$rc"
+          }
+
+          # Comparación ruta a ruta con `case`, no un regex sobre el conjunto pegado:
+          # evita escapar el punto de `.github` y hace imposible un acierto parcial.
+          evaluate() {
+            local f
+            for f in "${files[@]}"; do
+              case "$f" in
+                compose.yaml | compose.yml | compose.override.yaml | compose.override.yml | docker-compose*.yml | docker-compose*.yaml | docker-compose.worktree.yml | scripts/* | Makefile | .github/workflows/compose-ports.yml)
+                  compose=true
+                  reason="diff-touches-compose"
+                  return
+                  ;;
+              esac
+            done
+            compose=false
+            reason="no-compose-changes"
+          }
+
+          case "$EVENT_NAME" in
+            workflow_dispatch)
+              # Vía de escape deliberada: una ejecución manual siempre verifica todo.
+              reason="workflow-dispatch-runs-full-suite"
+              ;;
+
+            pull_request)
+              if [ -z "${PR_BASE_SHA:-}" ] || [ -z "${PR_HEAD_SHA:-}" ]; then
+                reason="pr-shas-missing"
+              elif ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null; then
+                reason="pr-base-unreachable"
+              # Tres puntos, no dos: interesan los cambios de la rama desde el ancestro
+              # común. Con dos puntos, fusionar `main` en la rama dispararía la suite
+              # sin que el PR haya tocado el área.
+              elif ! read_diff "${PR_BASE_SHA}...${PR_HEAD_SHA}"; then
+                reason="git-diff-failed"
+              else
+                evaluate
+              fi
+              ;;
+
+            push)
+              if [ -z "${PUSH_BEFORE:-}" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                # Rama nueva o primer push: no hay estado anterior con el que comparar.
+                reason="push-before-is-zero"
+              elif ! git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+                # Force-push: el commit anterior ya no es alcanzable.
+                reason="push-before-unreachable"
+              elif ! read_diff "${PUSH_BEFORE}" "${PUSH_AFTER}"; then
+                reason="git-diff-failed"
+              else
+                evaluate
+              fi
+              ;;
+          esac
+
+          {
+            echo "compose=${compose}"
+            echo "reason=${reason}"
+          } >> "$GITHUB_OUTPUT"
+
+          # A stdout además del output: `$GITHUB_OUTPUT` es un canal entre jobs y no
+          # imprime nada en el log, y el resumen lo escribe el job consolidador. Sin
+          # esto la decisión no sería visible donde se toma. Ambos valores salen de un
+          # conjunto cerrado de literales de este script, así que no son inyectables.
+          echo "::notice::compose=${compose} (${reason})"
+
+          if [ "${#files[@]}" -gt 0 ]; then
+            echo "Ficheros cambiados considerados (${#files[@]}):"
+            # `%q` y el prefijo son contención, no formato. Quien abre el PR elige los
+            # nombres de fichero, y un nombre puesto al principio de una línea del log
+            # lo ejecuta el runner como comando de workflow (`::notice::`, `::error::`,
+            # `::add-mask::`, `::stop-commands::`): permitiría falsificar la anotación de
+            # la decisión, o silenciar el resto del log.
+            #
+            # El prefijo de dos espacios NO basta por sí solo: un nombre de fichero puede
+            # contener SALTOS DE LÍNEA, y con `-z` llegan crudos, así que el prefijo solo
+            # protegería la primera línea y las demás empezarían en la columna 0. `%q`
+            # colapsa cada ruta a una sola línea, con lo que el prefijo vuelve a
+            # cubrirla entera — y de paso el tope de 50 pasa a contar líneas de verdad y
+            # no elementos que pueden expandirse a muchas.
+            printf '  %q\n' "${files[@]:0:50}"
+          fi
+
+  # --- La verificación de verdad. Intacta respecto a antes del change, salvo el ------
+  # `needs`/`if` de arriba y el nombre del job. Solo corre cuando el detector afirma
+  # que el diff toca el área.
+  compose-ports-suite:
+    needs: compose-ports-detect
+    if: needs.compose-ports-detect.outputs.compose == 'true'
     runs-on: [self-hosted, dev]
     timeout-minutes: 10
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -71,3 +262,78 @@ jobs:
         # árbol de dependencias del backend para probar scripts de la stdlib; el `pytest` va
         # **pinneado** y alineado con el `pytest>=9.1.1` de `backend/pyproject.toml`.
         run: uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/ -q
+
+  # --- El check que se reporta. SIEMPRE se ejecuta: es el invariante del gate. ------
+  # Este nombre de job es el contexto que ve GitHub, así que no se renombra sin romper
+  # cualquier selección de check obligatorio.
+  compose-ports:
+    needs: [compose-ports-detect, compose-ports-suite]
+    if: always()
+    runs-on: [self-hosted, dev]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - name: Consolidar el resultado del gate
+        env:
+          DETECT_RESULT: ${{ needs.compose-ports-detect.result }}
+          SUITE_RESULT: ${{ needs.compose-ports-suite.result }}
+          COMPOSE: ${{ needs.compose-ports-detect.outputs.compose }}
+          REASON: ${{ needs.compose-ports-detect.outputs.reason }}
+        # Los casos se enumeran uno a uno en vez de escribir un `!= 'failure'`
+        # abreviado: esa forma daría verde ante una cancelación y ante un job de
+        # detección roto, que son precisamente los dos falsos verdes que hay que
+        # evitar. Mismo criterio que la consolidación de `backend-tests.yml` y
+        # `frontend-tests.yml`.
+        run: |
+          set -euo pipefail
+
+          if [ "$DETECT_RESULT" != "success" ]; then
+            verdict=fail
+            detail="el job de detección terminó en '${DETECT_RESULT}', así que no se sabe si la suite hacía falta"
+            suite_line="no ejecutada"
+          elif [ "$SUITE_RESULT" = "success" ]; then
+            verdict=pass
+            detail="la suite se ejecutó completa y pasó"
+            suite_line="ejecutada y verde"
+          elif [ "$SUITE_RESULT" = "skipped" ]; then
+            if [ "$COMPOSE" = "false" ]; then
+              verdict=pass
+              detail="el diff no toca la configuración de compose ni este workflow, así que la suite NO se ejecutó"
+              suite_line="**OMITIDA** (no ejecutada)"
+            else
+              # No debería poder ocurrir: si hacía falta, no se salta. Si pasa, es un
+              # bug del gate y no un PR válido.
+              verdict=fail
+              detail="incoherencia del gate: la suite se saltó con compose='${COMPOSE}'"
+              suite_line="omitida indebidamente"
+            fi
+          else
+            verdict=fail
+            detail="la suite terminó en '${SUITE_RESULT}'"
+            suite_line="${SUITE_RESULT}"
+          fi
+
+          {
+            echo "## compose-ports"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Veredicto | ${verdict} |"
+            echo "| Suite de compose-ports | ${suite_line} |"
+            echo "| Decisión de área | \`${COMPOSE:-desconocida}\` (\`${REASON:-sin razón}\`) |"
+            echo ""
+            echo "${detail}"
+            if [ "$suite_line" = "**OMITIDA** (no ejecutada)" ]; then
+              echo ""
+              echo "> Este check está verde porque **no había nada que verificar**, no porque"
+              echo "> la suite haya pasado. Un PR que toque la configuración de compose la ejecuta entera."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$verdict" != "pass" ]; then
+            echo "::error::${detail}"
+            exit 1
+          fi
+          echo "::notice::${detail}"

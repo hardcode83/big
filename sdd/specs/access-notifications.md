@@ -444,16 +444,33 @@ escritos aunque desapareciesen sus builders. Y sin la segunda, `SLA_BREACH` y
 `test_free_text_sink_contract.py` documenta sobre el suyo: un guardián que lee texto se sortea
 escribiendo el nombre en un comentario.
 
-**Los dieciséis con escritor y los cuatro sin él** viven en `WITH_WRITER`/`WITHOUT_WRITER` de
+**Los diecinueve con escritor y los cuatro sin él** viven en `WITH_WRITER`/`WITHOUT_WRITER` de
 `test_writer_census.py` — este módulo no los enumera aquí para no duplicar el censo; la única
 excepción nominal a PRD §14 que añade `revenue-reviews` es `REVIEW_RESPONSE_APPROVED`, con
-escritor declarado en `reviews/domain/notifications.py`. `staff-messaging` añade los dos últimos
-—`CLEANING_TASK_MESSAGE` (`cleaning/domain/notifications.py`) e `INCIDENT_MESSAGE`
+escritor declarado en `reviews/domain/notifications.py`. `staff-messaging` añade los dos
+siguientes —`CLEANING_TASK_MESSAGE` (`cleaning/domain/notifications.py`) e `INCIDENT_MESSAGE`
 (`maintenance/domain/notifications.py`), cada una construida por un `staff_message_notification`
 gemelo cuyo `body` lleva solo `message_id` y `task_id`/`incident_id` más un texto constante,
 **nunca** el `content` del mensaje (regla 11 de `steering/security.md`, misma disciplina que
 `assignment_notification`)—, subiendo el total de catorce a dieciséis sin ampliar el catálogo de
-PRD §14 más allá de esa excepción ya declarada. Los dos tipos de texto libre que **no** son
+PRD §14 más allá de esa excepción ya declarada. `guest-link-delivery` añade el decimoséptimo:
+`GUEST_PORTAL_LINK_DELIVERED`, con escritor declarado en `guests/application/portal.py`
+(`SendGuestAccessTokenUseCase`), cuyo `subject`/`body` construye
+`guests/domain/notifications.py`'s `render_stored_guest_link_notice` — constante, sin
+identificadores del enlace, el mismo contrato que `auth-account-recovery`'s
+`STORED_RECOVERY_SUBJECT`/`BODY`. `approvals-web` añade los dos últimos —design D6, R4.2,
+enmendado en el gate de diseño del 2026-09-05 (OQ2) a **dos** tipos y no uno, porque la bandeja
+renderiza su texto sólo desde el tipo (`notification-copy.ts` no lee `subject`/`body`) y un único
+miembro no podría decir si el gasto se aprobó o se rechazó—: `OWNER_APPROVAL_APPROVED` y
+`OWNER_APPROVAL_REJECTED`, con escritor en `maintenance/domain/notifications.py`
+(`owner_approval_approved_notification`/`owner_approval_rejected_notification`), escritos por
+`RespondOwnerApprovalUseCase` dentro de la misma transacción que ya cierra la respuesta —así que
+no existe una respuesta registrada sin su aviso—, dirigidos a
+`incident.assigned_technician_id` y sin efecto (ni aviso ni fallo) cuando la incidencia no tiene
+técnico asignado o su id no resuelve. Ninguno de los dos lleva `sla_deadline_at` ni entrada en
+`escalation_for`: nadie llega tarde a leer un resultado. El catálogo sube de diecisiete a
+**diecinueve** miembros con escritor y de veintiuno a **veintitrés** en total. Los dos tipos de
+texto libre que **no** son
 miembros del enum —`INCIDENT_REJECTED` y `LEGAL_REGISTRATION_FAILED`, sobre la columna
 `String(100)`— quedan fuera del censo por construcción: no hay `NotificationType.<X>` que casar.
 
@@ -603,14 +620,25 @@ sobre datos de registro policial, y llegan con la integración real.
 resuelve a nada: una presentación fallida avisa a los managers y no escala a nadie. Es deliberado
 —inventar un tipo del PRD sería peor— y queda anotado como deuda.
 
-El enum `NotificationType` ya no tiene dieciséis miembros sino **dieciocho**: `auth-account-recovery`
-añadió `PASSWORD_RESET_REQUESTED` y `revenue-reviews` añadió `REVIEW_RESPONSE_APPROVED`,
-ambos declarados como divergencia explícita de PRD §14 igual que esta capacidad declaró sus dos
-jobs frente a los cuatro de PRD §8.3. Ninguno de los dos tiene escalado, y en ambos casos **no es
-deuda** — una recuperación de contraseña y una aprobación de respuesta son eventos sin plazo
-que incumplir —, así que sus filas se escriben sin `sla_deadline_at` a propósito. Qué guardián
-mide el conjunto de escritores y cómo lo hace
-mide— vive en «El censo de escritores», más arriba.
+El enum `NotificationType` ya no tiene dieciséis miembros sino **veintitrés** (recontado al
+archivar `approvals-web`, que suma `OWNER_APPROVAL_APPROVED`/`OWNER_APPROVAL_REJECTED` — D6):
+`auth-account-recovery`
+añadió `PASSWORD_RESET_REQUESTED`, `revenue-reviews` añadió `REVIEW_RESPONSE_APPROVED`,
+`staff-messaging` añadió `CLEANING_TASK_MESSAGE` e `INCIDENT_MESSAGE`, `guest-link-delivery`
+añadió `GUEST_PORTAL_LINK_DELIVERED` (el enlace del portal entregado por email al huésped,
+`POST .../guest-access-token/send` — [`guest-portal-api.md`](guest-portal-api.md)) y
+`approvals-web` añadió `OWNER_APPROVAL_APPROVED`/`OWNER_APPROVAL_REJECTED` (ya contadas en «El
+censo de escritores», más arriba), las siete declaradas como divergencia explícita de PRD §14
+igual que esta capacidad declaró sus dos jobs frente a los cuatro de PRD §8.3.
+Ninguna de las siete tiene escalado, y en los siete casos **no es deuda** — una recuperación de
+contraseña, una aprobación de respuesta, dos hilos de personal, un enlace que el operador
+decidió enviar y el resultado de una aprobación de gasto son eventos sin plazo que incumplir —,
+así que sus filas se escriben sin
+`sla_deadline_at` a propósito. `guest-link-delivery` sigue además el patrón síncrono de
+`auth-account-recovery` (más abajo): el escritor invoca el adapter `EMAIL` dentro de la propia
+petición y escribe `SENT`/`FAILED` directamente, nunca `PENDING` — la fila nunca pasa por
+`dispatch_notifications`. Qué guardián mide el conjunto de escritores y cómo lo hace mide— vive
+en «El censo de escritores», más arriba.
 
 ### Protección del dato de documento
 

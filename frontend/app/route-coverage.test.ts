@@ -38,6 +38,7 @@ const REAL_PAGE_ROUTE_IDS: Record<string, string> = {
   "(workspace)/reservations/[id]/page.tsx": "reservation-detail",
   "(workspace)/incidents/page.tsx": "incidents",
   "(workspace)/incidents/[id]/page.tsx": "incident-detail",
+  "(workspace)/approvals/page.tsx": "approvals",
 "(workspace)/conversations/page.tsx": "conversations",
   "(workspace)/conversations/[id]/page.tsx": "conversation-detail",
   "(workspace)/pricing/page.tsx": "pricing",

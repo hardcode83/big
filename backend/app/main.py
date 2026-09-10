@@ -2,6 +2,7 @@ import tomllib
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 # Imported for its side effect: every domain's models must be registered before the
 # first request, or the global tenant filter (design D16) silently covers fewer
@@ -357,6 +358,36 @@ def create_app() -> FastAPI:
     # route or handler. Reordering these two calls is not a style question; the test that fails
     # when somebody does is `tests/test_response_headers.py`.
     app.add_middleware(NoSniffMiddleware)
+
+    # `auth-session-persistence` R7, design D1. Mounted AFTER `MaxBodySizeMiddleware` and
+    # `NoSniffMiddleware` above, and that position is the mechanism, same rule as the
+    # `NoSniffMiddleware` comment above spells out: `add_middleware` inserts at position 0
+    # and `build_middleware_stack` wraps the list in reverse, so the LAST call added ends up
+    # OUTERMOST. **Corrected 2026-09-04** (the run panel's `sdd-architect` found the original
+    # placement — CORS mounted first, hence innermost of the three — left
+    # `MaxBodySizeMiddleware._refuse()`'s self-generated `413` without any
+    # `Access-Control-Allow-*` headers, because `_refuse` answers via the raw ASGI `send`
+    # without ever calling `self._app(...)`, so an inner CORSMiddleware never got a chance to
+    # see that response and decorate it. Mounting CORS last here makes it the OUTERMOST of
+    # the three, so it wraps every response the two below (and everything they wrap in turn:
+    # the router and the exception handling `app.include_router` above registered) can
+    # produce, self-generated error responses included — which is the "whole app" design D1
+    # actually asks CORS to wrap.
+    #
+    # `allow_origins=[]` + `allow_origin_regex` is the only shape that coexists with
+    # `allow_credentials=True`: a static `allow_origins` list forces `*` semantics once
+    # credentials are on, which browsers reject, and R7.1 demands an explicit
+    # `Access-Control-Allow-Origin` that is never `*`. Reflecting an allowlisted origin
+    # (regex match on `Origin` if present, else no CORS headers) meets that without
+    # enumerating every dev worktree's `PORT_OFFSET`-shifted port.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[],
+        allow_origin_regex=settings.backend_cors_allowed_origin_regex,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # Deliberately NOT under API_V1_PREFIX (design D2): the container healthcheck
     # in docker-compose.yml and docker-compose.deploy.yml probes /health, and the
