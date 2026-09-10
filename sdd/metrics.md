@@ -108,6 +108,6 @@
 | guest-link-delivery | new, design, tasks, run, review, ship, archive | 268830 | 956450 | 397869574 | 130.7355 | 2026-09-06 | 2026-09-08 |
 | frontend-verification-fixes | new, design, tasks, run, review, ship, archive | 2362153 | 3123101 | 1000465684 | 349.9101 | 2026-09-04 | 2026-09-09 |
 | cleaning-task-manage-web | new, design, tasks, run, review, ship, archive | 3707277 | 908624 | 299549419 | 114.9357 | 2026-09-05 | 2026-09-09 |
-| incident-triage-web | new, design, tasks, run, review, ship | 4993101 | 1281229 | 457740032 | 187.3738 | 2026-09-05 | — |
+| incident-triage-web | new, design, tasks, run, review, ship | 4993101 | 1281229 | 457740032 | 187.3738 | 2026-09-05 | 2026-09-10 |
 | approvals-web | new, design, tasks, run, review, ship, archive | 347007 | 1194492 | 432430285 | 131.5077 | 2026-09-05 | 2026-09-10 |
 | reservations-identity-web | new, tasks, run, review, ship, archive | 48198 | 268325 | 60302554 | 18.8499 | 2026-09-05 | 2026-09-05 |
