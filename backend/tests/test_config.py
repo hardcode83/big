@@ -817,3 +817,77 @@ def test_the_two_webhook_secrets_have_no_default_and_are_unset_under_mock(
 
     assert getattr(settings, name) is None
     assert name in Settings.model_fields
+
+
+# --- Environment label (change `sim-advance` R2, design D1) -------------------------
+
+
+def test_settings_environment_defaults_to_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D1: a developer who omits `APP_ENVIRONMENT` gets the safe default.
+
+    Rule 8 of `sdd/steering/security.md` puts the fail-fast on the declared shape, not on
+    a missing env var — so the unset case has to yield `"local"`, which is one of the two
+    values the CLI's guard of section 2 accepts. Asserted explicitly so a future refactor
+    that pushed the default to `"production"` would fail here, not at the first deploy.
+    """
+    monkeypatch.delenv("APP_ENVIRONMENT", raising=False)
+
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.environment == "local"
+
+
+@pytest.mark.parametrize(
+    "value", ["local", "dev", "staging", "production"]
+)
+def test_settings_environment_accepts_each_declared_value(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """The four literal members of D1 are the only values `Settings` should accept."""
+    monkeypatch.setenv("APP_ENVIRONMENT", value)
+
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.environment == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        # Different casing is NOT a member of the literal — a deploy that uppercased
+        # `APP_ENVIRONMENT=PRODUCTION` from a templated env would otherwise slip through.
+        "PRODUCTION",
+        "Production",
+        "Local",
+        "DEV",
+        # Common near-misses that downstream tooling might emit by accident.
+        "test",
+        "dev ",
+        " prod",
+        "dev/local",
+        "local\t",
+        # Empty string and missing whitespace-padded variants deliberately OMITTED: a
+        # blank value follows the boot path of `_load_settings`, not a direct constructor
+        # call; the `Literal` alone does not coerce, so `""` would raise here.
+        "",
+        "   ",
+    ],
+)
+def test_settings_environment_rejects_values_outside_the_literal(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """R2: invalid `environment` must fail at instantiation, not at the CLI guard.
+
+    The CLI guard of section 2 compares `settings.environment in {"local", "dev"}` — that
+    presupposes every value reaching the comparison has already been validated against the
+    declared `Literal[...]` shape. If `Settings()` accepted `"staging"`, the guard would
+    reject it (correct outcome), but with a different message; if it accepted `"prod"`, the
+    guard would mis-categorise it. The pydantic `Literal` is what makes the validation
+    happen once, at instantiation, with the values being exactly the four declared here.
+    """
+    monkeypatch.setenv("APP_ENVIRONMENT", value)
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **_REQUIRED)

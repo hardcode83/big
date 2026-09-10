@@ -10,11 +10,11 @@
      it may travel with the PR as a deferred entry; it may sit on any line of
      the task item, not only the checkbox line. -->
 
-## 1. Settings — campo `environment` y `.env.example`
+## 1. Settings — campo `environment` y `.env.example` <!-- panel: PASS 2026-09-10 receipt:db36aed1 -->
 
-- [ ] 1.1 Añadir `environment: Literal["local","dev","staging","production"] = "local"` a `backend/app/core/config.py`, leída de la variable `APP_ENVIRONMENT`, con docstring que cite a D1 (la guardia de R2) y a un consumidor futuro plausible. [R2]
-- [ ] 1.2 Añadir `APP_ENVIRONMENT` a `backend/.env.example` con el comentario «en deploy se debe poner a `production` o `staging`», sin valor por defecto (el default vive en código). [R2]
-- [ ] 1.3 Test unitario en `backend/tests/test_settings_environment.py` (o se añade a `tests/test_config.py` si existe esa convención) que verifique que `settings.environment` rechaza valores fuera de la `Literal` al instanciar. [R2, R4]
+- [x] 1.1 Añadir `environment: Literal["local","dev","staging","production"] = "local"` a `backend/app/core/config.py`, leída de la variable `APP_ENVIRONMENT`, con docstring que cite a D1 (la guardia de R2) y a un consumidor futuro plausible. [R2]
+- [x] 1.2 Añadir `APP_ENVIRONMENT` a `backend/.env.example` con el comentario «en deploy se debe poner a `production` o `staging`», sin valor por defecto (el default vive en código). [R2]
+- [x] 1.3 Test unitario en `backend/tests/test_settings_environment.py` (o se añade a `tests/test_config.py` si existe esa convención) que verifique que `settings.environment` rechaza valores fuera de la `Literal` al instanciar. [R2, R4]
 
 ## 2. CLI `sim_advance` — argumentos, parseo, guardia, bucle
 
@@ -56,3 +56,7 @@
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
+- Section 1: field is declared with `Field(alias="APP_ENVIRONMENT")`; the default pydantic-settings mapping would otherwise bind `environment` to `ENVIRONMENT` and silently ignore the prefixed name.
+- Section 1: `APP_ENVIRONMENT=` is documented in `.env.example` as commented-out (`# APP_ENVIRONMENT=`) rather than uncommented-empty, because the `Literal` rejects `""` and there is no normalization validator like the one `_blank_whatsapp_provider_falls_back_to_default` provides; matching the form of other default-bearing settings (CORS allowlist, password recovery).
+- Section 1: tests live in `backend/tests/test_config.py` per the convention there; the standalone `backend/tests/test_settings_environment.py` file proposed in the task does not exist.
+- Section 1: the 13 reject cases include `""` and `"   "` deliberately — proves the `Literal` validation happens at instantiation and there is no blank-value escape hatch for a deploy that ships an empty env.
