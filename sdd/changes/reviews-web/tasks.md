@@ -89,7 +89,7 @@ sección 8.
 
 ## 3. Módulos puros de la feature
 
-- [ ] 3.1 `features/reviews/lib/format.ts` (nuevo) + `.test.ts`: `fmtRating(value:
+- [x] 3.1 `features/reviews/lib/format.ts` (nuevo) + `.test.ts`: `fmtRating(value:
   string, locale: string)` con `Number(value)` **sólo para formatear**, un decimal
   fijo y la cadena original si el número no es finito, **sin** `/5` incrustado (la
   etiqueta localizada lo añade); `fmtDay(isoDay, locale)` con `Intl.DateTimeFormat(locale,
@@ -99,7 +99,7 @@ sección 8.
   No se escribe `fmtUtc`: ningún `created_at`/`updated_at` se muestra (D3 los
   descarta en el boundary). [R6.3, R8.3, R8.4]
 
-- [ ] 3.2 `features/reviews/lib/review-actions.ts` (nuevo) + `.test.ts`:
+- [x] 3.2 `features/reviews/lib/review-actions.ts` (nuevo) + `.test.ts`:
   `legalActions(status, role): readonly ReviewAction[]` sobre dos `Record`
   exhaustivos — el primero `Record<ReviewStatus, readonly ReviewAction[]>` con las
   cinco entradas de D5 (`NEW → []`, `DRAFTED → [APPROVE, IGNORE, EDIT]`,
@@ -111,7 +111,7 @@ sección 8.
   estados, los dos roles, y un estado desconocido (deploy skew) devuelve `[]`.
   Comentar que es affordance y no autoridad: el backend valida y contesta `409`. [R3.1, R3.2, R6.4]
 
-- [ ] 3.3 `features/reviews/lib/reviews-error.ts` (nuevo) + `.test.ts`: tres tablas
+- [x] 3.3 `features/reviews/lib/reviews-error.ts` (nuevo) + `.test.ts`: tres tablas
   `Record<number, string>` con `?? GENERIC`, eligiendo por `ApiError.status` —
   responder/editar (`403`, `404`, **`409`**, `422`, genérico), crear (`403`, `422`,
   genérico), leer (`403`, `404`, genérico). Sin rama `401` (lo resuelve el cliente
