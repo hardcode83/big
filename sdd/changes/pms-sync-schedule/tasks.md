@@ -38,7 +38,7 @@
 
 ## 3. Disparo manual
 
-- [ ] 3.1 `Makefile`: target `pms-sync:` junto a `sim-advance:`, invocando `$(COMPOSE) exec -T
+- [x] 3.1 `Makefile`: target `pms-sync:` junto a `sim-advance:`, invocando `$(COMPOSE) exec -T
       backend python -m app.integrations.cli.pms_sync $(TENANT) $(if $(WINDOW),$(WINDOW),) $(if
       $(PROVIDER),--provider $(PROVIDER),)` — mismo patrón de argumentos opcionales que
       `sim-advance`. Añadir `pms-sync` a la lista de `.PHONY`. [R4]
@@ -179,3 +179,39 @@
   → `6:00:00` / `True`; `python -c "import app.scheduler.tasks"` → `ok`; `pytest tests/scheduler/
   tests/test_layering.py -q` → 1581 passed, 2 failed (los dos de arriba, esperados y para 4.1).
   No corrí la suite completa ni pyright — eso es Section 5.
+
+### Section 3 (disparo manual) — para Section 5
+
+- Target `pms-sync:` añadido al `Makefile`, inmediatamente después de `sim-advance:` (línea
+  ~299), con el mismo comentario de dos líneas explicando `TENANT`/`WINDOW`/`PROVIDER` y la
+  referencia a D5. `pms-sync` añadido a la lista `.PHONY:` de la línea 125, junto a
+  `sim-advance`.
+- Comando exacto: `$(COMPOSE) exec -T backend python -m app.integrations.cli.pms_sync $(TENANT)
+  $(if $(WINDOW),$(WINDOW),) $(if $(PROVIDER),--provider $(PROVIDER),)`. Orden de argumentos
+  confirmado contra `backend/app/integrations/cli/pms_sync.py::main`/`_extract_provider`:
+  posicional 1 = tenant UUID (`args[0]`), posicional 2 opcional = window-days (`args[1]`, si no
+  se pasa usa el default del propio CLI — 30 días, no los 2 de `pms_sync_window_days` que usa
+  el scheduler), `--provider <valor>` puede ir en cualquier posición (se extrae de `argv` antes
+  de mirar los posicionales), y si se omite usa `MOCK_PROVIDER`.
+  **No verifiqué ni cambié el default de `window-days` en el propio CLI** — solo confirmé que
+  es 30 leyendo `_extract_provider`/`main`; si Section 5 necesita el nombre exacto de la
+  constante, es `DEFAULT_WINDOW_DAYS` en `pms_sync.py`.
+- Verificado con `make -n` (dry-run, no se levantó el stack ni se llamó Docker):
+  - `make -n pms-sync TENANT=00000000-0000-0000-0000-000000000000` →
+    `docker compose -f docker-compose.yml -f docker-compose.worktree.yml exec -T backend python
+    -m app.integrations.cli.pms_sync 00000000-0000-0000-0000-000000000000` (sin argumentos de
+    más; el overlay `-f docker-compose.worktree.yml` es por correr desde un worktree, viene de
+    `$(COMPOSE)` sin tocar).
+  - `make -n pms-sync TENANT=00000000-0000-0000-0000-000000000000 WINDOW=7 PROVIDER=beds24` →
+    mismo comando + ` 7 --provider beds24` al final, orden correcto.
+  - `grep -n "pms-sync" Makefile` → confirma el target (línea 299) y la entrada en `.PHONY`
+    (línea 125).
+- Para la verificación manual real de 5.3 (`make pms-sync TENANT=<uuid-del-seed>` contra el
+  stack levantado): usa un tenant ya sembrado con propiedades y credenciales PMS (el mismo
+  patrón de seed que Section 1/2 usaron para sus pruebas de humo), y compara el informe
+  `created`/`updated`/`skipped` contra invocar el mismo CLI a mano dentro del contenedor
+  (`docker compose exec backend python -m app.integrations.cli.pms_sync <uuid>`) — deben ser
+  idénticos porque `make pms-sync` no hace nada más que anteponer `docker compose exec -T
+  backend`. No se necesita `.env` temporal solo para el dry-run (`make -n` no invoca Docker),
+  pero si Section 5 levanta el stack (`make up`) necesitará el mismo `.env` temporal que
+  Sections 1-2 generaron a partir de `.env.example`, y recordar bajarlo al terminar.
