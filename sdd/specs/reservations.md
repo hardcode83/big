@@ -19,9 +19,10 @@ Es además el primer módulo que **persiste** `TimelineEvent`: hasta esta capaci
 
 No incluye la recepción de webhooks: es una capacidad propia y ya existe, documentada en
 `specs/reservations-webhooks.md`. Entra por aquí sin puerta nueva —alimenta el
-`ReservationIngestor` de esta capacidad, que sigue siendo la única ruta de upsert—. Tampoco
-incluye frontend (`dashboard-web`) ni escritura de `AuditLog` (entidad de
-`domain-foundation-financial`).
+`ReservationIngestor` de esta capacidad, que sigue siendo la única ruta de upsert—. La
+superficie web del ciclo manual se documenta en `docs/reservations.md` y en las specs frontend
+relacionadas; esta spec conserva las reglas de negocio y contrato del backend. No incluye
+escritura de `AuditLog` (entidad de `domain-foundation-financial`).
 
 Las **transiciones de estado operacional dependientes del reloj** sí existen ya: las hace
 `celery-jobs`, que lee estas reservas para decidir cuándo una propiedad entra en ventana de
@@ -206,6 +207,26 @@ no las dispara; aporta el dato del que cuelgan.
 - IF la reserva ya está en `CANCELLED`, THEN THE SYSTEM SHALL responder `204` sin registrar
   un segundo evento de cancelación.
 - THE SYSTEM SHALL permitir editar una reserva cancelada, registrando la edición como tal.
+
+### Superficie web del ciclo manual
+
+- WHEN un `PROPERTY_MANAGER` abre `/reservations`, THE SYSTEM SHALL mostrar un formulario de
+  alta que permita únicamente los canales `DIRECT` y `MANUAL`, envíe el request tipado de
+  creación y refresque el listado tras una respuesta exitosa.
+- WHEN un `PROPERTY_MANAGER` abre `/reservations/{id}`, THE SYSTEM SHALL mostrar la edición de
+  los campos permitidos mediante un `PATCH` con solo los campos modificados y ofrecer la
+  cancelación mediante `DELETE`, conservando la fila y su timeline.
+- WHEN el usuario no tiene `MANAGE_RESERVATIONS`, THE SYSTEM SHALL mantener las pantallas en
+  modo lectura y ocultar los controles de alta, edición y cancelación; el backend continúa
+  siendo la autoridad de autorización y tenancy.
+- WHILE una mutación está pendiente, THE SYSTEM SHALL impedir envíos duplicados, exponer un
+  estado accesible y esperar la invalidación tenant-scoped de las queries de listado y detalle.
+- IF una mutación responde `401`, `403`, `404`, `409`, `422`, 5xx o un error de red, THEN THE
+  SYSTEM SHALL mostrar el estado localizado correspondiente sin exponer el payload sensible
+  del servidor ni perder los valores editables del formulario.
+- THE SYSTEM SHALL proporcionar las etiquetas, ayudas, confirmaciones y errores de esta
+  superficie en español e inglés, mostrar la zona horaria y horas por defecto de la propiedad,
+  y no SHALL exponer ni generar `guest_id` desde el flujo web.
 
 **Confirmar y cancelar tienen consecuencias fuera de esta capacidad, y no son hooks.** Desde
 `access-notifications`, el barrido `provision_access_records` recorre cada cinco minutos las
@@ -437,7 +458,8 @@ definitiva. Abrir esas dos operaciones es trabajo de esta capacidad y está pend
 - **La API no tiene salida a internet**: el túnel enruta solo al frontend, así que estos
   endpoints se verifican con tests y, en dev, por túnel SSH (`RUNBOOK.md` §7.4). Lo cambia
   `api-ingress-routing`.
-- **Sin frontend**: llega con `dashboard-web`.
+- La implementación web del ciclo manual se encuentra en
+  `frontend/features/reservations/` y sus rutas `/reservations` y `/reservations/[id]`.
 
 ## Key files
 
@@ -463,4 +485,11 @@ definitiva. Abrir esas dos operaciones es trabajo de esta capacidad y está pend
   tenant-scoped de propiedad y huésped.
 - `backend/app/core/{unit_of_work,tenancy,http_limits}.py` — transacción compartida, error
   único de escritura cross-tenant, cota de tamaño de cuerpo.
+- `frontend/features/reservations/data/http/http-reservations-source.ts` — transporte tipado
+  de alta, edición y cancelación.
+- `frontend/features/reservations/hooks/use-reservations.ts` — mutaciones e invalidación
+  tenant-scoped de listado, detalle y timeline.
+- `frontend/features/reservations/components/{create,edit}/` y
+  `frontend/features/reservations/components/{list,detail}/` — formularios y controles web.
+- `frontend/locales/{es,en}/reservations.json` — textos localizados de la superficie.
 - `docs/reservations.md` — cómo se opera.
