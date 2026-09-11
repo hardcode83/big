@@ -133,6 +133,7 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Laura Gómez")).toBeInTheDocument();
     expect(screen.getByText(esReservations.create.languages.es)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: new RegExp(esReservations.fields.backToList) })).toHaveClass("tap-target");
   });
 
   it("renders the guest-empty copy when guest is null", () => {
@@ -201,6 +202,7 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
       name: new RegExp(esReservations.fields.backToList),
     });
     expect(backLink).toBeInTheDocument();
+    expect(backLink).toHaveClass("tap-target");
   });
 
   it("renders the forbidden state for a 403", () => {
@@ -270,6 +272,30 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
     expect(screen.queryByRole("textbox", { name: esReservations.fields.status })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: esReservations.fields.paymentStatus })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: esReservations.fields.cleaningRequired })).not.toBeInTheDocument();
+  });
+
+  it("associates ingest-owned help with every disabled edit control", () => {
+    useHasPermissionMock.mockReturnValue(true);
+    useReservationMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: { ...FULL_DETAIL, channel: "AIRBNB" },
+      refetch: vi.fn(),
+    });
+    renderDetail();
+
+    const help = screen.getByText(esReservations.edit.ingestOwnedHelp);
+    expect(help).toHaveAttribute("id", "reservation-edit-ingest-help");
+    for (const field of [
+      "checkInDate", "checkOutDate", "checkInTime", "checkOutTime", "adults",
+      "children", "grossAmount", "otaCommission", "netAmount", "currency",
+      "specialRequests",
+    ] as const) {
+      const control = document.getElementById(`reservation-edit-${field}`);
+      expect(control).not.toBeNull();
+      expect(control).toBeDisabled();
+      expect(control).toHaveAttribute("aria-describedby", help.id);
+    }
   });
 
   it("lets mutation hooks own refreshes while retaining localized success UI", async () => {

@@ -17,9 +17,10 @@ One entry per pending item (shared rule 5): `decision` needs a human before the 
 - **what & why**: Manual browser verification requires a running app plus manager/owner accounts and a mutation error path; this environment has no authenticated browser session.
 - **exact resume command**: /sdd:run reservation-create-web 6.5
 
-## Resolver findings adicionales de contrato y accesibilidad
+## Ejecutar harness browser de accesibilidad y responsive
 
 - **phase**: review
-- **type**: decision
-- **what & why**: Los blockers solicitados ya están resueltos: mutation.errors.cancel.network es la clave válida número 177, la aserción pasa, README usa reservation-create-web y la suite completa pasa (240 archivos, 2717 tests). El panel final, sin embargo, detecta findings nuevos fuera del scope pedido: edit-reservation-form.tsx:73 permite fechas iguales mientras backend/app/reservations/domain/entities.py rechaza check_out_date <= check_in_date (R2.3/D5); reservation-detail-view.tsx:55 deja enlaces de vuelta sin objetivo táctil 44x44; edit-reservation-form.tsx:136 no asocia aria-describedby a la explicación de campos deshabilitados; y create-reservation-form.test.tsx:167 no cubre keyboard/focus, contraste ni clipping responsive. No se han cambiado porque la instrucción fue no ampliar scope. Resolver estos findings antes de certificar.
-- **exact resume command**: /sdd:auto reservation-create-web
+- **type**: deferred
+- **tasks**: 6.5
+- **what & why**: La cobertura browser para keyboard/focus, contraste y clipping responsive está implementada en frontend/features/reservations/components/reservation-create-web.browser.test.tsx y usa el proyecto Vitest browser existente. La ejecución real quedó impedida porque el entorno no tiene el ejecutable Chromium de Playwright instalado: npm run test:layout termina antes de ejecutar tests con browserType.launch: Executable doesn't exist en ~/Library/Caches/ms-playwright. No se ha fabricado un resultado; instalar Chromium y repetir el harness es necesario.
+- **exact resume command**: /sdd:run reservation-create-web 6.5

@@ -26,7 +26,7 @@ describe("reservation edit patch", () => {
     expect(JSON.stringify(buildReservationPatch(detail, values))).not.toMatch(/guest_id|document/);
   });
 
-  it("rejects inverted intervals, non-integer counts, negative amounts, and non-finite values", () => {
+  it("rejects inverted and same-day intervals, non-integer counts, negative amounts, and non-finite values", () => {
     const values = initialEditValues(detail);
     values.checkInDate = "2026-08-20";
     values.checkOutDate = "2026-08-19";
@@ -44,12 +44,12 @@ describe("reservation edit patch", () => {
     expect(JSON.stringify(buildReservationPatch(detail, values))).not.toMatch(/NaN|Infinity/);
   });
 
-  it("allows equal check-in and check-out dates unless the API rejects them", () => {
+  it("rejects equal check-in and check-out dates", () => {
     const values = initialEditValues(detail);
     values.checkInDate = "2026-08-20";
     values.checkOutDate = "2026-08-20";
 
-    expect(validateEditValues(values)).not.toHaveProperty("checkOutDate");
+    expect(validateEditValues(values)).toHaveProperty("checkOutDate", "dateOrder");
   });
 
   it("keeps contract-supported edit fields closed", () => {

@@ -70,7 +70,7 @@ export function validateEditValues(values: EditFormValues): Partial<Record<Edita
   else if (!validDate(values.checkInDate)) errors.checkInDate = "invalidDate";
   if (!values.checkOutDate) errors.checkOutDate = "required";
   else if (!validDate(values.checkOutDate)) errors.checkOutDate = "invalidDate";
-  if (validDate(values.checkInDate) && validDate(values.checkOutDate) && values.checkOutDate < values.checkInDate) errors.checkOutDate = "dateOrder";
+  if (validDate(values.checkInDate) && validDate(values.checkOutDate) && values.checkOutDate <= values.checkInDate) errors.checkOutDate = "dateOrder";
   for (const field of ["adults", "children"] as const) {
     const number = Number(values[field].trim());
     const minimum = field === "adults" ? 1 : 0;
@@ -109,6 +109,7 @@ export function EditReservationForm({ detail }: { detail: ReservationDetailDto }
   if (!canManage) return null;
   const nonManual = !["DIRECT", "MANUAL"].includes(detail.channel);
   const disabled = (field: EditableField) => nonManual && INGEST_OWNED_FIELDS.includes(field as never);
+  const ingestHelpId = "reservation-edit-ingest-help";
   const setField = (field: EditableField, value: string) => {
     setFieldErrors((current) => ({ ...current, [field]: undefined }));
     setValues((current) => ({ ...current, [field]: value }));
@@ -126,14 +127,16 @@ export function EditReservationForm({ detail }: { detail: ReservationDetailDto }
   }
   return <form onSubmit={submit} noValidate className="flex flex-col gap-3" aria-label={t("edit.title")}>
     <h2 className="text-lg font-semibold">{t("edit.title")}</h2>
-    {nonManual ? <p className="text-sm text-muted-foreground">{t("edit.ingestOwnedHelp")}</p> : null}
+    {nonManual ? <p id={ingestHelpId} className="text-sm text-muted-foreground">{t("edit.ingestOwnedHelp")}</p> : null}
     <div className="grid gap-3 sm:grid-cols-2">
       {EDITABLE_FIELDS.map((field) => {
         const id = `reservation-edit-${field}`;
         const errorId = `${id}-error`;
         const error = fieldErrors[field];
         const required = REQUIRED_FIELDS.has(field);
-        const common = { id, name: field, className: fieldClass, value: values[field], disabled: disabled(field), required, "aria-required": required, "aria-invalid": Boolean(error), "aria-describedby": error ? errorId : undefined };
+        const isDisabled = disabled(field);
+        const describedBy = [error ? errorId : null, isDisabled ? ingestHelpId : null].filter(Boolean).join(" ") || undefined;
+        const common = { id, name: field, className: fieldClass, value: values[field], disabled: isDisabled, required, "aria-required": required, "aria-invalid": Boolean(error), "aria-describedby": describedBy };
         const control = field === "specialRequests" || field === "internalNotes"
           ? <textarea {...common} onChange={(event) => setField(field, event.target.value)} />
           : <input {...common} type={field.includes("Date") ? "date" : field.includes("Time") ? "time" : ["adults", "children", "grossAmount", "otaCommission", "netAmount"].includes(field) ? "number" : "text"} onChange={(event) => setField(field, event.target.value)} />;

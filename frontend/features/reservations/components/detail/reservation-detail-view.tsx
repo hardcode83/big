@@ -53,7 +53,7 @@ export function ReservationDetailView({
       <div className="flex flex-col gap-3 p-4">
         <Link
           href="/reservations"
-          className="text-sm text-primary underline"
+          className="tap-target text-sm text-primary underline"
         >
           {`« ${t("fields.backToList")} »`}
         </Link>
@@ -86,7 +86,7 @@ export function ReservationDetailView({
     <div className="flex flex-col gap-4 p-4">
       <Link
         href="/reservations"
-        className="text-sm text-primary underline"
+        className="tap-target text-sm text-primary underline"
       >
         {`« ${t("fields.backToList")} »`}
       </Link>
