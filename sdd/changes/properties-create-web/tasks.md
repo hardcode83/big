@@ -141,18 +141,18 @@
       design D3/D13). Component test: button hidden without permission, `Sheet`
       opens/closes, edit-form copy reads from the right namespaces. [R2.1]
 
-## 5. Retire flow
+## 5. Retire flow <!-- panel: PASS 2026-09-11 receipt:14f91bb4 -->
 
-- [ ] 5.1 Add locale keys to `frontend/locales/{es,en}/dashboard.json`: retire
+- [x] 5.1 Add locale keys to `frontend/locales/{es,en}/dashboard.json`: retire
       button label, `AlertDialog` confirmation title/description/confirm/cancel
       copy. [R2.6, R4.1]
-- [ ] 5.2 Add a "Retire property" button to `PropertyDetailView`, gated by
+- [x] 5.2 Add a "Retire property" button to `PropertyDetailView`, gated by
       `useHasPermission("MANAGE_PROPERTIES")` AND the property's current
       `status !== "INACTIVE"` (hidden once already retired), opening an
       `AlertDialog` (design D9). On confirm, calls `useUpdateProperty` with
       exactly `{ status: "INACTIVE" }` — never merged with any pending edit-form
       changes. [R2.6]
-- [ ] 5.3 Component test: button hidden without permission and when already
+- [x] 5.3 Component test: button hidden without permission and when already
       `INACTIVE`; confirming calls the mutation with exactly that body and
       nothing else; cancelling the dialog makes no request. [R2.6]
 
@@ -234,3 +234,14 @@
 - Locale keys added: `properties.json` → `editForm.{wifiPasswordHint,clearWifiPassword}`; `dashboard.json` → `detail.edit.{button,title,close,submit,submitting,cancel,success,genericError}`. **Section 5's retire copy belongs under `detail.retire.*` in `dashboard.json`**, alongside `detail.edit.*`, both locales (`lib/i18n/catalog-parity.test.ts` enforces es/en symmetry).
 - `property-detail-view.test.tsx` now mocks `@/lib/auth`'s `useHasPermission` (`useHasPermissionMock`, reset to `true` in `beforeEach`) and stubs `@/features/properties` with `{ EditPropertyForm }` only — **Section 5 must extend that stub if it imports anything else from that barrel**, or the module mock will make it `undefined`.
 - `cd frontend && npm run typecheck && npm run lint && npm test -- properties dashboard`: typecheck and lint clean, 429/429 tests passed (41 test files) — added `edit-property-form.test.tsx` (27 tests) and 3 tests to `property-detail-view.test.tsx`.
+
+### Section 5 (retire flow)
+
+- `property-detail-view.tsx` now also calls `useProperty(propertyId)` (module-level, unconditional, right after the pre-existing hooks — before any early return) **purely to read `status`** for the retire gate; it renders no loading/error state of its own for this query — if `propertyQuery.data` is `undefined` (still loading or errored) the retire button just stays hidden (`canRetire = canManageProperties && propertyQuery.data !== undefined && propertyQuery.data.status !== "INACTIVE"`). It also calls `useUpdateProperty()` once, at the same top level, for the retire confirm only — a **second, independent mutation instance** from whatever `EditPropertyForm` holds inside the `Sheet`; the two never share state, so an open edit form with unsaved changes cannot leak into the retire body.
+- The "Retire property" `<Button variant="destructive">` renders inside the **same** button group as Edit (`<div className="flex items-center gap-2">`), immediately after it, only when `canRetire`. It opens `isRetireOpen` state driving an `AlertDialog` (shadcn) that is a **sibling of the edit `Sheet`**, last child of the outer `div`.
+- The retire `AlertDialog`'s confirm handler (`handleRetireConfirm`) mirrors `ManagerIncidentActions`' `CancelDialog` pattern exactly (`frontend/features/incidents/components/detail/manager-incident-actions.tsx`): `AlertDialogAction` is Radix's `Dialog.Close` under the hood and closes unconditionally unless the click handler calls `event.preventDefault()`; a `retireSubmittingRef` (not `mutation.isPending`, which only flips on the next commit) guards against two clicks in the same frame; `onSuccess` is the only path that calls `setIsRetireOpen(false)` — a failed retire (`mutation.isError`) keeps the dialog open with `detail.retire.genericError` shown as `role="alert"` beneath the description, no field-level/409-specific mapping (the body is a fixed `{ status: "INACTIVE" }`, nothing to disambiguate by field).
+- `retireMutation.mutate({ id: propertyId, input: { status: "INACTIVE" } }, { onSuccess, onError, onSettled })` — exactly that body, built inline, never derived from or merged with `EditPropertyForm`'s diffed `buildUpdateInput` output (they are different component instances entirely; the edit `Sheet` can be open with dirty fields at the same time the retire dialog is confirmed, and neither observes the other).
+- Neither the "Retire property" trigger `Button` nor `AlertDialogAction`/`AlertDialogCancel` carry a `tap-target` class (44×44 floor) — same as the pre-existing "Edit" button, which also lacks it. Note for Section 6: `AlertDialogAction`/`AlertDialogCancel` (`frontend/components/ui/alert-dialog.tsx`) destructure `className` in their props but never apply it to the wrapped `Button` — passing `className="tap-target"` to either is silently dropped as-is today; any 44×44 fix for the retire dialog's buttons needs a change to `alert-dialog.tsx` itself (or a wrapper), not just a prop at the call site. This is pre-existing (the incidents `CancelDialog` has the same gap) — Section 6 should treat Edit + Retire buttons and the retire dialog's two buttons as one 44×44 sweep, not three separate fixes.
+- Locale keys added: `dashboard.json` (both locales) → `detail.retire.{button,title,description,cancel,confirm,confirming,genericError}`, alongside `detail.edit.*`. No new namespace, no keys added to `properties.json` for this section.
+- `property-detail-view.test.tsx`: extended the `@/features/properties` module mock (previously `{ EditPropertyForm }` only) with `useProperty` and `useUpdateProperty` (both `vi.hoisted` mocks), defaulted in `beforeEach` to `{ data: { status: "ACTIVE" } }` and a mocked `mutate`/`isPending: false`/`isError: false` respectively — **any Section 6 test touching this view must keep both mocked** or the real hooks resolve `undefined`/throw (no `AuthProvider`/react-query context in this suite).
+- `cd frontend && npm run typecheck && npm run lint && npm test -- properties dashboard`: typecheck and lint clean, 437/437 tests passed (41 test files, up from 429/41 after Section 4) — added 7 tests to `property-detail-view.test.tsx` (offer/hide by permission, hide when `INACTIVE`, hide while `status` not yet loaded, confirm calls the mutation with exactly `{ status: "INACTIVE" }`, cancel makes no request, error stays visible with the dialog open).

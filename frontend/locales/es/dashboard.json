@@ -111,6 +111,15 @@
       "cancel": "Cancelar",
       "success": "Cambios guardados.",
       "genericError": "No se pudieron guardar los cambios. Vuelve a intentarlo."
+    },
+    "retire": {
+      "button": "Retirar propiedad",
+      "title": "Retirar propiedad",
+      "description": "Esta acción retira la propiedad de forma permanente. No se puede deshacer desde esta pantalla.",
+      "cancel": "Cancelar",
+      "confirm": "Retirar propiedad",
+      "confirming": "Retirando…",
+      "genericError": "No se pudo retirar la propiedad. Vuelve a intentarlo."
     }
   },
   "financial": {

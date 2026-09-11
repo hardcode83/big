@@ -24,10 +24,21 @@ const useHasPermissionMock = vi.hoisted(() => vi.fn(() => true));
 vi.mock("@/lib/auth", () => ({
   useHasPermission: useHasPermissionMock,
 }));
+
+// `PropertyDetailView` reads the property's own `status` (for the retire
+// gate, R2.6/D9) through the same `useProperty` `EditPropertyForm` uses, and
+// drives the retire confirmation through `useUpdateProperty` — both mocked
+// here so this suite never reaches react-query/the data layer, same
+// convention as `EditPropertyForm` being stubbed below.
+const usePropertyMock = vi.hoisted(() => vi.fn());
+const useUpdatePropertyMock = vi.hoisted(() => vi.fn());
+const updatePropertyMutate = vi.hoisted(() => vi.fn());
 vi.mock("@/features/properties", () => ({
   EditPropertyForm: ({ propertyId }: { propertyId: string }) => (
     <div>edit-property-form-stub:{propertyId}</div>
   ),
+  useProperty: usePropertyMock,
+  useUpdateProperty: useUpdatePropertyMock,
 }));
 
 import { PropertyDetailView } from "./property-detail-view";
@@ -58,11 +69,26 @@ function renderView(id = "redes11") {
 beforeEach(() => {
   usePropertyDetail.mockReset();
   usePropertyTimeline.mockReset();
+  useHasPermissionMock.mockReset();
   useHasPermissionMock.mockReturnValue(true);
   usePropertyTimeline.mockReturnValue({
     isPending: false,
     isError: false,
     data: { data: [], total: 0, page: 1, per_page: 0, total_pages: 0 },
+  });
+  usePropertyMock.mockReset();
+  usePropertyMock.mockReturnValue({
+    isPending: false,
+    isError: false,
+    data: { status: "ACTIVE" },
+  });
+  useUpdatePropertyMock.mockReset();
+  updatePropertyMutate.mockReset();
+  useUpdatePropertyMock.mockReturnValue({
+    mutate: updatePropertyMutate,
+    isPending: false,
+    isError: false,
+    error: null,
   });
 });
 
@@ -167,5 +193,119 @@ describe("PropertyDetailView — edit affordance (R2.1, design D3/D13)", () => {
     expect(
       screen.queryByText("edit-property-form-stub:redes11"),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("PropertyDetailView — retire affordance (R2.6, design D9)", () => {
+  function ok() {
+    usePropertyDetail.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: detail,
+    });
+  }
+
+  it("offers the retire action with MANAGE_PROPERTIES and an active property", () => {
+    ok();
+    renderView();
+    expect(
+      screen.getByRole("button", { name: esDashboard.detail.retire.button }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the retire action without the permission", () => {
+    useHasPermissionMock.mockReturnValue(false);
+    ok();
+    renderView();
+    expect(
+      screen.queryByRole("button", { name: esDashboard.detail.retire.button }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides the retire action once the property is already INACTIVE", () => {
+    usePropertyMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: { status: "INACTIVE" },
+    });
+    ok();
+    renderView();
+    expect(
+      screen.queryByRole("button", { name: esDashboard.detail.retire.button }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides the retire action while the property's own status has not loaded yet", () => {
+    usePropertyMock.mockReturnValue({
+      isPending: true,
+      isError: false,
+      data: undefined,
+    });
+    ok();
+    renderView();
+    expect(
+      screen.queryByRole("button", { name: esDashboard.detail.retire.button }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens the confirmation AlertDialog and confirming calls the mutation with exactly {status: INACTIVE}", () => {
+    ok();
+    renderView();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: esDashboard.detail.retire.button }),
+    );
+    expect(
+      screen.getByRole("heading", { name: esDashboard.detail.retire.title }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: esDashboard.detail.retire.confirm }),
+    );
+
+    expect(updatePropertyMutate).toHaveBeenCalledTimes(1);
+    expect(updatePropertyMutate).toHaveBeenCalledWith(
+      { id: "redes11", input: { status: "INACTIVE" } },
+      expect.any(Object),
+    );
+  });
+
+  it("cancelling the dialog makes no request", () => {
+    ok();
+    renderView();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: esDashboard.detail.retire.button }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: esDashboard.detail.retire.cancel }),
+    );
+
+    expect(updatePropertyMutate).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("heading", { name: esDashboard.detail.retire.title }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the generic error and keeps the dialog open when the mutation fails", () => {
+    useUpdatePropertyMock.mockReturnValue({
+      mutate: updatePropertyMutate,
+      isPending: false,
+      isError: true,
+      error: new Error("boom"),
+    });
+    ok();
+    renderView();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: esDashboard.detail.retire.button }),
+    );
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      esDashboard.detail.retire.genericError,
+    );
+    expect(
+      screen.getByRole("heading", { name: esDashboard.detail.retire.title }),
+    ).toBeInTheDocument();
   });
 });
