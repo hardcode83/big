@@ -64,11 +64,12 @@ Fuera de la feature se tocan **dos** cosas más, ambas decididas en `/sdd:design
   miembros nuevos, `MANAGE_REVIEW_DECISIONS` y `CREATE_REVIEW_UI`, y los reparte
   en `ROLE_UI_PERMISSIONS` siguiendo la línea de `policy.py`: `TENANT_OWNER`
   tiene el primero, `PROPERTY_MANAGER` tiene el segundo. La owner **no** ve el
-  diálogo de alta —no tiene `CREATE_REVIEW` en el backend, y concederle la
-  entrada al formulario la expondría a un `403` que la propia UI no avisa
-  limpiamente—; el manager **no** ve los botones de decisión —no tiene
-  `APPROVE_REVIEW`/`IGNORE_REVIEW`/`MARK_REVIEW_POSTED` en el backend, y la
-  asimetría es la misma que `approvals-web` D10 ya fijó para
+  diálogo de alta —es una elección de UX (PRD §18 modela la creación como tarea
+  del manager, no de la propietaria); el manager **no** ve los botones de
+  decisión —también es una elección de UX, no de RBAC: `policy.py:309-316`
+  concede al `PROPERTY_MANAGER` los cinco permisos de reviews vía
+  `_REVIEW_MANAGE` (ver R7.2 más abajo para la justificación completa). La
+  misma asimetría que `approvals-web` D10 ya fijó para
   `RESPOND_OWNER_APPROVALS`.
 - **`backend/openapi.json`** se regenera para que el cliente tipado del
   frontend refleje las siete rutas y los cinco enums de `reviews`. Es un paso

@@ -242,7 +242,8 @@ sección 8.
 
 - [ ] 6.8 `features/reviews/components/create-review-dialog.tsx` (nuevo) +
   `.test.tsx`: diálogo de alta a mano con `property_id` (selector del catálogo de
-  viviendas), `channel` (selector cerrado con los cuatro valores del enum), un
+  viviendas), `channel` (selector cerrado con los **cinco** valores del enum
+  `ReviewChannel`: `AIRBNB`, `BOOKING`, `GOOGLE`, `MANUAL`, `OTHER`), un
   `<input>` opcional para `reviewer_name` (máximo 200 caracteres), selector
   `1.0`..`5.0` con paso `0.5` para `rating`, `<textarea>` opcional para `content`
   (máximo 4000 caracteres), `<select>` opcional para `language`. La validación de
@@ -291,9 +292,10 @@ sección 8.
   de `features/properties/locales/properties-locale.test.ts` (lista derivada del
   `Record` tipado sobre los enums generados, no transcrita a mano), comprobar que
   los **cinco** valores de `ReviewStatus` (incluido `NEW`), los **tres** de
-  `ReviewSentiment`, los **cuatro** de `ReviewChannel`, y los **nueve** de
-  `RecurringIssueTag` tienen etiqueta en ES y EN, y que las copias de
-  `respond.confirmQuestion` existen para las cuatro acciones. [R8.2, R8.5]
+  `ReviewSentiment`, los **cinco** de `ReviewChannel` (`AIRBNB`, `BOOKING`,
+  `GOOGLE`, `MANUAL`, `OTHER`), y los **nueve** de `RecurringIssueTag` tienen
+  etiqueta en ES y EN, y que las copias de `respond.confirmQuestion` existen
+  para las cuatro acciones. [R8.2, R8.5]
 
 ## 8. Ruta final
 

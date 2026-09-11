@@ -81,8 +81,10 @@ El DTO de borrador omite también `ai_generated` por el mismo motivo.
 `content` y `ai_summary` y `recurring_issues` **sí** cruzan el boundary, porque R6.2 los
 pinta en el detalle, pero el mapeador deja `content` como `string | null` literal —es
 prosa del huésped, sumidero de la regla 11 (excepción 4), y la UI la pinta como texto
-plano, D11— sin recombinarla ni traducirla. `draft_content` cruza como `string | null`
-con la misma disciplina.
+plano, D11— sin recombinarla ni traducirla. `draft_content` cruza como `string`
+requerido (no nullable, porque `ReviewDraftResponse.draft_content` está declarado
+así en el DTO publicado, `openapi.d.ts:4480`) y con la misma disciplina de no
+recombinarlo.
 
 Rejected: llevar todos los campos del DTO y filtrar en el componente — es exactamente la
 disciplina que R2.5/R5.4 dicen que no quieren, y sobrevive mal a un cuarto componente.
@@ -489,7 +491,7 @@ no este change.
 | Componentes | `.../reviews-panel.tsx` **(nuevo)** + `.test.tsx` | Listado completo con filtros y filas |
 | Componentes | `.../review-filters.tsx` **(nuevo)** + `.test.tsx` | Selectores de vivienda, canal, sentimiento, estado (en reseñas), rating min/max, fechas |
 | Componentes | `.../review-row.tsx` **(nuevo)** + `.test.tsx` | Tarjeta compacta: vivienda, canal, rating, sentimiento, fecha; estado sólo en la pestaña Reseñas (D5) |
-| Componentes | `.../review-actions.tsx` **(nuevo)** + `.test.tsx` | Botones de decisión/edición por en línea, los cuatro casos de D5 |
+| Componentes | `.../review-actions.tsx` **(nuevo)** + `.test.tsx` | Botones de decisión/edición por en línea, los casos de D5 (DRAFTED → APPROVE+IGNORE+EDIT al owner, EDIT al manager; APPROVED → MARK_POSTED al owner; nada más) |
 | Componentes | `.../review-detail.tsx` **(nuevo)** + `.test.tsx` | Detalle encima del listado, con texto del huésped, borrador, controles y diálogo (D11, D12) |
 | Componentes | `.../mark-posted-dialog.tsx` **(nuevo)** + `.test.tsx` | `AlertDialog` con preview de `content` + `draft_content` (D12) |
 | Componentes | `.../create-review-dialog.tsx` **(nuevo)** + `.test.tsx` | Diálogo de alta a mano con catálogo, canal, rating, contenido (R5) |
@@ -497,7 +499,7 @@ no este change.
 | Barril | `frontend/features/reviews/index.ts` **(nuevo)** | Exporta sólo `ReviewsView` |
 | i18n | `frontend/locales/es/reviews.json`, `frontend/locales/en/reviews.json` **(nuevos)** | Namespace completo (D17) |
 | i18n | `frontend/lib/i18n/resources.ts` | Los cuatro puntos de registro (D17, R8.1) |
-| i18n | `frontend/features/reviews/locales/reviews-locale.test.ts` **(nuevo)** | Los 5 estados, 3 sentimientos, 4 canales, 9 problemas recurrentes en ES y EN, derivados de los enums (D17, R8.2) |
+| i18n | `frontend/features/reviews/locales/reviews-locale.test.ts` **(nuevo)** | Los 5 estados, 3 sentimientos, 5 canales, 9 problemas recurrentes en ES y EN, derivados de los enums (D17, R8.2) |
 | Permisos | `frontend/lib/auth/permissions.ts` + `permissions.test.tsx` | `MANAGE_REVIEW_DECISIONS` a `TENANT_OWNER`, `CREATE_REVIEW_UI` a `PROPERTY_MANAGER` (D15, R7) |
 | Backend | — | **Nada.** Contrato congelado; no hay `make openapi` ni `npm run api:generate` en este diff (D19) |
 
