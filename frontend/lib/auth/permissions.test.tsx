@@ -7,6 +7,20 @@ const useAuth = vi.hoisted(() => vi.fn());
 vi.mock("./auth-provider", () => ({ useAuth }));
 
 describe("useHasPermission (R4.3)", () => {
+  it("grants MANAGE_RESERVATIONS only to PROPERTY_MANAGER (R4)", () => {
+    useAuth.mockReturnValue({ user: { role: "PROPERTY_MANAGER" } });
+    const { result } = renderHook(() => useHasPermission("MANAGE_RESERVATIONS"));
+    expect(result.current).toBe(true);
+  });
+
+  it("hides MANAGE_RESERVATIONS from owner and field roles (R4)", () => {
+    for (const role of ["TENANT_OWNER", "CLEANER", "TECHNICIAN"] as const) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() => useHasPermission("MANAGE_RESERVATIONS"));
+      expect(result.current, `${role} should not have it`).toBe(false);
+    }
+  });
+
   it("grants MANAGE_CLEANING_TASKS to PROPERTY_MANAGER", () => {
     useAuth.mockReturnValue({ user: { role: "PROPERTY_MANAGER" } });
     const { result } = renderHook(() =>
@@ -267,6 +281,75 @@ it("denies MANAGE_CONVERSATIONS to TENANT_OWNER — owner reads but does not ope
     useAuth.mockReturnValue({ user: null });
     const { result } = renderHook(() =>
       useHasPermission("MANAGE_GUEST_ACCESS_TOKENS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
+  it("grants MANAGE_REVIEW_DECISIONS to TENANT_OWNER (R7.2, reviews-web D15)", () => {
+    useAuth.mockReturnValue({ user: { role: "TENANT_OWNER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_REVIEW_DECISIONS"),
+    );
+    expect(result.current).toBe(true);
+  });
+
+  it("denies MANAGE_REVIEW_DECISIONS to the other four roles (R7.3)", () => {
+    // PROPERTY_MANAGER is included: the UX mirror hides approve/ignore/
+    // mark-posted from her even though `policy.py:_REVIEW_MANAGE` grants
+    // her every action of the flow. The mirror is the UX split, not the
+    // backend's RBAC split — D15 documents the difference.
+    for (const role of [
+      "SUPER_ADMIN",
+      "PROPERTY_MANAGER",
+      "CLEANER",
+      "TECHNICIAN",
+    ]) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() =>
+        useHasPermission("MANAGE_REVIEW_DECISIONS"),
+      );
+      expect(result.current, `${role} should not have it`).toBe(false);
+    }
+  });
+
+  it("denies MANAGE_REVIEW_DECISIONS without an authenticated user (R7.1)", () => {
+    useAuth.mockReturnValue({ user: null });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_REVIEW_DECISIONS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
+  it("grants CREATE_REVIEW_UI to PROPERTY_MANAGER (R7.2, reviews-web D15)", () => {
+    useAuth.mockReturnValue({ user: { role: "PROPERTY_MANAGER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("CREATE_REVIEW_UI"),
+    );
+    expect(result.current).toBe(true);
+  });
+
+  it("denies CREATE_REVIEW_UI to the other four roles (R7.3)", () => {
+    // TENANT_OWNER is included: the UX mirror narrows the create flow to
+    // the manager even though `policy.py:309-316` would grant it to both
+    // — PRD §18 models creation as the manager's task, not the owner's.
+    for (const role of [
+      "SUPER_ADMIN",
+      "TENANT_OWNER",
+      "CLEANER",
+      "TECHNICIAN",
+    ]) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() =>
+        useHasPermission("CREATE_REVIEW_UI"),
+      );
+      expect(result.current, `${role} should not have it`).toBe(false);
+    }
+  });
+
+  it("denies CREATE_REVIEW_UI without an authenticated user (R7.1)", () => {
+    useAuth.mockReturnValue({ user: null });
+    const { result } = renderHook(() =>
+      useHasPermission("CREATE_REVIEW_UI"),
     );
     expect(result.current).toBe(false);
   });

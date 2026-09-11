@@ -269,7 +269,7 @@ Categorías:
   needs: reservation-property-identity · size: S · kind: fix
 - [x] reservation-manual-guest-resolution — [BE] **resolver la identidad del huésped al crear manualmente una reserva**, sin convertirlo en CRUD de Guests … → changes/archive/2026-09-10-reservation-manual-guest-resolution/
   needs: reservations, reservations-web, reservations-identity-web · size: M · kind: feature
-- [ ] reservation-create-web — [FE] **crear, modificar y cancelar una reserva desde `/reservations`**, que hoy es sólo lectura …
+- [x] reservation-create-web — [FE] **crear, modificar y cancelar una reserva desde `/reservations`**, que hoy es sólo lectura: `POST` (:90), `PATCH` (:154) y `DELETE` (:180) de `reservations/api/router.py` existen y `http-reservations-source.ts` sólo tiene los dos `GET`. Es la única forma de **empezar** un ciclo operativo nuevo desde el navegador sin OTA ni PMS: canal `DIRECT`/`MANUAL`, nace `PENDING`, y `check_in_date`/`check_out_date`/`status` son parcheables (`schemas.py:75-79`). Cierra el «Fuera de alcance» que `reservations-web` dejó escrito sin entrada de seguimiento. Va detrás de `reservations-identity-web` para no construir un formulario sobre una lista que aún pinta UUIDs (no está en el plan original, añadida el 2026-09-04 al auditar los flujos por rol; hito «MVP operable» 1) … → changes/archive/2026-09-11-reservation-create-web/
   needs: reservations, reservations-web, reservations-identity-web, reservation-manual-guest-resolution · size: S · kind: feature
 - [x] shell-topbar-overflow-360 — [FE] **la cabecera compartida desborda a 360 px, en todas las superficies** … → changes/archive/2026-09-01-shell-topbar-overflow-360/
   needs: · size: S · kind: fix

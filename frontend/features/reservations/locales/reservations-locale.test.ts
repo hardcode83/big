@@ -25,6 +25,9 @@ import enReservations from "@/locales/en/reservations.json";
 import type { components } from "@/lib/api/generated/openapi";
 
 type ReservationStatus = components["schemas"]["ReservationStatus"];
+type ReservationChannel = components["schemas"]["ReservationChannel"];
+type PaymentStatus = components["schemas"]["PaymentStatus"];
+type ReservationAccessStatus = components["schemas"]["ReservationAccessStatus"];
 
 const STATUS_VALUES: ReservationStatus[] = [
   "PENDING",
@@ -35,6 +38,14 @@ const STATUS_VALUES: ReservationStatus[] = [
   "COMPLETED",
   "NO_SHOW",
 ];
+const CHANNEL_VALUES: ReservationChannel[] = ["AIRBNB", "BOOKING", "EXPEDIA", "DIRECT", "MANUAL", "OTHER"];
+const PAYMENT_STATUS_VALUES: PaymentStatus[] = ["PENDING", "PAID", "PARTIALLY_PAID", "REFUNDED"];
+const ACCESS_STATUS_VALUES: ReservationAccessStatus[] = ["PENDING", "CREATED_EXTERNAL", "MANUAL_ADDED", "DELIVERED", "EXPIRED", "NOT_REQUIRED"];
+
+function leafKeys(value: unknown, prefix = ""): string[] {
+  if (typeof value !== "object" || value === null) return prefix ? [prefix] : [];
+  return Object.entries(value).flatMap(([key, child]) => leafKeys(child, prefix ? `${prefix}.${key}` : key));
+}
 
 describe("reservations locale (R4.1, R4.3)", () => {
   it("localizes the seven ReservationStatus values in ES and EN", () => {
@@ -70,6 +81,24 @@ describe("reservations locale (R4.1, R4.3)", () => {
     for (const status of STATUS_VALUES) {
       const resolved = i18next.t(`status.${status}`);
       expect(resolved).toBe(esReservations.status[status]);
+    }
+  });
+
+  it("keeps every reservations leaf key in ES and EN", () => {
+    const esKeys = leafKeys(esReservations).sort();
+    const enKeys = leafKeys(enReservations).sort();
+    expect(esKeys).toEqual(enKeys);
+    expect(esKeys).toHaveLength(177);
+  });
+
+  it.each([
+    ["channels", CHANNEL_VALUES],
+    ["paymentStatuses", PAYMENT_STATUS_VALUES],
+    ["accessStatuses", ACCESS_STATUS_VALUES],
+  ] as const)("localizes %s enum values in both languages", (namespace, values) => {
+    for (const value of values) {
+      expect((esReservations[namespace] as Record<string, string>)[value]).toBeTypeOf("string");
+      expect((enReservations[namespace] as Record<string, string>)[value]).toBeTypeOf("string");
     }
   });
 });
