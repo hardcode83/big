@@ -43,7 +43,7 @@
       $(PROVIDER),--provider $(PROVIDER),)` — mismo patrón de argumentos opcionales que
       `sim-advance`. Añadir `pms-sync` a la lista de `.PHONY`. [R4]
 
-## 4. Tests
+## 4. Tests <!-- panel: PASS 2026-09-11 receipt:7a18405c -->
 
 - [x] 4.1 `backend/tests/scheduler/test_schedule.py`: añadir `sync_pms_reservations` a la tabla
       de divergencias declaradas (`BEYOND_PRD_8_3` o una tabla propia con su comentario, mismo
