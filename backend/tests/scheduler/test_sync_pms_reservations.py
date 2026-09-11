@@ -261,6 +261,16 @@ async def test_a_tenant_never_sees_another_tenants_reservations_or_timeline_even
     ).scalars().all()
     assert set(all_reservations) == {tenant_a.id, tenant_b.id}
     assert set(all_events) == {tenant_a.id, tenant_b.id}
+    # Set membership alone would pass even if a cross-tenant bug misattributed rows (e.g.
+    # tenant_a ending up with 3 reservations, one really tenant_b's, leaving tenant_b with
+    # only 1) as long as both tenant_id values are still represented somewhere. Each tenant's
+    # single MOCK property yields exactly 2 valid reservations/events per sync (`MockPMSAdapter
+    # ._seed`, matched by `outcome.created == 2` in the wiring tests above) — so the per-tenant
+    # count must be exactly 2, not just "at least one row of each tenant exists".
+    assert all_reservations.count(tenant_a.id) == 2, all_reservations
+    assert all_reservations.count(tenant_b.id) == 2, all_reservations
+    assert all_events.count(tenant_a.id) == 2, all_events
+    assert all_events.count(tenant_b.id) == 2, all_events
 
     # Read through a session marked for each tenant: the sharper half of R5 — no row of the
     # other tenant is reachable through an ORM read that names no tenant_id at all.
