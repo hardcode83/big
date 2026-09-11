@@ -19,10 +19,14 @@ proveedor, resuelve un adapter por grupo vía `PMSAdapterFactory`, y ya se niega
 (`_sync_one_provider`, líneas ~229-246) a servir un proveedor con credenciales `PROPERTY`-scoped
 en un sync agrupado. Lo usan hoy el CLI `python -m app.integrations.cli.pms_sync` (con
 `source=PMS_SOURCE`) y el drenaje de webhooks (`source=WEBHOOK_SOURCE`). `celery-jobs` design
-D16 decidió explícitamente NO programarlo porque su coste no estaba medido y su adapter no
-existía; las dos premisas cerraron con `docs/beds24-adapter.md` y `pms-beds24-adapter`
-respectivamente, y el propio docstring de `pms_sync.py` ya lo dice: "Whoever schedules this owns
-the cadence decision on its own merits."
+D16 decidió explícitamente NO programarlo — no por coste sin medir (su propio texto: "la
+cadencia sí está medida —8 créditos por ciclo, techo de un sync cada 24 s, recomendación ~6 h—
+pero está medida **contra Beds24, cuyo adapter no existe**"), sino porque ese adapter no
+existía y programar contra el mock no habría verificado nada. Esa única premisa cerró con
+`pms-beds24-adapter`, dueño de la `PMSAdapterFactory` real; el propio docstring de `pms_sync.py`
+ya lo dice: "Whoever schedules this owns the cadence decision on its own merits." (El consumo de
+crédito real —distinto de la cadencia teórica que D16 ya medía— sigue sin instrumentar; eso es
+tarea de `beds24-webhook-cutover-measurement`, no lo que bloqueaba D16.)
 
 ## Decisions
 

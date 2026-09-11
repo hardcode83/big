@@ -15,14 +15,22 @@ van firmados y se configuran por propiedad desde su UI (ADR 0006)— "desaconsej
 y recomienda sincronización completa cada ~6 horas". Sin barrido, un webhook perdido es una
 reserva que no existe hasta el siguiente `pms_sync` a mano.
 
-`celery-jobs` design D16 decidió explícitamente NO programar este sync porque la cadencia
-sería función del presupuesto de créditos de Beds24 (100 créditos / 300 s por cuenta), que no
-estaba medido y cuyo adapter no existía. Ambas premisas ya no aplican: el coste está medido
-(`docs/beds24-adapter.md:113-135`) y `pms-beds24-adapter` cerró la `PMSAdapterFactory` real —
-`sdd/specs/celery-jobs.md`'s "Estado y deuda conocida" sigue diciendo "su adapter no existe",
-lo que ya es falso y se corrige al archivar. Además, D16's argumento nunca aplicó a
-`MockPMSAdapter` ni a `ChannexAdapter` (staging), que son los proveedores con los que el MVP
-opera hasta la ventana de corte.
+`celery-jobs` design D16 (2026-08-04) decidió explícitamente NO programar este sync — pero no
+porque el coste no estuviera medido: su propio texto dice "la cadencia sí está medida —8
+créditos por ciclo, techo de un sync cada 24 s, recomendación del proveedor ~6 h— pero está
+medida **contra Beds24, cuyo adapter no existe**." El único bloqueo real era el adapter: sin él,
+el único selector de proveedor era un flag de operador con `mock` por defecto, y programar un
+sync periódico contra el mock no habría verificado nada mientras metía en la aplicación una
+configuración de proveedor que `pms_sync.py:54-66` evita a propósito para no resucitar el
+`PMS_PROVIDER` global que ADR 0006 retiró. D16 dejó el job explícitamente para cuando llegara
+`pms-beds24-adapter`, dueño de la `PMSAdapterFactory` — y esa change ya cerró: la factory
+resuelve un adapter real por propiedad. `sdd/specs/celery-jobs.md`'s "Estado y deuda conocida"
+sigue diciendo "su adapter no existe", lo que ya es falso y se corrige al archivar. (El consumo
+de crédito *real*, a diferencia de la cadencia teórica que D16 ya midió, sigue sin
+instrumentar — eso es un asunto aparte, hacia delante, de `beds24-webhook-cutover-measurement`,
+no la razón por la que D16 aplazó el job.) El argumento de D16 nunca aplicó a `MockPMSAdapter`
+ni a `ChannexAdapter` (staging), que son los proveedores con los que el MVP opera hasta la
+ventana de corte.
 
 ## What changes
 
