@@ -196,7 +196,7 @@ una edición retroactiva del timeline, prohibida por la decisión firme de
 | Settings doc | `backend/.env.example` | Añadir `APP_ENVIRONMENT` con comentario sobre cuándo poner `production`. |
 | CLI | `backend/app/cli/sim_advance.py` (nuevo) | `main()` con `--tenant`, `--at`, guardia de D5, bucle de D2/D3, formato de D4, exit codes de D4. |
 | Makefile | `Makefile` | Añadir target `sim-advance` que invoca `python -m app.cli.sim_advance` con `TENANT` y `AT` opcionales (R5.1). |
-| Deploy | `docker-compose.deploy.yml` | Declara `APP_ENVIRONMENT` como variable **obligatoria** (`${APP_ENVIRONMENT:?...}`) en `backend`/`worker`/`beat`: es lo que arma la guardia de D5 en todo entorno desplegado, presente y futuro (ver Riesgo **R5**). El comando en sí no llega al deploy: la guardia de D5 + la ausencia del target `sim-advance` en el Makefile del contenedor siguen cubriendo R2.3. |
+| Deploy | `docker-compose.deploy.yml` | Declara `APP_ENVIRONMENT` como variable **obligatoria** (`${APP_ENVIRONMENT:?...}`) en `backend`/`worker`/`beat` **y `migrate`** (los cuatro servicios que comparten la imagen de producción): es lo que arma la guardia de D5 en todo entorno desplegado, presente y futuro (ver Riesgo **R5**). El comando en sí no llega al deploy: la guardia de D5 + la ausencia del target `sim-advance` en el Makefile del contenedor siguen cubriendo R2.3. |
 | Docs | `docs/celery-jobs.md` | Sustituir la frase de «nueve jobs» por la cifra vigente al archivar; añadir sección «Avanzar el reloj a mano en dev» con un ejemplo real y las dos trampas de ventana (R5.2/3). |
 | RUNBOOK | `infra/environments/dev/RUNBOOK-seed-demo.md` §5 | Sustituir el heredoc de `:316-322` por `make sim-advance TENANT=…` (R5.4). |
 | Tests | `backend/tests/test_sim_advance_cli.py` (nuevo) | R4.1-R4.4: tres tests de escenario + uno de la guardia. |
@@ -244,13 +244,19 @@ no se introduce un evento nuevo.
 - **R5 — Un futuro `deploy-staging.yml`/`deploy-prod.yml` podría olvidar fijar
   `APP_ENVIRONMENT`, dejando que el guard evalúe el default permisivo de `Settings`
   (`"local"`) en un entorno real.** Mitigación: `docker-compose.deploy.yml` declara
-  `APP_ENVIRONMENT` como variable **obligatoria** (`:?`) en `backend`/`worker`/`beat`, el
-  mismo fichero de compose que cualquier entorno futuro reutilizará (steering/infra.md,
-  módulos Terraform por entorno) — así que un pipeline que no la fije no despliega
-  silenciosamente en modo permisivo: el contenedor se niega a arrancar. El riesgo residual
-  queda acotado a que ese futuro pipeline recuerde poner el valor correcto (`staging`,
-  `production`, fuera de `{local, dev}`) en su propio paso de render, siguiendo el patrón
-  que `deploy-dev.yml` ya establece con el literal `dev`.
+  `APP_ENVIRONMENT` como variable **obligatoria** (`:?`) en **los cuatro servicios que
+  comparten la imagen de producción** — `backend`/`worker`/`beat` y también `migrate`
+  (decisión registrada en `BLOCKED.md` tras el hallazgo de la tercera pasada del panel de
+  revisión: `migrate` corre la misma imagen y un `docker compose -f
+  docker-compose.deploy.yml run migrate python -m app.cli.sim_advance ...` contra un
+  despliegue real habría visto el default permisivo sin este requisito, aun sin ser el
+  camino previsto para invocar el comando) — el mismo fichero de compose que cualquier
+  entorno futuro reutilizará (steering/infra.md, módulos Terraform por entorno) — así que
+  un pipeline que no la fije no despliega silenciosamente en modo permisivo: el contenedor
+  se niega a arrancar. El riesgo residual queda acotado a que ese futuro pipeline recuerde
+  poner el valor correcto (`staging`, `production`, fuera de `{local, dev}`) en su propio
+  paso de render, siguiendo el patrón que `deploy-dev.yml` ya establece con el literal
+  `dev`.
 
 ## Open questions
 

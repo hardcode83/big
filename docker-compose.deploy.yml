@@ -147,6 +147,15 @@ services:
       # Same reason, and it is not hypothetical: `encryption_key` is required too, so the
       # migration container would exit before applying anything.
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
+      # A distinct reason from the two above (change `sim-advance`, decision recorded at
+      # BLOCKED.md): `Settings.environment` DOES default to `"local"`, so its absence would
+      # not fail `Settings()` here the way a missing JWT/encryption key would. This container
+      # shares the exact production image with `backend`/`worker`/`beat`, and without this
+      # line an operator could run `docker compose -f docker-compose.deploy.yml run --rm
+      # --no-deps migrate python -m app.cli.sim_advance ...` against a real deployment and
+      # have the D5 guard silently see the permissive default and let it through. Required
+      # here for consistency with the other three, not because migrate itself calls the CLI.
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:?Falta APP_ENVIRONMENT}
     depends_on:
       postgres:
         condition: service_healthy
