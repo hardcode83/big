@@ -404,7 +404,7 @@ describe("HttpReservationsSource — reservation mutations (R1, R2, R3, D4)", ()
     });
   });
 
-  it("omits blank optional guest fields but preserves explicit null", async () => {
+  it("omits blank guest fields and null values disallowed by OpenAPI", async () => {
     const { source, request } = sourceWith(response);
     await source.createReservation(TENANT, {
       property_id: "property-1",
@@ -419,7 +419,7 @@ describe("HttpReservationsSource — reservation mutations (R1, R2, R3, D4)", ()
     } as never);
 
     expect(request.mock.calls[0][1].body).toMatchObject({
-      guest: { full_name: "Guest", preferred_language: null },
+      guest: { full_name: "Guest" },
     });
     expect(request.mock.calls[0][1].body.guest).not.toHaveProperty("email");
     expect(request.mock.calls[0][1].body.guest).not.toHaveProperty("phone");

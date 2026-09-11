@@ -55,6 +55,9 @@ function sanitizeGuest(value: unknown): Record<string, unknown> | undefined {
   const sanitized = pickMutationFields(guest, [
     "full_name", "email", "phone", "preferred_language",
   ]);
+  if (sanitized.preferred_language === null) {
+    delete sanitized.preferred_language;
+  }
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
