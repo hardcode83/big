@@ -2,7 +2,7 @@
 
 <!-- Markers, read by /sdd:run and the lifecycle gates. -->
 
-## 1. Config y atribución
+## 1. Config y atribución <!-- panel: PASS 2026-09-11 receipt:73dfe915 -->
 
 - [x] 1.1 `backend/app/core/config.py`: añadir `pms_sync_window_days: int = 2` a `Settings`,
       junto a los demás enteros de dominio (`notification_batch_size`, `beds24_max_pages`).
