@@ -122,8 +122,8 @@ function ReservationManageActions({ detail }: { detail: ReservationDetailDto }) 
         <AlertDialogHeader><AlertDialogTitle>{t("cancel.title")}</AlertDialogTitle><AlertDialogDescription>{t("cancel.description")}</AlertDialogDescription></AlertDialogHeader>
         {cancel.isError ? <p role="alert">{t(reservationMutationErrorKey(cancel.error, "cancel"))}</p> : null}
         <AlertDialogFooter>
-          <AlertDialogCancel>{t("cancel.keep")}</AlertDialogCancel>
-          <AlertDialogAction disabled={cancel.isPending} aria-busy={cancel.isPending} onClick={(event) => { event.preventDefault(); cancel.mutate({ reservationId: detail.id }, { onSuccess: () => { setCancelOpen(false); setCancelAnnouncement(t("cancel.success")); } }); }}>
+          <AlertDialogCancel className="tap-target">{t("cancel.keep")}</AlertDialogCancel>
+          <AlertDialogAction className="tap-target" disabled={cancel.isPending} aria-busy={cancel.isPending} onClick={(event) => { event.preventDefault(); cancel.mutate({ reservationId: detail.id }, { onSuccess: () => { setCancelOpen(false); setCancelAnnouncement(t("cancel.success")); } }); }}>
             {cancel.isPending ? t("cancel.submitting") : t("cancel.confirm")}
           </AlertDialogAction>
         </AlertDialogFooter>

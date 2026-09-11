@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api";
 
 import * as dataModule from "../data";
+import type { PropertyFilters } from "../data";
 import { normalizePropertyFilters, propertiesKeys } from "./query-keys";
 import { useActiveProperties, useProperties } from "./use-properties";
 

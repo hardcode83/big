@@ -87,6 +87,9 @@ export function validateEditValues(values: EditFormValues): Partial<Record<Edita
 }
 
 const fieldClass = "min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-ring";
+const REQUIRED_FIELDS = new Set<EditableField>([
+  "checkInDate", "checkOutDate", "adults", "children", "currency",
+]);
 export function EditReservationForm({ detail }: { detail: ReservationDetailDto }) {
   const { t } = useTranslation("reservations");
   const canManage = useHasPermission("MANAGE_RESERVATIONS");
@@ -129,11 +132,12 @@ export function EditReservationForm({ detail }: { detail: ReservationDetailDto }
         const id = `reservation-edit-${field}`;
         const errorId = `${id}-error`;
         const error = fieldErrors[field];
-        const common = { id, name: field, className: fieldClass, value: values[field], disabled: disabled(field), "aria-invalid": Boolean(error), "aria-describedby": error ? errorId : undefined };
+        const required = REQUIRED_FIELDS.has(field);
+        const common = { id, name: field, className: fieldClass, value: values[field], disabled: disabled(field), required, "aria-required": required, "aria-invalid": Boolean(error), "aria-describedby": error ? errorId : undefined };
         const control = field === "specialRequests" || field === "internalNotes"
           ? <textarea {...common} onChange={(event) => setField(field, event.target.value)} />
           : <input {...common} type={field.includes("Date") ? "date" : field.includes("Time") ? "time" : ["adults", "children", "grossAmount", "otaCommission", "netAmount"].includes(field) ? "number" : "text"} onChange={(event) => setField(field, event.target.value)} />;
-        return <label key={field} htmlFor={id} className="flex flex-col gap-1 text-sm">{t(`edit.fields.${field}`)}{control}{error ? <span id={errorId} role="alert">{t(`edit.errors.${error}`)}</span> : null}</label>;
+        return <label key={field} htmlFor={id} className="flex flex-col gap-1 text-sm">{t(`edit.fields.${field}`)}{required ? ` (${t("edit.required")})` : null}{control}{error ? <span id={errorId} role="alert">{t(`edit.errors.${error}`)}</span> : null}</label>;
       })}
     </div>
     {submitted && Object.keys(fieldErrors).length > 0 ? <p role="alert">{t("edit.errors.correctFields")}</p> : null}

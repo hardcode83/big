@@ -6,6 +6,7 @@ import { I18nProvider } from "@/lib/i18n/client-provider";
 import esReservations from "@/locales/es/reservations.json";
 import esStates from "@/locales/es/states.json";
 import { ApiError } from "@/lib/api";
+import type { ReservationList } from "../../data";
 
 const useReservationsMock = vi.hoisted(() => vi.fn());
 const useHasPermissionMock = vi.hoisted(() => vi.fn());
@@ -47,7 +48,7 @@ beforeEach(() => {
   useCreateReservationMock.mockReturnValue({ isPending: false, mutate: vi.fn() });
 });
 
-const SAMPLE = {
+const SAMPLE: ReservationList = {
   data: [
     {
       id: "reservation-1",
@@ -55,6 +56,8 @@ const SAMPLE = {
       status: "PENDING",
       checkInDate: "2026-08-12",
       checkOutDate: "2026-08-15",
+      nights: 3,
+      totalGuests: 2,
       // A real (non-null) guestId paired with a null guestFullName: this is
       // the regression-catching shape for R3.2 — if the Guest cell ever
       // fell back to `row.guestId ?? "—"` instead of `row.guestFullName ??
@@ -64,6 +67,7 @@ const SAMPLE = {
       channel: "MANUAL",
       currency: "EUR",
       grossAmount: "612.50",
+      paymentStatus: "PENDING",
       propertyName: null,
       propertyInternalCode: null,
       guestFullName: null,
@@ -133,7 +137,7 @@ describe("ReservationsView (R2, R3.5, R4, R5.2, R5.4)", () => {
 
   it("lets a manager submit the create form, refreshes the list, and shows the created summary", async () => {
     useHasPermissionMock.mockReturnValue(true);
-    let currentList = { data: [], page: 1, perPage: 20, total: 0, totalPages: 0 };
+    let currentList: ReservationList = { data: [], page: 1, perPage: 20, total: 0, totalPages: 0 };
     let setVersion: ((value: (current: number) => number) => void) | undefined;
     const refetch = vi.fn(async () => {
       currentList = {

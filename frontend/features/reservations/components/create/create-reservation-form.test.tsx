@@ -79,7 +79,7 @@ const PROPERTY = {
   defaultCheckInTime: "15:00", defaultCheckOutTime: "11:00",
 };
 
-function renderForm(locale = "es" as const) {
+function renderForm(locale: "es" | "en" = "es") {
   return render(<I18nProvider locale={locale}><CreateReservationForm /></I18nProvider>);
 }
 
