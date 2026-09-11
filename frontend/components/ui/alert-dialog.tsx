@@ -101,6 +101,12 @@ function AlertDialogDescription({
  * Wraps a click handler in the destructive confirm pattern: closes the dialog
  * and then runs the callback. The cancel button (`AlertDialogCancel`) handles
  * the close-on-cancel path on its own.
+ *
+ * `className` is forwarded to the `Button` (which merges it through
+ * `cn(buttonVariants({ variant, size, className }))`) instead of being
+ * destructured away: without this, a caller's class — notably `tap-target`,
+ * the 44px floor of design D14 — was silently dropped and the footer buttons
+ * stayed at the `default` size's 40px.
  */
 function AlertDialogAction({
   className,
@@ -109,18 +115,24 @@ function AlertDialogAction({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Action>) {
   return (
     <AlertDialogPrimitive.Action asChild>
-      <Button variant="destructive" onClick={onClick} {...props} />
+      <Button
+        variant="destructive"
+        className={className}
+        onClick={onClick}
+        {...props}
+      />
     </AlertDialogPrimitive.Action>
   );
 }
 
+/** Forwards `className` to the `Button` for the same reason as `AlertDialogAction`. */
 function AlertDialogCancel({
   className,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Cancel>) {
   return (
     <AlertDialogPrimitive.Cancel asChild>
-      <Button variant="outline" {...props} />
+      <Button variant="outline" className={className} {...props} />
     </AlertDialogPrimitive.Cancel>
   );
 }
