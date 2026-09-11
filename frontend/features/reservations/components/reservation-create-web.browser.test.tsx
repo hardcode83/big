@@ -20,7 +20,10 @@ const useUpdateReservationMock = vi.hoisted(() => vi.fn(() => ({
   mutate: vi.fn(),
 })));
 
-vi.mock("@/lib/auth", () => ({ useHasPermission: useHasPermissionMock }));
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ user: { tenant_id: "tenant-from-session" } }),
+  useHasPermission: useHasPermissionMock,
+}));
 vi.mock("@/features/properties", () => ({ useActiveProperties: useActivePropertiesMock }));
 vi.mock("../../hooks/use-reservations", () => ({
   useReservation: useReservationMock,
