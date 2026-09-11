@@ -1,14 +1,14 @@
 ---
 schema: 1
-state: READY_FOR_PR
+state: PR_OPEN
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: sdd/reservation-create-web
 implementation_sha: 7b8ea164a1ab26706846221dbf8652af5d514112
-pr_number:
-pr_url:
-pr_state:
+pr_number: 181
+pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/181
+pr_state: OPEN
 merge_evidence:
 merge_sha:
 ---
