@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
 import { fireEvent, render, screen } from "@/test/render";
+import { I18nProvider } from "@/lib/i18n/client-provider";
 
 const useTenantMock = vi.hoisted(() => vi.fn());
 vi.mock("../hooks/use-tenant", () => ({ useTenant: useTenantMock }));
@@ -42,6 +43,12 @@ const TENANT = {
   },
 };
 
+function renderForm() {
+  return render(<TenantConfigForm />, {
+    wrapper: ({ children }) => <I18nProvider locale="es">{children}</I18nProvider>,
+  });
+}
+
 describe("TenantConfigForm (R5)", () => {
   const mutate = vi.fn();
 
@@ -69,7 +76,7 @@ describe("TenantConfigForm (R5)", () => {
       refetch: vi.fn(),
     });
     useHasPermissionMock.mockReturnValue(true);
-    render(<TenantConfigForm />);
+    renderForm();
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
@@ -77,28 +84,28 @@ describe("TenantConfigForm (R5)", () => {
     const refetch = vi.fn();
     useTenantMock.mockReturnValue({ isPending: false, isError: true, data: undefined, refetch });
     useHasPermissionMock.mockReturnValue(true);
-    render(<TenantConfigForm />);
+    renderForm();
     expect(screen.getByRole("alert")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
     expect(refetch).toHaveBeenCalledTimes(1);
   });
 
   it("renders read-only for PROPERTY_MANAGER: fields shown, no submit control at all (R5.2, design D5)", () => {
     useHasPermissionMock.mockReturnValue(false);
-    render(<TenantConfigForm />);
+    renderForm();
     expect(screen.getByText("Acme")).toBeInTheDocument();
     expect(screen.getByText("100.00")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Guardar cambios" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("form")).not.toBeInTheDocument();
   });
 
   it("sends only the changed top-level field on submit (R5.3)", () => {
     useHasPermissionMock.mockReturnValue(true);
-    render(<TenantConfigForm />);
+    renderForm();
 
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Acme Corp" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Acme Corp" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     expect(mutate).toHaveBeenCalledTimes(1);
     const [input] = mutate.mock.calls[0];
@@ -107,12 +114,12 @@ describe("TenantConfigForm (R5)", () => {
 
   it("sends only the changed nested config field, wrapped under `config`, when only config changes", () => {
     useHasPermissionMock.mockReturnValue(true);
-    render(<TenantConfigForm />);
+    renderForm();
 
-    fireEvent.change(screen.getByLabelText("SLA — critical (minutes)"), {
+    fireEvent.change(screen.getByLabelText("SLA — crítico (minutos)"), {
       target: { value: "20" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     expect(mutate).toHaveBeenCalledTimes(1);
     const [input] = mutate.mock.calls[0];
@@ -121,12 +128,12 @@ describe("TenantConfigForm (R5)", () => {
 
   it("sends the threshold as the exact string typed, not a JS number (Numeric-field convention)", () => {
     useHasPermissionMock.mockReturnValue(true);
-    render(<TenantConfigForm />);
+    renderForm();
 
-    fireEvent.change(screen.getByLabelText("Owner approval threshold (EUR)"), {
+    fireEvent.change(screen.getByLabelText("Umbral de aprobación del propietario (EUR)"), {
       target: { value: "250.75" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     const [input] = mutate.mock.calls[0];
     expect(input).toEqual({ config: { ownerApprovalThresholdEur: "250.75" } });
@@ -134,10 +141,10 @@ describe("TenantConfigForm (R5)", () => {
 
   it("rejects client-side before any request when the time zone is invalid (R5.3)", () => {
     useHasPermissionMock.mockReturnValue(true);
-    render(<TenantConfigForm />);
+    renderForm();
 
-    fireEvent.change(screen.getByLabelText("Time zone"), { target: { value: "Not/AZone" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.change(screen.getByLabelText("Zona horaria"), { target: { value: "Not/AZone" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     expect(mutate).not.toHaveBeenCalled();
     expect(
@@ -147,12 +154,12 @@ describe("TenantConfigForm (R5)", () => {
 
   it("rejects client-side before any request when the threshold is negative (R5.3)", () => {
     useHasPermissionMock.mockReturnValue(true);
-    render(<TenantConfigForm />);
+    renderForm();
 
-    fireEvent.change(screen.getByLabelText("Owner approval threshold (EUR)"), {
+    fireEvent.change(screen.getByLabelText("Umbral de aprobación del propietario (EUR)"), {
       target: { value: "-5" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     expect(mutate).not.toHaveBeenCalled();
     expect(screen.getByText("Cannot be negative.")).toBeInTheDocument();
@@ -160,20 +167,20 @@ describe("TenantConfigForm (R5)", () => {
 
   it("shows the inline caveat next to default_language (R5.4)", () => {
     useHasPermissionMock.mockReturnValue(true);
-    render(<TenantConfigForm />);
+    renderForm();
     expect(
       screen.getByText(
-        "Changing this does not affect the preferred language already set on existing users.",
+        "Cambiar esto no afecta al idioma preferido ya establecido en los usuarios existentes.",
       ),
     ).toBeInTheDocument();
   });
 
   it("shows the inline caveat next to owner_approval_threshold_eur (R5.5)", () => {
     useHasPermissionMock.mockReturnValue(true);
-    render(<TenantConfigForm />);
+    renderForm();
     expect(
       screen.getByText(
-        "Changing this does not re-evaluate owner approvals already generated.",
+        "Cambiar esto no reevalúa las aprobaciones del propietario ya generadas.",
       ),
     ).toBeInTheDocument();
   });
@@ -200,7 +207,7 @@ describe("TenantConfigForm (R5)", () => {
         },
       }),
     });
-    render(<TenantConfigForm />);
+    renderForm();
     expect(
       screen.getByText("owner_approval_threshold_eur cannot be negative"),
     ).toBeInTheDocument();
@@ -214,18 +221,18 @@ describe("TenantConfigForm (R5)", () => {
       isError: false,
       isSuccess: false,
     });
-    render(<TenantConfigForm />);
-    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    renderForm();
+    expect(screen.getByRole("button", { name: "Guardando…" })).toBeDisabled();
   });
 
   it("keeps a natural keyboard focus order: name first, submit reachable", () => {
     useHasPermissionMock.mockReturnValue(true);
-    render(<TenantConfigForm />);
-    const name = screen.getByLabelText("Name");
+    renderForm();
+    const name = screen.getByLabelText("Nombre");
     name.focus();
     expect(name).toHaveFocus();
 
-    const submit = screen.getByRole("button", { name: "Save changes" });
+    const submit = screen.getByRole("button", { name: "Guardar cambios" });
     expect(submit.tabIndex).toBeGreaterThanOrEqual(0);
     submit.focus();
     expect(submit).toHaveFocus();

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
 import { fireEvent, render, screen } from "@/test/render";
+import { I18nProvider } from "@/lib/i18n/client-provider";
 
 const useUserMock = vi.hoisted(() => vi.fn());
 vi.mock("../../hooks/use-user", () => ({ useUser: useUserMock }));
@@ -27,6 +28,12 @@ const USER = {
   updatedAt: "2026-08-01T09:00:00Z",
 };
 
+function renderForm(userId = "user-2") {
+  return render(<EditUserForm userId={userId} />, {
+    wrapper: ({ children }) => <I18nProvider locale="es">{children}</I18nProvider>,
+  });
+}
+
 describe("EditUserForm (R3.1, R3.2, R3.3)", () => {
   const mutate = vi.fn();
 
@@ -43,9 +50,9 @@ describe("EditUserForm (R3.1, R3.2, R3.3)", () => {
   });
 
   it("sends only the changed fields on submit (R3.1)", () => {
-    render(<EditUserForm userId="user-2" />);
-    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Marta C." } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    renderForm();
+    fireEvent.change(screen.getByLabelText("Nombre completo"), { target: { value: "Marta C." } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     expect(mutate).toHaveBeenCalledWith(
       { userId: "user-2", input: { name: "Marta C." } },
@@ -55,31 +62,31 @@ describe("EditUserForm (R3.1, R3.2, R3.3)", () => {
 
   it("disables the role and status controls when the target row is the acting user's own (R3.3)", () => {
     useAuthMock.mockReturnValue({ user: { id: "user-2", role: "CLEANER" } });
-    render(<EditUserForm userId="user-2" />);
+    renderForm();
 
-    expect(screen.getByLabelText("Role")).toBeDisabled();
-    expect(screen.getByLabelText("Status")).toBeDisabled();
+    expect(screen.getByLabelText("Rol")).toBeDisabled();
+    expect(screen.getByLabelText("Estado")).toBeDisabled();
   });
 
   it("leaves role/status enabled for a row that is not the acting user's own", () => {
-    render(<EditUserForm userId="user-2" />);
-    expect(screen.getByLabelText("Role")).not.toBeDisabled();
-    expect(screen.getByLabelText("Status")).not.toBeDisabled();
+    renderForm();
+    expect(screen.getByLabelText("Rol")).not.toBeDisabled();
+    expect(screen.getByLabelText("Estado")).not.toBeDisabled();
   });
 
   it("disables the submit button while the mutation is pending", () => {
     useUpdateUserMock.mockReturnValue({ mutate, isPending: true, isError: false });
-    render(<EditUserForm userId="user-2" />);
-    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    renderForm();
+    expect(screen.getByRole("button", { name: "Guardando…" })).toBeDisabled();
   });
 
   it("keeps a natural keyboard focus order: full name first, submit button reachable", () => {
-    render(<EditUserForm userId="user-2" />);
-    const fullName = screen.getByLabelText("Full name");
+    renderForm();
+    const fullName = screen.getByLabelText("Nombre completo");
     fullName.focus();
     expect(fullName).toHaveFocus();
 
-    const submit = screen.getByRole("button", { name: "Save changes" });
+    const submit = screen.getByRole("button", { name: "Guardar cambios" });
     expect(submit.tabIndex).toBeGreaterThanOrEqual(0);
     submit.focus();
     expect(submit).toHaveFocus();
@@ -97,7 +104,7 @@ describe("EditUserForm (R3.1, R3.2, R3.3)", () => {
         details: {},
       }),
     });
-    render(<EditUserForm userId="user-2" />);
+    renderForm();
 
     expect(
       screen.getByText(

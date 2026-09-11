@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,7 +35,8 @@ import { useDeactivateUser } from "../../hooks/use-deactivate-user";
  * previous attempt's error state does not leak into the next time this same
  * row's dialog is reopened.
  *
- * Plain English literals (section 3 scope note, see `user-list.tsx`).
+ * i18n (section 5): the `tenant-settings` namespace, incl. the interpolated
+ * `{{name}}` in the description and last-active-cleaner warning.
  */
 export function DeactivateUserConfirm({
   user,
@@ -66,6 +69,7 @@ function DeactivateUserConfirmBody({
   user: UserDto;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("tenant-settings");
   const mutation = useDeactivateUser();
   const isActiveCleaner = user.role === "CLEANER" && user.status === "ACTIVE";
   const cleanerCount = useActiveCleanerCount(isActiveCleaner);
@@ -79,30 +83,30 @@ function DeactivateUserConfirmBody({
   return (
     <>
       <AlertDialogHeader>
-        <AlertDialogTitle>Deactivate user</AlertDialogTitle>
+        <AlertDialogTitle>{t("deactivateConfirm.title")}</AlertDialogTitle>
         <AlertDialogDescription>
-          {`Are you sure you want to deactivate ${user.name}? They will no longer be able to sign in.`}
+          {t("deactivateConfirm.description", { name: user.name })}
         </AlertDialogDescription>
       </AlertDialogHeader>
       {isLastActiveCleaner ? (
         <p role="note" className="text-sm text-state-warning-text">
-          {`${user.name} is the only active cleaner in this tenant. Deactivating them will leave no one auto-assigned to checkout cleaning — this will not block the action.`}
+          {t("deactivateConfirm.lastCleanerWarning", { name: user.name })}
         </p>
       ) : null}
       {mutation.isError ? (
         <p role="alert" className="text-sm text-state-error-text">
-          Something went wrong while deactivating this user.
+          {t("deactivateConfirm.error")}
         </p>
       ) : null}
       <AlertDialogFooter>
-        <AlertDialogCancel className="tap-target">Cancel</AlertDialogCancel>
+        <AlertDialogCancel className="tap-target">{t("deactivateConfirm.cancel")}</AlertDialogCancel>
         <AlertDialogAction
           className="tap-target"
           onClick={handleConfirm}
           disabled={mutation.isPending}
           aria-busy={mutation.isPending}
         >
-          {mutation.isPending ? "Deactivating…" : "Deactivate"}
+          {mutation.isPending ? t("deactivateConfirm.confirming") : t("deactivateConfirm.confirm")}
         </AlertDialogAction>
       </AlertDialogFooter>
     </>

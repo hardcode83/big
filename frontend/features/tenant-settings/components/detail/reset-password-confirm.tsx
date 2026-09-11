@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,7 +30,8 @@ import { useResetPassword } from "../../hooks/use-reset-password";
  * to the next time this row's dialog is reopened — mirrors
  * `guest-portal-link-card.tsx`'s unmount/remount guarantee.
  *
- * Plain English literals (section 3 scope note, see `user-list.tsx`).
+ * i18n (section 5): the `tenant-settings` namespace, incl. the interpolated
+ * `{{name}}` in the confirmation description.
  */
 export function ResetPasswordConfirm({
   userId,
@@ -59,6 +62,7 @@ function ResetPasswordConfirmBody({
   userId: string;
   userName: string;
 }) {
+  const { t } = useTranslation("tenant-settings");
   const mutation = useResetPassword();
 
   function handleConfirm(event: { preventDefault: () => void }) {
@@ -70,14 +74,14 @@ function ResetPasswordConfirmBody({
     return (
       <>
         <AlertDialogHeader>
-          <AlertDialogTitle>Password reset</AlertDialogTitle>
+          <AlertDialogTitle>{t("resetPasswordConfirm.successTitle")}</AlertDialogTitle>
         </AlertDialogHeader>
         <TemporaryPasswordReveal
           temporaryPassword={mutation.data.temporaryPassword}
           userName={mutation.data.user.name}
         />
         <AlertDialogFooter>
-          <AlertDialogCancel className="tap-target">Close</AlertDialogCancel>
+          <AlertDialogCancel className="tap-target">{t("resetPasswordConfirm.close")}</AlertDialogCancel>
         </AlertDialogFooter>
       </>
     );
@@ -86,25 +90,25 @@ function ResetPasswordConfirmBody({
   return (
     <>
       <AlertDialogHeader>
-        <AlertDialogTitle>Reset password</AlertDialogTitle>
+        <AlertDialogTitle>{t("resetPasswordConfirm.title")}</AlertDialogTitle>
         <AlertDialogDescription>
-          {`Generate a new temporary password for ${userName}? Their current password stops working immediately.`}
+          {t("resetPasswordConfirm.description", { name: userName })}
         </AlertDialogDescription>
       </AlertDialogHeader>
       {mutation.isError ? (
         <p role="alert" className="text-sm text-state-error-text">
-          Something went wrong while resetting the password.
+          {t("resetPasswordConfirm.error")}
         </p>
       ) : null}
       <AlertDialogFooter>
-        <AlertDialogCancel className="tap-target">Cancel</AlertDialogCancel>
+        <AlertDialogCancel className="tap-target">{t("resetPasswordConfirm.cancel")}</AlertDialogCancel>
         <AlertDialogAction
           className="tap-target"
           onClick={handleConfirm}
           disabled={mutation.isPending}
           aria-busy={mutation.isPending}
         >
-          {mutation.isPending ? "Resetting…" : "Reset password"}
+          {mutation.isPending ? t("resetPasswordConfirm.confirming") : t("resetPasswordConfirm.confirm")}
         </AlertDialogAction>
       </AlertDialogFooter>
     </>

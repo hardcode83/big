@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
+
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 
 import { useUser } from "../../hooks/use-user";
@@ -16,39 +18,41 @@ import { useUser } from "../../hooks/use-user";
  * rows from this endpoint, and this view renders whatever status comes back
  * with no special-casing.
  *
- * Plain English literals (section 3 scope note, see `user-list.tsx`) — i18n
- * lands in tasks.md section 5.
+ * i18n (section 5): the `tenant-settings` namespace. `role`/`status` labels
+ * are translated; `name`/`email`/`phone` are the raw DTO values, never
+ * localized/formatted.
  */
 export function UserDetailView({ userId }: { userId: string }) {
+  const { t } = useTranslation("tenant-settings");
   const query = useUser(userId);
 
   if (query.isPending) {
-    return <LoadingState label="Loading user…" />;
+    return <LoadingState label={t("userDetail.loading")} />;
   }
 
   if (query.isError) {
     return (
       <ErrorState
-        title="Couldn't load this user"
-        description="Something went wrong while loading the user's detail."
+        title={t("userDetail.error.title")}
+        description={t("userDetail.error.description")}
         onRetry={() => void query.refetch()}
-        retryLabel="Retry"
+        retryLabel={t("userDetail.error.retry")}
       />
     );
   }
 
   const user = query.data;
   if (!user) {
-    return <EmptyState title="User not found" />;
+    return <EmptyState title={t("userDetail.notFound")} />;
   }
 
   return (
-    <dl className="flex flex-col gap-3" aria-label="User detail">
-      <DetailRow label="Name" value={user.name} />
-      <DetailRow label="Email" value={user.email} />
-      <DetailRow label="Phone" value={user.phone ?? "—"} />
-      <DetailRow label="Role" value={user.role} />
-      <DetailRow label="Status" value={user.status} />
+    <dl className="flex flex-col gap-3" aria-label={t("userDetail.ariaLabel")}>
+      <DetailRow label={t("userDetail.fields.name")} value={user.name} />
+      <DetailRow label={t("userDetail.fields.email")} value={user.email} />
+      <DetailRow label={t("userDetail.fields.phone")} value={user.phone ?? t("userDetail.unset")} />
+      <DetailRow label={t("userDetail.fields.role")} value={t(`userRole.${user.role}`)} />
+      <DetailRow label={t("userDetail.fields.status")} value={t(`userStatus.${user.status}`)} />
     </dl>
   );
 }

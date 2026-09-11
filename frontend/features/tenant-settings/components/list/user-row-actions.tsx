@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -39,9 +40,10 @@ type SheetStep = "closed" | "view" | "edit";
  * row — deactivation is a status change on oneself, the same class of action
  * R3.3 disables role/status controls for.
  *
- * Plain English literals (section 3 scope note, see `user-list.tsx`).
+ * i18n (section 5): the `tenant-settings` namespace.
  */
 export function UserRowActions({ user }: { user: UserDto }) {
+  const { t } = useTranslation("tenant-settings");
   const { user: sessionUser } = useAuth();
   const canManage = useHasPermission("MANAGE_USERS");
   const [step, setStep] = useState<SheetStep>("closed");
@@ -59,7 +61,7 @@ export function UserRowActions({ user }: { user: UserDto }) {
         className="tap-target"
         onClick={() => setStep("view")}
       >
-        View
+        {t("rowActions.view")}
       </Button>
       <Sheet
         open={step !== "closed"}
@@ -67,9 +69,11 @@ export function UserRowActions({ user }: { user: UserDto }) {
           if (!open) setStep("closed");
         }}
       >
-        <SheetContent closeLabel="Close">
+        <SheetContent closeLabel={t("rowActions.sheet.close")}>
           <SheetHeader>
-            <SheetTitle>{step === "edit" ? "Edit user" : "User detail"}</SheetTitle>
+            <SheetTitle>
+              {step === "edit" ? t("rowActions.sheet.editTitle") : t("rowActions.sheet.viewTitle")}
+            </SheetTitle>
           </SheetHeader>
           {step === "view" ? (
             <div className="flex flex-col gap-4">
@@ -82,7 +86,7 @@ export function UserRowActions({ user }: { user: UserDto }) {
                     className="tap-target"
                     onClick={() => setStep("edit")}
                   >
-                    Edit
+                    {t("rowActions.edit")}
                   </Button>
                   <Button
                     type="button"
@@ -91,7 +95,7 @@ export function UserRowActions({ user }: { user: UserDto }) {
                     className="tap-target"
                     onClick={() => setResetOpen(true)}
                   >
-                    Reset password
+                    {t("rowActions.resetPassword")}
                   </Button>
                   {user.status === "ACTIVE" ? (
                     <Button
@@ -102,7 +106,7 @@ export function UserRowActions({ user }: { user: UserDto }) {
                       disabled={isSelf}
                       onClick={() => setDeactivateOpen(true)}
                     >
-                      Deactivate
+                      {t("rowActions.deactivate")}
                     </Button>
                   ) : null}
                 </div>

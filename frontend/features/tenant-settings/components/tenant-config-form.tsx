@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ErrorState, LoadingState } from "@/components/states";
 import { Button } from "@/components/ui/button";
@@ -118,24 +119,26 @@ function diff<T extends object>(
  * scope" — switching storage backends is `cleaning`'s data-migration
  * problem, not this form's).
  *
- * Plain English literals (section 4 scope note, mirrors section 3's): i18n
- * lands in tasks.md section 5, not here.
+ * i18n (section 5): the `tenant-settings` namespace. Client-validation error
+ * strings (`validate-tenant-config.ts`) are out of this section's scope and
+ * stay as-is.
  */
 export function TenantConfigForm() {
+  const { t } = useTranslation("tenant-settings");
   const query = useTenant();
   const canManage = useHasPermission("MANAGE_TENANT_SETTINGS");
 
   if (query.isPending) {
-    return <LoadingState label="Loading tenant settings…" />;
+    return <LoadingState label={t("tenantConfig.loading")} />;
   }
 
   if (query.isError || !query.data) {
     return (
       <ErrorState
-        title="Couldn't load tenant settings"
-        description="Something went wrong while loading the tenant configuration."
+        title={t("tenantConfig.error.title")}
+        description={t("tenantConfig.error.description")}
         onRetry={() => void query.refetch()}
-        retryLabel="Retry"
+        retryLabel={t("tenantConfig.error.retry")}
       />
     );
   }
@@ -152,49 +155,61 @@ export function TenantConfigForm() {
  * `false` for) sees every field, no inputs, no submit control.
  */
 function TenantConfigReadOnly({ tenant }: { tenant: TenantDto }) {
+  const { t } = useTranslation("tenant-settings");
+  const enabledLabel = (value: boolean) => (value ? t("tenantConfig.enabled") : t("tenantConfig.disabled"));
+
   return (
-    <dl className="flex flex-col gap-3" aria-label="Tenant settings (read-only)">
-      <DetailRow label="Name" value={tenant.name} />
-      <DetailRow label="Billing email" value={tenant.billingEmail} />
-      <DetailRow label="Country" value={tenant.country} />
-      <DetailRow label="Time zone" value={tenant.timezone} />
-      <DetailRow label="Default language" value={tenant.defaultLanguage} />
+    <dl className="flex flex-col gap-3" aria-label={t("tenantConfig.readOnlyAriaLabel")}>
+      <DetailRow label={t("tenantConfig.fields.name")} value={tenant.name} />
+      <DetailRow label={t("tenantConfig.fields.billingEmail")} value={tenant.billingEmail} />
+      <DetailRow label={t("tenantConfig.fields.country")} value={tenant.country} />
+      <DetailRow label={t("tenantConfig.fields.timezone")} value={tenant.timezone} />
+      <DetailRow label={t("tenantConfig.fields.defaultLanguage")} value={tenant.defaultLanguage} />
       <DetailRow
-        label="Owner approval threshold (EUR)"
+        label={t("tenantConfig.fields.ownerApprovalThreshold")}
         value={tenant.config.ownerApprovalThresholdEur}
       />
-      <DetailRow label="AI confidence threshold" value={tenant.config.aiConfidenceThreshold} />
-      <DetailRow label="SLA — critical (minutes)" value={String(tenant.config.slaCriticalMinutes)} />
-      <DetailRow label="SLA — high (minutes)" value={String(tenant.config.slaHighMinutes)} />
-      <DetailRow label="SLA — medium (minutes)" value={String(tenant.config.slaMediumMinutes)} />
-      <DetailRow label="SLA — low (minutes)" value={String(tenant.config.slaLowMinutes)} />
       <DetailRow
-        label="Check-in window (hours before)"
+        label={t("tenantConfig.fields.aiConfidenceThreshold")}
+        value={tenant.config.aiConfidenceThreshold}
+      />
+      <DetailRow
+        label={t("tenantConfig.fields.slaCritical")}
+        value={String(tenant.config.slaCriticalMinutes)}
+      />
+      <DetailRow label={t("tenantConfig.fields.slaHigh")} value={String(tenant.config.slaHighMinutes)} />
+      <DetailRow
+        label={t("tenantConfig.fields.slaMedium")}
+        value={String(tenant.config.slaMediumMinutes)}
+      />
+      <DetailRow label={t("tenantConfig.fields.slaLow")} value={String(tenant.config.slaLowMinutes)} />
+      <DetailRow
+        label={t("tenantConfig.fields.checkinWindow")}
         value={String(tenant.config.checkinWindowHoursBefore)}
       />
       <DetailRow
-        label="Checkout-ready window (hours after)"
+        label={t("tenantConfig.fields.checkoutWindow")}
         value={String(tenant.config.checkoutReadyHoursAfter)}
       />
       <DetailRow
-        label="Auto-create cleaning task"
-        value={tenant.config.autoCreateCleaningTask ? "Enabled" : "Disabled"}
+        label={t("tenantConfig.fields.autoCreateCleaningTask")}
+        value={enabledLabel(tenant.config.autoCreateCleaningTask)}
       />
       <DetailRow
-        label="Cleaning photo required"
-        value={tenant.config.cleaningPhotoRequired ? "Enabled" : "Disabled"}
+        label={t("tenantConfig.fields.cleaningPhotoRequired")}
+        value={enabledLabel(tenant.config.cleaningPhotoRequired)}
       />
-      <DetailRow label="Storage type" value={tenant.config.storageType} />
+      <DetailRow label={t("tenantConfig.fields.storageType")} value={tenant.config.storageType} />
       <DetailRow
-        label="Email notifications"
-        value={tenant.config.notificationEmailEnabled ? "Enabled" : "Disabled"}
-      />
-      <DetailRow
-        label="WhatsApp notifications"
-        value={tenant.config.notificationWhatsappEnabled ? "Enabled" : "Disabled"}
+        label={t("tenantConfig.fields.notificationEmail")}
+        value={enabledLabel(tenant.config.notificationEmailEnabled)}
       />
       <DetailRow
-        label="Recurring issues shown"
+        label={t("tenantConfig.fields.notificationWhatsapp")}
+        value={enabledLabel(tenant.config.notificationWhatsappEnabled)}
+      />
+      <DetailRow
+        label={t("tenantConfig.fields.reviewRecurringIssuesTopN")}
         value={String(tenant.config.reviewRecurringIssuesTopN)}
       />
     </dl>
@@ -211,6 +226,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
+  const { t } = useTranslation("tenant-settings");
   const mutation = useUpdateTenant();
   const [values, setValues] = useState<EditableValues>(() => toEditableValues(tenant));
   const [baseline, setBaseline] = useState<EditableValues>(() => toEditableValues(tenant));
@@ -302,7 +318,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-name" className="text-sm font-medium">
-          Name
+          {t("tenantConfig.fields.name")}
         </label>
         <input
           id="tenant-name"
@@ -320,7 +336,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
 
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-billing-email" className="text-sm font-medium">
-          Billing email
+          {t("tenantConfig.fields.billingEmail")}
         </label>
         <input
           id="tenant-billing-email"
@@ -339,7 +355,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
 
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-country" className="text-sm font-medium">
-          Country
+          {t("tenantConfig.fields.country")}
         </label>
         <input
           id="tenant-country"
@@ -357,7 +373,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
 
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-timezone" className="text-sm font-medium">
-          Time zone
+          {t("tenantConfig.fields.timezone")}
         </label>
         <input
           id="tenant-timezone"
@@ -375,7 +391,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
 
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-default-language" className="text-sm font-medium">
-          Default language
+          {t("tenantConfig.fields.defaultLanguage")}
         </label>
         <select
           id="tenant-default-language"
@@ -391,7 +407,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
         </select>
         {/* R5.4 */}
         <p role="note" className="text-xs text-muted-foreground">
-          Changing this does not affect the preferred language already set on existing users.
+          {t("tenantConfig.languageNote")}
         </p>
         {errorFor("defaultLanguage", "default_language") ? (
           <p role="alert" className="text-sm text-state-error-text">
@@ -402,7 +418,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
 
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-owner-approval-threshold" className="text-sm font-medium">
-          Owner approval threshold (EUR)
+          {t("tenantConfig.fields.ownerApprovalThreshold")}
         </label>
         <input
           id="tenant-owner-approval-threshold"
@@ -415,7 +431,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
         />
         {/* R5.5 */}
         <p role="note" className="text-xs text-muted-foreground">
-          Changing this does not re-evaluate owner approvals already generated.
+          {t("tenantConfig.thresholdNote")}
         </p>
         {errorFor("ownerApprovalThresholdEur", "owner_approval_threshold_eur") ? (
           <p role="alert" className="text-sm text-state-error-text">
@@ -426,7 +442,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
 
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-ai-confidence-threshold" className="text-sm font-medium">
-          AI confidence threshold
+          {t("tenantConfig.fields.aiConfidenceThreshold")}
         </label>
         <input
           id="tenant-ai-confidence-threshold"
@@ -446,7 +462,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
 
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-sla-critical" className="text-sm font-medium">
-          SLA — critical (minutes)
+          {t("tenantConfig.fields.slaCritical")}
         </label>
         <input
           id="tenant-sla-critical"
@@ -465,7 +481,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
 
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-sla-high" className="text-sm font-medium">
-          SLA — high (minutes)
+          {t("tenantConfig.fields.slaHigh")}
         </label>
         <input
           id="tenant-sla-high"
@@ -484,7 +500,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
 
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-sla-medium" className="text-sm font-medium">
-          SLA — medium (minutes)
+          {t("tenantConfig.fields.slaMedium")}
         </label>
         <input
           id="tenant-sla-medium"
@@ -503,7 +519,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
 
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-sla-low" className="text-sm font-medium">
-          SLA — low (minutes)
+          {t("tenantConfig.fields.slaLow")}
         </label>
         <input
           id="tenant-sla-low"
@@ -522,7 +538,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
 
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-checkin-window" className="text-sm font-medium">
-          Check-in window (hours before)
+          {t("tenantConfig.fields.checkinWindow")}
         </label>
         <input
           id="tenant-checkin-window"
@@ -541,7 +557,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
 
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-checkout-window" className="text-sm font-medium">
-          Checkout-ready window (hours after)
+          {t("tenantConfig.fields.checkoutWindow")}
         </label>
         <input
           id="tenant-checkout-window"
@@ -560,7 +576,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
 
       <div className="flex flex-col gap-1">
         <label htmlFor="tenant-review-top-n" className="text-sm font-medium">
-          Recurring issues shown
+          {t("tenantConfig.fields.reviewRecurringIssuesTopN")}
         </label>
         <input
           id="tenant-review-top-n"
@@ -585,7 +601,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
           checked={values.autoCreateCleaningTask}
           onChange={(event) => set("autoCreateCleaningTask", event.target.checked)}
         />
-        Auto-create cleaning task after checkout
+        {t("tenantConfig.fields.autoCreateCleaningTask")}
       </label>
 
       <label htmlFor="tenant-cleaning-photo-required" className="tap-target flex items-center gap-2 text-sm">
@@ -596,7 +612,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
           checked={values.cleaningPhotoRequired}
           onChange={(event) => set("cleaningPhotoRequired", event.target.checked)}
         />
-        Require a cleaning photo
+        {t("tenantConfig.fields.cleaningPhotoRequired")}
       </label>
 
       <label htmlFor="tenant-notification-email" className="tap-target flex items-center gap-2 text-sm">
@@ -607,7 +623,7 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
           checked={values.notificationEmailEnabled}
           onChange={(event) => set("notificationEmailEnabled", event.target.checked)}
         />
-        Email notifications
+        {t("tenantConfig.fields.notificationEmail")}
       </label>
 
       <label htmlFor="tenant-notification-whatsapp" className="tap-target flex items-center gap-2 text-sm">
@@ -618,22 +634,22 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
           checked={values.notificationWhatsappEnabled}
           onChange={(event) => set("notificationWhatsappEnabled", event.target.checked)}
         />
-        WhatsApp notifications
+        {t("tenantConfig.fields.notificationWhatsapp")}
       </label>
 
       {/* `storage_type` has no control anywhere in this form — read-only display only. */}
       <div className="flex flex-col gap-0.5">
-        <span className="text-xs font-medium text-muted-foreground">Storage type</span>
+        <span className="text-xs font-medium text-muted-foreground">{t("tenantConfig.fields.storageType")}</span>
         <span className="text-sm text-foreground">{tenant.config.storageType}</span>
       </div>
 
       <Button type="submit" className="tap-target" disabled={mutation.isPending}>
-        {mutation.isPending ? "Saving…" : "Save changes"}
+        {mutation.isPending ? t("tenantConfig.submitting") : t("tenantConfig.submit")}
       </Button>
 
       {mutation.isSuccess ? (
         <p role="status" className="text-sm text-muted-foreground">
-          Tenant settings updated.
+          {t("tenantConfig.success")}
         </p>
       ) : null}
 

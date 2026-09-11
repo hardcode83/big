@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 
@@ -33,9 +34,11 @@ const GRANTABLE_ROLES: readonly UserRole[] = [
  * use) is attributed to `email` via `mapFieldErrors(error, "email")` (R2.2) —
  * the only field a `409` here can concern.
  *
- * Plain English literals (section 3 scope note, see `user-list.tsx`).
+ * i18n (section 5): the `tenant-settings` namespace. Role option values stay
+ * the raw enum; only the rendered label is translated.
  */
 export function CreateUserForm() {
+  const { t } = useTranslation("tenant-settings");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -63,7 +66,7 @@ export function CreateUserForm() {
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
         <label htmlFor="new-user-full-name" className="text-sm font-medium">
-          Full name
+          {t("createUser.fields.fullName")}
         </label>
         <input
           id="new-user-full-name"
@@ -80,7 +83,7 @@ export function CreateUserForm() {
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="new-user-email" className="text-sm font-medium">
-          Email
+          {t("createUser.fields.email")}
         </label>
         <input
           id="new-user-email"
@@ -98,7 +101,7 @@ export function CreateUserForm() {
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="new-user-phone" className="text-sm font-medium">
-          Phone
+          {t("createUser.fields.phone")}
         </label>
         <input
           id="new-user-phone"
@@ -115,7 +118,7 @@ export function CreateUserForm() {
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="new-user-role" className="text-sm font-medium">
-          Role
+          {t("createUser.fields.role")}
         </label>
         <select
           id="new-user-role"
@@ -125,17 +128,17 @@ export function CreateUserForm() {
         >
           {GRANTABLE_ROLES.map((grantableRole) => (
             <option key={grantableRole} value={grantableRole}>
-              {grantableRole}
+              {t(`userRole.${grantableRole}`)}
             </option>
           ))}
         </select>
       </div>
       <Button type="submit" className="tap-target" disabled={mutation.isPending}>
-        {mutation.isPending ? "Creating…" : "Create user"}
+        {mutation.isPending ? t("createUser.submitting") : t("createUser.submit")}
       </Button>
       {hasGenericError ? (
         <p role="alert" className="text-sm text-state-error-text">
-          Something went wrong. Please try again.
+          {t("createUser.genericError")}
         </p>
       ) : null}
     </form>

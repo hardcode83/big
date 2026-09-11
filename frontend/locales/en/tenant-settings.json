@@ -1,0 +1,166 @@
+{
+  "userRole": {
+    "TENANT_OWNER": "Owner",
+    "PROPERTY_MANAGER": "Manager",
+    "CLEANER": "Cleaner",
+    "TECHNICIAN": "Technician",
+    "SUPER_ADMIN": "Super admin"
+  },
+  "userStatus": {
+    "ACTIVE": "Active",
+    "INACTIVE": "Inactive",
+    "SUSPENDED": "Suspended"
+  },
+  "view": {
+    "usersHeading": "Users",
+    "tenantHeading": "Tenant",
+    "addUser": "Add user",
+    "sheet": {
+      "close": "Close",
+      "createUserTitle": "Add user"
+    }
+  },
+  "userList": {
+    "filters": {
+      "ariaLabel": "Filter users",
+      "role": "Role",
+      "status": "Status",
+      "allRoles": "All roles",
+      "allStatuses": "All statuses",
+      "clear": "Clear filters"
+    },
+    "table": {
+      "caption": "Tenant users",
+      "name": "Name",
+      "email": "Email",
+      "role": "Role",
+      "status": "Status",
+      "actions": "Actions",
+      "view": "View"
+    },
+    "loading": "Loading users…",
+    "empty": {
+      "title": "No users found",
+      "description": "No user matches the current filters."
+    },
+    "error": {
+      "title": "Couldn't load users",
+      "description": "Something went wrong while loading the user directory.",
+      "retry": "Retry"
+    }
+  },
+  "rowActions": {
+    "view": "View",
+    "edit": "Edit",
+    "resetPassword": "Reset password",
+    "deactivate": "Deactivate",
+    "sheet": {
+      "close": "Close",
+      "viewTitle": "User detail",
+      "editTitle": "Edit user"
+    }
+  },
+  "userDetail": {
+    "loading": "Loading user…",
+    "error": {
+      "title": "Couldn't load this user",
+      "description": "Something went wrong while loading the user's detail.",
+      "retry": "Retry"
+    },
+    "notFound": "User not found",
+    "ariaLabel": "User detail",
+    "fields": {
+      "name": "Name",
+      "email": "Email",
+      "phone": "Phone",
+      "role": "Role",
+      "status": "Status"
+    },
+    "unset": "—"
+  },
+  "createUser": {
+    "fields": {
+      "fullName": "Full name",
+      "email": "Email",
+      "phone": "Phone",
+      "role": "Role"
+    },
+    "submit": "Create user",
+    "submitting": "Creating…",
+    "genericError": "Something went wrong. Please try again."
+  },
+  "editUser": {
+    "loading": "Loading user…",
+    "error": {
+      "title": "Couldn't load this user",
+      "description": "Something went wrong while loading the user's detail.",
+      "retry": "Retry"
+    },
+    "fields": {
+      "fullName": "Full name",
+      "email": "Email",
+      "phone": "Phone",
+      "role": "Role",
+      "status": "Status"
+    },
+    "selfNote": "You cannot change your own role or status.",
+    "submit": "Save changes",
+    "submitting": "Saving…"
+  },
+  "deactivateConfirm": {
+    "title": "Deactivate user",
+    "description": "Are you sure you want to deactivate {{name}}? They will no longer be able to sign in.",
+    "lastCleanerWarning": "{{name}} is the only active cleaner in this tenant. Deactivating them will leave no one auto-assigned to checkout cleaning — this will not block the action.",
+    "error": "Something went wrong while deactivating this user.",
+    "cancel": "Cancel",
+    "confirm": "Deactivate",
+    "confirming": "Deactivating…"
+  },
+  "resetPasswordConfirm": {
+    "title": "Reset password",
+    "description": "Generate a new temporary password for {{name}}? Their current password stops working immediately.",
+    "successTitle": "Password reset",
+    "error": "Something went wrong while resetting the password.",
+    "cancel": "Cancel",
+    "close": "Close",
+    "confirm": "Reset password",
+    "confirming": "Resetting…"
+  },
+  "tenantConfig": {
+    "loading": "Loading tenant settings…",
+    "error": {
+      "title": "Couldn't load tenant settings",
+      "description": "Something went wrong while loading the tenant configuration.",
+      "retry": "Retry"
+    },
+    "readOnlyAriaLabel": "Tenant settings (read-only)",
+    "fields": {
+      "name": "Name",
+      "billingEmail": "Billing email",
+      "country": "Country",
+      "timezone": "Time zone",
+      "defaultLanguage": "Default language",
+      "ownerApprovalThreshold": "Owner approval threshold (EUR)",
+      "aiConfidenceThreshold": "AI confidence threshold",
+      "slaCritical": "SLA — critical (minutes)",
+      "slaHigh": "SLA — high (minutes)",
+      "slaMedium": "SLA — medium (minutes)",
+      "slaLow": "SLA — low (minutes)",
+      "checkinWindow": "Check-in window (hours before)",
+      "checkoutWindow": "Checkout-ready window (hours after)",
+      "autoCreateCleaningTask": "Auto-create cleaning task after checkout",
+      "cleaningPhotoRequired": "Require a cleaning photo",
+      "storageType": "Storage type",
+      "notificationEmail": "Email notifications",
+      "notificationWhatsapp": "WhatsApp notifications",
+      "reviewRecurringIssuesTopN": "Recurring issues shown"
+    },
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "languageNote": "Changing this does not affect the preferred language already set on existing users.",
+    "thresholdNote": "Changing this does not re-evaluate owner approvals already generated.",
+    "submit": "Save changes",
+    "submitting": "Saving…",
+    "success": "Tenant settings updated."
+  }
+}

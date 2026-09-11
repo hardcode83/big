@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fireEvent, render, screen } from "@/test/render";
+import { I18nProvider } from "@/lib/i18n/client-provider";
 
 const useAuthMock = vi.hoisted(() => vi.fn());
 const useHasPermissionMock = vi.hoisted(() => vi.fn());
@@ -44,6 +45,12 @@ const USER: UserDto = {
   updatedAt: "2026-08-01T09:00:00Z",
 };
 
+function renderRowActions(user: UserDto = USER) {
+  return render(<UserRowActions user={user} />, {
+    wrapper: ({ children }) => <I18nProvider locale="es">{children}</I18nProvider>,
+  });
+}
+
 describe("UserRowActions (R1.3, R3, R4, design D4, D5)", () => {
   beforeEach(() => {
     useAuthMock.mockReturnValue({ user: { id: "owner-1", role: "TENANT_OWNER" } });
@@ -51,39 +58,39 @@ describe("UserRowActions (R1.3, R3, R4, design D4, D5)", () => {
 
   it("opens the read-only detail view for any row, regardless of permission", () => {
     useHasPermissionMock.mockReturnValue(false);
-    render(<UserRowActions user={USER} />);
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    renderRowActions();
+    fireEvent.click(screen.getByRole("button", { name: "Ver" }));
     expect(screen.getByTestId("user-detail-view")).toBeInTheDocument();
   });
 
   it("for a PROPERTY_MANAGER session (no MANAGE_USERS) hosts only the read-only view, never the mutation forms", () => {
     useHasPermissionMock.mockReturnValue(false);
-    render(<UserRowActions user={USER} />);
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    renderRowActions();
+    fireEvent.click(screen.getByRole("button", { name: "Ver" }));
 
     expect(screen.getByTestId("user-detail-view")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reset password" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Deactivate" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Editar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restablecer contraseña" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Desactivar" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("deactivate-confirm")).not.toBeInTheDocument();
     expect(screen.queryByTestId("reset-password-confirm")).not.toBeInTheDocument();
   });
 
   it("with MANAGE_USERS shows edit/reset/deactivate controls alongside the detail view", () => {
     useHasPermissionMock.mockReturnValue(true);
-    render(<UserRowActions user={USER} />);
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    renderRowActions();
+    fireEvent.click(screen.getByRole("button", { name: "Ver" }));
 
-    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reset password" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Deactivate" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Editar" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restablecer contraseña" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Desactivar" })).toBeInTheDocument();
   });
 
   it("switches the Sheet to EditUserForm when Edit is clicked", () => {
     useHasPermissionMock.mockReturnValue(true);
-    render(<UserRowActions user={USER} />);
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    renderRowActions();
+    fireEvent.click(screen.getByRole("button", { name: "Ver" }));
+    fireEvent.click(screen.getByRole("button", { name: "Editar" }));
 
     expect(screen.getByTestId("edit-user-form")).toBeInTheDocument();
     expect(screen.queryByTestId("user-detail-view")).not.toBeInTheDocument();
@@ -91,25 +98,25 @@ describe("UserRowActions (R1.3, R3, R4, design D4, D5)", () => {
 
   it("does not offer Deactivate for an already-INACTIVE row", () => {
     useHasPermissionMock.mockReturnValue(true);
-    render(<UserRowActions user={{ ...USER, status: "INACTIVE" }} />);
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
-    expect(screen.queryByRole("button", { name: "Deactivate" })).not.toBeInTheDocument();
+    renderRowActions({ ...USER, status: "INACTIVE" });
+    fireEvent.click(screen.getByRole("button", { name: "Ver" }));
+    expect(screen.queryByRole("button", { name: "Desactivar" })).not.toBeInTheDocument();
   });
 
   it("keeps a natural keyboard focus order: View, then Edit / Reset password / Deactivate", () => {
     useHasPermissionMock.mockReturnValue(true);
-    render(<UserRowActions user={USER} />);
+    renderRowActions();
 
-    const view = screen.getByRole("button", { name: "View" });
+    const view = screen.getByRole("button", { name: "Ver" });
     expect(view.tabIndex).toBeGreaterThanOrEqual(0);
     view.focus();
     expect(view).toHaveFocus();
 
     fireEvent.click(view);
     const actions = [
-      screen.getByRole("button", { name: "Edit" }),
-      screen.getByRole("button", { name: "Reset password" }),
-      screen.getByRole("button", { name: "Deactivate" }),
+      screen.getByRole("button", { name: "Editar" }),
+      screen.getByRole("button", { name: "Restablecer contraseña" }),
+      screen.getByRole("button", { name: "Desactivar" }),
     ];
 
     for (const control of actions) {
@@ -131,8 +138,8 @@ describe("UserRowActions (R1.3, R3, R4, design D4, D5)", () => {
   it("disables Deactivate for the acting user's own row", () => {
     useAuthMock.mockReturnValue({ user: { id: "user-1", role: "CLEANER" } });
     useHasPermissionMock.mockReturnValue(true);
-    render(<UserRowActions user={USER} />);
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
-    expect(screen.getByRole("button", { name: "Deactivate" })).toBeDisabled();
+    renderRowActions();
+    fireEvent.click(screen.getByRole("button", { name: "Ver" }));
+    expect(screen.getByRole("button", { name: "Desactivar" })).toBeDisabled();
   });
 });

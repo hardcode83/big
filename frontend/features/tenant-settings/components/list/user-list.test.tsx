@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fireEvent, render, screen, within } from "@/test/render";
+import { I18nProvider } from "@/lib/i18n/client-provider";
 
 const useUsersMock = vi.hoisted(() => vi.fn());
 vi.mock("../../hooks/use-users", () => ({
@@ -38,7 +39,9 @@ const PAGE = {
 };
 
 function renderList() {
-  return render(<UserList />);
+  return render(<UserList />, {
+    wrapper: ({ children }) => <I18nProvider locale="es">{children}</I18nProvider>,
+  });
 }
 
 describe("UserList (R1.1, R1.2, R1.3)", () => {
@@ -61,7 +64,7 @@ describe("UserList (R1.1, R1.2, R1.3)", () => {
       refetch: vi.fn(),
     });
     renderList();
-    expect(screen.getByText("No users found")).toBeInTheDocument();
+    expect(screen.getByText("No se encontraron usuarios")).toBeInTheDocument();
   });
 
   it("shows the error state with a working retry", () => {
@@ -69,7 +72,7 @@ describe("UserList (R1.1, R1.2, R1.3)", () => {
     useUsersMock.mockReturnValue({ isPending: false, isError: true, data: undefined, refetch });
     renderList();
     expect(screen.getByRole("alert")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
     expect(refetch).toHaveBeenCalledTimes(1);
   });
 
@@ -79,19 +82,19 @@ describe("UserList (R1.1, R1.2, R1.3)", () => {
     const table = within(screen.getByRole("table"));
     expect(table.getByText("Ana Owner")).toBeInTheDocument();
     expect(table.getByText("ana@example.com")).toBeInTheDocument();
-    expect(table.getByText("TENANT_OWNER")).toBeInTheDocument();
-    expect(table.getByText("ACTIVE")).toBeInTheDocument();
-    expect(table.getByRole("button", { name: "View" })).toBeInTheDocument();
+    expect(table.getByText("Propietaria")).toBeInTheDocument();
+    expect(table.getByText("Activo")).toBeInTheDocument();
+    expect(table.getByRole("button", { name: "Ver" })).toBeInTheDocument();
   });
 
   it("passes role/status filters to useUsers as query params (R1.2)", () => {
     useUsersMock.mockReturnValue({ isPending: false, isError: false, data: PAGE, refetch: vi.fn() });
     renderList();
 
-    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "CLEANER" } });
+    fireEvent.change(screen.getByLabelText("Rol"), { target: { value: "CLEANER" } });
     expect(useUsersMock).toHaveBeenLastCalledWith({ role: "CLEANER" });
 
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "SUSPENDED" } });
+    fireEvent.change(screen.getByLabelText("Estado"), { target: { value: "SUSPENDED" } });
     expect(useUsersMock).toHaveBeenLastCalledWith({ role: "CLEANER", status: "SUSPENDED" });
   });
 
@@ -100,10 +103,10 @@ describe("UserList (R1.1, R1.2, R1.3)", () => {
     renderList();
 
     const controls = [
-      screen.getByLabelText("Role"),
-      screen.getByLabelText("Status"),
-      screen.getByRole("button", { name: "Clear filters" }),
-      screen.getByRole("button", { name: "View" }),
+      screen.getByLabelText("Rol"),
+      screen.getByLabelText("Estado"),
+      screen.getByRole("button", { name: "Limpiar filtros" }),
+      screen.getByRole("button", { name: "Ver" }),
     ];
 
     for (const control of controls) {

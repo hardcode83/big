@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { render, screen } from "@/test/render";
+import { I18nProvider } from "@/lib/i18n/client-provider";
 
 import type { UserDto } from "../../dto";
 
@@ -31,6 +32,12 @@ const ACTIVE_CLEANER: UserDto = {
 
 const ACTIVE_MANAGER: UserDto = { ...ACTIVE_CLEANER, id: "user-2", role: "PROPERTY_MANAGER" };
 
+function renderConfirm(user: UserDto, open = true, onOpenChange = vi.fn()) {
+  return render(<DeactivateUserConfirm user={user} open={open} onOpenChange={onOpenChange} />, {
+    wrapper: ({ children }) => <I18nProvider locale="es">{children}</I18nProvider>,
+  });
+}
+
 describe("DeactivateUserConfirm (R3.4)", () => {
   beforeEach(() => {
     useDeactivateUserMock.mockReturnValue({ mutate: vi.fn(), isPending: false, isError: false });
@@ -38,48 +45,38 @@ describe("DeactivateUserConfirm (R3.4)", () => {
 
   it("shows the last-active-cleaner warning when total === 1 for an ACTIVE CLEANER", () => {
     useActiveCleanerCountMock.mockReturnValue({ data: 1 });
-    render(
-      <DeactivateUserConfirm user={ACTIVE_CLEANER} open onOpenChange={vi.fn()} />,
-    );
+    renderConfirm(ACTIVE_CLEANER);
     expect(useActiveCleanerCountMock).toHaveBeenCalledWith(true);
-    expect(screen.getByText(/only active cleaner/)).toBeInTheDocument();
+    expect(screen.getByText(/única limpiadora activa/)).toBeInTheDocument();
     // Non-blocking: the confirm button is still enabled.
-    expect(screen.getByRole("button", { name: "Deactivate" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Desactivar" })).not.toBeDisabled();
   });
 
   it("does not show the warning when the cleaner is not the last active one", () => {
     useActiveCleanerCountMock.mockReturnValue({ data: 3 });
-    render(
-      <DeactivateUserConfirm user={ACTIVE_CLEANER} open onOpenChange={vi.fn()} />,
-    );
-    expect(screen.queryByText(/only active cleaner/)).not.toBeInTheDocument();
+    renderConfirm(ACTIVE_CLEANER);
+    expect(screen.queryByText(/única limpiadora activa/)).not.toBeInTheDocument();
   });
 
   it("does not fire the active-cleaner-count query or show the warning for a non-cleaner row", () => {
     useActiveCleanerCountMock.mockReturnValue({ data: undefined });
-    render(
-      <DeactivateUserConfirm user={ACTIVE_MANAGER} open onOpenChange={vi.fn()} />,
-    );
+    renderConfirm(ACTIVE_MANAGER);
     expect(useActiveCleanerCountMock).toHaveBeenCalledWith(false);
-    expect(screen.queryByText(/only active cleaner/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/única limpiadora activa/)).not.toBeInTheDocument();
   });
 
   it("disables the confirm button while the deactivation is pending", () => {
     useDeactivateUserMock.mockReturnValue({ mutate: vi.fn(), isPending: true, isError: false });
     useActiveCleanerCountMock.mockReturnValue({ data: undefined });
-    render(
-      <DeactivateUserConfirm user={ACTIVE_MANAGER} open onOpenChange={vi.fn()} />,
-    );
-    expect(screen.getByRole("button", { name: "Deactivating…" })).toBeDisabled();
+    renderConfirm(ACTIVE_MANAGER);
+    expect(screen.getByRole("button", { name: "Desactivando…" })).toBeDisabled();
   });
 
   it("keeps Cancel and the confirm button reachable in keyboard tab order", () => {
     useActiveCleanerCountMock.mockReturnValue({ data: undefined });
-    render(
-      <DeactivateUserConfirm user={ACTIVE_MANAGER} open onOpenChange={vi.fn()} />,
-    );
-    const cancel = screen.getByRole("button", { name: "Cancel" });
-    const confirm = screen.getByRole("button", { name: "Deactivate" });
+    renderConfirm(ACTIVE_MANAGER);
+    const cancel = screen.getByRole("button", { name: "Cancelar" });
+    const confirm = screen.getByRole("button", { name: "Desactivar" });
     for (const control of [cancel, confirm]) {
       expect(control.tabIndex).toBeGreaterThanOrEqual(0);
       control.focus();
@@ -89,13 +86,11 @@ describe("DeactivateUserConfirm (R3.4)", () => {
 
   it("gives both footer buttons the 44px `tap-target` floor (design D14)", () => {
     useActiveCleanerCountMock.mockReturnValue({ data: undefined });
-    render(
-      <DeactivateUserConfirm user={ACTIVE_MANAGER} open onOpenChange={vi.fn()} />,
-    );
+    renderConfirm(ACTIVE_MANAGER);
     // `AlertDialogCancel`/`AlertDialogAction` render the shared `Button`
     // internally: this asserts the class survives that indirection instead of
     // being dropped, leaving the buttons at the `default` size's 40px.
-    expect(screen.getByRole("button", { name: "Cancel" })).toHaveClass("tap-target");
-    expect(screen.getByRole("button", { name: "Deactivate" })).toHaveClass("tap-target");
+    expect(screen.getByRole("button", { name: "Cancelar" })).toHaveClass("tap-target");
+    expect(screen.getByRole("button", { name: "Desactivar" })).toHaveClass("tap-target");
   });
 });

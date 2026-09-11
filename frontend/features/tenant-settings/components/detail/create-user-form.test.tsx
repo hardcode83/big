@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
 import { fireEvent, render, screen } from "@/test/render";
+import { I18nProvider } from "@/lib/i18n/client-provider";
 
 const useCreateUserMock = vi.hoisted(() => vi.fn());
 vi.mock("../../hooks/use-create-user", () => ({
@@ -10,9 +11,15 @@ vi.mock("../../hooks/use-create-user", () => ({
 
 import { CreateUserForm } from "./create-user-form";
 
+function renderForm() {
+  return render(<CreateUserForm />, {
+    wrapper: ({ children }) => <I18nProvider locale="es">{children}</I18nProvider>,
+  });
+}
+
 function fillForm() {
-  fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Persona Nueva" } });
-  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@example.com" } });
+  fireEvent.change(screen.getByLabelText("Nombre completo"), { target: { value: "Persona Nueva" } });
+  fireEvent.change(screen.getByLabelText("Correo electrónico"), { target: { value: "new@example.com" } });
 }
 
 describe("CreateUserForm (R2.1, R2.2)", () => {
@@ -23,8 +30,8 @@ describe("CreateUserForm (R2.1, R2.2)", () => {
 
   it("restricts the role selector to the four grantable roles, never SUPER_ADMIN", () => {
     useCreateUserMock.mockReturnValue({ mutate, isPending: false, isError: false, isSuccess: false });
-    render(<CreateUserForm />);
-    const select = screen.getByLabelText("Role") as HTMLSelectElement;
+    renderForm();
+    const select = screen.getByLabelText("Rol") as HTMLSelectElement;
     const options = Array.from(select.options).map((option) => option.value);
     expect(options).toEqual(["TENANT_OWNER", "PROPERTY_MANAGER", "CLEANER", "TECHNICIAN"]);
     expect(options).not.toContain("SUPER_ADMIN");
@@ -32,9 +39,9 @@ describe("CreateUserForm (R2.1, R2.2)", () => {
 
   it("submits name/email/phone/role", () => {
     useCreateUserMock.mockReturnValue({ mutate, isPending: false, isError: false, isSuccess: false });
-    render(<CreateUserForm />);
+    renderForm();
     fillForm();
-    fireEvent.click(screen.getByRole("button", { name: "Create user" }));
+    fireEvent.click(screen.getByRole("button", { name: "Crear usuario" }));
 
     expect(mutate).toHaveBeenCalledWith({
       name: "Persona Nueva",
@@ -56,24 +63,24 @@ describe("CreateUserForm (R2.1, R2.2)", () => {
         status: 409,
       }),
     });
-    render(<CreateUserForm />);
+    renderForm();
     expect(screen.getByText("That email address is already in use")).toBeInTheDocument();
   });
 
   it("disables the submit button while the mutation is pending", () => {
     useCreateUserMock.mockReturnValue({ mutate, isPending: true, isError: false, isSuccess: false });
-    render(<CreateUserForm />);
-    expect(screen.getByRole("button", { name: "Creating…" })).toBeDisabled();
+    renderForm();
+    expect(screen.getByRole("button", { name: "Creando…" })).toBeDisabled();
   });
 
   it("keeps a natural keyboard focus order: full name first, submit button reachable", () => {
     useCreateUserMock.mockReturnValue({ mutate, isPending: false, isError: false, isSuccess: false });
-    render(<CreateUserForm />);
-    const fullName = screen.getByLabelText("Full name");
+    renderForm();
+    const fullName = screen.getByLabelText("Nombre completo");
     fullName.focus();
     expect(fullName).toHaveFocus();
 
-    const submit = screen.getByRole("button", { name: "Create user" });
+    const submit = screen.getByRole("button", { name: "Crear usuario" });
     expect(submit.tabIndex).toBeGreaterThanOrEqual(0);
     submit.focus();
     expect(submit).toHaveFocus();
@@ -90,8 +97,8 @@ describe("CreateUserForm (R2.1, R2.2)", () => {
         user: { id: "u1", name: "Persona Nueva" },
       },
     });
-    render(<CreateUserForm />);
+    renderForm();
     expect(screen.getByText("temp-pass-123")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Create user" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Crear usuario" })).not.toBeInTheDocument();
   });
 });

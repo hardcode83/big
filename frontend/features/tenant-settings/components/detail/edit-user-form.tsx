@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { ErrorState, LoadingState } from "@/components/states";
 import { Button } from "@/components/ui/button";
@@ -43,7 +44,9 @@ const STATUS_OPTIONS: readonly UserStatus[] = ["ACTIVE", "INACTIVE", "SUSPENDED"
  * reason) instead of inventing a generic "something went wrong" string,
  * which is what "no generic fallback message" means here.
  *
- * Plain English literals (section 3 scope note, see `user-list.tsx`).
+ * i18n (section 5): the `tenant-settings` namespace. `genericMessage` is the
+ * backend's own message text (never translated — it is not a static UI
+ * string), same as before.
  */
 export function EditUserForm({
   userId,
@@ -52,19 +55,20 @@ export function EditUserForm({
   userId: string;
   onSuccess?: () => void;
 }) {
+  const { t } = useTranslation("tenant-settings");
   const query = useUser(userId);
 
   if (query.isPending) {
-    return <LoadingState label="Loading user…" />;
+    return <LoadingState label={t("editUser.loading")} />;
   }
 
   if (query.isError || !query.data) {
     return (
       <ErrorState
-        title="Couldn't load this user"
-        description="Something went wrong while loading the user's detail."
+        title={t("editUser.error.title")}
+        description={t("editUser.error.description")}
         onRetry={() => void query.refetch()}
-        retryLabel="Retry"
+        retryLabel={t("editUser.error.retry")}
       />
     );
   }
@@ -84,6 +88,7 @@ function EditUserFormBody({
   user: UserDto;
   onSuccess?: () => void;
 }) {
+  const { t } = useTranslation("tenant-settings");
   const { user: sessionUser } = useAuth();
   const mutation = useUpdateUser();
 
@@ -134,7 +139,7 @@ function EditUserFormBody({
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
         <label htmlFor="edit-user-name" className="text-sm font-medium">
-          Full name
+          {t("editUser.fields.fullName")}
         </label>
         <input
           id="edit-user-name"
@@ -151,7 +156,7 @@ function EditUserFormBody({
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="edit-user-email" className="text-sm font-medium">
-          Email
+          {t("editUser.fields.email")}
         </label>
         <input
           id="edit-user-email"
@@ -169,7 +174,7 @@ function EditUserFormBody({
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="edit-user-phone" className="text-sm font-medium">
-          Phone
+          {t("editUser.fields.phone")}
         </label>
         <input
           id="edit-user-phone"
@@ -186,7 +191,7 @@ function EditUserFormBody({
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="edit-user-role" className="text-sm font-medium">
-          Role
+          {t("editUser.fields.role")}
         </label>
         <select
           id="edit-user-role"
@@ -197,7 +202,7 @@ function EditUserFormBody({
         >
           {ROLE_OPTIONS.map((roleOption) => (
             <option key={roleOption} value={roleOption}>
-              {roleOption}
+              {t(`userRole.${roleOption}`)}
             </option>
           ))}
         </select>
@@ -209,7 +214,7 @@ function EditUserFormBody({
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="edit-user-status" className="text-sm font-medium">
-          Status
+          {t("editUser.fields.status")}
         </label>
         <select
           id="edit-user-status"
@@ -220,7 +225,7 @@ function EditUserFormBody({
         >
           {STATUS_OPTIONS.map((statusOption) => (
             <option key={statusOption} value={statusOption}>
-              {statusOption}
+              {t(`userStatus.${statusOption}`)}
             </option>
           ))}
         </select>
@@ -232,11 +237,11 @@ function EditUserFormBody({
       </div>
       {isSelf ? (
         <p role="note" className="text-xs text-muted-foreground">
-          You cannot change your own role or status.
+          {t("editUser.selfNote")}
         </p>
       ) : null}
       <Button type="submit" className="tap-target" disabled={mutation.isPending}>
-        {mutation.isPending ? "Saving…" : "Save changes"}
+        {mutation.isPending ? t("editUser.submitting") : t("editUser.submit")}
       </Button>
       {genericMessage ? (
         <p role="alert" className="text-sm text-state-error-text">
