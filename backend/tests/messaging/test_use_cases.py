@@ -837,8 +837,13 @@ def human_reply_use_case(harness: Harness) -> RecordHumanReplyUseCase:
     return RecordHumanReplyUseCase(
         conversations=harness.conversations,
         messages=harness.messages,
+        # The fakes are duck-typed; the same `arg-type` issues exist on the
+        # `ProcessInboundGuestMessageUseCase` construction in `Harness` (test_use_cases.py:147)
+        # and are part of the baseline noise this file accepts.
+        guests=harness.guests,  # type: ignore[arg-type]
+        channels=harness.channels,  # type: ignore[arg-type]
         timeline=harness.timeline,
-        uow=harness.uow,
+        uow=harness.uow,  # type: ignore[arg-type]
     )
 
 
@@ -942,6 +947,227 @@ async def test_a_human_reply_emits_its_timeline_event_with_a_user_actor() -> Non
 def test_the_role_mapping_has_one_entry_and_it_is_the_manager() -> None:
     """D17's declared consequence: `MessageSenderType.OWNER` has no writer in this change."""
     assert SENDER_TYPE_BY_ROLE == {UserRole.PROPERTY_MANAGER: MessageSenderType.MANAGER}
+
+
+# --- `RecordHumanReplyUseCase` outbound delivery (`human-reply-outbound-delivery` R1, R2) -
+
+
+@pytest.mark.asyncio
+async def test_a_whatsapp_human_reply_records_delivery_status_sent_when_the_send_delivers() -> None:
+    """Task 1.6 (a): R1.4 — a successful send annotates the row `SENT`."""
+    guest = GuestSummary(
+        id=uuid.uuid4(),
+        full_name="Ada",
+        email="ada@example.com",
+        phone="+34600123456",
+        preferred_language="es",
+        document_status=GuestDocumentStatus.NOT_PROVIDED,
+        legal_registration_status=LegalRegistrationStatus.NOT_REQUIRED,
+    )
+    harness = Harness(
+        make_conversation(
+            channel=ConversationChannel.WHATSAPP,
+            guest_id=guest.id,
+            business_phone_number="1234567890",
+        ),
+        adapter=FakeOutboundAdapter(result=ChannelSendResult.ok()),
+        guests=FakeGuestRepository(guest),
+    )
+
+    message = await human_reply_use_case(harness).execute(
+        tenant_id=TENANT,
+        conversation_id=harness.conversation.id,
+        content="Buenos dias",
+        actor_user_id=ACTOR,
+        actor_role=UserRole.PROPERTY_MANAGER,
+        now=NOW,
+    )
+
+    metadata = message.metadata
+    assert metadata is not None
+    assert metadata.delivery_status == DELIVERY_STATUS_SENT
+    assert metadata.delivery_error_code is None
+
+
+@pytest.mark.asyncio
+async def test_a_whatsapp_human_reply_preserves_a_translated_failure_code() -> None:
+    """Task 1.6 (b): R1.3 — `delivered=False` keeps the row, marks `delivery_status=FAILED`,
+    and preserves the `ChannelErrorCode` translated from the adapter's failure."""
+    guest = GuestSummary(
+        id=uuid.uuid4(),
+        full_name="Ada",
+        email="ada@example.com",
+        phone="+34600123456",
+        preferred_language="es",
+        document_status=GuestDocumentStatus.NOT_PROVIDED,
+        legal_registration_status=LegalRegistrationStatus.NOT_REQUIRED,
+    )
+    harness = Harness(
+        make_conversation(
+            channel=ConversationChannel.WHATSAPP,
+            guest_id=guest.id,
+            business_phone_number="1234567890",
+        ),
+        adapter=FakeOutboundAdapter(
+            result=ChannelSendResult.failure(ChannelErrorCode.OUTSIDE_SESSION_WINDOW)
+        ),
+        guests=FakeGuestRepository(guest),
+    )
+
+    message = await human_reply_use_case(harness).execute(
+        tenant_id=TENANT,
+        conversation_id=harness.conversation.id,
+        content="Buenos dias",
+        actor_user_id=ACTOR,
+        actor_role=UserRole.PROPERTY_MANAGER,
+        now=NOW,
+    )
+
+    metadata = message.metadata
+    assert metadata is not None
+    assert metadata.delivery_status == DELIVERY_STATUS_FAILED
+    assert metadata.delivery_error_code is ChannelErrorCode.OUTSIDE_SESSION_WINDOW
+    # R1.3: the message is kept — the commit still happens.
+    assert harness.uow.commits == 1
+    assert harness.messages.by_sender(MessageSenderType.MANAGER) == [message]
+
+
+@pytest.mark.asyncio
+async def test_an_airbnb_msg_human_reply_persists_with_no_adapter_failure_code() -> None:
+    """Task 1.6 (c): R1.2 / D3 — `AIRBNB_MSG` has no key in the registry, and that absence is
+    the mechanism: the message is persisted, the failure is annotated in metadata, no
+    exception escapes the use case. `HUMAN_RESPONSE_SENT` is still emitted because the reply
+    is a recorded row, regardless of whether the channel can carry it."""
+    harness = Harness(
+        make_conversation(channel=ConversationChannel.AIRBNB_MSG), channels={}
+    )
+
+    message = await human_reply_use_case(harness).execute(
+        tenant_id=TENANT,
+        conversation_id=harness.conversation.id,
+        content="Buenos dias",
+        actor_user_id=ACTOR,
+        actor_role=UserRole.PROPERTY_MANAGER,
+        now=NOW,
+    )
+
+    metadata = message.metadata
+    assert metadata is not None
+    assert metadata.delivery_status == DELIVERY_STATUS_FAILED
+    assert metadata.delivery_error_code is ChannelErrorCode.ADAPTER_UNAVAILABLE
+    # The reply is still a reply: the message lands, the timeline event is written, the
+    # transaction commits.
+    assert harness.messages.by_sender(MessageSenderType.MANAGER) == [message]
+    assert harness.timeline.of_type(TimelineEventType.HUMAN_RESPONSE_SENT)
+    assert harness.uow.commits == 1
+    # No `adapter.send` was reached: the harness would have recorded the call.
+    assert harness.adapter.sends == []
+
+
+@pytest.mark.asyncio
+async def test_a_human_reply_does_not_escalate_even_when_the_send_fails() -> None:
+    """Task 1.6 (d): R1.3 — the human is already in the loop; a delivery failure does not
+    re-trigger escalation. `Conversation.escalation_status` stays `NONE`, and no
+    `AI_ESCALATED_TO_HUMAN` event is emitted on this path."""
+    guest = GuestSummary(
+        id=uuid.uuid4(),
+        full_name="Ada",
+        email="ada@example.com",
+        phone="+34600123456",
+        preferred_language="es",
+        document_status=GuestDocumentStatus.NOT_PROVIDED,
+        legal_registration_status=LegalRegistrationStatus.NOT_REQUIRED,
+    )
+    harness = Harness(
+        make_conversation(channel=ConversationChannel.WHATSAPP, guest_id=guest.id),
+        adapter=FakeOutboundAdapter(
+            result=ChannelSendResult.failure(ChannelErrorCode.ADAPTER_UNAVAILABLE)
+        ),
+        guests=FakeGuestRepository(guest),
+    )
+
+    await human_reply_use_case(harness).execute(
+        tenant_id=TENANT,
+        conversation_id=harness.conversation.id,
+        content="Buenos dias",
+        actor_user_id=ACTOR,
+        actor_role=UserRole.PROPERTY_MANAGER,
+        now=NOW,
+    )
+
+    assert harness.conversation.escalation_status is ConversationEscalationStatus.NONE
+    assert harness.conversation.status is ConversationStatus.OPEN
+    assert harness.timeline.of_type(TimelineEventType.AI_ESCALATED_TO_HUMAN) == []
+
+
+@pytest.mark.asyncio
+async def test_a_whatsapp_human_reply_passes_the_conversations_business_phone_number() -> None:
+    """Task 1.6 (e): R1.5 / D6 — the human reply leaves from the same number the guest wrote
+    to; only `WHATSAPP` carries `business_phone_number`, every other channel passes `None`."""
+    guest = GuestSummary(
+        id=uuid.uuid4(),
+        full_name="Ada",
+        email="ada@example.com",
+        phone="+34600123456",
+        preferred_language="es",
+        document_status=GuestDocumentStatus.NOT_PROVIDED,
+        legal_registration_status=LegalRegistrationStatus.NOT_REQUIRED,
+    )
+    harness = Harness(
+        make_conversation(
+            channel=ConversationChannel.WHATSAPP,
+            guest_id=guest.id,
+            business_phone_number="1234567890",
+        ),
+        adapter=FakeOutboundAdapter(result=ChannelSendResult.ok()),
+        guests=FakeGuestRepository(guest),
+    )
+
+    await human_reply_use_case(harness).execute(
+        tenant_id=TENANT,
+        conversation_id=harness.conversation.id,
+        content="Buenos dias",
+        actor_user_id=ACTOR,
+        actor_role=UserRole.PROPERTY_MANAGER,
+        now=NOW,
+    )
+
+    assert harness.adapter.sends[0]["phone_number_id"] == "1234567890"
+    # Symmetric to the inbound pipeline: no `template_id` for a free-text human reply (D6).
+    assert harness.adapter.sends[0]["template_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_an_email_human_reply_resolves_the_guests_email_address() -> None:
+    """R1.1: the reply's address is the guest's email on `EMAIL`, parallel to the phone
+    branch above; closes the gap that the factory's `harness.adapter` is currently indexed by
+    the conversation channel and would otherwise never receive an `EMAIL` test."""
+    guest = GuestSummary(
+        id=uuid.uuid4(),
+        full_name="Ada",
+        email="ada@example.com",
+        phone="+34600123456",
+        preferred_language="es",
+        document_status=GuestDocumentStatus.NOT_PROVIDED,
+        legal_registration_status=LegalRegistrationStatus.NOT_REQUIRED,
+    )
+    harness = Harness(
+        make_conversation(channel=ConversationChannel.EMAIL, guest_id=guest.id),
+        adapter=FakeOutboundAdapter(result=ChannelSendResult.ok()),
+        guests=FakeGuestRepository(guest),
+    )
+
+    await human_reply_use_case(harness).execute(
+        tenant_id=TENANT,
+        conversation_id=harness.conversation.id,
+        content="Le adjunto los detalles",
+        actor_user_id=ACTOR,
+        actor_role=UserRole.PROPERTY_MANAGER,
+        now=NOW,
+    )
+
+    assert harness.adapter.sends[0]["recipient_contact"] == "ada@example.com"
+    assert harness.adapter.sends[0]["phone_number_id"] is None
 
 
 # --- The inbox use cases (R7.1, R7.3, R7.4) ----------------------------------------------

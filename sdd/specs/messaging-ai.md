@@ -188,6 +188,18 @@ solo el primer mensaje del huésped (R1, R6, R7).
   `sender_type` derivado de su rol y `sender_user_id`, SHALL emitir
   `TimelineEvent(HUMAN_RESPONSE_SENT)`, y WHERE la conversación esperaba a una persona SHALL
   tomarla (`take_over`).
+- WHEN un usuario autenticado contesta manualmente, THE SYSTEM SHALL enviar el `content` por
+  el `OutboundMessagePort` asociado a `conversation.channel` en el registry de canales —el
+  mismo que ya usa el camino de la IA (R6.2, R6.3)—, SHALL anotar `metadata.delivery_status`
+  con `SENT` o `FAILED` y `metadata.delivery_error_code` con el código traducido por
+  `_translate` (`OUTSIDE_SESSION_WINDOW`, `ADAPTER_UNAVAILABLE`, `INVALID_RECIPIENT`, etc.),
+  SHALL no escalar la conversación aunque el envío falle (el humano ya está en el hilo), y
+  SHALL no emitir `AI_RESPONSE_SENT`. Para `AIRBNB_MSG`/`BOOKING_MSG` (canales sin adapter),
+  THE SYSTEM SHALL persistir el `Message` con `delivery_status=FAILED` y
+  `delivery_error_code=ADAPTER_UNAVAILABLE` y SHALL no lanzar `PMSChannelUnavailableError`
+  al router —el resultado es un valor, no un 5xx—. WHERE `conversation.channel is WHATSAPP`,
+  THE SYSTEM SHALL pasar `phone_number_id=conversation.business_phone_number` y SHALL no
+  pasar `template_id` (ninguna plantilla aprobada en MVP).
 - WHEN el intent clasificado es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`, THE SYSTEM SHALL crear
   un `Incident` a través de `IncidentReportingPort` —puerto declarado en `messaging` e
   implementado por `maintenance`, cableado en `messaging/api/dependencies.py`— y NEVER SHALL

@@ -5,7 +5,7 @@
 | `MANUAL` | `PanelOutboundAdapter` | no-op: the row **is** the delivery |
 | `PORTAL` | `PortalOutboundAdapter` | no-op: the row **is** the delivery, read by the guest |
 | `WHATSAPP` | delegates to `WhatsAppCloudAdapter`/`MockWhatsAppAdapter` | selected by `settings.whatsapp_provider`, `access-notifications`/`whatsapp-cloud-adapter` |
-| `EMAIL` | delegates to `ConsoleEmailAdapter` | ditto |
+| `EMAIL` | delegates to `_email_adapter()` → `SMTPEmailAdapter` when `smtp_host` is set, else `ConsoleEmailAdapter` | ditto (R2); SMTP relay selected the same way `notifications.adapter_registry` does |
 | `PHONE_TRANSCRIPT` | `InboundOnlyAdapter` | returns `CHANNEL_INBOUND_ONLY` |
 | `AIRBNB_MSG`, `BOOKING_MSG` | — | **absent on purpose** (R6.3) |
 
@@ -40,6 +40,7 @@ from app.notifications.infrastructure.adapters import (
     ConsoleEmailAdapter,
     MockWhatsAppAdapter,
     WhatsAppCloudAdapter,
+    _email_adapter,
 )
 
 #: How a `NotificationResult` from a delegated adapter becomes a `ChannelSendResult`.
@@ -247,6 +248,13 @@ def outbound_registry(messages: MessageRepository) -> dict[ConversationChannel, 
     `settings.whatsapp_access_token`/`settings.whatsapp_phone_number_id`; anything else builds
     `MockWhatsAppAdapter()` — safe without a further check because `Settings`' own field
     validator already rejects any value outside `{"mock", "meta"}` at boot.
+
+    `EMAIL` is built through `_email_adapter()` from `notifications.infrastructure.adapters`
+    rather than a literal `ConsoleEmailAdapter()` (`human-reply-outbound-delivery` R2, D5):
+    when `settings.smtp_host` is set that returns `SMTPEmailAdapter()` and a human reply
+    leaves through the real relay; when it is empty, the same `ConsoleEmailAdapter` the
+    notifications side picks today. The selection is identical to `notifications.adapter_registry`
+    by construction, not by coincidence.
     """
     whatsapp_delegate: ConsoleEmailAdapter | MockWhatsAppAdapter | WhatsAppCloudAdapter
     if settings.whatsapp_provider == "meta":
@@ -263,7 +271,7 @@ def outbound_registry(messages: MessageRepository) -> dict[ConversationChannel, 
             whatsapp_delegate, NotificationChannel.WHATSAPP, messages
         ),
         ConversationChannel.EMAIL: DelegatingOutboundAdapter(
-            ConsoleEmailAdapter(), NotificationChannel.EMAIL, messages
+            _email_adapter(), NotificationChannel.EMAIL, messages
         ),
         ConversationChannel.PHONE_TRANSCRIPT: InboundOnlyAdapter(),
     }
