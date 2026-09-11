@@ -326,10 +326,12 @@ docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docke
 deja la vivienda `OCCUPIED_ESTIMATED`), la segunda con `--at` en el de check-out (dispara
 `process_checkouts`). El comando se niega con exit 1 si `settings.environment` no es `local` ni
 `dev` (design D5) — y en esta VM **eso no bloquea nada**: `docker-compose.deploy.yml` declara
-`APP_ENVIRONMENT` como obligatorio (`:?`) en `backend`/`worker`/`beat`, y `dev-runtime.env` (lo
-genera `.github/workflows/deploy-dev.yml`) lo escribe explícitamente como `dev` — un valor que sí
-está en el conjunto permitido. La guarda evalúa `dev` y lo acepta; no es que no evalúe nada. Frena
-un despliegue que declare `staging`/`production`, no éste.
+`APP_ENVIRONMENT` como obligatorio (`:?`) en los **cuatro** servicios que comparten la imagen de
+producción — `backend`/`worker`/`beat` y también `migrate`, para que ni siquiera un `run` contra
+ese último bordee la guardia —, y `dev-runtime.env` (lo genera `.github/workflows/deploy-dev.yml`)
+lo escribe explícitamente como `dev` — un valor que sí está en el conjunto permitido. La guarda
+evalúa `dev` y lo acepta; no es que no evalúe nada. Frena un despliegue que declare
+`staging`/`production`, no éste.
 
 La secuencia de la vivienda es `VACANT_READY` → `AWAITING_CHECKIN` → `OCCUPIED_ESTIMATED` →
 `AWAITING_CLEANING`, y en ese último salto `process_checkouts` crea la tarea en la misma
