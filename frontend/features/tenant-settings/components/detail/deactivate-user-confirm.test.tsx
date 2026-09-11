@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { render, screen } from "@/test/render";
 import { I18nProvider } from "@/lib/i18n/client-provider";
+import { ApiError } from "@/lib/api";
 
 import type { UserDto } from "../../dto";
 
@@ -82,6 +83,29 @@ describe("DeactivateUserConfirm (R3.4)", () => {
       control.focus();
       expect(control).toHaveFocus();
     }
+  });
+
+  it("surfaces the backend's 422 (last-owner / self-action) with the backend's own message, no generic fallback (R3.2)", () => {
+    useDeactivateUserMock.mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+      isError: true,
+      error: new ApiError({
+        code: "VALIDATION_ERROR",
+        message: "This would leave the tenant without an active owner, and there is no endpoint to appoint one from outside it",
+        status: 422,
+        details: {},
+      }),
+    });
+    useActiveCleanerCountMock.mockReturnValue({ data: undefined });
+    renderConfirm(ACTIVE_MANAGER);
+
+    expect(
+      screen.getByText(
+        "This would leave the tenant without an active owner, and there is no endpoint to appoint one from outside it",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Algo salió mal al desactivar este usuario.")).not.toBeInTheDocument();
   });
 
   it("gives both footer buttons the 44px `tap-target` floor (design D14)", () => {
