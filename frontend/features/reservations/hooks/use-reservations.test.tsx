@@ -1,20 +1,33 @@
 import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  type UseMutationResult,
+} from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
 
-import { useReservation, useReservations } from "./use-reservations";
+import {
+  useCancelReservation,
+  useCreateReservation,
+  useReservation,
+  useReservations,
+  useUpdateReservation,
+} from "./use-reservations";
 import * as dataModule from "../data";
 import { reservationsKeys } from "./query-keys";
 
-vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ user: { tenant_id: "tenant-from-session" } }),
-}));
+const authUser = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/auth", () => ({ useAuth: authUser }));
 
 const listMock = vi.fn();
 const detailMock = vi.fn();
+const createMock = vi.fn();
+const updateMock = vi.fn();
+const cancelMock = vi.fn();
 const getReservationsDataSource = vi.spyOn(dataModule, "getReservationsDataSource");
 
 getReservationsDataSource.mockImplementation(
@@ -22,6 +35,9 @@ getReservationsDataSource.mockImplementation(
     ({
       listReservations: listMock,
       getReservation: detailMock,
+      createReservation: createMock,
+      updateReservation: updateMock,
+      cancelReservation: cancelMock,
     }) as unknown as ReturnType<typeof dataModule.getReservationsDataSource>,
 );
 
@@ -87,8 +103,12 @@ const DETAIL_PAYLOAD = {
 
 describe("useReservations / useReservation", () => {
   beforeEach(() => {
+    authUser.mockReturnValue({ user: { tenant_id: "tenant-from-session" } });
     detailMock.mockReset();
     listMock.mockReset();
+    createMock.mockReset().mockResolvedValue({ id: "reservation-1" });
+    updateMock.mockReset().mockResolvedValue({ id: "reservation-1" });
+    cancelMock.mockReset().mockResolvedValue(undefined);
   });
 
   it("useReservations calls the source with the filters it received", async () => {
@@ -133,6 +153,181 @@ describe("useReservations / useReservation", () => {
       "reservations-detail",
       "reservation-1",
     ]);
+  });
+
+  async function expectMutationInvalidation<T>(
+    hook: () => UseMutationResult<unknown, Error, T>,
+    variables: T,
+    sourceMock: ReturnType<typeof vi.fn>,
+    expectsDetail: boolean,
+  ) {
+    const client = new QueryClient({
+      defaultOptions: { mutations: { retry: 3 }, queries: { retry: false } },
+    });
+    const invalidate = vi.spyOn(client, "invalidateQueries").mockResolvedValue(undefined);
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { result } = renderHook(() => hook(), { wrapper: Wrapper });
+
+    result.current.mutate(variables);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: reservationsKeys.listPrefix("tenant-from-session"),
+    });
+    if (expectsDetail) {
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: reservationsKeys.detail("tenant-from-session", "reservation-1"),
+      });
+    }
+    expect(sourceMock).toHaveBeenCalledTimes(1);
+  }
+
+  it("create mutation does not retry and awaits tenant-scoped invalidation", async () => {
+    await expectMutationInvalidation(
+      useCreateReservation,
+      { property_id: "property-1" } as never,
+      createMock,
+      false,
+    );
+  });
+
+  it("update mutation invalidates list and detail after awaiting both", async () => {
+    await expectMutationInvalidation(
+      useUpdateReservation,
+      { reservationId: "reservation-1", input: {} },
+      updateMock,
+      true,
+    );
+  });
+
+  it("cancel mutation invalidates list and detail after awaiting both", async () => {
+    await expectMutationInvalidation(
+      useCancelReservation,
+      { reservationId: "reservation-1" },
+      cancelMock,
+      true,
+    );
+  });
+
+  async function expectFailedMutationInvalidation<T>(
+    hook: () => UseMutationResult<unknown, Error, T>,
+    variables: T,
+    sourceMock: ReturnType<typeof vi.fn>,
+    expectedInvalidations: number,
+    reservationId?: string,
+  ) {
+    const failure = new ApiError({
+      code: "CONFLICT",
+      message: "opaque server message",
+      status: 409,
+    });
+    sourceMock.mockRejectedValue(failure);
+    let release!: () => void;
+    const invalidation = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const client = new QueryClient({
+      defaultOptions: { mutations: { retry: 3, retryDelay: 0 } },
+    });
+    const invalidate = vi
+      .spyOn(client, "invalidateQueries")
+      .mockImplementation(() => invalidation);
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { result } = renderHook(() => hook(), { wrapper: Wrapper });
+
+    result.current.mutate(variables);
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(expectedInvalidations));
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: reservationsKeys.listPrefix("tenant-from-session"),
+    });
+    if (reservationId) {
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: reservationsKeys.detail("tenant-from-session", reservationId),
+      });
+    }
+    expect(sourceMock).toHaveBeenCalledTimes(1);
+    expect(result.current.isError).toBe(false);
+    release();
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(sourceMock).toHaveBeenCalledTimes(1);
+  }
+
+  it("create mutation does not retry and awaits list invalidation after an error", async () => {
+    await expectFailedMutationInvalidation(
+      useCreateReservation,
+      { property_id: "property-1" } as never,
+      createMock,
+      1,
+    );
+  });
+
+  it("update mutation does not retry and awaits list/detail invalidation after an error", async () => {
+    await expectFailedMutationInvalidation(
+      useUpdateReservation,
+      { reservationId: "reservation-1", input: {} },
+      updateMock,
+      2,
+      "reservation-1",
+    );
+  });
+
+  it("cancel mutation does not retry and awaits list/detail invalidation after an error", async () => {
+    await expectFailedMutationInvalidation(
+      useCancelReservation,
+      { reservationId: "reservation-1" },
+      cancelMock,
+      2,
+      "reservation-1",
+    );
+  });
+
+  it.each([
+    [null, "missing user"],
+    [{}, "missing tenant id"],
+    [{ tenant_id: 42 }, "malformed tenant id"],
+    [{ tenant_id: "" }, "empty tenant id"],
+    [{ tenant_id: "   " }, "blank tenant id"],
+  ] as const)("rejects %s context (%s) with a stable internal code", (user, _label) => {
+    authUser.mockReturnValue({ user });
+    expect(() => renderHook(() => useReservations(), { wrapper: freshWrapper() })).toThrowError(
+      expect.objectContaining({ code: "TENANT_CONTEXT_REQUIRED" }),
+    );
+  });
+
+  it("does not finish until invalidation settles", async () => {
+    let release!: () => void;
+    const invalidation = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi
+      .spyOn(client, "invalidateQueries")
+      .mockImplementation(() => invalidation);
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { result } = renderHook(() => useCreateReservation(), { wrapper: Wrapper });
+    result.current.mutate({ property_id: "property-1" } as never);
+    await waitFor(() => expect(invalidate).toHaveBeenCalled());
+    expect(result.current.isSuccess).toBe(false);
+    release();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  });
+
+  it("does not optimistically write reservation cache", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const setQueryData = vi.spyOn(client, "setQueryData");
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    }
+    const { result } = renderHook(() => useUpdateReservation(), { wrapper: Wrapper });
+    result.current.mutate({ reservationId: "reservation-1", input: {} });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(setQueryData).not.toHaveBeenCalled();
   });
 
   // The next two tests pin the wiring of `retry: retryPolicy` so that

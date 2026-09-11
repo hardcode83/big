@@ -5,8 +5,24 @@
 export { ReservationsView } from "./components/list/reservations-view";
 export { ReservationsFilters } from "./components/list/reservations-filters";
 export { ReservationDetailView } from "./components/detail/reservation-detail-view";
-export { useReservations, useReservation } from "./hooks/use-reservations";
+export {
+  useCancelReservation,
+  useCreateReservation,
+  useReservation,
+  useReservations,
+  useUpdateReservation,
+} from "./hooks/use-reservations";
+export type {
+  CancelReservationVariables,
+  UpdateReservationVariables,
+} from "./hooks/use-reservations";
 export { reservationsKeys } from "./hooks/query-keys";
 export { mapReservationsError } from "./lib/error-mapping";
+export {
+  reservationMutationErrorKey,
+} from "./lib/mutation-error-mapping";
+export type {
+  ReservationMutationErrorKey,
+} from "./lib/mutation-error-mapping";
 export { getReservationsDataSource } from "./data";
 export type * from "./data";

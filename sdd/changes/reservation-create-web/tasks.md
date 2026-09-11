@@ -6,11 +6,11 @@
 - [x] 1.2 Add `createReservation`, `updateReservation` and `cancelReservation` to `frontend/features/reservations/data/http/http-reservations-source.ts`, using only generated OpenAPI request schemas, mapping POST/PATCH to summary DTOs and DELETE to `void` [R1, R3, R5]
 - [x] 1.3 Add source tests for exact POST/PATCH/DELETE paths, methods, payload omission of empty optionals and no `guest_id` generation [R1, R2, R3]
 
-## 2. Query mutations and authorization
+## 2. Query mutations and authorization <!-- panel: PASS 2026-09-11 receipt:42d7d883 -->
 
-- [ ] 2.1 Add `MANAGE_RESERVATIONS` to `frontend/lib/auth/permissions.ts` for `PROPERTY_MANAGER` only and test owner/manager/field-role visibility [R4]
-- [ ] 2.2 Add create/update/cancel mutation hooks in `frontend/features/reservations/hooks/use-reservations.ts` with `retry: false`, tenant-scoped invalidation of list/detail keys, and awaited invalidation tests [R3, R4]
-- [ ] 2.3 Add `frontend/features/reservations/lib/mutation-error-mapping.ts` and tests covering `ApiError` 401/403/404/409/422, 5xx and network errors without exposing server PII [R1, R3, R4]
+- [x] 2.1 Add `MANAGE_RESERVATIONS` to `frontend/lib/auth/permissions.ts` for `PROPERTY_MANAGER` only and test owner/manager/field-role visibility [R4]
+- [x] 2.2 Add create/update/cancel mutation hooks in `frontend/features/reservations/hooks/use-reservations.ts` with `retry: false`, tenant-scoped invalidation of list/detail keys, and awaited invalidation tests [R3, R4]
+- [x] 2.3 Add `frontend/features/reservations/lib/mutation-error-mapping.ts` and tests covering `ApiError` 401/403/404/409/422, 5xx and network errors without exposing server PII [R1, R3, R4]
 
 ## 3. Manual creation flow <!-- hard -->
 
@@ -45,3 +45,5 @@
 - `HttpReservationsSource` mutation responses map to `ReservationSummaryDto`; detail refresh remains query-owned.
 - `CreateReservationInput` and `UpdateReservationInput` omit `guest_id` at the type boundary.
 - `npm install --ignore-scripts` was required locally because locked Vitest browser dependency was absent from node_modules.
+- Section 2 uses `useCreateReservation`, `useUpdateReservation` and `useCancelReservation`; all settle through awaited tenant-scoped list/detail invalidation, without cache writes or retries.
+- `reservationMutationErrorKey` returns only localized keys; 401 maps to session handling and server/network error payloads are discarded.
