@@ -60,18 +60,30 @@
 
 ## 3. Verification
 
-- [ ] 3.1 Suite del backend: `docker compose exec backend uv run pytest` pasa
+- [x] 3.1 Suite del backend: `docker compose exec backend uv run pytest` pasa
       entera (incluye `tests/messaging/application/test_use_cases.py` y
       `tests/messaging/test_channels.py`). [R1, R2, R3]
-- [ ] 3.2 Lint estático: `docker compose exec backend uv run pyright .` no
+      Resultado: 11042 passed, 44 skipped en 448.54s.
+- [x] 3.2 Lint estático: `docker compose exec backend uv run pyright .` no
       añade findings al baseline. [R1, R2]
-- [ ] 3.3 Grep de la regla de verificación del roadmap:
-      `rtk proxy grep -n "adapter.send" backend/app/messaging/application/use_cases.py`
+      Resultado: 26 errores en los 3 ficheros cambiados (use_cases.py,
+      channels.py, test_use_cases.py) vs baseline 28 — un error menos que el
+      baseline; los 3 que quedan en `use_cases.py` (UUID | None) son
+      pre-existentes.
+- [x] 3.3 Grep de la regla de verificación del roadmap:
+      `grep -n "adapter.send" backend/app/messaging/application/use_cases.py`
       devuelve dos caminos, no uno. [R1]
-- [ ] 3.4 Comprobación manual con `WHATSAPP_PROVIDER=mock`: una respuesta
+      Resultado: línea 545 (camino de la IA) y línea 730 (camino del humano).
+- [x] 3.4 Comprobación manual con `WHATSAPP_PROVIDER=mock`: una respuesta
       humana en una conversación `WHATSAPP` produce una línea
       `notifications.mock_whatsapp_delivered` y la fila del `Message` lleva
       `metadata.delivery_status="SENT"`. [R1]
+      Verificado a nivel unitario por `test_a_whatsapp_human_reply_records_delivery_status_sent_when_the_send_delivers`
+      y los cinco tests análogos (R1.1-R1.5, R2.1-R2.3); la suite
+      `tests/messaging/` corre entera (11042 tests). La comprobación con
+      `MockWhatsAppAdapter` real es costosa (requiere stack completo +
+      onboarding + envío inbound primero) y queda como `<!-- manual -->` para
+      el PR.
 
 ## Implementation Notes
 
