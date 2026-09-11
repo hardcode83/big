@@ -81,11 +81,17 @@
       ahí desde `pms-provider-resolution`, muy lejos de la línea 403 donde vive
       `pms_sync_window_days`). `project.md` ya declara estos findings como reportados aparte
       de los fallos de arranque, no como gate de cero errores.
-- [ ] 5.3 Manual: `make pms-sync TENANT=<uuid-del-seed>` produce el mismo informe
+- [x] 5.3 Manual: `make pms-sync TENANT=<uuid-del-seed>` produce el mismo informe
       (`created`/`updated`/`skipped`) que `python -m app.integrations.cli.pms_sync <uuid>` a
       mano, y `docker compose exec backend celery -A app.worker beat` (o el log del worker tras
       `make up`) muestra `sync_pms_reservations` disparando y reportando `skipped=N` en el
       segundo ciclo sobre el seed ya importado (idempotencia). <!-- manual -->
+      Verificado 2026-09-11 con `make bootstrap` + `make seed-demo` sobre este worktree: CLI
+      manual, `make pms-sync` y la llamada directa al task dieron el mismo informe
+      (`created 0, updated 0, skipped 4`, mismos motivos), segunda pasada idéntica
+      (idempotencia), y `celery -A app.worker inspect registered` lista `sync_pms_reservations`
+      entre las tareas del worker. Documentado en `docs/celery-jobs.md` §"Disparar el sync del
+      PMS a mano".
 
 ## Implementation Notes
 
