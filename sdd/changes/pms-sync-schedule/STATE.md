@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/pms-sync-schedule
 implementation_sha: 04105d6651d5935d6661f077893f802560a88602
 pr_number:
 pr_url:
