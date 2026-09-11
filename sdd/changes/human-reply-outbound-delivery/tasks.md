@@ -2,24 +2,24 @@
 
 ## 1. Backend: inyectar canales, despachar por el canal de la conversación y enrutar `EMAIL` por SMTP
 
-- [ ] 1.1 Cablear `channels=outbound_registry(messages)` en
+- [x] 1.1 Cablear `channels=outbound_registry(messages)` en
       `backend/app/messaging/api/dependencies.py:108-114`, usando la misma
       instancia de `SqlAlchemyMessageRepository(session)` que
       `get_process_inbound_message_use_case:83-105` ya construye (compartir la
       instancia evita un segundo `MessageRepository` para resolver
       `last_inbound_at` en `WHATSAPP`). [R1, R2]
-- [ ] 1.2 Mover el método de instancia `_recipient_contact`
+- [x] 1.2 Mover el método de instancia `_recipient_contact`
       (`backend/app/messaging/application/use_cases.py:312-336`) a una función
       de módulo `_recipient_contact(guests, tenant_id, conversation)` al lado de
       los otros helpers; actualizar `ProcessInboundGuestMessageUseCase` para
       llamarla con `self._guests`. [R1]
-- [ ] 1.3 Añadir `channels: dict[ConversationChannel, OutboundMessagePort]` como
+- [x] 1.3 Añadir `channels: dict[ConversationChannel, OutboundMessagePort]` como
       keyword-only al constructor de `RecordHumanReplyUseCase`
       (`backend/app/messaging/application/use_cases.py:655-666`); actualizar la
       factoría de tests `human_reply_use_case(harness)` en
       `backend/tests/messaging/test_use_cases.py:836-842` para pasar
       `channels=harness.channels`. [R1]
-- [ ] 1.4 Reordenar `execute` (`use_cases.py:668-732`) para que el envío por el
+- [x] 1.4 Reordenar `execute` (`use_cases.py:668-732`) para que el envío por el
       adapter ocurra **antes** de construir el `Message` y siguiendo el orden:
       (a) `_recipient_contact` para resolver el destinatario;
       (b) `adapter = self._channels.get(conversation.channel)` — si es `None`,
@@ -33,11 +33,11 @@
       DELIVERY_STATUS_SENT if result.delivered else DELIVERY_STATUS_FAILED,
       delivery_error_code=result.error_code)`;
       (e) `register_message`/`take_over` (sin cambios) → `commit()` único. [R1]
-- [ ] 1.5 Cambiar `backend/app/messaging/infrastructure/channels.py:265-267`
+- [x] 1.5 Cambiar `backend/app/messaging/infrastructure/channels.py:265-267`
       para construir el delegate de `EMAIL` con `_email_adapter()` desde
       `app.notifications.infrastructure.adapters` en vez del
       `ConsoleEmailAdapter()` literal. [R2]
-- [ ] 1.6 Añadir tests en `backend/tests/messaging/test_use_cases.py` para
+- [x] 1.6 Añadir tests en `backend/tests/messaging/test_use_cases.py` para
       cubrir: (a) `WHATSAPP` con `result.delivered=True` →
       `delivery_status=SENT`; (b) `WHATSAPP` con `result.delivered=False` y
       código traducido → `delivery_status=FAILED` y `delivery_error_code`
@@ -74,3 +74,28 @@
       `metadata.delivery_status="SENT"`. [R1]
 
 ## Implementation Notes
+
+- Section 1 wired `channels` (and a `GuestRepository` for `_recipient_contact`) into
+  `RecordHumanReplyUseCase.__init__` as keyword-only — the constructor's `guests` kwarg was not
+  in task 1.3 but is required for the module-level `_recipient_contact` (task 1.2 / D7) to
+  resolve the recipient on every channel; the next section's spec work should call this out.
+- `_recipient_contact` keeps the `contact_kind_for` short-circuit before the guest lookup
+  (`WHATSAPP`/`EMAIL` only) so a `MANUAL`/`PORTAL`/`PHONE_TRANSCRIPT` reply returns `None`
+  cheaply — same precedence as the original method (D14).
+- `RecordHumanReplyUseCase.execute` always builds the `Message` after the `adapter.send` call
+  (or after the "no adapter" branch), so `metadata` is constructed once with the final
+  `delivery_status`/`delivery_error_code` (D2/D4) — no `metadata=` mutation after `Message(...)`
+  because the entity is `frozen=True`.
+- The "no adapter" branch (`AIRBNB_MSG`/`BOOKING_MSG`) keeps the `Message`, the
+  `HUMAN_RESPONSE_SENT` timeline event and the single `commit()`; no `PMSChannelUnavailableError`
+  escapes (R1.2/D3).
+- `outbound_registry` imports `_email_adapter` (a leading-underscore module-private function
+  in `notifications.infrastructure.adapters`) for the `EMAIL` row only (R2/D5); `WHATSAPP` keeps
+  its inline `MockWhatsAppAdapter`/`WhatsAppCloudAdapter` selection (no behaviour change for
+  the inbound side).
+- The human-reply `Message` carries `metadata` only — no `template_key`/`template_version`/
+  `escalation_reason` (D4) — because the human writes prose, not templates, and a failed send
+  must not re-escalate (R1.3, test 1.6 (d)).
+- Test factory `human_reply_use_case(harness)` gained two kwargs (`guests`, `channels`) and
+  three `# type: ignore[arg-type]` comments; the messaging subset of pyright goes from 28
+  (baseline) to 27 on the four touched files.

@@ -60,6 +60,7 @@ from app.messaging.domain.templates import (
 from app.messaging.domain.value_objects import (
     DELIVERY_STATUS_FAILED,
     DELIVERY_STATUS_SENT,
+    ChannelErrorCode,
     ConversationContext,
     InboundMessageActor,
     MessageClassification,
@@ -102,6 +103,34 @@ _INCIDENT_INTENTS = (MessageIntent.MAINTENANCE_ISSUE, MessageIntent.ACCESS_PROBL
 SENDER_TYPE_BY_ROLE: dict[UserRole, MessageSenderType] = {
     UserRole.PROPERTY_MANAGER: MessageSenderType.MANAGER,
 }
+
+
+async def _recipient_contact(
+    guests: GuestRepository, tenant_id: uuid.UUID, conversation: Conversation
+) -> str | None:
+    """Where to send, for the channels that need an address (D14).
+
+    Module-level so `RecordHumanReplyUseCase` can share the resolution without inheriting
+    `ProcessInboundGuestMessageUseCase` (D7). The guests repository travels whole and is the
+    only collaborator: `Conversation.guest_id` and `contact_kind_for` (a closed table in
+    `domain/value_objects.py`) name the lookup, this function performs it.
+
+    `None` when the conversation has no guest or the guest has no contact of that kind,
+    and the adapter turns that into `INVALID_RECIPIENT` — a failure by value, which R6.5
+    routes to a person rather than losing.
+
+    `GuestSummary` and not `Guest`: the projection carries the contact fields and
+    structurally cannot carry the identity document (rule 4 of `steering/security.md`).
+    """
+    if conversation.guest_id is None:
+        return None
+    kind = contact_kind_for(conversation.channel)
+    if kind is None:
+        return None
+    guest = await guests.get(tenant_id, conversation.guest_id)
+    if guest is None:
+        return None
+    return guest.phone if kind == "phone" else guest.email
 
 
 def _timeline_event(
@@ -308,32 +337,6 @@ class ProcessInboundGuestMessageUseCase:
         configuration to read, which is the reason that port has no plain `get`."""
         config = await self._configs.get_or_create(tenant_id, now)
         return config.ai_confidence_threshold
-
-    async def _recipient_contact(
-        self, tenant_id: uuid.UUID, conversation: Conversation
-    ) -> str | None:
-        """Where to send, for the channels that need an address (D14).
-
-        Resolved from the conversation's guest, per channel: a phone number for `WHATSAPP`, an
-        email for `EMAIL`, and nothing for the channels that do not address anybody —
-        `MANUAL`, where the row *is* the delivery, and `PHONE_TRANSCRIPT`, which has no
-        outbound direction at all.
-
-        `None` when the conversation has no guest or the guest has no contact of that kind,
-        and the adapter turns that into `INVALID_RECIPIENT` — a failure by value, which R6.5
-        routes to a person rather than losing. That is the right outcome: we genuinely cannot
-        deliver, and pretending otherwise would show an operator a message the guest never got.
-
-        `GuestSummary` and not `Guest`: the projection carries the contact fields and
-        structurally cannot carry the identity document (rule 4 of `steering/security.md`).
-        """
-        kind = contact_kind_for(conversation.channel)
-        if kind is None or conversation.guest_id is None:
-            return None
-        guest = await self._guests.get(tenant_id, conversation.guest_id)
-        if guest is None:
-            return None
-        return guest.phone if kind == "phone" else guest.email
 
     async def _hours_to_checkin(
         self, tenant_id: uuid.UUID, conversation: Conversation, now: datetime
@@ -542,7 +545,9 @@ class ProcessInboundGuestMessageUseCase:
         result = await adapter.send(
             channel=conversation.channel,
             conversation_id=conversation.id,
-            recipient_contact=await self._recipient_contact(tenant_id, conversation),
+            recipient_contact=await _recipient_contact(
+                self._guests, tenant_id, conversation
+            ),
             content=generated.content,
             language=language,
             tenant_id=tenant_id,
@@ -640,7 +645,7 @@ class ProcessInboundGuestMessageUseCase:
 
 
 class RecordHumanReplyUseCase:
-    """A person answers the guest (R4.5, D18).
+    """A person answers the guest (R4.5, D18; `human-reply-outbound-delivery` R1, R2).
 
     Two things happen that the pipeline above does not do, and both come from *who* is
     writing: the `sender_type` is **derived from the caller's role** rather than taken from
@@ -650,6 +655,16 @@ class RecordHumanReplyUseCase:
     Nothing is classified and nothing is generated: this message is a person's own words, so
     `intent`, `confidence_score` and `ai_generated` stay unset — which is also what keeps this
     path out of `messages.intent`'s closed-form contract.
+
+    The reply is also **sent through the channel the conversation runs on** (D1, D2): the
+    adapter comes from the same `outbound_registry` the inbound pipeline uses, and the
+    `Message` is built **after** the `adapter.send` returns so its `metadata` carries the
+    delivery outcome once and only once — `Message` is frozen (`entities.Message`), so a
+    later annotation is not an option. A channel with no key in the registry (`AIRBNB_MSG`/
+    `BOOKING_MSG`) does not raise: the message is persisted with
+    `delivery_status=FAILED`/`delivery_error_code=ADAPTER_UNAVAILABLE` and the commit still
+    happens (D3, R1.2). `PHONE_TRANSCRIPT` reports `CHANNEL_INBOUND_ONLY` through its own
+    adapter, not as an exception.
     """
 
     def __init__(
@@ -657,11 +672,15 @@ class RecordHumanReplyUseCase:
         *,
         conversations: ConversationRepository,
         messages: MessageRepository,
+        guests: GuestRepository,
+        channels: dict[ConversationChannel, OutboundMessagePort],
         timeline: TimelineEventRepository,
         uow: UnitOfWork,
     ) -> None:
         self._conversations = conversations
         self._messages = messages
+        self._guests = guests
+        self._channels = channels
         self._timeline = timeline
         self._uow = uow
 
@@ -693,6 +712,41 @@ class RecordHumanReplyUseCase:
                 f"Role {actor_role.value} has no sender type for a conversation message"
             )
 
+        recipient_contact = await _recipient_contact(
+            self._guests, tenant_id, conversation
+        )
+        adapter = self._channels.get(conversation.channel)
+        if adapter is None:
+            # R1.2 / D3: `AIRBNB_MSG` and `BOOKING_MSG` have no adapter, and there is
+            # deliberately no key to fall back to. The failure is recorded in `metadata`
+            # (D4: only `delivery_status`/`delivery_error_code`, no template fields, no
+            # `escalation_reason` because the human does not escalate); no exception is
+            # raised — the message is the reply, even when the channel cannot carry it.
+            send_metadata = MessageMetadata(
+                delivery_status=DELIVERY_STATUS_FAILED,
+                delivery_error_code=ChannelErrorCode.ADAPTER_UNAVAILABLE,
+            )
+        else:
+            result = await adapter.send(
+                channel=conversation.channel,
+                conversation_id=conversation.id,
+                recipient_contact=recipient_contact,
+                content=content,
+                language=conversation.language,
+                tenant_id=tenant_id,
+                phone_number_id=(
+                    conversation.business_phone_number
+                    if conversation.channel is ConversationChannel.WHATSAPP
+                    else None
+                ),
+            )
+            send_metadata = MessageMetadata(
+                delivery_status=(
+                    DELIVERY_STATUS_SENT if result.delivered else DELIVERY_STATUS_FAILED
+                ),
+                delivery_error_code=result.error_code,
+            )
+
         message = Message(
             id=uuid.uuid4(),
             conversation_id=conversation.id,
@@ -700,6 +754,7 @@ class RecordHumanReplyUseCase:
             content=content,
             created_at=now,
             sender_user_id=actor_user_id,
+            metadata=send_metadata,
         )
         await self._messages.add(tenant_id, message)
 

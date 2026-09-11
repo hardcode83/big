@@ -106,9 +106,17 @@ def get_process_inbound_message_use_case(
 
 
 def get_record_human_reply_use_case(session: SessionDep) -> RecordHumanReplyUseCase:
+    # Same `SqlAlchemyMessageRepository` instance passed into `outbound_registry` so the
+    # `WHATSAPP` adapter can resolve `last_inbound_at` (`whatsapp-cloud-adapter` R2.4, D2)
+    # without a second repo. Mirrors `get_process_inbound_message_use_case:82-105`.
+    messages = SqlAlchemyMessageRepository(session)
     return RecordHumanReplyUseCase(
         conversations=SqlAlchemyConversationRepository(session),
-        messages=SqlAlchemyMessageRepository(session),
+        messages=messages,
+        # `_recipient_contact` resolves the guest's phone or email for the channel's outbound
+        # direction (D7); same scope as the inbound pipeline's `guests` injection.
+        guests=SqlAlchemyGuestRepository(session),
+        channels=outbound_registry(messages),
         timeline=SqlAlchemyTimelineEventRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
