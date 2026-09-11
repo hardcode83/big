@@ -708,3 +708,97 @@ async def test_a_second_cli_run_repeats_no_transition_and_writes_no_row(
         ).scalar_one()
         assert prop_row.current_operational_state == state_after_first
         assert prop_row.updated_at == updated_at_after_first
+
+
+# --- D4: the all-fail exit code (the mixed-failure path was tested; this wasn't) ---
+
+
+@pytest.mark.asyncio
+async def test_all_three_jobs_failing_exits_1(
+    db_session,
+    test_engine,
+    test_factory,
+    monkeypatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """D4: 0 all OK, 1 ALL failed, 2 some but not all. Only the mixed case (2) had
+    coverage; the `succeeded == 0` branch (`sim_advance.py:322-326`) had none, so a
+    regression collapsing it into 0 or 2 would pass silently.
+    """
+    tenant = await insert_tenant(db_session)
+    await db_session.commit()
+
+    async def _advance_that_always_fails(session, tenant_id, now, *, trigger):
+        raise RuntimeError("boom-all")
+
+    monkeypatch.setattr(cli, "_advance", _advance_that_always_fails)
+
+    with caplog.at_level(logging.ERROR, logger="app.cli.sim_advance"):
+        rc = await cli._run(
+            ["--tenant", str(tenant.id), "--at", _at_utc(_local(2026, 9, 10, 15, 1))]
+        )
+    captured = capsys.readouterr()
+
+    assert rc == 1, f"stdout:\n{captured.out}\nstderr:\n{captured.err}"
+    for trigger_value in (
+        "CHECKIN_WINDOW_OPENED",
+        "CHECKIN_TIME_REACHED",
+        "CHECKOUT_TIME_REACHED",
+    ):
+        assert f"sim-advance: {trigger_value} FAILED: RuntimeError: boom-all" in captured.err
+
+    failure_records = [r for r in caplog.records if r.getMessage() == "sim_advance.job_failed"]
+    assert len(failure_records) == 3, f"expected 3 failures logged; caplog:\n{caplog.text}"
+
+
+# --- R1.5's sibling branch: a syntactically invalid --tenant -----------------------
+
+
+@pytest.mark.asyncio
+async def test_invalid_tenant_uuid_exits_1_without_opening_a_session(
+    db_session, test_engine, test_factory
+) -> None:
+    """R1.5: `--tenant not-a-uuid` fails argparse's `_parse_tenant` before `_run`'s own
+    body runs at all, so this exercises `_Parser.error` (exit code 1, not argparse's
+    default 2) rather than the nonexistent-tenant branch already covered above."""
+
+    async def _count_transitions() -> int:
+        async with AsyncSession(test_engine, expire_on_commit=False) as fresh:
+            return int(
+                (
+                    await fresh.execute(
+                        select(func.count()).select_from(PropertyStateTransitionModel)
+                    )
+                ).scalar_one()
+            )
+
+    before = await _count_transitions()
+
+    with pytest.raises(SystemExit) as exc_info:
+        await cli._run(["--tenant", "not-a-uuid"])
+    assert exc_info.value.code == 1
+
+    after = await _count_transitions()
+    assert after == before, "a job ran despite the argument being rejected"
+
+
+# --- R1.3: the now-line names the live clock when --at is omitted ------------------
+
+
+@pytest.mark.asyncio
+async def test_now_line_names_the_live_clock_when_at_is_omitted(
+    db_session, test_engine, test_factory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """R1.3: without `--at`, the command uses `datetime.now(UTC)` and SHALL print a
+    line saying so; the existing tests all pass `--at` and never assert this label."""
+    ghost_tenant_id = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
+    rc = await cli._run(["--tenant", str(ghost_tenant_id)])
+    captured = capsys.readouterr()
+
+    assert rc == 1  # the tenant doesn't exist; the now-line still prints first (R1)
+    now_line = next(
+        line for line in captured.out.splitlines() if line.startswith("sim-advance: now = ")
+    )
+    assert "(live clock)" in now_line, now_line
