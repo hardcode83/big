@@ -42,9 +42,9 @@
       `delivery_status=SENT`; (b) `WHATSAPP` con `result.delivered=False` y
       código traducido → `delivery_status=FAILED` y `delivery_error_code`
       preservado; (c) `AIRBNB_MSG` (sin adapter) →
-      `delivery_status=FAILED`, `delivery_error_code=ADAPTER_UNAVAILABLE`, sin
-      `HUMAN_RESPONSE_SENT` levantado; (d) respuesta humana no escala aunque el
-      envío falle; (e) `phone_number_id` pasa `business_phone_number` para
+      `delivery_status=FAILED`, `delivery_error_code=ADAPTER_UNAVAILABLE`,
+      `HUMAN_RESPONSE_SENT` emitido y commit único (D3); (d) respuesta humana no escala
+      aunque el envío falle; (e) `phone_number_id` pasa `business_phone_number` para
       `WHATSAPP`. [R1]
 
 ## 2. Specs y docs: enmendar R4 y declarar el límite de la ventana 24 h <!-- panel: skipped — pure docs/spec section; verifier panel runs against production code only -->
@@ -91,9 +91,10 @@
   `RecordHumanReplyUseCase.__init__` as keyword-only — the constructor's `guests` kwarg was not
   in task 1.3 but is required for the module-level `_recipient_contact` (task 1.2 / D7) to
   resolve the recipient on every channel; the next section's spec work should call this out.
-- `_recipient_contact` keeps the `contact_kind_for` short-circuit before the guest lookup
-  (`WHATSAPP`/`EMAIL` only) so a `MANUAL`/`PORTAL`/`PHONE_TRANSCRIPT` reply returns `None`
-  cheaply — same precedence as the original method (D14).
+- `_recipient_contact` returns `None` for `MANUAL`/`PORTAL`/`PHONE_TRANSCRIPT` because
+  `contact_kind_for` returns `None` for those channels (D14), and also when the conversation
+  has no `guest_id` or the guest lookup misses — same outcomes as the original method, the
+  order of the two empty-checks is a refactor that doesn't change behaviour.
 - `RecordHumanReplyUseCase.execute` always builds the `Message` after the `adapter.send` call
   (or after the "no adapter" branch), so `metadata` is constructed once with the final
   `delivery_status`/`delivery_error_code` (D2/D4) — no `metadata=` mutation after `Message(...)`
