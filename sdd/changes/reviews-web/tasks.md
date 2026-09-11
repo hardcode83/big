@@ -129,7 +129,7 @@ sección 8.
 
 ## 4. Store de UI
 
-- [ ] 4.1 `features/reviews/state/use-reviews-ui-store.ts` (nuevo) + `.test.ts`:
+- [x] 4.1 `features/reviews/state/use-reviews-ui-store.ts` (nuevo) + `.test.ts`:
   Zustand con `tenantId`, `activeTab: "drafts" | "reviews"` (inicial `"drafts"`),
   `detailReviewId: string | null`, y **dos rebanadas independientes** —
   `drafts {propertyId, channel, sentiment, ratingMin, ratingMax, dateFrom, dateTo,
@@ -144,7 +144,7 @@ sección 8.
 
 ## 5. Hooks de query y mutación
 
-- [ ] 5.1 `features/reviews/hooks/query-keys.ts` (nuevo) + `.test.ts`: sobre
+- [x] 5.1 `features/reviews/hooks/query-keys.ts` (nuevo) + `.test.ts`: sobre
   `tenantScopedKey`, recursos `"reviews"`, `"review-drafts"`, `"review-properties"`,
   y las entradas `list(tenantId, filters, page)`, **`listPrefix(tenantId)`** (para
   invalidar por prefijo), `detail(tenantId, reviewId)`, `draft(tenantId, reviewId)`,
@@ -153,14 +153,14 @@ sección 8.
   orden dan la misma clave, y `listPrefix` es prefijo de `list` para cualquier filtro
   y página. [R2.1, R3.4, R5.1]
 
-- [ ] 5.2 `features/reviews/hooks/use-reviews-data.ts` (nuevo) + `.test.tsx`:
+- [x] 5.2 `features/reviews/hooks/use-reviews-data.ts` (nuevo) + `.test.tsx`:
   `useReviewsList(filters, page)`, `useReviewDetail(reviewId)`,
   `useReviewDraft(reviewId)`, `usePropertyDirectory()` con la `retryPolicy` del
   árbol. El detalle y el borrador son **dos queries independientes** que el detalle
   dispara en paralelo (R6.1); el detalle se monta sólo cuando `detailReviewId` no es
   `null`. El fallo del catálogo no marca error en las otras queries. [R2.1, R2.8, R5.1, R6.1]
 
-- [ ] 5.3 `features/reviews/hooks/use-respond-to-review.ts` (nuevo) + `.test.tsx`:
+- [x] 5.3 `features/reviews/hooks/use-respond-to-review.ts` (nuevo) + `.test.tsx`:
   unión discriminada `RespondInput` (D4), `retry: false`, **sin** parcheo optimista,
   con `invalidateQueries({ queryKey: reviewsKeys.listPrefix(tenantId) })` en
   **`onSettled`**. La mutación no recibe el `tenantId` por argumento, lo lee de
@@ -170,7 +170,7 @@ sección 8.
   vacío falla en el sitio de uso (`draftContent.trim().length === 0` →
   `TypeError`, sin red). [R3.3, R3.4, R3.5, R4.3]
 
-- [ ] 5.4 `features/reviews/hooks/use-create-review.ts` (nuevo) + `.test.tsx`:
+- [x] 5.4 `features/reviews/hooks/use-create-review.ts` (nuevo) + `.test.tsx`:
   `retry: false`, cuerpo `CreateReviewInput` (de `data/dto.ts`), misma invalidación
   de prefijo en `onSettled`. Tests: el cuerpo tiene los nombres correctos
   (`property_id` snake_case, no `propertyId`), y la invalidación ocurre también al

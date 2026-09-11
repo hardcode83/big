@@ -201,10 +201,10 @@ export class HttpReviewsSource implements ReviewsDataSource {
     // wire contract publishes — `{action}` for the three terminal moves and
     // `{action, draft_content}` for `EDIT`. `extra="forbid"` on the backend
     // catches any extra field as a `422`.
-    const body: Record<string, unknown> = { action: input.action };
-    if (input.action === "EDIT") {
-      body.draft_content = input.draftContent;
-    }
+    const body =
+      input.action === "EDIT"
+        ? { action: input.action, draft_content: input.draftContent }
+        : { action: input.action };
     const response: ReviewResponse = await this.client.request(
       "/api/v1/reviews/{review_id}/response",
       {

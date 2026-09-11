@@ -109,14 +109,17 @@ export interface PropertySummary {
   name: string;
 }
 
-/** Server-side filters for the review list (R2.1, R5.1); never applied client-side. */
+/** Server-side filters for the review list (R2.1, R5.1); never applied client-side.
+ *  `ratingMin`/`ratingMax` are `number` because the backend's `Query(alias=...)`
+ *  declares them as such (`openapi.d.ts:10203` `rating_min?: number | null`).
+ *  The UI collects them as numbers from the rating selector. */
 export interface ReviewFilters {
   propertyId?: string;
   channel?: ReviewChannel;
   sentiment?: ReviewSentiment | null;
   status?: ReviewStatus;
-  ratingMin?: string;
-  ratingMax?: string;
+  ratingMin?: number;
+  ratingMax?: number;
   dateFrom?: string;
   dateTo?: string;
 }

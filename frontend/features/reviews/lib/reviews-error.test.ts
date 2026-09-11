@@ -55,8 +55,11 @@ describe("respondErrorKey", () => {
     expect(respondErrorKey({ status: 409 })).toBe(GENERIC_RESPOND_ERROR_KEY);
   });
   it("does not leak message/code/details into the key", () => {
-    const e = apiError(409, "another action was taken first", "INVALID_STATE", {
-      state: "POSTED_MANUALLY",
+    const e = new ApiError({
+      status: 409,
+      message: "another action was taken first",
+      code: "INVALID_STATE",
+      details: { state: "POSTED_MANUALLY" },
     });
     const key = respondErrorKey(e);
     expect(key).not.toContain("another");
