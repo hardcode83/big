@@ -1,0 +1,50 @@
+# Tasks: tenant-settings-web
+
+## 1. Foundations — permissions, DTOs, HTTP data source
+
+- [ ] 1.1 Add `"MANAGE_USERS"` and `"MANAGE_TENANT_SETTINGS"` to the `Permission` union and to `ROLE_UI_PERMISSIONS.TENANT_OWNER` in `frontend/lib/auth/permissions.ts` (design D2); extend `frontend/lib/auth/permissions.test.tsx` with cases for both permissions across all five roles (`TENANT_OWNER` true, everyone else false). [R2, R3, R4, R5]
+- [ ] 1.2 Export `TemporaryPasswordReveal` from `frontend/features/platform/index.ts`. [R2, R4] (design D1)
+- [ ] 1.3 Create `frontend/features/tenant-settings/dto.ts`: `UserDto`, `UserListDto`, `CreatedUserDto`, `TenantConfigDto`, `TenantDto`, `CreateUserInput`, `UpdateUserInput`, `UpdateTenantInput` (camelCase mirrors of `UserResponse`/`UserPageResponse`/`CreatedUserResponse`/`TenantResponse`/`CreateUserRequest`/`UpdateUserRequest`/`UpdateTenantRequest`/`TenantConfigPatch`). [R1, R2, R3, R5]
+- [ ] 1.4 Create `frontend/features/tenant-settings/data/http/http-tenant-settings-source.ts` implementing all eight endpoint calls (`GET/POST /api/v1/users`, `GET/PATCH/DELETE /api/v1/users/{id}`, `POST /api/v1/users/{id}/reset-password`, `GET/PATCH /api/v1/tenants/{id}`) with request/response mapping to/from the DTOs of 1.3, mirroring `http-platform-source.ts`'s shape; `http-tenant-settings-source.test.ts` covers every mapping function. [R1, R2, R3, R4, R5] (design D1, D7)
+- [ ] 1.5 Create `frontend/features/tenant-settings/data/index.ts`: the single composition point, `getTenantSettingsDataSource()`, wired through `createAuthenticatedClients` exactly like `features/platform/data/index.ts` and `features/reservations/data/index.ts`. [R1, R2, R3, R4, R5]
+
+## 2. Query and mutation hooks
+
+- [ ] 2.1 Create `frontend/features/tenant-settings/hooks/query-keys.ts`: `tenantSettingsKeys` built on `tenantScopedKey` — `usersList(tenantId, filters)`, `userDetail(tenantId, userId)`, `tenantDetail(tenantId)`, `activeCleanerCount(tenantId, role, status)`. [R1, R3, R5]
+- [ ] 2.2 Create `frontend/features/tenant-settings/hooks/use-users.ts` (`GET /api/v1/users`, paginated + role/status filters, R1.1/R1.2) and `use-user.ts` (`GET /api/v1/users/{id}`, R1.3), both with a local `useTenantId()` helper mirroring `features/reservations/hooks/use-reservations.ts`; retry via `retryPolicy`. Tests cover the filter query params and the `useTenantId()` throw when unauthenticated. [R1]
+- [ ] 2.3 Create `frontend/features/tenant-settings/hooks/use-create-user.ts` (`POST /api/v1/users`, `gcTime: 0` — same reasoning as `useCreatePlatformUser` for the one-time temporary password) and `frontend/features/tenant-settings/hooks/use-reset-password.ts` (`POST /api/v1/users/{id}/reset-password`, `gcTime: 0`). Tests confirm `gcTime: 0` and that both invalidate `usersList` on success. [R2, R4]
+- [ ] 2.4 Create `frontend/features/tenant-settings/hooks/use-update-user.ts` (`PATCH /api/v1/users/{id}`, used for profile/role edits and reactivation via `{status: "ACTIVE"}`, R3.1) and `frontend/features/tenant-settings/hooks/use-deactivate-user.ts` (`DELETE /api/v1/users/{id}`, R3.2). Both invalidate `usersList` and the row's `userDetail` on success. [R3] (design D7)
+- [ ] 2.5 Create `frontend/features/tenant-settings/hooks/use-active-cleaner-count.ts`: fires `GET /api/v1/users?role=CLEANER&status=ACTIVE&per_page=1` on demand (not on every render) and exposes `total`. Test asserts the query params and that it is disabled until explicitly enabled. [R3.4] (design D8)
+- [ ] 2.6 Create `frontend/features/tenant-settings/hooks/use-tenant.ts` (`GET /api/v1/tenants/{id}`, R5.1) and `use-update-tenant.ts` (`PATCH /api/v1/tenants/{id}`, R5.3), invalidating `tenantDetail` on success. [R5]
+
+## 3. Users section UI
+
+- [ ] 3.1 Create `frontend/features/tenant-settings/components/list/user-list.tsx`: paginated table (name, email, role, status), role/status filter controls, row selection opens detail. Loading/empty/error states per `steering/frontend.md`. Component test covers loading, empty, error, and a populated page. [R1.1, R1.2]
+- [ ] 3.2 Create `frontend/features/tenant-settings/components/detail/user-detail-view.tsx`: read-only rendering of one user (name, email, phone, role, status — including `INACTIVE`/`SUSPENDED`) via `use-user`, opened for **any** row regardless of role — `PROPERTY_MANAGER` has backend read access to `GET /api/v1/users/{id}` (`user-management` §Aislamiento) same as the list, so this view is not gated by `useHasPermission`. Test covers rendering an `INACTIVE` user's detail. [R1.3]
+- [ ] 3.3 Create `frontend/features/tenant-settings/components/detail/create-user-form.tsx`: full_name/email/phone/role fields (role options = `GRANTABLE_ROLES` minus `SUPER_ADMIN`, mirroring `create-user-form.tsx`'s list), `409` mapped via `mapFieldErrors(error, "email")`, success renders the reused `TemporaryPasswordReveal`. Rendered only when `useHasPermission("MANAGE_USERS")` is true (design D5). Test covers submit, `409`, and success reveal. [R2]
+- [ ] 3.4 Create `frontend/features/tenant-settings/components/detail/edit-user-form.tsx`: profile/role/status fields via `use-update-user`, only changed fields sent; disables role/status controls when the target row is the acting user's own (`user.id === session.user.id`, R3.3); surfaces the backend's `422` (last-owner / self-action) via `mapFieldErrors` with no generic fallback message. Rendered as a mutation layer on top of 3.2, only when `useHasPermission("MANAGE_USERS")` is true. Tests cover a normal edit, the self-row disable, and the `422` surfacing. [R3.1, R3.2, R3.3]
+- [ ] 3.5 Create `frontend/features/tenant-settings/components/detail/deactivate-user-confirm.tsx`: confirmation dialog calling `use-deactivate-user`; when the target is an `ACTIVE` `CLEANER`, calls `use-active-cleaner-count` and shows the non-blocking warning copy if `total === 1`, without blocking the confirm action. Test covers the warning appearing only for the last active cleaner and not for any other row. [R3.4]
+- [ ] 3.6 Create `frontend/features/tenant-settings/components/detail/reset-password-confirm.tsx`: confirm dialog calling `use-reset-password`, success renders `TemporaryPasswordReveal`. Rendered only when `useHasPermission("MANAGE_USERS")` is true. [R4]
+- [ ] 3.7 Create `frontend/features/tenant-settings/components/list/user-row-actions.tsx` wiring 3.2 (always) plus 3.3/3.4/3.5/3.6 (only when `useHasPermission("MANAGE_USERS")`) into a `Sheet` per row (mirrors `platform-console.tsx`'s single-`Sheet`-hosts-one-form pattern). For a `PROPERTY_MANAGER` session the `Sheet` hosts only the read-only 3.2 view, never the mutation forms. [R1.3, R3, R4] (design D4, D5)
+
+## 4. Tenant configuration UI
+
+- [ ] 4.1 Create `frontend/features/tenant-settings/lib/validate-tenant-config.ts`: client-side range checks mirroring the backend (threshold ≥ 0, SLAs > 0, confidence in `[0,1]`, IANA timezone via `Intl.supportedValuesOf("timeZone")` or `try { new Intl.DateTimeFormat(undefined, {timeZone}) }`). Unit tests cover each rejected/accepted boundary. [R5.3]
+- [ ] 4.2 Create `frontend/features/tenant-settings/components/tenant-config-form.tsx`: renders tenant + `TenantConfig` fields from `use-tenant`; when `useHasPermission("MANAGE_TENANT_SETTINGS")` is false, renders read-only with no submit control (design D5); otherwise validates via 4.1 before calling `use-update-tenant`, sends only changed fields, shows inline copy next to `default_language` (R5.4) and `owner_approval_threshold_eur` (R5.5), and surfaces `422`s via `mapFieldErrors`. Tests cover the read-only render for `PROPERTY_MANAGER`, a submit with only-changed-fields, client-side rejection before any request, and the two inline caveats. [R5]
+
+## 5. Composition, route wiring, gating regression, i18n
+
+- [ ] 5.1 Create `frontend/features/tenant-settings/components/tenant-settings-view.tsx`: two stacked `<section>`s ("Usuarios" then "Tenant") per design D4, hosting `user-list`/`user-row-actions`/`create-user-form` trigger and `tenant-config-form`. Create `frontend/features/tenant-settings/index.ts` barrel. [R1, R2, R3, R4, R5, R6]
+- [ ] 5.2 Replace the `RoutePlaceholder` in `frontend/app/(workspace)/settings/page.tsx` with `TenantSettingsView`. [R1, R6]
+- [ ] 5.3 Add a regression test (mirrors `auth-guard.test.tsx`'s existing role-denial cases) asserting a `CLEANER`/`TECHNICIAN` session is redirected away from `/settings`, pinning the existing `(workspace)/layout.tsx` `AuthGuard allow` list (design D3 — no production code change, test only). [R1.4, R6]
+- [ ] 5.4 Create `frontend/locales/es/tenant-settings.json` and `frontend/locales/en/tenant-settings.json` (all UI strings used by sections 3-5: forms, labels, errors, confirmations, warnings, `UserRole`/`UserStatus` display labels); register both in `frontend/lib/i18n/resources.ts`. [`steering/frontend.md` i18n rule]
+- [ ] 5.5 Create `frontend/features/tenant-settings/locales/tenant-settings-locale.test.ts` (mirrors `reservations-locale.test.ts`): every `UserRole` and `UserStatus` enum value from the generated OpenAPI types has a label in both `es` and `en`, and resolves identically through `i18next` wherever it's rendered.
+
+## 6. Verification
+
+- [ ] 6.1 Full frontend test suite passes: `cd frontend && npm test`
+- [ ] 6.2 Lint passes: `cd frontend && npm run lint`
+- [ ] 6.3 Typecheck passes: `cd frontend && npm run typecheck`
+- [ ] 6.4 Manual check of the end-to-end flow in a browser: as `TENANT_OWNER`, list/create/edit/deactivate/reactivate/reset-password a user and edit the tenant config at `/settings`; as `PROPERTY_MANAGER`, confirm both sections render read-only with no mutation controls; as `CLEANER`/`TECHNICIAN`, confirm `/settings` redirects. <!-- manual -->
+
+## Implementation Notes
