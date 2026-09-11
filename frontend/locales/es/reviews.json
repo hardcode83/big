@@ -1,4 +1,5 @@
 {
+  "title": "Reseñas",
   "tabs": {
     "label": "Secciones de reseñas",
     "drafts": "Borradores",
@@ -6,6 +7,8 @@
   },
   "list": {
     "label": "Listado de reseñas",
+    "title": "Listado de reseñas",
+    "loading": "Cargando…",
     "empty": {
       "title": "Sin reseñas",
       "description": "No hay reseñas que coincidan con los filtros seleccionados."
@@ -23,6 +26,7 @@
       "description": "Vuelve a intentarlo en unos segundos."
     }
   },
+  "separator": "·",
   "columns": {
     "property": "Vivienda",
     "channel": "Canal",
@@ -64,6 +68,7 @@
   "identity": {
     "unavailable": "Vivienda no disponible",
     "loading": "Cargando catálogo…",
+    "pending": "Cargando catálogo…",
     "portfolio": "Toda la cartera"
   },
   "filters": {
@@ -89,10 +94,13 @@
       "max": "Máximo"
     },
     "dateFrom": { "label": "Desde" },
-    "dateTo": { "label": "Hasta" }
+    "dateTo": { "label": "Hasta" },
+    "all": "Todos"
   },
   "pagination": {
     "label": "Paginación de reseñas",
+    "drafts": "Paginación de borradores",
+    "reviews": "Paginación de reseñas",
     "previous": "Página anterior",
     "next": "Página siguiente",
     "pageOfTotal": "Página {{page}} de {{totalPages}}",
@@ -103,8 +111,11 @@
     "ignore": "Ignorar",
     "markPosted": "Marcar como publicada",
     "editDraft": "Editar borrador",
+    "edit": "Editar borrador",
     "confirm": "Confirmar",
     "cancel": "Cancelar",
+    "editSave": "Guardar cambios",
+    "editCancel": "Cancelar edición",
     "sending": "Enviando…",
     "success": "Reseña actualizada.",
     "confirmQuestion": {
@@ -123,9 +134,18 @@
   },
   "create": {
     "title": "Añadir reseña",
+    "body": "Registra una reseña a mano. La reseña aparecerá como Pendiente de clasificar y la pipeline la analizará en los siguientes minutos.",
     "button": "Añadir reseña",
+    "trigger": "Añadir reseña",
+    "selectProperty": "Selecciona una vivienda",
     "sending": "Enviando…",
     "success": "Reseña creada.",
+    "propertyLabel": "Vivienda",
+    "channelLabel": "Canal",
+    "reviewerNameLabel": "Nombre del huésped (opcional)",
+    "ratingLabel": "Valoración (/5)",
+    "contentLabel": "Texto de la reseña (opcional)",
+    "languageLabel": "Idioma (opcional)",
     "fields": {
       "property": "Vivienda",
       "channel": "Canal",
@@ -147,8 +167,16 @@
       "generic": "No se pudo crear la reseña. Vuelve a intentarlo."
     }
   },
+  "read": {
+    "error": {
+      "forbidden": "No tienes permiso para ver estas reseñas.",
+      "notFound": "La reseña ya no existe.",
+      "generic": "No se pudo cargar la reseña. Vuelve a intentarlo."
+    }
+  },
   "preview": {
     "guestText": "Texto del huésped",
+    "guestContent": "Texto del huésped",
     "reviewerName": "Huésped",
     "rating": "Valoración",
     "channel": "Canal",
@@ -157,7 +185,8 @@
     "aiSummary": "Resumen automático",
     "recurringIssues": "Problemas recurrentes",
     "draftContent": "Borrador propuesto",
-    "noDraft": "Sin borrador."
+    "noDraft": "Sin borrador.",
+    "empty": "—"
   },
   "markPosted": {
     "dialog": {
@@ -166,6 +195,7 @@
       "guestPreview": "Texto del huésped",
       "draftPreview": "Borrador aprobado",
       "confirm": "Confirmar",
+      "confirmAria": "Confirmar que ya publicaste esta respuesta en el canal correspondiente.",
       "cancel": "Cancelar"
     }
   },
@@ -173,6 +203,12 @@
     "title": "Detalle de la reseña",
     "close": "Cerrar",
     "loading": "Cargando detalle…",
-    "error": "No se pudo cargar el detalle."
+    "error": "No se pudo cargar el detalle.",
+    "guestContent": "Texto del huésped",
+    "rating": "Valoración",
+    "reviewer": "Huésped",
+    "sentiment": "Sentimiento",
+    "aiSummary": "Resumen automático",
+    "draft": "Borrador propuesto"
   }
 }

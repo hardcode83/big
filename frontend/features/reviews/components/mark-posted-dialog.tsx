@@ -68,7 +68,7 @@ export function MarkPostedDialog({
         <div className="flex flex-col gap-3 border-t border-border pt-3">
           <div className="flex flex-col gap-1">
             <span className="text-body-base font-medium text-muted-foreground">
-              {t("preview.guestContent")}
+              {t("preview.guestText")}
             </span>
             <p className="whitespace-pre-wrap text-body-base text-foreground">
               {review.content ?? t("preview.empty")}

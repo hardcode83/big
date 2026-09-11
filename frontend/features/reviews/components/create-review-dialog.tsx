@@ -127,7 +127,7 @@ export function CreateReviewDialog({
         >
           <label className="flex flex-col gap-1 text-body-base">
             <span className="font-medium text-foreground">
-              {t("create.propertyLabel")}
+              {t("create.fields.property")}
             </span>
             <select
               value={propertyId}
@@ -145,7 +145,7 @@ export function CreateReviewDialog({
           </label>
           <label className="flex flex-col gap-1 text-body-base">
             <span className="font-medium text-foreground">
-              {t("create.channelLabel")}
+              {t("create.fields.channel")}
             </span>
             <select
               value={channel}
@@ -161,7 +161,7 @@ export function CreateReviewDialog({
           </label>
           <label className="flex flex-col gap-1 text-body-base">
             <span className="font-medium text-foreground">
-              {t("create.reviewerNameLabel")}
+              {t("create.fields.reviewerName")}
             </span>
             <input
               type="text"
@@ -173,7 +173,7 @@ export function CreateReviewDialog({
           </label>
           <label className="flex flex-col gap-1 text-body-base">
             <span className="font-medium text-foreground">
-              {t("create.ratingLabel")}
+              {t("create.fields.rating")}
             </span>
             <select
               value={rating}
@@ -192,7 +192,7 @@ export function CreateReviewDialog({
           </label>
           <label className="flex flex-col gap-1 text-body-base">
             <span className="font-medium text-foreground">
-              {t("create.contentLabel")}
+              {t("create.fields.content")}
             </span>
             <textarea
               value={content}
@@ -203,7 +203,7 @@ export function CreateReviewDialog({
             />
           </label>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isBusy}>
+            <AlertDialogCancel type="button" disabled={isBusy}>
               {t("create.cancel")}
             </AlertDialogCancel>
             <Button type="submit" disabled={!canSubmit}>

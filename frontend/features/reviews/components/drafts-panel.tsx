@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 
-import type { Review, ReviewStatus } from "../data";
+import type { Review, ReviewAction, ReviewStatus } from "../data";
 import { useReviewsUiStore } from "../state/use-reviews-ui-store";
 import { useReviewsList } from "../hooks/use-reviews-data";
 import { ReviewActions } from "./review-actions";
@@ -34,6 +34,12 @@ export interface DraftsPanelProps {
   onOpenRow: (reviewId: string) => void;
   /** The current user's role for the action matrix (D5). */
   role: "owner" | "manager" | "other";
+  /** Mutation handler wired through the parent (R3.1). */
+  onConfirm: (input: {
+    reviewId: string;
+    action: Exclude<ReviewAction, "MARK_POSTED">;
+    draftContent?: string;
+  }) => void;
 }
 
 export function DraftsPanel({
@@ -44,6 +50,7 @@ export function DraftsPanel({
   isMutationPending,
   onOpenRow,
   role,
+  onConfirm,
 }: DraftsPanelProps) {
   const { t } = useTranslation("reviews");
   const slice = useReviewsUiStore((state) => state.drafts);
@@ -61,16 +68,16 @@ export function DraftsPanel({
     <div className="flex flex-col gap-3" data-testid="drafts-panel">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-headline-md font-semibold text-foreground">
-          {t("list.title")}
+          {t("list.label")}
         </h2>
         {!createDialogOpen && (
           <Button type="button" onClick={onOpenCreateDialog}>
-            {t("create.trigger")}
+            {t("create.button")}
           </Button>
         )}
       </div>
       <label className="flex flex-col gap-1 text-body-base">
-        <span className="font-medium text-foreground">{t("filters.property")}</span>
+        <span className="font-medium text-foreground">{t("filters.property.label")}</span>
         <select
           value={slice.propertyId ?? ""}
           onChange={(e) =>
@@ -78,7 +85,7 @@ export function DraftsPanel({
           }
           className="rounded-md border border-border bg-background px-2 py-1.5 text-body-base"
         >
-          <option value="">{t("filters.all")}</option>
+          <option value="">{t("filters.property.all")}</option>
           {catalog.map((property) => (
             <option key={property.id} value={property.id}>
               {property.name}
@@ -96,7 +103,7 @@ export function DraftsPanel({
       )}
       {query.data && query.data.total === 0 && (
         <p className="text-body-base text-muted-foreground">
-          {t("list.empty")}
+          {t("list.draftsEmpty.title")}
         </p>
       )}
       {query.data && query.data.total > 0 && (
@@ -116,16 +123,13 @@ export function DraftsPanel({
                   status={review.status}
                   role={role}
                   isBusy={isMutationPending}
-                  isPending={
-                    /* The pending mutation is for THIS row, not another.
-                     * The view passes its current variables; we don't have
-                     * per-row variables here, so we report `false` and let
-                     * the button text reset once the mutation settles. */
-                    false
+                  isPending={false}
+                  onConfirm={(input) =>
+                    onConfirm({
+                      reviewId: input.reviewId,
+                      action: input.action,
+                    })
                   }
-                  onConfirm={() => {
-                    /* Wired through the parent for symmetry with Reseñas. */
-                  }}
                 />
               </li>
             ))}

@@ -15,12 +15,10 @@ import {
   usePropertyDirectory,
   useReviewDetail,
   useReviewDraft,
-  useReviewsList,
 } from "../hooks/use-reviews-data";
 import { CreateReviewDialog } from "./create-review-dialog";
 import { DraftsPanel } from "./drafts-panel";
 import { ReviewDetail } from "./review-detail";
-import { ReviewActions } from "./review-actions";
 import { ReviewsPanel } from "./reviews-panel";
 import { ReviewsTabs } from "./reviews-tabs";
 
@@ -89,19 +87,6 @@ export function ReviewsView() {
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
-  // Wire both tabs through the same mutation. The Borradores panel receives
-  // only the in-DRAFTED list, the Reseñas panel receives the filtered one.
-  const draftsSlice = useReviewsUiStore((s) => s.drafts);
-  const draftsQuery = useReviewsList(
-    {
-      ...(draftsSlice.propertyId !== undefined
-        ? { propertyId: draftsSlice.propertyId }
-        : {}),
-      status: "DRAFTED",
-    },
-    draftsSlice.page,
-  );
-
   function closeDetail() {
     setDetailReviewId(null);
   }
@@ -149,6 +134,7 @@ export function ReviewsView() {
                 isMutationPending={isBusy}
                 onOpenRow={openRow}
                 role={canDecide ? role : "other"}
+                onConfirm={respondFromRow}
               />
             ),
           },
@@ -161,6 +147,9 @@ export function ReviewsView() {
                 createDialogOpen={createDialogOpen}
                 onOpenCreateDialog={() => canCreate && setCreateDialogOpen(true)}
                 onOpenRow={openRow}
+                role={canDecide ? role : "other"}
+                isMutationPending={isBusy}
+                onConfirm={respondFromRow}
               />
             ),
           },
@@ -179,16 +168,6 @@ export function ReviewsView() {
           }}
         />
       )}
-      {detail.data && (
-        <ReviewActions
-          reviewId={detail.data.id}
-          status={detail.data.status}
-          role={role}
-          isBusy={isBusy}
-          isPending={isPendingThisRow(detail.data.id)}
-          onConfirm={respondFromRow}
-        />
-      )}
       {canCreate && (
         <CreateReviewDialog
           open={createDialogOpen}
@@ -202,10 +181,6 @@ export function ReviewsView() {
           }}
         />
       )}
-      {/* The Borradores panel reads its own filtered query; expose it via a
-        //  separate query to keep the view small. */}
-      {/* This block keeps the type narrowing happy. */}
-      <span hidden>{draftsQuery.error ? "" : ""}</span>
     </div>
   );
 }
