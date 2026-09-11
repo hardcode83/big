@@ -51,5 +51,48 @@
     "title": "Filtros no válidos",
     "description": "Revisa los filtros seleccionados y vuelve a intentarlo."
   },
-  "cityEmpty": "Sin ciudad"
+  "cityEmpty": "Sin ciudad",
+  "newProperty": "Nueva propiedad",
+  "sheet": {
+    "close": "Cerrar",
+    "newPropertyTitle": "Nueva propiedad"
+  },
+  "createForm": {
+    "fields": {
+      "name": "Nombre",
+      "internalCode": "Código interno",
+      "pmsExternalId": "ID externo del PMS",
+      "addressLine1": "Dirección línea 1",
+      "addressLine2": "Dirección línea 2",
+      "city": "Ciudad",
+      "province": "Provincia",
+      "postalCode": "Código postal",
+      "country": "País",
+      "timezone": "Zona horaria",
+      "maxGuests": "Huéspedes máximos",
+      "bedrooms": "Habitaciones",
+      "bathrooms": "Baños",
+      "defaultCheckInTime": "Hora de check-in",
+      "defaultCheckOutTime": "Hora de check-out",
+      "wifiName": "Nombre del WiFi",
+      "wifiPassword": "Contraseña del WiFi",
+      "accessNotes": "Notas de acceso",
+      "cleaningNotes": "Notas de limpieza",
+      "emergencyNotes": "Notas de emergencia"
+    },
+    "placeholders": {
+      "country": "ES",
+      "timezone": "Europe/Madrid"
+    },
+    "accessNotesHint": "Texto de cara al huésped con las instrucciones de llegada. No es el lugar para un código de puerta o cerradura — eso pertenece a un registro de acceso.",
+    "errors": {
+      "required": "Este campo es obligatorio.",
+      "tooLong": "Este valor es demasiado largo.",
+      "invalidCountry": "Introduce un código de país de 2 letras (por ejemplo, ES).",
+      "outOfRange": "Introduce un valor dentro del rango permitido."
+    },
+    "submit": "Crear propiedad",
+    "submitting": "Creando…",
+    "genericError": "No se pudo crear la propiedad. Vuelve a intentarlo."
+  }
 }

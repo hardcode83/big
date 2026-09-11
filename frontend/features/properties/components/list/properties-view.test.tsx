@@ -11,6 +11,18 @@ vi.mock("../../hooks/use-properties", () => ({
   useProperties: usePropertiesMock,
 }));
 
+const useHasPermissionMock = vi.hoisted(() => vi.fn(() => true));
+vi.mock("@/lib/auth", () => ({
+  useHasPermission: useHasPermissionMock,
+}));
+
+// `CreatePropertyForm` has its own dedicated test file (`create-property-form.test.tsx`).
+// Stubbed here so opening the Sheet in these tests never reaches its real
+// `useCreateProperty`/`next/navigation` dependencies.
+vi.mock("../form/create-property-form", () => ({
+  CreatePropertyForm: () => <div>create-property-form-stub</div>,
+}));
+
 import { PropertiesView } from "./properties-view";
 
 function renderView() {
@@ -370,5 +382,44 @@ describe("PropertiesView — no hardcoded copy (R6.4)", () => {
     expect(text).toContain(esProperties.pagination.next);
     expect(text).toContain(esProperties.filters.all);
     expect(text).toContain(esProperties.filters.allStates);
+  });
+});
+
+describe("PropertiesView — the create flow (R1.1, design D2/D12)", () => {
+  it("shows the 'New property' button when MANAGE_PROPERTIES is granted", () => {
+    useHasPermissionMock.mockReturnValue(true);
+    ok(page());
+    renderView();
+    expect(
+      screen.getByRole("button", { name: esProperties.newProperty }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the 'New property' button without the permission", () => {
+    useHasPermissionMock.mockReturnValue(false);
+    ok(page());
+    renderView();
+    expect(
+      screen.queryByRole("button", { name: esProperties.newProperty }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens the Sheet hosting CreatePropertyForm and closes it again", () => {
+    useHasPermissionMock.mockReturnValue(true);
+    ok(page());
+    renderView();
+
+    expect(screen.queryByText("create-property-form-stub")).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: esProperties.newProperty }),
+    );
+    expect(
+      screen.getByRole("heading", { name: esProperties.sheet.newPropertyTitle }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("create-property-form-stub")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: esProperties.sheet.close }));
+    expect(screen.queryByText("create-property-form-stub")).not.toBeInTheDocument();
   });
 });

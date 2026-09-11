@@ -78,20 +78,20 @@
       confirm the data layer compiles and its own tests pass before any UI
       depends on it.
 
-## 3. Create flow
+## 3. Create flow <!-- panel: PASS 2026-09-11 receipt:baf66912 -->
 
-- [ ] 3.1 Add locale keys to `frontend/locales/{es,en}/properties.json`: field
+- [x] 3.1 Add locale keys to `frontend/locales/{es,en}/properties.json`: field
       labels, placeholders, the `access_notes` inline guidance (design D14),
       validation messages, `newProperty` button label, create success/generic
       error copy. [R1, R4.1]
-- [ ] 3.2 Create `frontend/features/properties/components/form/property-fieldset.tsx`:
+- [x] 3.2 Create `frontend/features/properties/components/form/property-fieldset.tsx`:
       the shared ~15-field presentational list (name, internal_code,
       pms_external_id, address block, country, timezone, capacity trio,
       check-in/out times, wifi name/password, three notes), receiving `values`/
       `onChange`/`fieldErrors` as props, `maxLength` wired from
       `field-limits.ts`, one programmatically associated label per field,
       required fields marked. Never renders `pms_provider` or `status`. [R1.2, R3.1, R3.2, R3.3, R4.2]
-- [ ] 3.3 Create
+- [x] 3.3 Create
       `frontend/features/properties/components/form/create-property-form.tsx`:
       controlled state per field (design D1), `validatePropertyFields` on
       submit, `useCreateProperty`, submit disabled + pending copy while in
@@ -100,7 +100,7 @@
       path navigation, client-side validation blocking submit, `409` on each of
       `internal_code`/`pms_external_id` attributing to the right field,
       double-submit prevention. [R1.1, R1.3, R1.4, R1.5, R1.6]
-- [ ] 3.4 Wire `PropertiesView`
+- [x] 3.4 Wire `PropertiesView`
       (`frontend/features/properties/components/list/properties-view.tsx`):
       "New property" button gated by `useHasPermission("MANAGE_PROPERTIES")`,
       opening a `Sheet` hosting `CreatePropertyForm` (mirrors `PlatformConsole`,
@@ -214,3 +214,11 @@
 - Hand-reproduced dashboard invalidation keys used by both mutation hooks' `onSettled` (verbatim, copy these into section 4/5 code rather than re-deriving): `["tenant", tenantId, "dashboard-cards"]` (both hooks) and `["tenant", tenantId, "property-detail", id]` (update only). `features/properties` still does not import `dashboardKeys`.
 - `frontend/features/properties/index.ts` now re-exports `useProperty`, `useCreateProperty`, `useUpdateProperty` (+ `UpdatePropertyMutationInput`), and the types `PropertyDetailDto`/`CreatePropertyInput`/`UpdatePropertyInput` (via `export type {...} from "./data"`), alongside the pre-existing `PropertiesView`.
 - `cd frontend && npm run typecheck && npm test -- properties`: typecheck clean, 149/149 tests passed (12 test files).
+
+### Section 3 (create flow)
+
+- `frontend/features/properties/components/form/property-fieldset.tsx` exports `PropertyFormFields` (the flat, snake_case, ~20-field superset of `PropertyFieldValues` — includes every field `PropertyFieldValues` omits: `pms_external_id`, the address block, `wifi_name`, `timezone`, the two check-in/out times) and `PropertyFieldset({ values: PropertyFormFields, onChange: (field: keyof PropertyFormFields, value: string | number) => void, fieldErrors: Record<string, string>, disabled?: boolean })`. Section 4's `EditPropertyForm` should reuse this component and this exact prop shape verbatim — `onChange` is NOT generic (plain `(field, value) => void`), so a caller with a numeric field does its own `Number(...)` conversion before calling it (see `property-fieldset.tsx`'s own numeric `<input>`s for the pattern). `PropertyFieldset` never translates `fieldErrors` itself — callers must pass already-localized strings (translated validation keys or raw backend 422/409 messages, see `create-property-form.tsx`). Ids are `property-<field with _ replaced by ->` (e.g. `property-internal-code`, `property-default-check-in-time`); `#property-access-notes-hint` is the D14 hint's id, referenced via that `<textarea>`'s `aria-describedby` — reuse it if Section 4 needs to point at the same hint. `wifi_password` renders as `type="password"` with `autoComplete="new-password"`; the three notes and `wifi_password` are plain `<textarea>`/`<input>`, never parsed (R3.3).
+- `frontend/features/properties/components/form/create-property-form.tsx` exports `CreatePropertyForm()` (no props). It owns `useState<PropertyFormFields>`, calls `validatePropertyFields` (which accepts `PropertyFormFields` directly — it's a structural superset of `PropertyFieldValues`) on submit, translates the returned error **keys** via `t(\`createForm.errors.${key}\`)` before handing them to `PropertyFieldset`, and merges in `mapPropertyFieldErrors(mutation.error)` (raw, untranslated backend text) only when there are no live client-validation errors. The `<form>` has `noValidate` (mirrors `login-form.tsx`): `name`/`internal_code` still carry the HTML `required` attribute for a11y (R4.2), but browser-native constraint validation is disabled so `validatePropertyFields` is the single, consistent path that blocks submit and renders errors — without `noValidate`, jsdom (and real browsers) silently block the `submit` event before `onSubmit` ever runs when a `required` field is empty, which is also why any Section 4 form reusing native `required` attributes needs the same `noValidate`. Navigation is via `mutation.mutate(input, { onSuccess: (created) => router.push(...) })` — the callback form of `mutate`, not a `useEffect` watching `mutation.isSuccess`. Double-submit guard is `if (mutation.isPending) return;` at the top of `handleSubmit`, on top of the disabled submit button.
+- `PropertiesView` (`frontend/features/properties/components/list/properties-view.tsx`) now calls `useHasPermission("MANAGE_PROPERTIES")` unconditionally at the top (rules-of-hooks) and owns one `useState<boolean>` for the create `Sheet`'s open state. `properties-view.test.tsx` now mocks `@/lib/auth`'s `useHasPermission` (default `true`) and stubs `../form/create-property-form`'s `CreatePropertyForm` — any Section 4/5 test touching `PropertiesView` or `PropertyDetailView` should mock `@/lib/auth` the same way rather than relying on a real `AuthProvider`.
+- Locale keys added to `properties.json` (both languages), all under the `properties` namespace (no new namespace, unlike `dashboard`'s cross-namespace precedent for operational states): top-level `newProperty` (the list's button) and `sheet.close`/`sheet.newPropertyTitle` (mirrors `platform.json`'s `sheet.*` shape), plus `createForm.fields.*` (one key per of the 20 fields, camelCase field name), `createForm.placeholders.{country,timezone}`, `createForm.accessNotesHint` (D14), `createForm.errors.{required,tooLong,invalidCountry,outOfRange}` (translates `validatePropertyFields`'s error keys verbatim — Section 4 reuses these same four, do not add a second copy), and `createForm.{submit,submitting,genericError}`. Section 4 adds its own `edit`-scoped keys to `properties.json` (per the task list: the "clear stored password" checkbox copy) plus new keys to `dashboard.json` (edit button, save/cancel, edit success/error, retire copy) — `properties-locale.test.ts` was not touched (it only pins the `PropertyStatus`/`PropertyOperationalState` catalogs and the six list columns; it does not enumerate `createForm.*` and does not need to for this section).
+- `cd frontend && npm run typecheck && npm test -- properties`: typecheck clean, 166/166 tests passed (14 test files, up from 149/12 after Section 2 — added `create-property-form.test.tsx` and `property-fieldset.test.tsx`, and extended `properties-view.test.tsx`).

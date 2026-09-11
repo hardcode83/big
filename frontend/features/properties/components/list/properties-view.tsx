@@ -7,11 +7,20 @@ import { useTranslation } from "react-i18next";
 import { PropertyStateBadge } from "@/components/property-state-badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { useHasPermission } from "@/lib/auth";
 
 import type { PropertyFilters, PropertySummaryDto } from "../../data";
 import { useProperties } from "../../hooks/use-properties";
 import { mapPropertiesError } from "../../lib/error-mapping";
+import { CreatePropertyForm } from "../form/create-property-form";
 import { PropertiesFilters } from "./properties-filters";
 
 /** The six columns, closed list, in this order (R1.2 / design D11). */
@@ -184,6 +193,11 @@ export function PropertiesView() {
   const [filters, setFilters] = useState<PropertyFilters>({ page: 1 });
   const query = useProperties(filters);
   const state = mapPropertiesError(query);
+  // Gated by `MANAGE_PROPERTIES` (R1.1, design D12) — a UX courtesy, the
+  // backend still 403s a `POST` from anyone lacking it
+  // (`steering/frontend.md`: "RBAC del backend decide, el frontend solo oculta").
+  const canManageProperties = useHasPermission("MANAGE_PROPERTIES");
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   function body() {
     if (state.kind === "loading") {
@@ -309,11 +323,26 @@ export function PropertiesView() {
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      <h1 className="text-headline-md font-semibold text-foreground">
-        {tNav("routes.properties.title")}
-      </h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-headline-md font-semibold text-foreground">
+          {tNav("routes.properties.title")}
+        </h1>
+        {canManageProperties ? (
+          <Button type="button" onClick={() => setIsCreateOpen(true)}>
+            {t("newProperty")}
+          </Button>
+        ) : null}
+      </div>
       <PropertiesFilters value={filters} onChange={setFilters} />
       {body()}
+      <Sheet open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        <SheetContent closeLabel={t("sheet.close")}>
+          <SheetHeader>
+            <SheetTitle>{t("sheet.newPropertyTitle")}</SheetTitle>
+          </SheetHeader>
+          <CreatePropertyForm />
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
