@@ -47,9 +47,9 @@
       aunque el envío falle; (e) `phone_number_id` pasa `business_phone_number` para
       `WHATSAPP`. [R1]
 
-## 2. Specs y docs: enmendar R4 y declarar el límite de la ventana 24 h <!-- panel: skipped — pure docs/spec section; verifier panel runs against production code only -->
+## 2. Specs y docs: enmendar la R4 del spec y declarar el límite de la ventana 24 h <!-- panel: skipped — pure docs/spec section; verifier panel runs against production code only -->
 
-- [x] 2.1 Enmendar `sdd/specs/messaging-ai.md:187-191` para añadir a R4 las
+- [x] 2.1 Enmendar `sdd/specs/messaging-ai.md:187-191` para añadir a la R4 del spec las
       cuatro garantías del envío humano: despacho por el canal de la
       conversación, anotación en `metadata`, no-escalación y no-emisión de
       `AI_RESPONSE_SENT` (sólo `HUMAN_RESPONSE_SENT`). [R3]
