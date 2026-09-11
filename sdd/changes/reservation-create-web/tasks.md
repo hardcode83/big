@@ -1,6 +1,6 @@
 # Tasks: reservation-create-web
 
-## 1. API source and DTO contracts
+## 1. API source and DTO contracts <!-- panel: PASS 2026-09-11 receipt:60c1bb55 -->
 
 - [x] 1.1 Extend `frontend/features/reservations/data/dto.ts` with typed mutation inputs and `ReservationSummaryDto` response usage, keeping civil dates, nullable fields and guest input separate from read DTOs [R1, R2, R3]
 - [x] 1.2 Add `createReservation`, `updateReservation` and `cancelReservation` to `frontend/features/reservations/data/http/http-reservations-source.ts`, using only generated OpenAPI request schemas, mapping POST/PATCH to summary DTOs and DELETE to `void` [R1, R3, R5]
