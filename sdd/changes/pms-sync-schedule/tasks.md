@@ -36,7 +36,7 @@
       (`SyncReservationsFromPmsUseCase`, `PostgresGuestEmailExclusion`, `SCHEDULED_SOURCE`, si
       no están ya en el módulo). [R1, R2, R3]
 
-## 3. Disparo manual
+## 3. Disparo manual <!-- panel: PASS 2026-09-11 receipt:bc16d5b8 -->
 
 - [x] 3.1 `Makefile`: target `pms-sync:` junto a `sim-advance:`, invocando `$(COMPOSE) exec -T
       backend python -m app.integrations.cli.pms_sync $(TENANT) $(if $(WINDOW),$(WINDOW),) $(if
