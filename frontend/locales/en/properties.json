@@ -94,5 +94,9 @@
     "submit": "Create property",
     "submitting": "Creating…",
     "genericError": "The property could not be created. Please try again."
+  },
+  "editForm": {
+    "wifiPasswordHint": "Leave it blank to keep the stored password. Type a new one to replace it.",
+    "clearWifiPassword": "Clear the stored password"
   }
 }

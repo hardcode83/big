@@ -107,13 +107,13 @@
       design D2). Component test: button hidden without permission, `Sheet`
       opens/closes. [R1.1]
 
-## 4. Edit flow <!-- hard -->
+## 4. Edit flow <!-- hard --> <!-- panel: PASS 2026-09-11 receipt:c0382627 -->
 
-- [ ] 4.1 Add locale keys to `frontend/locales/{es,en}/properties.json`: the
+- [x] 4.1 Add locale keys to `frontend/locales/{es,en}/properties.json`: the
       "clear stored password" checkbox copy (shared fieldset context), and to
       `frontend/locales/{es,en}/dashboard.json`: edit button label, save/cancel,
       edit success/generic error copy. [R2, R4.1]
-- [ ] 4.2 Create
+- [x] 4.2 Create
       `frontend/features/properties/components/form/edit-property-form.tsx`:
       `useProperty(id)` to fetch and pre-fill (design D7); keeps the initial
       snapshot alongside live values; on submit, builds the `PATCH` body with
@@ -127,14 +127,14 @@
       `current_operational_state`/`status` (R2.3). Submit disabled + pending
       copy while in flight (R2.8), `mapPropertyFieldErrors` on error (R2.7).
       [R2.1, R2.2, R2.3, R2.4, R2.5, R2.7, R2.8]
-- [ ] 4.3 Component tests for 4.2: pre-fill from fetched data; saving with no
+- [x] 4.3 Component tests for 4.2: pre-fill from fetched data; saving with no
       changes sends an empty/no-op body; clearing a nullable text field sends
       `null` for exactly that field and omits untouched ones; typing a wifi
       password sends it; checking "clear password" with the field left blank
       sends `wifi_password: null`; leaving both untouched omits
       `wifi_password`; `409` on either conflicting field attributes correctly;
       double-submit prevention. [R2.2, R2.4, R2.5, R2.7, R2.8]
-- [ ] 4.4 Wire `PropertyDetailView`
+- [x] 4.4 Wire `PropertyDetailView`
       (`frontend/features/dashboard/components/detail/property-detail-view.tsx`):
       "Edit" button gated by `useHasPermission("MANAGE_PROPERTIES")`, opening a
       `Sheet` hosting `EditPropertyForm` (imported from `@/features/properties`,
@@ -222,3 +222,15 @@
 - `PropertiesView` (`frontend/features/properties/components/list/properties-view.tsx`) now calls `useHasPermission("MANAGE_PROPERTIES")` unconditionally at the top (rules-of-hooks) and owns one `useState<boolean>` for the create `Sheet`'s open state. `properties-view.test.tsx` now mocks `@/lib/auth`'s `useHasPermission` (default `true`) and stubs `../form/create-property-form`'s `CreatePropertyForm` — any Section 4/5 test touching `PropertiesView` or `PropertyDetailView` should mock `@/lib/auth` the same way rather than relying on a real `AuthProvider`.
 - Locale keys added to `properties.json` (both languages), all under the `properties` namespace (no new namespace, unlike `dashboard`'s cross-namespace precedent for operational states): top-level `newProperty` (the list's button) and `sheet.close`/`sheet.newPropertyTitle` (mirrors `platform.json`'s `sheet.*` shape), plus `createForm.fields.*` (one key per of the 20 fields, camelCase field name), `createForm.placeholders.{country,timezone}`, `createForm.accessNotesHint` (D14), `createForm.errors.{required,tooLong,invalidCountry,outOfRange}` (translates `validatePropertyFields`'s error keys verbatim — Section 4 reuses these same four, do not add a second copy), and `createForm.{submit,submitting,genericError}`. Section 4 adds its own `edit`-scoped keys to `properties.json` (per the task list: the "clear stored password" checkbox copy) plus new keys to `dashboard.json` (edit button, save/cancel, edit success/error, retire copy) — `properties-locale.test.ts` was not touched (it only pins the `PropertyStatus`/`PropertyOperationalState` catalogs and the six list columns; it does not enumerate `createForm.*` and does not need to for this section).
 - `cd frontend && npm run typecheck && npm test -- properties`: typecheck clean, 166/166 tests passed (14 test files, up from 149/12 after Section 2 — added `create-property-form.test.tsx` and `property-fieldset.test.tsx`, and extended `properties-view.test.tsx`).
+
+### Section 4 (edit flow)
+
+- **`property-detail-view.tsx`, exact structure left for Section 5's retire button.** Two hooks now run at the top of `PropertyDetailView`, before every early return (rules of hooks): `const canManageProperties = useHasPermission("MANAGE_PROPERTIES")` and `const [isEditOpen, setIsEditOpen] = useState(false)`. The success branch's first child is now a header row — `<div className="flex flex-wrap items-center justify-between gap-3">` holding the `<h1>` plus, when `canManageProperties`, a **button group** `<div className="flex items-center gap-2">` whose only child today is the Edit `<Button>`. **Section 5's "Retire property" button goes inside that same group, right after Edit** (a comment in the file says so), reusing `canManageProperties` — do not add a second `useHasPermission` call. The edit `Sheet` is the last child of the outer `div`, after `<PropertyTimeline>`; the retire `AlertDialog` can be its sibling there. Section 5's extra gate (`status !== "INACTIVE"`) is **not** available from this view's own query: `usePropertyDetail` is the dashboard aggregate (`PropertyDetail`) and it carries `operationalState`, **not** `status` — Section 5 has to source `status` itself (e.g. `useProperty(propertyId)` from `@/features/properties`, the same hook `EditPropertyForm` uses, which is already cached under `propertiesKeys.detail`).
+- `frontend/features/properties/components/form/edit-property-form.tsx` exports `EditPropertyForm({ propertyId: string; onCancel?: () => void; onSaved?: (property: PropertyDetailDto) => void })` and `EditPropertyFormProps`; both are re-exported from `frontend/features/properties/index.ts`. `onCancel` is optional and the Cancel button renders **only when it is passed** (the detail view passes `() => setIsEditOpen(false)`). Saving does **not** close the `Sheet`: on success the form re-seeds its snapshot from the server's returned `PropertyDetailDto` and shows `detail.edit.success` inline (`role="status"`), so a second save diffs against the saved values instead of replaying them.
+- Diffing (D8) lives in a module-private `buildUpdateInput(initial, values, clearWifiPassword)`, driven by four `[UpdatePropertyInput key, PropertyFormFields key]` tables: `NULLABLE_TEXT_FIELDS` (the only fields that may ever be `null`), `REQUIRED_TEXT_FIELDS`, `TIME_FIELDS` (re-adds `:00`), `NUMBER_FIELDS`. Rule: unchanged → omitted; nullable emptied (trim) from a non-empty value → `null`; nullable empty-to-empty (whitespace included) → omitted. **`status` is never written by this function** — the retire path is the only writer (D9).
+- `wifi_password` and the "clear stored password" checkbox are **mutually exclusive by construction**: typing a non-empty password unchecks the box, checking the box blanks the password input. So the body carries at most one of `wifiPassword: <value>` / `wifiPassword: null`, never an ambiguous pair.
+- The checkbox and its hint are rendered by `EditPropertyForm` **after** `<PropertyFieldset>`, not inside it — `PropertyFieldset`'s prop signature is untouched (the create form has no stored password to keep or clear). Ids: `#property-clear-wifi-password`.
+- Namespaces (D13): `EditPropertyForm` calls `useTranslation("properties")` for `editForm.*` and for translating `validatePropertyFields`'s error keys via the **existing** `createForm.errors.*` (no second copy), `useTranslation("dashboard")` for `detail.edit.{submit,submitting,cancel,success,genericError}`, and `useTranslation("states")` for its own fetch loading/error states (`LoadingState`/`ErrorState`, reusing `states.error.*` rather than adding new keys).
+- Locale keys added: `properties.json` → `editForm.{wifiPasswordHint,clearWifiPassword}`; `dashboard.json` → `detail.edit.{button,title,close,submit,submitting,cancel,success,genericError}`. **Section 5's retire copy belongs under `detail.retire.*` in `dashboard.json`**, alongside `detail.edit.*`, both locales (`lib/i18n/catalog-parity.test.ts` enforces es/en symmetry).
+- `property-detail-view.test.tsx` now mocks `@/lib/auth`'s `useHasPermission` (`useHasPermissionMock`, reset to `true` in `beforeEach`) and stubs `@/features/properties` with `{ EditPropertyForm }` only — **Section 5 must extend that stub if it imports anything else from that barrel**, or the module mock will make it `undefined`.
+- `cd frontend && npm run typecheck && npm run lint && npm test -- properties dashboard`: typecheck and lint clean, 429/429 tests passed (41 test files) — added `edit-property-form.test.tsx` (27 tests) and 3 tests to `property-detail-view.test.tsx`.

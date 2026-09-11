@@ -101,6 +101,16 @@
     "notFound": {
       "title": "Property not found",
       "description": "There is no property with that identifier."
+    },
+    "edit": {
+      "button": "Edit property",
+      "title": "Edit property",
+      "close": "Close",
+      "submit": "Save changes",
+      "submitting": "Saving…",
+      "cancel": "Cancel",
+      "success": "Changes saved.",
+      "genericError": "The changes could not be saved. Please try again."
     }
   },
   "financial": {

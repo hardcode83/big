@@ -94,5 +94,9 @@
     "submit": "Crear propiedad",
     "submitting": "Creando…",
     "genericError": "No se pudo crear la propiedad. Vuelve a intentarlo."
+  },
+  "editForm": {
+    "wifiPasswordHint": "Déjala en blanco para mantener la contraseña guardada. Escribe una nueva para reemplazarla.",
+    "clearWifiPassword": "Borrar la contraseña guardada"
   }
 }

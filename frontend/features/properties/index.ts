@@ -5,6 +5,10 @@
 // feature's internals (design D3, mirroring how `dashboard` already imports
 // from `@/features/incidents`).
 export { PropertiesView } from "./components/list/properties-view";
+export {
+  EditPropertyForm,
+  type EditPropertyFormProps,
+} from "./components/form/edit-property-form";
 export { useProperty } from "./hooks/use-property";
 export { useCreateProperty } from "./hooks/use-create-property";
 export {

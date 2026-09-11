@@ -101,6 +101,16 @@
     "notFound": {
       "title": "Propiedad no encontrada",
       "description": "No existe ninguna propiedad con ese identificador."
+    },
+    "edit": {
+      "button": "Editar propiedad",
+      "title": "Editar propiedad",
+      "close": "Cerrar",
+      "submit": "Guardar cambios",
+      "submitting": "Guardando…",
+      "cancel": "Cancelar",
+      "success": "Cambios guardados.",
+      "genericError": "No se pudieron guardar los cambios. Vuelve a intentarlo."
     }
   },
   "financial": {

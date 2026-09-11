@@ -67,6 +67,14 @@ export interface PropertyFieldsetProps {
   fieldErrors: Record<string, string>;
   /** Disables every control, e.g. while a submit is in flight (R1.6/R2.8). */
   disabled?: boolean;
+  /**
+   * `id` of an externally-rendered hint paragraph to associate with the
+   * `wifi_password` input via `aria-describedby` (D14). `EditPropertyForm`
+   * renders its own wifi-password hint alongside the checkbox that has no
+   * equivalent here (R2.5) — there is nothing for the create form to pass,
+   * so `wifi_password` carries no `aria-describedby` there, same as before.
+   */
+  wifiPasswordHintId?: string;
 }
 
 function FieldError({ message }: { message?: string }) {
@@ -113,6 +121,7 @@ export function PropertyFieldset({
   onChange,
   fieldErrors,
   disabled = false,
+  wifiPasswordHintId,
 }: PropertyFieldsetProps) {
   const { t } = useTranslation("properties");
 
@@ -353,6 +362,7 @@ export function PropertyFieldset({
           autoComplete="new-password"
           className={inputClass}
           maxLength={MAX_WIFI_PASSWORD}
+          aria-describedby={wifiPasswordHintId}
           {...textFieldProps("wifi_password")}
         />
         <FieldError message={fieldErrors.wifi_password} />
