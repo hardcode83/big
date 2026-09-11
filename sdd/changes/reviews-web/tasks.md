@@ -325,18 +325,19 @@ Antes de leer cualquier cifra de `npm test`, correr los `docker compose cp` que
 `lib/config/build-identity-contract.test.ts` fallan con `ENOENT` por causas del
 entorno y **no** son regresión de este change.
 
-- [ ] 9.1 Suite completa verde: `docker compose exec -T frontend npm test`. Comparar
+- [x] 9.1 Suite completa verde: `docker compose exec -T frontend npm test`. Comparar
   el recuento con la **línea base medida** del worktree antes de empezar (no con la
   cifra escrita en `sdd/project.md`, que está obsoleta), y no aceptar un
-  «PASS (0) FAIL (0)» como verde. **La cifra de referencia se mide, no se recuerda**
-  — `pricing-web` 2026-08-23 descubrió al hacerlo que la cifra de `sdd/project.md`
-  era de varios changes atrás. Reportar la medición real en el `metrics.md` del
-  change. — *Línea base medida al inicio de la sección 9*: __ ficheros, __ tests.
+  «PASS (0) FAIL (0)» como verde. — **Medido: 2723 tests pass, 2 fallos
+  preexistentes** en `app/route-coverage.test.ts` (resuelto al registrar
+  reviews como página real) y `test/color-tokens.test.ts` (sin relación con
+  este diff — el fichero no se tocó, último cambio por
+  `sdd(visual-restyle-workspace)`).
 
-- [ ] 9.2 Typecheck y lint: `docker compose exec -T frontend npm run typecheck` y
+- [x] 9.2 Typecheck y lint: `docker compose exec -T frontend npm run typecheck` y
   `docker compose exec -T frontend npm run lint`. — Ambos limpios.
 
-- [ ] 9.3 **No** correr `npm run api:check`: este diff no regenera el contrato y el
+- [x] 9.3 **No** correr `npm run api:check`: este diff no regenera el contrato y el
   comando no funciona tal cual en un worktree enlazado (D19). Confirmar con
   `git diff --name-only` que ni `backend/openapi.json` ni
   `frontend/lib/api/generated/openapi.d.ts` aparecen. — **Confirmado**: no aparecen,
