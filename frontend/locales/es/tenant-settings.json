@@ -47,6 +47,13 @@
       "title": "No se pudieron cargar los usuarios",
       "description": "Algo salió mal al cargar el directorio de usuarios.",
       "retry": "Reintentar"
+    },
+    "pagination": {
+      "label": "Paginación de usuarios",
+      "previous": "Página anterior",
+      "next": "Página siguiente",
+      "pageOfTotal": "Página {{page}} de {{totalPages}}",
+      "totalUsers": "{{total}} usuarios en total"
     }
   },
   "rowActions": {

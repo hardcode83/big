@@ -47,6 +47,13 @@
       "title": "Couldn't load users",
       "description": "Something went wrong while loading the user directory.",
       "retry": "Retry"
+    },
+    "pagination": {
+      "label": "User pagination",
+      "previous": "Previous page",
+      "next": "Next page",
+      "pageOfTotal": "Page {{page}} of {{totalPages}}",
+      "totalUsers": "{{total}} users in total"
     }
   },
   "rowActions": {

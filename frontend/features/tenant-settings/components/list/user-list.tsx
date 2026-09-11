@@ -8,6 +8,7 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 
 import type { UserDto, UserRole, UserStatus } from "../../dto";
 import { useUsers } from "../../hooks/use-users";
+import { UserListPagination } from "./user-list-pagination";
 import { UserRowActions } from "./user-row-actions";
 
 const ROLE_OPTIONS: readonly UserRole[] = [
@@ -33,15 +34,29 @@ const STATUS_OPTIONS: readonly UserStatus[] = ["ACTIVE", "INACTIVE", "SUSPENDED"
  * namespace. Role/status option values stay the raw enum (untranslated) — only
  * their rendered label is `t(...)` — so filter wiring/tests that assert on
  * `value` are unaffected by locale.
+ *
+ * The page number lives here next to the filters and travels into `useUsers`
+ * as part of the same object, so it is part of the query key and a move
+ * re-fetches (R1.1's "listado paginado": without it a tenant past the default
+ * `per_page` of 20 had no way to reach user #21). Changing a filter resets it
+ * to 1 — the page you were on is a position inside the *old* result set, and
+ * keeping it would land a narrower filter on a page that no longer exists.
  */
 export function UserList() {
   const [filters, setFilters] = useState<{ role?: UserRole; status?: UserStatus }>({});
-  const query = useUsers(filters);
+  const [page, setPage] = useState(1);
+  const query = useUsers({ page, ...filters });
 
   return (
     <div className="flex flex-col gap-4">
-      <UserListFilters value={filters} onChange={setFilters} />
-      <UserListBody query={query} />
+      <UserListFilters
+        value={filters}
+        onChange={(next) => {
+          setFilters(next);
+          setPage(1);
+        }}
+      />
+      <UserListBody query={query} onPageChange={setPage} />
     </div>
   );
 }
@@ -115,8 +130,10 @@ function UserListFilters({
 
 function UserListBody({
   query,
+  onPageChange,
 }: {
   query: ReturnType<typeof useUsers>;
+  onPageChange: (page: number) => void;
 }) {
   const { t } = useTranslation("tenant-settings");
 
@@ -135,9 +152,9 @@ function UserListBody({
     );
   }
 
-  const page = query.data;
+  const userPage = query.data;
 
-  if (page.data.length === 0) {
+  if (userPage.data.length === 0) {
     return (
       <EmptyState
         title={t("userList.empty.title")}
@@ -147,8 +164,8 @@ function UserListBody({
   }
 
   return (
-    <div className="flex min-w-0 flex-col">
-      <div className="overflow-x-auto rounded-xl border border-border">
+    <div className="flex min-w-0 flex-col rounded-xl border border-border">
+      <div className="overflow-x-auto">
         <table className="w-full border-collapse text-left text-sm">
           <caption className="sr-only">{t("userList.table.caption")}</caption>
           <thead>
@@ -171,12 +188,18 @@ function UserListBody({
             </tr>
           </thead>
           <tbody>
-            {page.data.map((user) => (
+            {userPage.data.map((user) => (
               <UserRow key={user.id} user={user} />
             ))}
           </tbody>
         </table>
       </div>
+      <UserListPagination
+        page={userPage.page}
+        totalPages={userPage.totalPages}
+        total={userPage.total}
+        onPageChange={onPageChange}
+      />
     </div>
   );
 }
