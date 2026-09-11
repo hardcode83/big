@@ -72,7 +72,7 @@ permissions:
 # mira. Así que: pasar el presupuesto emite un aviso destacado en el resumen, y solo pasar
 # el techo pone el check en rojo.
 #
-# No sustituyen a `timeout-minutes: 20` del job, que es otra cosa: una guillotina cuyo
+# No sustituyen a `timeout-minutes: 25` del job, que es otra cosa: una guillotina cuyo
 # incumplimiento se lee como avería de infraestructura, no como regresión de rendimiento.
 #
 # Dimensionadas sobre el **peor caso observado** y no sobre la mediana ni sobre el mejor
@@ -80,27 +80,28 @@ permissions:
 # crecimiento sobre ese peor caso, bastante más que la variabilidad medida del runner
 # (±5-7 %), así que un aviso significa deriva y no mala suerte.
 #
-# --- Re-baselinadas el 2026-08-22 (tercera vez que esta cifra envejece) -----------------
+# --- Re-baselinadas el 2026-09-10 (cuarta vez que esta cifra envejece) -----------------
 #
-# Peor caso observado: **424s**, medido en CI sobre `sdd/tech-incident-context` y reproducido
-# en local con el mismo número. Las anteriores (260/400) estaban dimensionadas sobre los 205s
-# del 2026-08-10 y llevaban rotas un tiempo indeterminado: el techo de 400s se cruzó **sin que
-# ningún check se pusiera en rojo**, porque todos los changes intermedios eran de frontend y
-# `backend-tests-detect` se saltaba la suite entera. Aquellos ticks verdes lo eran por vacío
-# —«no había nada que verificar»—, no porque la suite pasara el presupuesto.
+# Peor caso observado: **746s**, medido dos veces de forma consistente en `main` tras el
+# merge de `sdd/incident-triage-web` (dos runs seguidos del mismo push, mismo `-n 2`,
+# 746s ambas — no es varianza de runner, es el coste real de la suite que hay hoy). El
+# techo de 700s se cruzó por primera vez desde la re-baselinación anterior (2026-08-22),
+# después de varios merges consecutivos que sólo fueron sumando tests (`cleaning-task-
+# manage-web`, `approvals-web`, `guest-link-delivery`, `auth-session-persistence`,
+# `incident-triage-web`, entre otros): cada uno pasó el presupuesto anterior sin más señal
+# que el aviso amarillo, hasta que el total acumulado cruzó el techo.
 #
-# Es exactamente el modo de fallo que el comentario de la cabecera describe dos veces, y es
-# la tercera: la cifra envejeció sin que nada fallara. Lo que lo hizo visible fue el primer PR
-# que volvió a tocar `backend/**`.
+# Es el mismo modo de fallo que describe el resto de este comentario, con una variante: esta
+# vez el gate sí se puso en rojo (el diff seguía tocando `backend/**`), así que no hubo
+# ventana ciega — sólo la acumulación normal de trabajo mergeado.
 #
-# **La regresión de runtime NO se investigó** (205s → 424s, peor incluso que los 375s de los
-# que partió `backend-suite-runtime` el 2026-08-10). Se decidió explícitamente re-baselinar y
-# no optimizar, así que estos números describen la suite que hay, no la que debería haber.
-# `pytest-xdist` ya está en su óptimo medido (`-n 2`, ver más abajo), así que la palanca de
-# paralelismo está agotada: lo que queda es coste real de tests.
+# **La regresión de runtime NO se investigó** (424s → 746s). Se decide, otra vez, re-
+# baselinar y no optimizar: `pytest-xdist` sigue en su óptimo medido (`-n 2`, ver más abajo),
+# así que la palanca de paralelismo sigue agotada y lo que queda es coste real de tests —
+# que además es exactamente lo esperable tras cinco features backend nuevas.
 env:
-  BACKEND_SUITE_BUDGET_SECONDS: "540"   # ~9m — pasarlo avisa (424s +27 %, misma regla que antes)
-  BACKEND_SUITE_CEILING_SECONDS: "700"  # ~11m40s — pasarlo pone el check en rojo
+  BACKEND_SUITE_BUDGET_SECONDS: "960"   # ~16m — pasarlo avisa (746s +27 %, misma regla que antes)
+  BACKEND_SUITE_CEILING_SECONDS: "1260" # ~21m — mismo margen sobre presupuesto que la baseline anterior (700/540 ≈ 1260/960)
 
 jobs:
   # --- ¿Hay que ejecutar la suite? Se decide una vez, aquí, y se publica. -----------
@@ -268,7 +269,12 @@ jobs:
     needs: backend-tests-detect
     if: needs.backend-tests-detect.outputs.backend == 'true'
     runs-on: [self-hosted, dev]
-    timeout-minutes: 20
+    # 25m: comfortably above the new 1260s (~21m) ceiling plus checkout/compose overhead
+    # (~50s measured). At the old 20m/700s pairing this guillotine already sat close
+    # enough to the ceiling that raising the ceiling without raising this would have let
+    # the job get killed by timeout — read as an infra failure — before the ceiling
+    # check ever ran (2026-09-10 rebaseline).
+    timeout-minutes: 25
     permissions:
       contents: read
 

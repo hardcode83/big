@@ -147,6 +147,15 @@ services:
       # Same reason, and it is not hypothetical: `encryption_key` is required too, so the
       # migration container would exit before applying anything.
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
+      # A distinct reason from the two above (change `sim-advance`, decision recorded at
+      # BLOCKED.md): `Settings.environment` DOES default to `"local"`, so its absence would
+      # not fail `Settings()` here the way a missing JWT/encryption key would. This container
+      # shares the exact production image with `backend`/`worker`/`beat`, and without this
+      # line an operator could run `docker compose -f docker-compose.deploy.yml run --rm
+      # --no-deps migrate python -m app.cli.sim_advance ...` against a real deployment and
+      # have the D5 guard silently see the permissive default and let it through. Required
+      # here for consistency with the other three, not because migrate itself calls the CLI.
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:?Falta APP_ENVIRONMENT}
     depends_on:
       postgres:
         condition: service_healthy
@@ -185,6 +194,12 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
       APP_VERSION: ${APP_VERSION:?Falta APP_VERSION}
+      # Guarda del entorno (change `sim-advance`, R2/D5): `Settings.environment` por defecto
+      # cae en "local", el valor MÁS permisivo, así que sin esto el guard del CLI de
+      # `sim-advance` nunca podría bloquearse en un entorno desplegado. Con `:?` cualquier
+      # entorno (dev hoy, staging/prod el día que existan) se ve OBLIGADO a declararlo o el
+      # contenedor no arranca — más fuerte que confiar en el default de `Settings`.
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:?Falta APP_ENVIRONMENT}
       APP_PROVENANCE_REPOSITORY_URL: ${APP_PROVENANCE_REPOSITORY_URL:-}
       APP_PROVENANCE_PULL_REQUEST_NUMBER: ${APP_PROVENANCE_PULL_REQUEST_NUMBER:-}
       APP_PROVENANCE_COMMIT_SHA: ${APP_PROVENANCE_COMMIT_SHA:-}
@@ -270,6 +285,10 @@ services:
       # And the worker is where credentials get read: a job that resolves a PMS adapter per
       # property decrypts them, so the key is not optional here either.
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
+      # Environment guard (change `sim-advance`, R2/D5): required for the same reason as on
+      # `backend` — `Settings.environment` defaults to the most permissive value ("local"),
+      # so without this the `sim-advance` CLI's guard could never actually arm here either.
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:?Falta APP_ENVIRONMENT}
       # Relay SMTP (change `smtp-delivery-adapter`). `worker`, no `beat`: beat solo programa
       # (`celery -A app.worker beat`, sin `-B`, nunca ejecuta un cuerpo de tarea); el cuerpo de
       # `dispatch_notifications` (`scheduler/tasks.py`, que llama `adapter_registry()` en
@@ -309,6 +328,10 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY}
       # Ídem con `encryption_key`, que también es obligatorio: el beat importa la misma config.
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
+      # Guarda del entorno (change `sim-advance`, R2/D5): igual que en `backend` y `worker` —
+      # `Settings.environment` cae en "local" por defecto, así que sin esto el guard del CLI
+      # de `sim-advance` nunca podría bloquearse aquí tampoco.
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:?Falta APP_ENVIRONMENT}
     depends_on:
       redis:
         condition: service_healthy

@@ -4,7 +4,7 @@ Cómo se opera el scheduler que mueve el estado operacional de las viviendas con
 El *qué hace* está en [`sdd/specs/celery-jobs.md`](../sdd/specs/celery-jobs.md); esta página
 es el *cómo se usa y se diagnostica*.
 
-## Los nueve jobs
+## Los doce jobs
 
 | Job | Cadencia | Qué hace |
 |---|---|---|
@@ -16,25 +16,32 @@ es el *cómo se usa y se diagnostica*.
 | `provision_access_records` | cada 5 min | Reserva confirmada sin `AccessRecord` → lo crea en `PENDING`, revoca los de reservas canceladas y arranca el registro legal de PRD §17 (change `access-notifications`) |
 | `process_webhook_events` | cada 60 s | Drena la cola de avisos del PMS y relee por API (change `reservations-webhooks`) — ver [`reservations-webhooks.md`](reservations-webhooks.md) |
 | `classify_incidents` | cada 5 min | Pasa por el clasificador toda incidencia `OPEN` que nadie ha mirado (change `maintenance`) — ver [`maintenance.md`](maintenance.md) |
+| `reconcile_owner_approvals_for_expenses` | cada 5 min | Aplica las respuestas de aprobación del owner a los gastos pendientes de la liquidación (change `revenue-statements`) — ver [`revenue-statements.md`](revenue-statements.md) |
+| `classify_reviews` | cada 5 min | Pasa por el pipeline de análisis toda reseña `NEW` (change `revenue-reviews`) — ver [`reviews.md`](reviews.md) |
 | `generate_price_recommendations` | **diario, 06:00 UTC** | Recalcula el horizonte de 60 días de precio recomendado de cada vivienda activa con regla aplicable (change `revenue-pricing`) — ver [`pricing.md`](pricing.md) |
+| `generate_owner_statements` | **mensual, día 1, 02:00 UTC** | Genera la liquidación mensual de cada vivienda activa (change `revenue-statements`) — ver [`revenue-statements.md`](revenue-statements.md) |
 
-El calendario vive en `backend/app/scheduler/schedule.py`, en **dos tablas**: `CADENCES` para
-los ocho que corren por periodo y `DAILY_JOBS` para el que corre a una hora del día.
-`beat_schedule()` sale de las dos.
+El calendario vive en `backend/app/scheduler/schedule.py`, en **tres tablas**: `CADENCES` para
+los diez que corren por periodo, `DAILY_JOBS` para el que corre a una hora del día y
+`MONTHLY_JOBS` para el que corre un día del mes. `beat_schedule()` sale de las tres.
 
 De `CADENCES` sale también el TTL del lock de cada job periódico —cadencia × 3—, así que esos
-ocho no se pueden desincronizar. **El diario no puede derivarlo así**: cadencia × 3 sobre un
-job diario son tres días de bloqueo si un worker muere a mitad de ejecución, de modo que
-`DAILY_JOBS` lleva el suyo escrito (tres horas).
+diez no se pueden desincronizar. **El diario y el mensual no pueden derivarlo así**: cadencia ×
+3 sobre un job diario son tres días de bloqueo si un worker muere a mitad de ejecución, y sobre
+uno mensual no hay cadencia de la que partir, de modo que `DAILY_JOBS` y `MONTHLY_JOBS` llevan
+el suyo escrito (tres horas y seis horas).
 
-**Cinco son de PRD §8.3, con sus números: los cuatro primeros y el diario. Los otros cuatro no
-están en el PRD**, y es una divergencia declarada (`access-notifications` design D2 y D3,
-`reservations-webhooks` design D10, `maintenance` D2): el PRD dice *qué* tiene que pasar —§14
-entrega notificaciones, §15 le da un registro de acceso a cada reserva confirmada, §16 recibe los
-avisos del PMS, §12 pide que una incidencia llegue clasificada— y no dice qué lo dispara. Los
-cuatro son idempotentes y dependen del reloj, así que beat es su sitio; los nombres del PRD no se
-han tocado. `test_schedule.py` los separa (`PRD_8_3` y `PRD_8_3_DAILY` frente a `BEYOND_PRD_8_3`)
-para que nadie invoque «lo dice el PRD» sobre un número que el PRD no ha visto nunca.
+**Seis son de PRD §8.3, con sus números: los cuatro primeros, el diario y el mensual. Los otros
+seis no están en el PRD**, y es una divergencia declarada (`access-notifications` design D2 y
+D3, `reservations-webhooks` design D10, `maintenance` D2, `revenue-statements` D4,
+`revenue-reviews` D2): el PRD dice *qué* tiene que pasar —§14 entrega notificaciones, §15 le da
+un registro de acceso a cada reserva confirmada, §16 recibe los avisos del PMS, §12 pide que
+una incidencia llegue clasificada, §18 declara el pipeline de reseñas y R5.7 exige la
+aprobación del owner sobre gastos— y no dice qué lo dispara. Los seis son idempotentes y
+dependen del reloj, así que beat es su sitio; los nombres del PRD no se han tocado.
+`test_schedule.py` los separa (`PRD_8_3`, `PRD_8_3_DAILY` y `PRD_8_3_MONTHLY` frente a
+`BEYOND_PRD_8_3`) para que nadie invoque «lo dice el PRD» sobre un número que el PRD no ha
+visto nunca.
 
 **Por qué `provision_access_records` es un barrido y no un enganche a la confirmación**: ya hay
 reservas confirmadas en la base de datos. Un hook en la transición solo cubriría las futuras y
@@ -80,6 +87,53 @@ Su fichero de planificación se comporta distinto según el entorno, y conviene 
 `./backend:/app`, así que aparece como `backend/celerybeat-schedule` en tu árbol de trabajo y
 sobrevive a los reinicios. Está en `.gitignore`. Si quieres que beat olvide su historial de
 disparos, bórralo con el stack parado.
+
+## Avanzar el reloj a mano en dev
+
+Esperar a que `beat` dispare los tres jobs de reloj por su cadencia real (5 min los tres)
+es lento para probar un tránsito de estado a mano. `sim-advance` (change `sim-advance`)
+ejecuta `check_checkin_windows`, `mark_occupied_estimated` y `process_checkouts` para **un**
+tenant, en orden, compartiendo un único instante `now` — real o sintético — sin tocar `beat`
+ni el reloj del sistema:
+
+```bash
+make sim-advance TENANT=3f2a1c10-4b8e-4d2a-9c31-8e6a2f0b7d11
+make sim-advance TENANT=3f2a1c10-4b8e-4d2a-9c31-8e6a2f0b7d11 AT=2026-09-12T08:00:00+02:00
+```
+
+Sin `AT` el comando usa `datetime.now(UTC)` resuelto **una sola vez** y compartido por los
+tres jobs. Con `AT` simula cualquier instante sin tocar la reserva: para una estancia de un
+día, créala con sus fechas reales y pasa `AT` al instante de check-in en una invocación y al
+de check-out en la siguiente, en vez de mover las fechas con un `PATCH`. `AT` tiene que ser
+ISO 8601 **con zona** (`+00:00`, `Z`, `+02:00`); un instante naive se rechaza con exit 1
+(design D3). Cada job imprime su línea:
+
+```
+sim-advance: tenant=<uuid> trigger=<value> candidates=<n> transitioned=<n> blocked=<n> ambiguous=<n> unresolvable_time=<n> transitioned_without_task=<n> not_eligible=<n>
+```
+
+y el exit code resume las tres tiradas: `0` si las tres fueron bien, `1` si las tres
+fallaron, `2` si el resultado es mixto (design D4) — los contadores se leen igual que los de
+`beat`, ver §Cómo leer el informe.
+
+**Trampa 1 — la ventana de `AT` no es infinita.** El fetch de candidatas usa la misma
+`candidate_window` que los jobs de `beat`: 30 días hacia atrás y 2 hacia adelante **desde
+`AT`**, no desde el reloj real (`CANDIDATE_LOOKBEHIND`/`CANDIDATE_LOOKAHEAD`,
+`clock_triggers.py:42,52,55`). Un `AT` que caiga fuera de esa ventana respecto a las fechas
+reales de la reserva no la ve — `candidates: 0`, no un fallo del comando. Para simular un
+check-in hay que elegir un `AT` dentro de los 2 días previos a esa fecha; para un checkout
+atrasado, dentro de los 30 días posteriores.
+
+**Trampa 2 — «hoy» es el día local de la vivienda, no el de `AT` en UTC.**
+`check_checkin_windows` sólo abre la ventana si el día de `AT`, convertido a la zona de la
+vivienda, coincide con el día local de check-in de la reserva (`opens_checkin_window`,
+`clock_triggers.py:94-122`). Un `AT` que sea «hoy» en UTC puede caer en «mañana» o «ayer» en
+`Europe/Madrid` según la hora — y entonces `not_eligible`, no porque la hora aún no haya
+llegado sino porque el día no coincide. Calcula `AT` en la zona de la vivienda, no en UTC.
+
+**Sólo dev/local.** El comando se niega con exit 1 si `settings.environment` (variable
+`APP_ENVIRONMENT`, default `local`) no es `local` ni `dev` (design D5): es una herramienta
+para probar en desarrollo, no una vía para adelantar el reloj de un tenant real.
 
 ## Cómo leer el informe
 

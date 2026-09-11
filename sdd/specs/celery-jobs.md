@@ -219,6 +219,34 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   que se pasó de TTL no borre el lock de su sucesora, y SHALL acotarlo con un TTL de tres veces
   la cadencia para que un worker muerto no lo deje bloqueado.
 
+### Avance manual del reloj (`sim-advance`)
+
+- THE SYSTEM SHALL exponer `AdvancePropertyStatesUseCase` a un operador de dev/local mediante
+  `python -m app.cli.sim_advance --tenant <uuid> [--at <instante>]` (`make sim-advance
+  TENANT=<uuid> [AT=<instante>]`), como llamante **adicional** del mismo caso de uso que ya
+  invocan `beat`/`scheduler/tasks.py` y `seed_demo._advance_states` — ninguno de los tres jobs
+  cambia de comportamiento por su existencia.
+- THE SYSTEM SHALL ejecutar los tres triggers de reloj (`CHECKIN_WINDOW_OPENED`,
+  `CHECKIN_TIME_REACHED`, `CHECKOUT_TIME_REACHED`) en ese orden, cada uno en su propia sesión
+  marcada por tenant y su propio commit, compartiendo un único `now`: el de `--at` si se pasa
+  (exigido con offset UTC; un instante naive se rechaza) o `datetime.now(UTC)` tomado una sola
+  vez si no.
+- THE SYSTEM SHALL imprimir una línea por trigger con el nombre de cada cubo de `AdvanceReport`
+  (`candidates`, `transitioned`, `blocked`, `ambiguous`, `unresolvable_time`,
+  `transitioned_without_task` y, cuando aplica, `not_eligible`); un trigger que lanza excepción
+  imprime `FAILED` y el comando sigue con el siguiente. Sale con 0 si los tres jobs corrieron,
+  1 si los tres fallaron y 2 si falló alguno pero no todos.
+- THE SYSTEM SHALL negarse a ejecutar si `Settings.environment` no es `local` ni `dev`,
+  comprobado **antes** de tocar la base de datos. `Settings.environment` es un
+  `Literal["local", "dev", "staging", "production"]` con default `"local"`, leído de
+  `APP_ENVIRONMENT`; un despliegue real fija esa variable como obligatoria en los cuatro
+  servicios que comparten su imagen (`backend`, `worker`, `beat`, `migrate`), así que el
+  comando no tiene una vía silenciosa para correr contra datos reales.
+- THE SYSTEM SHALL propagar `--at` únicamente como `now` del caso de uso: `occurred_at` del
+  `TimelineEvent` y el `metadata` de `property_state_transitions` reflejan ese instante, pero
+  `created_at`/`updated_at` de filas preexistentes siguen el reloj de la base de datos —
+  ninguna vía del caso de uso los reescribe.
+
 ### SLA vencido
 
 - WHEN un `NotificationLog` cumple `status = SENT`, `sla_deadline_at` no nulo y vencido, y
@@ -369,5 +397,11 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
 - `backend/app/notifications/{domain/escalation.py,application/use_cases.py}` — política de
   escalado pura y el caso de uso que la aplica.
 - `backend/scripts/measure_tenant_filter.py` — la medición del filtro global.
-- `docker-compose.yml`, `docker-compose.deploy.yml` — el servicio `beat`.
-- `docs/celery-jobs.md` — cómo se opera.
+- `backend/app/cli/sim_advance.py` — el comando de avance manual del reloj; copia deliberada del
+  wiring de `scheduler/tasks.py::_advance` (comentario que apunta a la fuente) para no arrastrar
+  Celery al proceso del CLI.
+- `backend/app/core/config.py` — `Settings.environment`, la guardia que cierra `sim-advance` a
+  `local`/`dev`.
+- `docker-compose.yml`, `docker-compose.deploy.yml` — el servicio `beat`; `deploy.yml` además fija
+  `APP_ENVIRONMENT` como obligatoria en `backend`/`worker`/`beat`/`migrate`.
+- `docs/celery-jobs.md` — cómo se opera, incluida la sección de avance manual.

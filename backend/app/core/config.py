@@ -1,6 +1,7 @@
 import base64
 import binascii
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, ValidationError, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,6 +34,28 @@ class Settings(BaseSettings):
     postgres_password: str = ""
     redis_url: str = "redis://redis:6379/0"
     database_url: str = ""
+
+    # Which environment this process is serving (change `sim-advance` R2, design D1).
+    # Validated by Pydantic against the `Literal[...]` set, so a value outside the four
+    # declarations fails at instantiation — the CLI's own guard (sections 2 & 4 of this
+    # change) only has to compare against `{"local", "dev"}`. Defaulting to `"local"` is
+    # deliberate: a developer who forgets to set `APP_ENVIRONMENT` still gets the safe
+    # behaviour, and the command runs (rule 8 of `sdd/steering/security.md` — the fail-fast
+    # belongs to the value's declared shape, not to a missing environment variable).
+    #
+    # `alias="APP_ENVIRONMENT"` is what binds this field to a `Settings`-code-name of
+    # `environment` while the env var keeps the `APP_*` prefix the rest of the top-level
+    # build identity (`APP_VERSION`, `APP_PROVENANCE_*`) uses. The default `model_config`
+    # maps field names directly to env vars, so without the alias pydantic-settings would
+    # look for `ENVIRONMENT` and silently keep the default.
+    #
+    # Future consumer: the proposed cross-tenant audit console (`super-admin-console` is a
+    # pending capability per `sdd/specs/`) would gate itself on this same field, refusing to
+    # expose tenant-scoped data to a `production` or `staging` operator whose access tokens
+    # could not yet have been reconciled with the dashboard's tenancy model.
+    environment: Literal["local", "dev", "staging", "production"] = Field(
+        default="local", alias="APP_ENVIRONMENT"
+    )
 
     # Required: the application must refuse to boot without a signing key (R1.7)
     # rather than serve with a default one. The 32-character floor matches the

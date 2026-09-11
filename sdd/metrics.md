@@ -111,3 +111,5 @@
 | incident-triage-web | new, design, tasks, run, review, ship | 4993101 | 1281229 | 457740032 | 187.3738 | 2026-09-05 | 2026-09-10 |
 | approvals-web | new, design, tasks, run, review, ship, archive | 347007 | 1194492 | 432430285 | 131.5077 | 2026-09-05 | 2026-09-10 |
 | reservations-identity-web | new, tasks, run, review, ship, archive | 48198 | 268325 | 60302554 | 18.8499 | 2026-09-05 | 2026-09-05 |
+| sim-advance | new, design, tasks, run, review, ship, archive | 3845110 | 1006870 | 206761779 | 113.1049 | 2026-09-10 | 2026-09-11 |
+| human-reply-outbound-delivery | new, design, run, review, archive | 3951453 | 473040 | 94190363 | 78.6784 | 2026-09-11 | 2026-09-11 |
