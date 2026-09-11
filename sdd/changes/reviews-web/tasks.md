@@ -119,7 +119,7 @@ sección 8.
   lectura da una clave distinta del genérico, y **ninguna** de las tres funciones
   lee `message`, `code` ni `details`. [R3.5, R3.6, R3.7, R5.5]
 
-- [ ] 3.4 `features/reviews/lib/property-directory.ts` (nuevo) + `.test.ts`: unión
+- [x] 3.4 `features/reviews/lib/property-directory.ts` (nuevo) + `.test.ts`: unión
   de cuatro formas `portfolio | pending | unavailable | resolved`, copia adaptada de
   `features/pricing/lib/property-directory.ts` (D6). En esta pantalla `property_id`
   nunca es `null` (R1.5 del spec backend), pero se conserva la forma del módulo de
@@ -288,7 +288,7 @@ sección 8.
 
 ## 7. i18n — contrato de locales
 
-- [ ] 7.1 `features/reviews/locales/reviews-locale.test.ts` (nuevo): con el patrón
+- [x] 7.1 `features/reviews/locales/reviews-locale.test.ts` (nuevo): con el patrón
   de `features/properties/locales/properties-locale.test.ts` (lista derivada del
   `Record` tipado sobre los enums generados, no transcrita a mano), comprobar que
   los **cinco** valores de `ReviewStatus` (incluido `NEW`), los **tres** de
@@ -310,7 +310,7 @@ sección 8.
 
 ## 8. Ruta final
 
-- [ ] 8.1 `app/(workspace)/reviews/page.tsx`: sustituir `RoutePlaceholder` por
+- [x] 8.1 `app/(workspace)/reviews/page.tsx`: sustituir `RoutePlaceholder` por
   `<ReviewsView />` desde `@/features/reviews`, conservando `generateMetadata` desde
   `routeMetadata("reviews")`. **No tocar** `features/shell/navigation/route-registry.ts`
   ni `locales/{es,en}/navigation.json`, no dar de alta descriptores y no cambiar
@@ -347,7 +347,7 @@ entorno y **no** son regresión de este change.
   `backend/openapi.json` y `frontend/lib/api/generated/openapi.d.ts` fuera del diff
   (workaround de `sdd/project.md` §Commands). Se commitea aparte y se reabre el PR
   antes de review si hay deriva. — *Hecho*: ver commit de regeneración al pie del
-  PR.
+  PR. <!-- manual -->
 
 ## Implementation Notes
 
