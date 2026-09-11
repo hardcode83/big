@@ -14,8 +14,22 @@ import { useTenant } from "../hooks/use-tenant";
 import { useUpdateTenant } from "../hooks/use-update-tenant";
 import {
   validateTenantConfig,
+  type TenantConfigValidationErrorCode,
   type TenantConfigValidationInput,
 } from "../lib/validate-tenant-config";
+
+/**
+ * Maps the four SLA validation fields to their own `tenantConfig.fields.*`
+ * label key — reused for `validation.notPositive`'s `{{label}}`
+ * interpolation instead of re-declaring English-only labels in
+ * `validate-tenant-config.ts` (see that module's doc comment).
+ */
+const SLA_FIELD_LABEL_KEYS: Record<string, string> = {
+  slaCriticalMinutes: "tenantConfig.fields.slaCritical",
+  slaHighMinutes: "tenantConfig.fields.slaHigh",
+  slaMediumMinutes: "tenantConfig.fields.slaMedium",
+  slaLowMinutes: "tenantConfig.fields.slaLow",
+};
 
 /** Mirrors the backend's `SUPPORTED_LANGUAGES` (`tenants/domain/value_objects.py`). */
 const LANGUAGE_OPTIONS = ["es", "en"] as const;
@@ -119,9 +133,13 @@ function diff<T extends object>(
  * scope" — switching storage backends is `cleaning`'s data-migration
  * problem, not this form's).
  *
- * i18n (section 5): the `tenant-settings` namespace. Client-validation error
- * strings (`validate-tenant-config.ts`) are out of this section's scope and
- * stay as-is.
+ * i18n (section 5): the `tenant-settings` namespace, incl. `validation.*` —
+ * `validate-tenant-config.ts` returns a `TenantConfigValidationErrorCode`
+ * per invalid field (it has no `useTranslation` access), and this form
+ * resolves each to `t("validation.<code>")` at the error-display site
+ * (`errorFor`); `notPositive` additionally interpolates `{{label}}` with
+ * the same already-translated `tenantConfig.fields.*` label used elsewhere
+ * in this form (`SLA_FIELD_LABEL_KEYS`).
  */
 export function TenantConfigForm() {
   const { t } = useTranslation("tenant-settings");
@@ -230,7 +248,9 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
   const mutation = useUpdateTenant();
   const [values, setValues] = useState<EditableValues>(() => toEditableValues(tenant));
   const [baseline, setBaseline] = useState<EditableValues>(() => toEditableValues(tenant));
-  const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
+  const [clientErrors, setClientErrors] = useState<
+    Record<string, TenantConfigValidationErrorCode>
+  >({});
 
   const backendErrors = mutation.isError ? mapFieldErrors(mutation.error) : {};
   const genericMessage =
@@ -249,7 +269,15 @@ function TenantConfigFormBody({ tenant }: { tenant: TenantDto }) {
   // `owner_approval_threshold_eur`), so each inline error reads from both by
   // its own two names rather than one shared key.
   function errorFor(clientKey: string, backendKey: string): string | null {
-    return clientErrors[clientKey] ?? backendErrors[backendKey] ?? null;
+    const clientCode = clientErrors[clientKey];
+    if (clientCode) {
+      return clientCode === "notPositive"
+        ? t("validation.notPositive", {
+            label: t(SLA_FIELD_LABEL_KEYS[clientKey] ?? clientKey),
+          })
+        : t(`validation.${clientCode}`);
+    }
+    return backendErrors[backendKey] ?? null;
   }
 
   function set<K extends keyof EditableValues>(key: K, value: EditableValues[K]) {

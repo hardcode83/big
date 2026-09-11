@@ -21,6 +21,15 @@
  * field already has server-side (design's "sends only the fields that
  * changed"), so a field the caller is not changing is never blocked by a
  * pre-existing out-of-range value it did not touch.
+ *
+ * Returns a validation-failure CODE per field, not a rendered message: this
+ * module has no `useTranslation` access (it is plain client-side logic, not
+ * a component), and `sdd/steering/frontend.md` requires every end-user-facing
+ * string to go through `locales/es/`+`locales/en/tenant-settings.json`'s
+ * `validation` namespace. `tenant-config-form.tsx` (the only caller) maps
+ * each code to `t("validation.<code>")` at the error-display site —
+ * `notPositive` additionally interpolates `{{label}}` with that field's own
+ * already-translated `tenantConfig.fields.*` label.
  */
 export interface TenantConfigValidationInput {
   timezone?: string;
@@ -32,42 +41,51 @@ export interface TenantConfigValidationInput {
   slaLowMinutes?: number;
 }
 
+/** Validation-failure codes; `tenant-config-form.tsx` resolves each to `t("validation.<code>")`. */
+export type TenantConfigValidationErrorCode =
+  | "notANumber"
+  | "negative"
+  | "outOfConfidenceRange"
+  | "notPositive"
+  | "timezoneEmpty"
+  | "timezoneInvalid";
+
 const SLA_FIELDS = [
-  ["slaCriticalMinutes", "SLA (critical)"],
-  ["slaHighMinutes", "SLA (high)"],
-  ["slaMediumMinutes", "SLA (medium)"],
-  ["slaLowMinutes", "SLA (low)"],
+  "slaCriticalMinutes",
+  "slaHighMinutes",
+  "slaMediumMinutes",
+  "slaLowMinutes",
 ] as const;
 
-/** Returns field → message pairs for every present-and-invalid field; `{}` means "safe to send". */
+/** Returns field → error-code pairs for every present-and-invalid field; `{}` means "safe to send". */
 export function validateTenantConfig(
   input: TenantConfigValidationInput,
-): Record<string, string> {
-  const errors: Record<string, string> = {};
+): Record<string, TenantConfigValidationErrorCode> {
+  const errors: Record<string, TenantConfigValidationErrorCode> = {};
 
   if (input.ownerApprovalThresholdEur !== undefined) {
     const amount = toNumber(input.ownerApprovalThresholdEur);
     if (amount === null) {
-      errors.ownerApprovalThresholdEur = "Must be a number.";
+      errors.ownerApprovalThresholdEur = "notANumber";
     } else if (amount < 0) {
-      errors.ownerApprovalThresholdEur = "Cannot be negative.";
+      errors.ownerApprovalThresholdEur = "negative";
     }
   }
 
   if (input.aiConfidenceThreshold !== undefined) {
     const amount = toNumber(input.aiConfidenceThreshold);
     if (amount === null) {
-      errors.aiConfidenceThreshold = "Must be a number.";
+      errors.aiConfidenceThreshold = "notANumber";
     } else if (amount < 0 || amount > 1) {
-      errors.aiConfidenceThreshold = "Must be between 0 and 1.";
+      errors.aiConfidenceThreshold = "outOfConfidenceRange";
     }
   }
 
-  for (const [field, label] of SLA_FIELDS) {
+  for (const field of SLA_FIELDS) {
     const value = input[field];
     if (value !== undefined) {
       if (!Number.isFinite(value) || value <= 0) {
-        errors[field] = `${label} must be greater than zero.`;
+        errors[field] = "notPositive";
       }
     }
   }
@@ -75,9 +93,9 @@ export function validateTenantConfig(
   if (input.timezone !== undefined) {
     const candidate = input.timezone.trim();
     if (!candidate) {
-      errors.timezone = "Time zone cannot be empty.";
+      errors.timezone = "timezoneEmpty";
     } else if (!isValidIanaTimeZone(candidate)) {
-      errors.timezone = "Not a recognized IANA time zone (e.g. Europe/Madrid).";
+      errors.timezone = "timezoneInvalid";
     }
   }
 

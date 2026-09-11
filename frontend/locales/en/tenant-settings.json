@@ -162,5 +162,13 @@
     "submit": "Save changes",
     "submitting": "Saving…",
     "success": "Tenant settings updated."
+  },
+  "validation": {
+    "notANumber": "Must be a number.",
+    "negative": "Cannot be negative.",
+    "outOfConfidenceRange": "Must be between 0 and 1.",
+    "notPositive": "{{label}} must be greater than zero.",
+    "timezoneEmpty": "Time zone cannot be empty.",
+    "timezoneInvalid": "Not a recognized IANA time zone (e.g. Europe/Madrid)."
   }
 }

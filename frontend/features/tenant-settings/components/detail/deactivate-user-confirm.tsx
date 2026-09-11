@@ -12,6 +12,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { mapFieldErrors } from "@/features/platform";
+import { ApiError } from "@/lib/api";
 
 import type { UserDto } from "../../dto";
 import { useActiveCleanerCount } from "../../hooks/use-active-cleaner-count";
@@ -35,8 +37,17 @@ import { useDeactivateUser } from "../../hooks/use-deactivate-user";
  * previous attempt's error state does not leak into the next time this same
  * row's dialog is reopened.
  *
+ * R3.2: a `422` from the backend (last-owner / self-action) is surfaced the
+ * same way `edit-user-form.tsx`'s `PATCH` path does — `mapFieldErrors`
+ * resolves to `{}` for these two domain errors (no `details.errors`/`loc`),
+ * so this falls back to the `ApiError`'s own `message` (the backend's real
+ * reason) instead of the static `deactivateConfirm.error` string, which is
+ * now only the last-resort fallback for a non-`ApiError` failure.
+ *
  * i18n (section 5): the `tenant-settings` namespace, incl. the interpolated
  * `{{name}}` in the description and last-active-cleaner warning.
+ * `genericMessage` is the backend's own message text (never translated —
+ * it is not a static UI string), same as `edit-user-form.tsx`.
  */
 export function DeactivateUserConfirm({
   user,
@@ -75,6 +86,14 @@ function DeactivateUserConfirmBody({
   const cleanerCount = useActiveCleanerCount(isActiveCleaner);
   const isLastActiveCleaner = isActiveCleaner && cleanerCount.data === 1;
 
+  const fieldErrors = mutation.isError ? mapFieldErrors(mutation.error) : {};
+  const genericMessage =
+    mutation.isError &&
+    Object.keys(fieldErrors).length === 0 &&
+    mutation.error instanceof ApiError
+      ? mutation.error.message
+      : null;
+
   function handleConfirm(event: { preventDefault: () => void }) {
     event.preventDefault();
     mutation.mutate(user.id, { onSuccess: () => onClose() });
@@ -95,7 +114,7 @@ function DeactivateUserConfirmBody({
       ) : null}
       {mutation.isError ? (
         <p role="alert" className="text-sm text-state-error-text">
-          {t("deactivateConfirm.error")}
+          {genericMessage ?? t("deactivateConfirm.error")}
         </p>
       ) : null}
       <AlertDialogFooter>

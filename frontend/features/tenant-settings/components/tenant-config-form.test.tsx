@@ -148,7 +148,7 @@ describe("TenantConfigForm (R5)", () => {
 
     expect(mutate).not.toHaveBeenCalled();
     expect(
-      screen.getByText("Not a recognized IANA time zone (e.g. Europe/Madrid)."),
+      screen.getByText("Zona horaria IANA no reconocida (p. ej. Europe/Madrid)."),
     ).toBeInTheDocument();
   });
 
@@ -162,7 +162,7 @@ describe("TenantConfigForm (R5)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     expect(mutate).not.toHaveBeenCalled();
-    expect(screen.getByText("Cannot be negative.")).toBeInTheDocument();
+    expect(screen.getByText("No puede ser negativo.")).toBeInTheDocument();
   });
 
   it("shows the inline caveat next to default_language (R5.4)", () => {
