@@ -26,10 +26,10 @@ describe("reservation edit patch", () => {
     expect(JSON.stringify(buildReservationPatch(detail, values))).not.toMatch(/guest_id|document/);
   });
 
-  it("rejects invalid intervals, non-integer counts, negative amounts, and non-finite values", () => {
+  it("rejects inverted intervals, non-integer counts, negative amounts, and non-finite values", () => {
     const values = initialEditValues(detail);
     values.checkInDate = "2026-08-20";
-    values.checkOutDate = "2026-08-20";
+    values.checkOutDate = "2026-08-19";
     values.adults = "2.5";
     values.children = "-1";
     values.grossAmount = "NaN";
@@ -42,6 +42,14 @@ describe("reservation edit patch", () => {
       netAmount: "invalidAmount",
     });
     expect(JSON.stringify(buildReservationPatch(detail, values))).not.toMatch(/NaN|Infinity/);
+  });
+
+  it("allows equal check-in and check-out dates unless the API rejects them", () => {
+    const values = initialEditValues(detail);
+    values.checkInDate = "2026-08-20";
+    values.checkOutDate = "2026-08-20";
+
+    expect(validateEditValues(values)).not.toHaveProperty("checkOutDate");
   });
 
   it("keeps contract-supported edit fields closed", () => {

@@ -116,7 +116,7 @@ function ReservationManageActions({ detail }: { detail: ReservationDetailDto }) 
   const [cancelAnnouncement, setCancelAnnouncement] = useState<string | null>(null);
   return <>
     <EditReservationForm detail={detail} />
-    <Button variant="destructive" type="button" onClick={() => setCancelOpen(true)} disabled={cancel.isPending}>{t("cancel.open")}</Button>
+    <Button variant="destructive" type="button" className="tap-target" onClick={() => setCancelOpen(true)} disabled={cancel.isPending}>{t("cancel.open")}</Button>
     <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
       <AlertDialogContent>
         <AlertDialogHeader><AlertDialogTitle>{t("cancel.title")}</AlertDialogTitle><AlertDialogDescription>{t("cancel.description")}</AlertDialogDescription></AlertDialogHeader>

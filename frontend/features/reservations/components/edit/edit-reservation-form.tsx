@@ -70,7 +70,7 @@ export function validateEditValues(values: EditFormValues): Partial<Record<Edita
   else if (!validDate(values.checkInDate)) errors.checkInDate = "invalidDate";
   if (!values.checkOutDate) errors.checkOutDate = "required";
   else if (!validDate(values.checkOutDate)) errors.checkOutDate = "invalidDate";
-  if (validDate(values.checkInDate) && validDate(values.checkOutDate) && values.checkOutDate <= values.checkInDate) errors.checkOutDate = "dateOrder";
+  if (validDate(values.checkInDate) && validDate(values.checkOutDate) && values.checkOutDate < values.checkInDate) errors.checkOutDate = "dateOrder";
   for (const field of ["adults", "children"] as const) {
     const number = Number(values[field].trim());
     const minimum = field === "adults" ? 1 : 0;
@@ -139,6 +139,6 @@ export function EditReservationForm({ detail }: { detail: ReservationDetailDto }
     {submitted && Object.keys(fieldErrors).length > 0 ? <p role="alert">{t("edit.errors.correctFields")}</p> : null}
     {mutation.isError ? <p role="alert">{t(reservationMutationErrorKey(mutation.error, "edit"))}</p> : null}
     {submitted && mutation.isSuccess ? <p role="status">{t("edit.success")}</p> : null}
-    <Button type="submit" disabled={mutation.isPending} aria-busy={mutation.isPending}>{mutation.isPending ? t("edit.submitting") : t("edit.submit")}</Button>
+    <Button type="submit" className="tap-target" disabled={mutation.isPending} aria-busy={mutation.isPending}>{mutation.isPending ? t("edit.submitting") : t("edit.submit")}</Button>
   </form>;
 }

@@ -22,6 +22,16 @@ Sale de PRD §6: el manager gestiona reservas, la propietaria las ve. `SUPER_ADM
 poderes globales (tenants, configuración, integraciones), no operativos de un tenant — la
 visibilidad cross-tenant es una decisión pendiente de la fase SaaS.
 
+## Operar reservas desde la web
+
+En `/reservations`, `PROPERTY_MANAGER` puede crear reservas manuales con los canales `DIRECT`
+o `MANUAL`; el alta muestra el resultado y refresca el listado sin recargar la página. En
+`/reservations/[id]`, el mismo rol puede editar los campos permitidos enviando solo los cambios
+y cancelar mediante `DELETE`; cancelar conserva el histórico y deja la reserva en `CANCELLED`.
+`TENANT_OWNER` puede consultar el listado y el detalle, pero no ve los controles de escritura.
+La web mantiene las validaciones y mensajes en español e inglés; el backend sigue siendo la
+autoridad para autorización y reglas de negocio.
+
 ## Los endpoints
 
 Todos bajo `/api/v1`, con `Authorization: Bearer <access_token>`. El contrato completo está en
@@ -163,8 +173,5 @@ timeline es evidencia de cambios, no de peticiones.
 - **La API no sale a internet** todavía: el túnel enruta solo al frontend. Para probarla contra
   dev hace falta un túnel SSH (`infra/environments/dev/RUNBOOK.md` §7.4). Lo cambia la entrada
   `api-ingress-routing`.
-- **Frontend read-only** (`reservations-web`, archivado): la pantalla `/reservations` lista las
-  reservas del tenant con filtros por `status` y rango de fechas `date_from`/`date_to`
-  (D4) y paginación; `/reservations/[id]` muestra el detalle. La escritura
-  (`POST`/`PATCH`/`DELETE`) sigue fuera de alcance desde la web y pertenece a su
-  propia entrada.
+- La web de reservas permite al `PROPERTY_MANAGER` crear, editar y cancelar reservas desde
+  `/reservations` y `/reservations/[id]`; el `TENANT_OWNER` mantiene acceso de solo lectura.

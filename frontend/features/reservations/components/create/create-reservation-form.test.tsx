@@ -138,8 +138,8 @@ describe("CreateReservationForm section 3 panel findings", () => {
   });
 
   it.each([
-    ["es", "La fecha de salida debe ser posterior o igual a la entrada.", /Fecha de entrada/, /Fecha de salida/, "Crear reserva"],
-    ["en", "Check-out must be on or after check-in.", /Check-in date/, /Check-out date/, "Create reservation"],
+    ["es", "La fecha de salida debe ser posterior a la entrada.", /Fecha de entrada/, /Fecha de salida/, "Crear reserva"],
+    ["en", "Check-out must be after check-in.", /Check-in date/, /Check-out date/, "Create reservation"],
   ] as const)("blocks inverted date intervals with localized feedback in %s", (locale, expected, checkInLabel, checkOutLabel, buttonName) => {
     renderForm(locale);
     fireEvent.change(screen.getByLabelText(/Property|Propiedad/), { target: { value: "property-1" } });
@@ -150,7 +150,7 @@ describe("CreateReservationForm section 3 panel findings", () => {
     expect(screen.getByLabelText(checkOutLabel)).toHaveAccessibleDescription(expected);
   });
 
-  it("allows same-day check-in and check-out when the backend accepts it", () => {
+  it("rejects same-day check-in and check-out", () => {
     const mutate = vi.fn();
     useCreateReservationMock.mockReturnValue({ isPending: false, isSuccess: false, mutate });
     renderForm();
@@ -159,12 +159,9 @@ describe("CreateReservationForm section 3 panel findings", () => {
     fireEvent.change(screen.getByLabelText(/Fecha de salida/), { target: { value: "2026-09-12" } });
     fireEvent.submit(screen.getByRole("button", { name: "Crear reserva" }).closest("form")!);
 
-    expect(mutate).toHaveBeenCalledTimes(1);
-    expect(mutate.mock.calls[0][0]).toMatchObject({
-      check_in_date: "2026-09-12",
-      check_out_date: "2026-09-12",
-    });
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(mutate).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("La fecha de salida debe ser posterior a la entrada.");
+    expect(screen.getByLabelText(/Fecha de salida/)).toHaveAccessibleDescription("La fecha de salida debe ser posterior a la entrada.");
   });
 
   it("uses the shared 44px tap-target convention for the primary submit", () => {

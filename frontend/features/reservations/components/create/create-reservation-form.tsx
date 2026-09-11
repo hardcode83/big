@@ -188,7 +188,7 @@ export function CreateReservationForm({
       setFormError(t("create.errors.correctFields"));
       return;
     }
-    if (values.checkOutDate < values.checkInDate) {
+    if (values.checkOutDate <= values.checkInDate) {
       setFieldErrors({ checkOutDate: t("create.errors.dateOrder") });
       setFormError(t("create.errors.dateOrder"));
       return;
