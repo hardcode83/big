@@ -73,6 +73,7 @@ from app.core.config import settings
 from app.core.db import async_session_factory, bind_session_to_tenant
 from app.core.unit_of_work import CallerOwnedUnitOfWork, SqlAlchemyUnitOfWork
 from app.guests.domain.entities import Guest
+from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.integrations.application.ingest import IngestRow, ReservationIngestor
 from app.integrations.domain.dtos import ReservationDTO
@@ -1720,6 +1721,7 @@ async def _seed_reservations(
     await _seed_direct_reservation(
         tenant_id=tenant_id,
         actor_user_id=actor_user_id,
+        session=session,
         property_id=redes.id,
         reservations=reservations,
         properties=properties,
@@ -1732,6 +1734,7 @@ async def _seed_reservations(
     await _seed_ota_reservations(
         tenant_id=tenant_id,
         actor_user_id=actor_user_id,
+        session=session,
         reservations=reservations,
         properties=properties,
         guests=guests,
@@ -1746,6 +1749,7 @@ async def _seed_direct_reservation(
     *,
     tenant_id: uuid.UUID,
     actor_user_id: uuid.UUID,
+    session: AsyncSession,
     property_id: uuid.UUID,
     reservations: SqlAlchemyReservationRepository,
     properties: SqlAlchemyPropertyRepository,
@@ -1790,6 +1794,7 @@ async def _seed_direct_reservation(
         guests=guests,
         timeline=timeline,
         uow=CallerOwnedUnitOfWork(),
+        guest_email_exclusion=PostgresGuestEmailExclusion(session),
     )
     await use_case.execute(
         tenant_id=tenant_id,
@@ -1845,6 +1850,7 @@ async def _seed_ota_reservations(
     *,
     tenant_id: uuid.UUID,
     actor_user_id: uuid.UUID,
+    session: AsyncSession,
     reservations: SqlAlchemyReservationRepository,
     properties: SqlAlchemyPropertyRepository,
     guests: SqlAlchemyGuestRepository,
@@ -1892,7 +1898,10 @@ async def _seed_ota_reservations(
         return await properties.find_by_internal_code(tenant_id, row.property_external_id)
 
     ingestor = ReservationIngestor(
-        reservations=reservations, guests=guests, timeline=timeline
+        reservations=reservations,
+        guests=guests,
+        timeline=timeline,
+        email_exclusion=PostgresGuestEmailExclusion(session),
     )
     report = await ingestor.ingest(
         tenant_id=tenant_id,

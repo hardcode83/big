@@ -26,6 +26,14 @@ from typing import Protocol
 from app.guests.domain.enums import GuestDocumentType, LegalRegistrationStatus
 
 
+class GuestEmailExclusion(Protocol):
+    """Transaction-scoped exclusion for one tenant and normalized guest email."""
+
+    async def acquire(self, tenant_id: uuid.UUID, normalized_email: str) -> None:
+        """Block concurrent resolution of the same tenant/email until outer transaction ends."""
+        ...
+
+
 class SubmissionStatus(str, enum.Enum):
     """What the provider says about a submission it already has.
 

@@ -22,6 +22,7 @@ import pytest
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.infrastructure.models import UserModel
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
+from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.integrations.application.ingest import IngestRow, ReservationIngestor
 from app.integrations.domain.dtos import ReservationDTO
 from app.properties.domain.enums import PropertyStatus
@@ -86,6 +87,7 @@ def _create_use_case(db_session) -> CreateReservationUseCase:
         guests=SqlAlchemyGuestRepository(db_session),
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
+        guest_email_exclusion=PostgresGuestEmailExclusion(db_session),
     )
 
 
@@ -180,6 +182,7 @@ async def test_the_batch_routes_skip_a_retired_property_without_aborting(
         reservations=SqlAlchemyReservationRepository(db_session),
         guests=SqlAlchemyGuestRepository(db_session),
         timeline=SqlAlchemyTimelineEventRepository(db_session),
+        email_exclusion=PostgresGuestEmailExclusion(db_session),
     )
     report = await ingestor.ingest(
         tenant_id=tenant.id,

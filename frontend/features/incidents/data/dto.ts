@@ -94,6 +94,19 @@ export interface CloseIncidentInput {
   materials?: string;
 }
 
+/**
+ * One technician of the tenant's roster (R2.1). Same shape as `CleanerSummary`
+ * (`features/cleaning/data/dto.ts`) — deliberate duplication, not a shared
+ * type (design D7): `isActive` is carried unfiltered so an inactive
+ * technician can still be resolved by name, just not selected (UI concern,
+ * section 5).
+ */
+export interface TechnicianSummary {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
 /** Wire-shaped list envelope from the backend, renamed to camelCase. */
 export interface IncidentList {
   items: IncidentSummaryDto[];

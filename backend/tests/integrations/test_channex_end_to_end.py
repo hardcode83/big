@@ -28,6 +28,7 @@ from app.core.db import bind_session_to_tenant
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
+from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
 from app.integrations.domain.enums import PMSProvider
 from tests.integrations.test_sync import _FactoryReturning
@@ -97,6 +98,7 @@ def _use_case(db_session, payload: dict) -> SyncReservationsFromPmsUseCase:
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
         audit=SqlAlchemyAuditLogRepository(db_session),
+        email_exclusion=PostgresGuestEmailExclusion(db_session),
     )
 
 

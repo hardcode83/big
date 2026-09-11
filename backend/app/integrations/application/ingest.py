@@ -15,7 +15,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.core.unit_of_work import UnitOfWork
-from app.guests.domain.entities import Guest
+from app.guests.application.resolution import ManualGuestIdentityInput, ResolveOrCreateGuest
+from app.guests.domain.ports import GuestEmailExclusion
 from app.guests.domain.repositories import GuestRepository
 from app.integrations.domain.dtos import ReservationDTO
 from app.properties.domain.entities import Property
@@ -100,16 +101,26 @@ class IngestReport:
 
 
 class ReservationIngestor:
+    """The known production writer for ingest-time guest email resolution.
+
+    PMS/CSV/demo ingest reaches ``ResolveOrCreateGuest`` here. Guest Portal check-in creates
+    its reservation guest without email and remains outside this policy; ``seed_demo`` may seed
+    controlled demo Guests directly. Manual reservations use the same resolver from their own
+    use case, so this class owns the ingest-specific DTO/default/reporting concerns only.
+    """
+
     def __init__(
         self,
         *,
         reservations: ReservationRepository,
         guests: GuestRepository,
         timeline: TimelineEventRepository,
+        email_exclusion: GuestEmailExclusion,
     ) -> None:
         self._reservations = reservations
         self._guests = guests
         self._timeline = timeline
+        self._resolver = ResolveOrCreateGuest(guests, email_exclusion)
 
     async def ingest(
         self,
@@ -268,23 +279,19 @@ class ReservationIngestor:
         With no name and no email there is nothing to link: the reservation stays
         guest-less rather than growing an empty `Guest` per imported row.
         """
-        if row.guest_email:
-            existing = await self._guests.find_by_email(tenant_id, row.guest_email)
-            if existing is not None:
-                return existing.id
-        if not row.guest_name and not row.guest_email:
+        normalized_name = row.guest_name.strip() if row.guest_name else None
+        normalized_email = row.guest_email.strip() if row.guest_email else None
+        if not normalized_email and not normalized_name:
             return None
-        guest = Guest(
-            id=uuid.uuid4(),
+        return await self._resolver.execute(
             tenant_id=tenant_id,
-            full_name=row.guest_name or (row.guest_email or "Unknown guest"),
-            created_at=now,
-            updated_at=now,
-            email=row.guest_email,
-            phone=row.guest_phone,
+            identity=ManualGuestIdentityInput(
+                full_name=normalized_name or normalized_email or "Unknown guest",
+                email=normalized_email,
+                phone=row.guest_phone,
+            ),
+            now=now,
         )
-        await self._guests.add(tenant_id, guest)
-        return guest.id
 
     async def _record_imported(
         self,

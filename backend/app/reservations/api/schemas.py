@@ -14,11 +14,12 @@ Two rules this module exists to enforce:
 import uuid
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.guests.domain.value_objects import GuestSummary
+from app.guests.application.resolution import ManualGuestIdentityInput
 from app.reservations.application.use_cases import ReservationDetail
 from app.reservations.domain.entities import Reservation
 from app.reservations.domain.enums import (
@@ -38,7 +39,85 @@ MAX_PAGE = 100_000
 MAX_TEXT = 5000
 
 
+class ManualGuestRequest(BaseModel):
+    """Optional guest identity supplied when creating a manual reservation (R4, D6)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    full_name: Annotated[str, Field(min_length=1, max_length=300)]
+    email: Annotated[
+        str | None,
+        Field(description="Optional; trimmed and lowercased, with an empty result treated as absent."),
+    ] = None
+    phone: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Optional; accepts a supported E.164 or Spanish national format and is "
+                "normalized to E.164."
+            )
+        ),
+    ] = None
+    preferred_language: Literal["es", "en"] = "es"
+
+    @field_validator("full_name", mode="before")
+    @classmethod
+    def trim_full_name(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("full_name must be a string")
+        return value.strip()
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, value: str) -> str:
+        if not 1 <= len(value) <= 300:
+            raise ValueError("full_name must contain between 1 and 300 characters")
+        return value
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("email must be a string")
+        value = value.strip().lower()
+        return value or None
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def normalize_phone(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("phone must be a string")
+        value = value.strip()
+        if not value:
+            return None
+        from app.guests.domain.value_objects import normalize_phone_e164
+
+        normalized = normalize_phone_e164(value)
+        if normalized is None:
+            raise ValueError("phone must use a supported E.164 or Spanish national format")
+        return normalized
+
+    def to_application_input(self) -> ManualGuestIdentityInput:
+        return ManualGuestIdentityInput(
+            full_name=self.full_name,
+            email=self.email,
+            phone=self.phone,
+            preferred_language=self.preferred_language,
+        )
+
+
 class CreateReservationRequest(BaseModel):
+    """Manual reservation input.
+
+    `guest_id` and `guest` are mutually exclusive: send either one, or neither for a
+    guest-less reservation. When `guest` is supplied, the created response contains its
+    resolved `guest_id`; the response field remains nullable for guest-less bookings.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     property_id: uuid.UUID
@@ -48,6 +127,7 @@ class CreateReservationRequest(BaseModel):
     adults: Annotated[int, Field(ge=1, le=50)] = 1
     children: Annotated[int, Field(ge=0, le=50)] = 0
     guest_id: uuid.UUID | None = None
+    guest: ManualGuestRequest | None = None
     check_in_time: time | None = None
     check_out_time: time | None = None
     gross_amount: Annotated[Decimal | None, Field(ge=0, max_digits=10, decimal_places=2)] = None
@@ -59,6 +139,12 @@ class CreateReservationRequest(BaseModel):
     special_requests: Annotated[str | None, Field(max_length=MAX_TEXT)] = None
     internal_notes: Annotated[str | None, Field(max_length=MAX_TEXT)] = None
     external_channel_id: Annotated[str | None, Field(max_length=200)] = None
+
+    @model_validator(mode="after")
+    def validate_guest_reference(self) -> "CreateReservationRequest":
+        if self.guest_id is not None and self.guest is not None:
+            raise ValueError("guest_id and guest are mutually exclusive")
+        return self
 
 
 class UpdateReservationRequest(BaseModel):

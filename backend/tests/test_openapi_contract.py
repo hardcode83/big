@@ -468,6 +468,18 @@ def test_the_committed_contract_matches_the_code() -> None:
     assert check() == 0
 
 
+def test_manual_guest_request_publishes_runtime_constraints() -> None:
+    """R4.5–R4.8 — the public schema must expose the guest input contract."""
+    schema = json.loads(_document())["components"]["schemas"]["ManualGuestRequest"]
+    properties = schema["properties"]
+
+    assert properties["full_name"]["minLength"] == 1
+    assert properties["full_name"]["maxLength"] == 300
+    assert properties["preferred_language"]["enum"] == ["es", "en"]
+    assert "trimmed and lowercased" in properties["email"]["description"]
+    assert "normalized to E.164" in properties["phone"]["description"]
+
+
 @pytest.mark.asyncio
 async def test_a_real_validation_failure_matches_the_published_shape() -> None:
     """R3.1 — the fidelity check.

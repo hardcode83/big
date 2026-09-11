@@ -52,6 +52,27 @@ Detalles que importan al usarlos:
 - **Una reserva de otro tenant responde `404`, nunca `403`** — la respuesta no revela que
   exista.
 
+### Crear una reserva y resolver el huésped
+
+`POST /api/v1/reservations` acepta opcionalmente un bloque `guest` para que el alta manual
+reciba la identidad del huésped sin una operación aparte. El request puede llevar `guest_id`,
+`guest` o ninguno, pero nunca los dos: `guest_id` y `guest` son mutuamente excluyentes y esa
+combinación responde `422` sin crear nada. Si no se envía ninguno, la reserva se crea sin
+huésped.
+
+Cuando se envía `guest`, `full_name` es obligatorio (entre 1 y 300 caracteres tras quitar
+espacios); `email` y `phone` son opcionales, y `preferred_language` solo admite `es` o `en`
+(por defecto, `es`). La validación aplica las normalizaciones vigentes —incluido trim y
+lowercase del email— y cualquier error de validación, o un `guest_id` inexistente en el tenant,
+responde con el envelope habitual `422`/`404` sin crear la reserva.
+
+Con un email normalizado que ya existe en el tenant se reutiliza ese Guest; si no existe, se
+crea uno nuevo y se vincula a la reserva. Sin email no hay matching automático por nombre o
+teléfono: cada alta con `guest` crea un Guest nuevo. La reutilización no actualiza los datos del
+Guest existente. La forma normativa completa está en [`sdd/specs/reservations.md`](../sdd/specs/reservations.md)
+(`reservation-manual-guest-resolution`); no hay merge automático ni una constraint UNIQUE de
+email en este change.
+
 ## Importar un CSV
 
 `POST /api/v1/integrations/pms/import-csv` con el fichero en el campo `file`. UTF-8 (el BOM de
