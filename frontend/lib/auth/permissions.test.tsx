@@ -271,6 +271,54 @@ it("denies MANAGE_CONVERSATIONS to TENANT_OWNER — owner reads but does not ope
     expect(result.current).toBe(false);
   });
 
+  it("grants MANAGE_USERS to TENANT_OWNER only (tenant-settings-web D2)", () => {
+    for (const role of [
+      "TENANT_OWNER",
+      "PROPERTY_MANAGER",
+      "CLEANER",
+      "TECHNICIAN",
+      "SUPER_ADMIN",
+    ]) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() => useHasPermission("MANAGE_USERS"));
+      expect(result.current, `${role} MANAGE_USERS`).toBe(
+        role === "TENANT_OWNER",
+      );
+    }
+  });
+
+  it("denies MANAGE_USERS without an authenticated user", () => {
+    useAuth.mockReturnValue({ user: null });
+    const { result } = renderHook(() => useHasPermission("MANAGE_USERS"));
+    expect(result.current).toBe(false);
+  });
+
+  it("grants MANAGE_TENANT_SETTINGS to TENANT_OWNER only (tenant-settings-web D2)", () => {
+    for (const role of [
+      "TENANT_OWNER",
+      "PROPERTY_MANAGER",
+      "CLEANER",
+      "TECHNICIAN",
+      "SUPER_ADMIN",
+    ]) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() =>
+        useHasPermission("MANAGE_TENANT_SETTINGS"),
+      );
+      expect(result.current, `${role} MANAGE_TENANT_SETTINGS`).toBe(
+        role === "TENANT_OWNER",
+      );
+    }
+  });
+
+  it("denies MANAGE_TENANT_SETTINGS without an authenticated user", () => {
+    useAuth.mockReturnValue({ user: null });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_TENANT_SETTINGS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
   it("declares every UserRole of the generated contract", () => {
     expect(Object.keys(ROLE_UI_PERMISSIONS).sort()).toEqual([
       "CLEANER",

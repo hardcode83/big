@@ -1,12 +1,12 @@
 # Tasks: tenant-settings-web
 
-## 1. Foundations — permissions, DTOs, HTTP data source
+## 1. Foundations — permissions, DTOs, HTTP data source <!-- panel: PASS 2026-09-11 receipt:75fcd97f -->
 
-- [ ] 1.1 Add `"MANAGE_USERS"` and `"MANAGE_TENANT_SETTINGS"` to the `Permission` union and to `ROLE_UI_PERMISSIONS.TENANT_OWNER` in `frontend/lib/auth/permissions.ts` (design D2); extend `frontend/lib/auth/permissions.test.tsx` with cases for both permissions across all five roles (`TENANT_OWNER` true, everyone else false). [R2, R3, R4, R5]
-- [ ] 1.2 Export `TemporaryPasswordReveal` from `frontend/features/platform/index.ts`. [R2, R4] (design D1)
-- [ ] 1.3 Create `frontend/features/tenant-settings/dto.ts`: `UserDto`, `UserListDto`, `CreatedUserDto`, `TenantConfigDto`, `TenantDto`, `CreateUserInput`, `UpdateUserInput`, `UpdateTenantInput` (camelCase mirrors of `UserResponse`/`UserPageResponse`/`CreatedUserResponse`/`TenantResponse`/`CreateUserRequest`/`UpdateUserRequest`/`UpdateTenantRequest`/`TenantConfigPatch`). [R1, R2, R3, R5]
-- [ ] 1.4 Create `frontend/features/tenant-settings/data/http/http-tenant-settings-source.ts` implementing all eight endpoint calls (`GET/POST /api/v1/users`, `GET/PATCH/DELETE /api/v1/users/{id}`, `POST /api/v1/users/{id}/reset-password`, `GET/PATCH /api/v1/tenants/{id}`) with request/response mapping to/from the DTOs of 1.3, mirroring `http-platform-source.ts`'s shape; `http-tenant-settings-source.test.ts` covers every mapping function. [R1, R2, R3, R4, R5] (design D1, D7)
-- [ ] 1.5 Create `frontend/features/tenant-settings/data/index.ts`: the single composition point, `getTenantSettingsDataSource()`, wired through `createAuthenticatedClients` exactly like `features/platform/data/index.ts` and `features/reservations/data/index.ts`. [R1, R2, R3, R4, R5]
+- [x] 1.1 Add `"MANAGE_USERS"` and `"MANAGE_TENANT_SETTINGS"` to the `Permission` union and to `ROLE_UI_PERMISSIONS.TENANT_OWNER` in `frontend/lib/auth/permissions.ts` (design D2); extend `frontend/lib/auth/permissions.test.tsx` with cases for both permissions across all five roles (`TENANT_OWNER` true, everyone else false). [R2, R3, R4, R5]
+- [x] 1.2 Export `TemporaryPasswordReveal` from `frontend/features/platform/index.ts`. [R2, R4] (design D1)
+- [x] 1.3 Create `frontend/features/tenant-settings/dto.ts`: `UserDto`, `UserListDto`, `CreatedUserDto`, `TenantConfigDto`, `TenantDto`, `CreateUserInput`, `UpdateUserInput`, `UpdateTenantInput` (camelCase mirrors of `UserResponse`/`UserPageResponse`/`CreatedUserResponse`/`TenantResponse`/`CreateUserRequest`/`UpdateUserRequest`/`UpdateTenantRequest`/`TenantConfigPatch`). [R1, R2, R3, R5]
+- [x] 1.4 Create `frontend/features/tenant-settings/data/http/http-tenant-settings-source.ts` implementing all eight endpoint calls (`GET/POST /api/v1/users`, `GET/PATCH/DELETE /api/v1/users/{id}`, `POST /api/v1/users/{id}/reset-password`, `GET/PATCH /api/v1/tenants/{id}`) with request/response mapping to/from the DTOs of 1.3, mirroring `http-platform-source.ts`'s shape; `http-tenant-settings-source.test.ts` covers every mapping function. [R1, R2, R3, R4, R5] (design D1, D7)
+- [x] 1.5 Create `frontend/features/tenant-settings/data/index.ts`: the single composition point, `getTenantSettingsDataSource()`, wired through `createAuthenticatedClients` exactly like `features/platform/data/index.ts` and `features/reservations/data/index.ts`. [R1, R2, R3, R4, R5]
 
 ## 2. Query and mutation hooks
 
@@ -48,3 +48,14 @@
 - [ ] 6.4 Manual check of the end-to-end flow in a browser: as `TENANT_OWNER`, list/create/edit/deactivate/reactivate/reset-password a user and edit the tenant config at `/settings`; as `PROPERTY_MANAGER`, confirm both sections render read-only with no mutation controls; as `CLEANER`/`TECHNICIAN`, confirm `/settings` redirects. <!-- manual -->
 
 ## Implementation Notes
+
+- `frontend/node_modules` was missing at session start (`npm install` run first, 606 packages) — pre-existing environment gap, unrelated to this change; no action beyond installing.
+- 1.1: both permissions added `TENANT_OWNER`-only; test file extended with a loop-based case per permission across all five roles plus the two unauthenticated-user cases (35 tests total, up from 25).
+- 1.3 `dto.ts` exact names: `UserDto`, `UserListDto` (`{data, total, page, perPage, totalPages}` — the older `{data,...}` envelope, not `{items,...}`), `CreatedUserDto` (`{user, temporaryPassword}`), `TenantConfigDto`, `TenantDto`, `CreateUserInput`, `UpdateUserInput`, `UpdateTenantInput`. Also exported (not explicitly named by 1.3 but needed by callers): `UserRole`, `UserStatus`, `TenantStatus`, `StorageType` (re-exported from generated OpenAPI), and `UpdateTenantConfigInput` (the nested partial-config type `UpdateTenantInput.config` uses, mirroring `TenantConfigPatch`).
+- `UserDto` carries no `tenantId` field — `UserResponse` (unlike `PlatformUserResponse`) has none; tenant scoping is implicit in the bearer token per `user-management` §Aislamiento.
+- `TenantConfigDto.storageType` is typed as the narrow `StorageType` union (`"LOCAL" | "S3"`), not a generic `string` like `features/platform/dto.ts`'s equivalent field — more precise and harmless since `storage_type` is read-only here (no patch control, confirmed absent from `TenantConfigPatch`).
+- `UpdateTenantConfigInput.ownerApprovalThresholdEur`/`aiConfidenceThreshold` are typed `string | number | null` (matching `TenantConfigPatch`'s own wire type), unlike `TenantConfigDto`'s read-side `string`. This is the first input-side `Numeric` field in the codebase per design.md's callout; the convention (send the exact decimal-precision string) is documented in a `dto.ts` comment for section 4's form to follow.
+- 1.4 `HttpTenantSettingsSource` gives every `/api/v1/users*` method an explicit unused `_tenantId: string` first parameter, mirroring `HttpReservationsSource` (tenant scoping stays honest even though these routes carry no `tenant_id` path param). `getTenant`/`updateTenant` use `tenantId` for real — it is a genuine path parameter on `/api/v1/tenants/{tenant_id}`.
+- `listUsers` always sends `page`/`per_page` (defaulted 1/20) and only adds `role`/`status` to the query when the caller passes them — needed as-is by design D8's `use-active-cleaner-count` (`role=CLEANER&status=ACTIVE&per_page=1`) in section 2.
+- `updateUser`/`updateTenant` (incl. nested `config`) send only the keys present on the input object (`!== undefined` spread pattern), mirroring `http-incidents-source.ts`'s `triageIncident`. `deactivateUser` maps `DELETE /api/v1/users/{user_id}` (design D7), returns `void`, no response body to map.
+- No blockers or design conflicts encountered; all eight endpoint mappings matched the `openapi.d.ts` schemas/paths without ambiguity.

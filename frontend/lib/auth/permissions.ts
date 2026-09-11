@@ -40,6 +40,13 @@ import type { components } from "@/lib/api/generated/openapi";
  * `GuestPortalLinkCard` on `/reservations/[id]`: the same two roles the
  * backend policy already grants it (`guest-portal-api` D14 — `TENANT_OWNER`
  * and `PROPERTY_MANAGER`, nobody else).
+ *
+ * `tenant-settings-web` D2 adds `MANAGE_USERS` and `MANAGE_TENANT_SETTINGS`,
+ * `TENANT_OWNER`-only: it mirrors `policy.py`'s `_USER_MANAGE`/`_TENANT_MANAGE`
+ * bundles exactly. `PROPERTY_MANAGER` holds the paired `READ_*` permission on
+ * the backend but not the `MANAGE_*` one, so `/settings` renders read-only for
+ * that role (D5) — same "owner operates, manager reads" split as
+ * `RESPOND_OWNER_APPROVALS` above, not the `MANAGE_CLEANING_TASKS` one.
  */
 type UserRole = components["schemas"]["UserRole"];
 
@@ -50,7 +57,9 @@ export type Permission =
   | "MANAGE_CONVERSATIONS"
   | "MANAGE_INCIDENTS"
   | "RESPOND_OWNER_APPROVALS"
-  | "MANAGE_GUEST_ACCESS_TOKENS";
+  | "MANAGE_GUEST_ACCESS_TOKENS"
+  | "MANAGE_USERS"
+  | "MANAGE_TENANT_SETTINGS";
 
 export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [],
@@ -68,6 +77,8 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "MANAGE_PRICE_RECOMMENDATIONS",
     "RESPOND_OWNER_APPROVALS",
     "MANAGE_GUEST_ACCESS_TOKENS",
+    "MANAGE_USERS",
+    "MANAGE_TENANT_SETTINGS",
   ],
   PROPERTY_MANAGER: [
     "MANAGE_CLEANING_TASKS",
