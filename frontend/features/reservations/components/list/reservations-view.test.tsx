@@ -380,6 +380,7 @@ describe("ReservationsView (R2, R3.5, R4, R5.2, R5.4)", () => {
     });
     expect(link).toBeInTheDocument();
     expect(link).toHaveAttribute("href", "/reservations/reservation-1");
+    expect(link).toHaveClass("tap-target");
   });
 
   it("renders a row with grossAmount: null as an em-dash, with no stray currency code (R1.1)", () => {

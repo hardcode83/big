@@ -7,9 +7,12 @@ import { I18nProvider } from "@/lib/i18n/client-provider";
 import { AA_NORMAL_TEXT, contrastRatio } from "@/test/wcag-contrast";
 import { EditReservationForm } from "./edit/edit-reservation-form";
 import { ReservationDetailView } from "./detail/reservation-detail-view";
+import { CreateReservationForm } from "./create/create-reservation-form";
 
 const useHasPermissionMock = vi.hoisted(() => vi.fn());
 const useReservationMock = vi.hoisted(() => vi.fn());
+const useActivePropertiesMock = vi.hoisted(() => vi.fn());
+const useCreateReservationMock = vi.hoisted(() => vi.fn());
 const useUpdateReservationMock = vi.hoisted(() => vi.fn(() => ({
   isPending: false,
   isError: false,
@@ -18,8 +21,10 @@ const useUpdateReservationMock = vi.hoisted(() => vi.fn(() => ({
 })));
 
 vi.mock("@/lib/auth", () => ({ useHasPermission: useHasPermissionMock }));
+vi.mock("@/features/properties", () => ({ useActiveProperties: useActivePropertiesMock }));
 vi.mock("../../hooks/use-reservations", () => ({
   useReservation: useReservationMock,
+  useCreateReservation: useCreateReservationMock,
   useUpdateReservation: useUpdateReservationMock,
   useCancelReservation: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
 }));
@@ -66,7 +71,51 @@ function renderDetail() {
   render(<I18nProvider locale="es"><ReservationDetailView reservationId="reservation-1" /></I18nProvider>);
 }
 
+function renderCreateForm() {
+  useHasPermissionMock.mockReturnValue(true);
+  useActivePropertiesMock.mockReturnValue({
+    isPending: false,
+    isError: false,
+    data: {
+      data: [{
+        id: "property-1",
+        name: "Casa del Mar",
+        internalCode: "CDM-01",
+        timezone: "Europe/Madrid",
+        defaultCheckInTime: "15:00",
+        defaultCheckOutTime: "11:00",
+      }],
+    },
+  });
+  const mutate = vi.fn();
+  useCreateReservationMock.mockReturnValue({ isPending: false, mutate });
+  render(<I18nProvider locale="es"><CreateReservationForm /></I18nProvider>);
+  return mutate;
+}
+
 describe("reservation create web review coverage", () => {
+  it("renders and exercises the create form with localized required semantics", async () => {
+    const mutate = renderCreateForm();
+
+    expect(screen.getByRole("form")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Fecha de entrada \(obligatorio\)/)).toHaveAttribute("aria-required", "true");
+    expect(screen.queryByText(/\*$/)).not.toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText(/Propiedad/), "property-1");
+    await userEvent.fill(screen.getByLabelText(/Fecha de entrada/), "2026-09-12");
+    await userEvent.fill(screen.getByLabelText(/Fecha de salida/), "2026-09-14");
+    await userEvent.click(screen.getByRole("button", { name: "Crear reserva" }));
+
+    expect(mutate).toHaveBeenCalledTimes(1);
+    expect(mutate.mock.calls[0][0]).toMatchObject({
+      property_id: "property-1",
+      check_in_date: "2026-09-12",
+      check_out_date: "2026-09-14",
+      adults: 1,
+      children: 0,
+    });
+  });
+
   it("keeps keyboard focus order on enabled controls and exposes the visible focus indicator", async () => {
     renderEditForm();
     const form = screen.getByRole("form");

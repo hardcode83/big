@@ -173,7 +173,7 @@ function ReservationRow({ row }: { row: ReservationSummaryDto }) {
         <Link
           href={href}
           aria-label={t("fields.openReservationWithContext", { context: rowContext || row.id })}
-          className="text-primary underline after:absolute after:inset-0 after:content-['']"
+          className="tap-target text-primary underline after:absolute after:inset-0 after:content-['']"
         >
           {row.guestFullName ?? "—"}
         </Link>
