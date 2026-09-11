@@ -5,7 +5,7 @@ local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: sdd/reservation-create-web
-implementation_sha: 0dc34fd867a666a1620682d977eef8fe6a7e2766
+implementation_sha: fff73afe3e612847d5f1842ddc6a6624d73fea12
 pr_number: 181
 pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/181
 pr_state: OPEN
