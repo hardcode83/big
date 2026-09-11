@@ -17,6 +17,8 @@ import type { ReservationFilters } from "../data";
  * key and TanStack Query does not invalidate.
  */
 export const reservationsKeys = {
+  listPrefix: (tenantId: string): QueryKey =>
+    tenantScopedKey(tenantId, "reservations-list"),
   list: (tenantId: string, filters: ReservationFilters = {}): QueryKey =>
     tenantScopedKey(tenantId, "reservations-list", filters),
   detail: (tenantId: string, reservationId: string): QueryKey =>

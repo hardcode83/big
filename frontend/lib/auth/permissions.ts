@@ -58,6 +58,7 @@ export type Permission =
   | "EXECUTE_INCIDENTS"
   | "MANAGE_CONVERSATIONS"
   | "MANAGE_INCIDENTS"
+  | "MANAGE_RESERVATIONS"
   | "RESPOND_OWNER_APPROVALS"
   | "MANAGE_GUEST_ACCESS_TOKENS"
   | "MANAGE_REVIEW_DECISIONS"
@@ -91,6 +92,7 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "EXECUTE_INCIDENTS",
     "MANAGE_CONVERSATIONS",
     "MANAGE_INCIDENTS",
+    "MANAGE_RESERVATIONS",
     "MANAGE_GUEST_ACCESS_TOKENS",
     // `CREATE_REVIEW_UI` is the manager's side of the reviews split
     // (reviews-web D15): she creates reviews by hand and edits drafts. The

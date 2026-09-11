@@ -42,3 +42,7 @@ teléfono, que es un dato que hoy no indexa nada. Ése es el trabajo real de la 
 `guest-portal-messaging` ayuda si va antes: deja probado el camino
 `ProcessInboundGuestMessageUseCase` → IA → escalación → bandeja con un emisor que ya está autenticado por
 token, de modo que aquí solo se discute la resolución de identidad y no todo el pipeline a la vez.
+
+---
+
+**No es `beds24-messaging-adapter`**, que es mensajería de OTA aplazada sin fecha. Dos restricciones mandan sobre el diseño: la ventana de 24 h con plantillas aprobadas fuera de ella, y la regla 12 entera sobre el webhook entrante (no está en el plan original, añadida el 2026-08-28) …

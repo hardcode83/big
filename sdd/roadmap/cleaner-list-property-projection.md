@@ -1,0 +1,3 @@
+# cleaner-list-property-projection
+
+hoy `GET /api/v1/cleaning-tasks` devuelve `property_id` como UUID pelado en `CleaningTaskListItem`, así que `/cleaner` emite hasta `per_page` peticiones extra a `GET /cleaning-tasks/{id}/context` por página renderizada (N+1). Proyectar `property_name` y `property_internal_code` en `CleaningTaskListItem` —la misma forma que `cleaning-assign-preconditions` ya usó para añadir `assignment_blocked_by` al ítem del listado— cierra el N+1 en el origen y no en el cliente. A diferencia de `incident-list-property-projection`, el contexto de limpieza no lleva `access_notes`, así que no hay excepción 6 de la regla 11 que recortar aquí (no está en el plan original, candidata de `cleaner-app` el 2026-08-31; design D4, §Risks) …
