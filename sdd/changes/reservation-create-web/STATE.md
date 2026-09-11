@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/reservation-create-web
 implementation_sha: 7b8ea164a1ab26706846221dbf8652af5d514112
 pr_number:
 pr_url:
