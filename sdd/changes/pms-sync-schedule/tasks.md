@@ -45,11 +45,11 @@
 
 ## 4. Tests
 
-- [ ] 4.1 `backend/tests/scheduler/test_schedule.py`: añadir `sync_pms_reservations` a la tabla
+- [x] 4.1 `backend/tests/scheduler/test_schedule.py`: añadir `sync_pms_reservations` a la tabla
       de divergencias declaradas (`BEYOND_PRD_8_3` o una tabla propia con su comentario, mismo
       estilo que las demás filas: nombre, cadencia, por qué) y verificar que `CADENCES` /
       `beat_schedule()` lo incluyen con `timedelta(hours=6)`. [R1]
-- [ ] 4.2 `backend/tests/scheduler/test_sync_pms_reservations.py` (nuevo, mismo patrón que
+- [x] 4.2 `backend/tests/scheduler/test_sync_pms_reservations.py` (nuevo, mismo patrón que
       `test_generate_price_recommendations.py`): dos mitades, no una.
       **Mitad 1 — wiring directo contra la sesión de test**: llamar `_sync_pms_reservations`
       con una sesión de test real, un tenant con propiedades `MOCK` sembradas, y verificar que
@@ -63,7 +63,7 @@
       tenants, así que una aserción sobre el report de una llamada real al task es vacía — el
       mismo problema que el docstring de `test_generate_price_recommendations.py` ya documentó
       y resolvió para pricing). [R1]
-- [ ] 4.3 Test de aislamiento entre tenants, mismo patrón que
+- [x] 4.3 Test de aislamiento entre tenants, mismo patrón que
       `test_a_tenant_never_sees_another_tenants_rows` de `test_runner.py`: dos tenants `ACTIVE`
       con propiedades `MOCK`, un ciclo de `sync_pms_reservations`, verificar que cada
       `Reservation`/`TimelineEvent` resultante queda con el `tenant_id` correcto y que ninguna
@@ -215,3 +215,67 @@
   backend`. No se necesita `.env` temporal solo para el dry-run (`make -n` no invoca Docker),
   pero si Section 5 levanta el stack (`make up`) necesitará el mismo `.env` temporal que
   Sections 1-2 generaron a partir de `.env.example`, y recordar bajarlo al terminar.
+
+### Section 4 (tests) — para Section 5
+
+- `backend/tests/scheduler/test_schedule.py`: `sync_pms_reservations` añadido a `BEYOND_PRD_8_3`
+  con `timedelta(hours=6)` y su propia fila de comentario en el bloque de arriba (mismo estilo
+  que las demás — nombre, cadencia, por qué), siguiendo exactamente el estilo que `schedule.py`
+  ya usaba para su propio comentario de la entrada en `CADENCES`. Sin sorpresas: los dos tests
+  que Section 2 dejó en rojo (`test_the_calendar_is_prd_8_3_plus_exactly_the_declared_additions`,
+  `test_the_beat_schedule_covers_both_tables_and_nothing_else`) pasan ahora sin tocar nada más
+  del fichero.
+- `backend/tests/scheduler/test_sync_pms_reservations.py` (nuevo, 6 tests, docstring de módulo
+  explica el mismo split de `test_generate_price_recommendations.py`):
+  - Mitad 1 (wiring, contra `db_session` real, sin mockear nada):
+    `test_since_is_derived_from_the_settings_window_and_not_the_cli_default` y
+    `test_the_resulting_timeline_events_are_tagged_scheduled_not_manual_or_webhook`. Ambas
+    siembran un tenant (`insert_tenant` de `tests.auth.conftest`) con una `PropertyModel` cuyo
+    `pms_external_id=SEED_PROPERTY_CODE` (de `app.integrations.infrastructure.mock_pms`, no un
+    literal repetido), marcan la sesión con `bind_session_to_tenant`, y llaman
+    `_sync_pms_reservations(db_session, tenant.id, NOW)` directo — nunca la task de Celery.
+    **Verificado que ambas aserciones son reales y no vacías**: mutando temporalmente
+    `tasks.py` (since a 30 días fijos, y quitando `source=SCHEDULED_SOURCE`), cada test
+    correspondiente falló como se esperaba; revertido antes de dejar el fichero — `git diff`
+    de `backend/app/scheduler/tasks.py` queda limpio, solo tocado `test_schedule.py` y el
+    nuevo fichero de test.
+    `MockPMSAdapter._seed` construye sus dos reservas a partir de `since.date()` (NO de `now`),
+    así que la fecha de `check_in_date`/`check_out_date` de la `Reservation` resultante es una
+    señal real de qué `since` calculó el job — no hace falta espiar la llamada al adaptador.
+  - Mitad 2 (candado/lista de tenants, tenant list stubbeada donde hace falta):
+    `test_the_lock_ttl_is_the_cadence_times_three` (TTL == `lock_ttl_for(timedelta(hours=6))`
+    == 18 h, contra el `task_lock` real parcheado, mismo patrón que el test de TTL de
+    `generate_price_recommendations`), `test_a_run_that_loses_the_lock_is_skipped_not_failed`
+    (dos llamadas concurrentes, la segunda `skipped_locked=True`) y
+    `test_it_calls_the_sync_once_per_active_tenant` (loop, con `list_active_tenants` Y
+    `_sync_pms_reservations` stubbeados — analogía exacta del test de
+    `generate_price_recommendations` para el loop). Las tres corren contra
+    `worker_session_factory()`/la BD real de compose (vacía de tenants) tal como lo hace su
+    precedente, porque ninguna de sus aserciones depende de cuántos tenants existan ahí.
+  - Aislamiento (R5, 4.3): `test_a_tenant_never_sees_another_tenants_reservations_or_timeline_events`,
+    mismo patrón que `test_a_tenant_never_sees_another_tenants_rows` de `test_runner.py` — usa
+    la misma fixture `worker_sessions` (duplicada localmente en este fichero, no importada de
+    `test_runner.py`, que no la exporta) para apuntar `runner._session_factory` al motor de
+    test. Dos tenants `ACTIVE` con una `PropertyModel` `MOCK` cada uno (mismo
+    `SEED_PROPERTY_CODE`, distinto `tenant_id` — el índice único de `properties` está scopeado
+    por tenant así que no colisiona), un `runner.run_for_every_tenant(TASK_NAME,
+    _sync_pms_reservations, now=NOW)`, y dos aserciones: (a) contra `db_session` SIN marcar,
+    que las filas resultantes de `ReservationModel`/`TimelineEventModel` llevan exactamente los
+    dos `tenant_id` esperados; (b) contra una sesión nueva marcada para cada tenant
+    (`bind_session_to_tenant`), que un `SELECT` sin `tenant_id` en el WHERE no devuelve ninguna
+    fila del otro tenant.
+- Comandos exactos para reproducir solo estos tests (desde la raíz del worktree, con `.env`
+  temporal si el stack está abajo): `docker compose run --rm backend uv run pytest
+  tests/scheduler/test_schedule.py tests/scheduler/test_sync_pms_reservations.py -q` → 23
+  passed. `docker compose run --rm backend uv run pytest tests/scheduler/ -q` → 68 passed, 0
+  failed (todo `tests/scheduler/`, incluidos los 6 nuevos). `docker compose run --rm backend
+  uv run pytest tests/scheduler/ tests/test_layering.py -q` → 1589 passed, 0 failed — 1581 que
+  Section 2 dejó pasando + los 2 que dejó en rojo (arreglados por 4.1) + los 6 nuevos de
+  4.2/4.3.
+- Entorno: este worktree seguía sin `.env`. Repetí el mismo procedimiento que Sections 1-3:
+  `.env` temporal generado desde `.env.example` con `JWT_SECRET_KEY`/`ENCRYPTION_KEY` válidos
+  (usando `secrets.token_urlsafe(32)` y `Fernet.generate_key()` respectivamente), `docker
+  compose down` al terminar, `.env` borrado — árbol limpio salvo `test_schedule.py`,
+  el nuevo `test_sync_pms_reservations.py` y este `tasks.md`.
+- No corrí la suite completa ni pyright — eso sigue siendo Section 5, igual que dejó dicho
+  Section 2.
