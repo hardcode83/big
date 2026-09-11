@@ -69,3 +69,9 @@ docs/adr/*.html
 # Salida de las herramientas de medición de Beds24 (`--out=/app/...` aterriza aquí por el
 # montaje de Docker). La evidencia curada se commitea en docs/, no aquí.
 backend/beds24-*.jsonl
+
+# Worktrees de SDD (isolation: always en sdd/project.md) — machine-local, uno por feature.
+# Sin barra final a propósito: `sdd-doctor.py` (SDD024) comprueba con `git check-ignore`
+# antes de que el directorio exista, y un patrón `.../worktrees/` con barra solo hace match
+# de directorio — git no puede confirmarlo sobre una ruta que todavía no existe.
+.claude/worktrees

@@ -124,3 +124,7 @@ Es la consecuencia directa de haber elegido la opción (a), y es la mitad del ar
 `needs: dashboard-api, dashboard-web · size: S · kind: feature`
 
 **Por qué `S`**: no hay endpoint nuevo, ni método nuevo en `DashboardDataSource`, ni DTO nuevo, ni ruta que registrar, ni cerco de tests que enmendar, ni tipos que generar. El componente de timeline, su store de filtros, su clave de query y su mapper HTTP existen y ya hablan el contrato congelado. El volumen se concentra en trabajo mecánico y acotado: 41 × 2 etiquetas levantadas literalmente de `rendering.py:70-265`, un selector alimentado por un hook que ya existe, `page`/`per_page` añadidos a un DTO y a un mapper, y controles de paginación y rango de fechas sobre **un** componente. Es comparable a `reservations-web` (`S`), que además tuvo que construir lista y detalle desde cero. Lo que la subiría a `M` sería meter el timeline global, el realtime o el arreglo de los 19 tipos huérfanos: las tres están explícitamente fuera y las tres tienen dueño en otro sitio.
+
+---
+
+el timeline ya se pinta dentro de `/properties/[id]`, así que esto no construye una lista de eventos sino que resuelve la tensión entre la ruta plana del sidebar y un endpoint que exige propiedad, y termina el componente que ya existe contra el contrato congelado (no está en el plan original, añadida el 2026-08-22 al auditar el sidebar contra lo implementado: 8 de las 12 rutas del shell son `RoutePlaceholder`, y tres de ellas ya tienen su backend archivado, así que la pantalla es lo único que falta) …
