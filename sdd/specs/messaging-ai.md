@@ -275,7 +275,10 @@ solo el primer mensaje del huésped (R1, R6, R7).
   no por despacho dinámico: `MANUAL` → `PanelOutboundAdapter`, `PORTAL` →
   `PortalOutboundAdapter`, `WHATSAPP` → `WhatsAppCloudAdapter` (real, vía la Cloud API de Meta —
   `MockWhatsAppAdapter` con `WHATSAPP_PROVIDER=mock`, ver `whatsapp-cloud-adapter.md`),
-  `EMAIL` → `ConsoleEmailAdapter` (el que ya gobierna `access-notifications`),
+  `EMAIL` → adapter que `_email_adapter()` de `notifications.infrastructure.adapters` resuelve
+  (`ConsoleEmailAdapter` cuando `SMTP_HOST` está vacío, `SMTPEmailAdapter` cuando está
+  configurado — la misma selección que `notifications.adapter_registry` y el mismo
+  `SMTPConfigurationError` si los cinco campos SMTP no cierran),
   `PHONE_TRANSCRIPT` → `InboundOnlyAdapter`.
 - THE SYSTEM SHALL tratar `PORTAL` como `MANUAL`: la entrega **es** la fila que ya se persistió,
   así que `PortalOutboundAdapter.send` es un no-op que devuelve éxito — verdadero porque
