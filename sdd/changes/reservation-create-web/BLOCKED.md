@@ -33,3 +33,10 @@ One entry per pending item (shared rule 5): `decision` needs a human before the 
 - **tasks**: 6.5
 - **what & why**: La implementación browser de CreateReservationForm y las comprobaciones de keyboard/focus, contraste, targets táctiles y clipping responsive están presentes, pero npm run test:layout no ejecutó ningún test: en el intento sandbox falló el listener con EPERM y, con ejecución permitida, Playwright terminó en browserType.launch porque no existe el ejecutable Chromium en ~/Library/Caches/ms-playwright. El resultado real es BLOCKED/NOT RUN; no se registra PASS.
 - **exact resume command**: /sdd:run reservation-create-web 6.5
+
+## Auto delegado no disponible: sesión Codex sin login
+
+- **phase**: auto
+- **type**: deferred
+- **what & why**: La reanudación oficial de /sdd:auto reservation-create-web se intentó dos veces y ambas sesiones terminaron antes de ejecutar la fase con terminal_reason=api_error: Not logged in · Please run /login. El fix browser af931d00 está implementado y el test afectado pasa 6/6, pero el toolkit no pudo ejecutar la recertificación automática; no se inventa PASS ni se cambia el alcance.
+- **exact resume command**: /sdd:auto reservation-create-web
