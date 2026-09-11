@@ -151,14 +151,21 @@ Acceptance criteria:
    publicada** con `{"action": "MARK_POSTED"}`, y SHALL NOT ofrecerla en ningún
    otro estado — `POSTED_MANUALLY` y `IGNORED` son terminales
    ([specs/revenue-reviews.md R4.1](../specs/revenue-reviews.md)).
-3. WHEN la fila está en `DRAFTED` o `APPROVED` y la usuaria pulsa **Editar
-   borrador**, THE SYSTEM SHALL abrir un campo editable sobre el
-   `draft_content` que la IA propuso; al guardar envía
-   `{"action": "EDIT", "draft_content": "<texto>"}` y SHALL NOT cambiar
-   `ai_generated` (el campo no se publica, y el backend lo trata como bitácora
-   de origen: spec R3.6).
+3. WHEN la fila está en `DRAFTED` y la usuaria pulsa **Editar borrador**, THE
+   SYSTEM SHALL abrir un campo editable sobre el `draft_content` que la IA
+   propuso; al guardar envía `{"action": "EDIT", "draft_content": "<texto>"}` y
+   SHALL NOT cambiar `ai_generated` (el campo no se publica, y el backend lo
+   trata como bitácora de origen: spec R3.6). **No** SHALL ofrecer Editar
+   borrador cuando la fila está en `APPROVED`: la entidad
+   `ReviewResponseDraft.edit()` rechaza con `ReviewValidationError` en cuanto
+   `approved_at` está fijado (regla R3.6 del spec, fija por
+   `test_edit_after_approval_is_refused`), así que prometer ese botón sólo
+   serviría para entregar un `422` que la UI no puede enseñar — la norma del
+   proyecto prohíbe pintar el cuerpo del `422`.
 4. WHEN una decisión o una edición se envía, THE SYSTEM SHALL deshabilitar los
-   controles de esa fila mientras la petición vuela, configurar la mutación
+   controles de **todas** las filas y los del diálogo **Marcar como
+   publicada** mientras la petición vuela —una sola escritura en vuelo, como
+   `pricing-web` R3.3—; configurar la mutación
    con `retry: false`, y SHALL invalidar el **prefijo** de la clave de
    reseñas en `onSettled` —también cuando falla— de modo que la fila desaparezca
    del filtro que ya no la contiene. La respuesta del `PATCH` es una reseña
@@ -220,11 +227,12 @@ Acceptance criteria:
    `APPROVED`, `POSTED_MANUALLY`, `IGNORED`—, con etiqueta en ES y EN.
 3. WHEN la usuaria con permiso `CREATE_REVIEW_UI` pulsa **Añadir reseña**,
    THE SYSTEM SHALL abrir un diálogo con `property_id` (selector del
-   catálogo de viviendas), `channel` (selector cerrado: `AIRBNB`,
-   `BOOKING_COM`, `DIRECT`, `OTHER`), `reviewer_name` (opcional, máximo 200
-   caracteres), `rating` (selector `1.0`..`5.0` con paso `0.5`), `content`
-   (opcional, máximo 4000 caracteres), y `language` opcional. La validación
-   de cliente refleja la del backend ([specs/revenue-reviews.md R5.1](../specs/revenue-reviews.md))
+   catálogo de viviendas), `channel` (selector cerrado con los **cinco**
+   miembros del enum `ReviewChannel`: `AIRBNB`, `BOOKING`, `GOOGLE`,
+   `MANUAL`, `OTHER`), `reviewer_name` (opcional, máximo 200 caracteres),
+   `rating` (selector `1.0`..`5.0` con paso `0.5`), `content` (opcional,
+   máximo 4000 caracteres), y `language` opcional. La validación de cliente
+   refleja la del backend ([specs/revenue-reviews.md R5.1](../specs/revenue-reviews.md))
    y SHALL NOT añadir restricciones que el backend no impone.
 4. WHEN el diálogo se envía, THE SYSTEM SHALL llamar a
    `POST /api/v1/reviews` con `Content-Type: application/json`, mostrar éxito
@@ -248,8 +256,9 @@ Acceptance criteria:
 
 1. WHEN la usuaria abre el detalle de una reseña (en la misma pestaña,
    encima del listado, sin ruta hija), THE SYSTEM SHALL pedir
-   `GET /api/v1/reviews/{id}` y, si la reseña está en `DRAFTED`/`APPROVED`,
-   también `GET /api/v1/reviews/{id}/response` para pintar el borrador.
+   `GET /api/v1/reviews/{id}` y, si la reseña está en `DRAFTED` (único
+   estado en el que existe borrador editable, R3.3 arriba), también
+   `GET /api/v1/reviews/{id}/response` para pintar el borrador.
 2. THE SYSTEM SHALL pintar, en este orden: `content` (prosa del huésped), el
    `reviewer_name` si existe, `rating`, `channel`, `published_at`, `sentiment`
    localizado, `ai_summary` localizado y etiquetado como
@@ -262,11 +271,11 @@ Acceptance criteria:
    tercero el primero, vocabulario cerrado el segundo).
 4. THE SYSTEM SHALL incluir en el detalle los **controles de decisión** que
    correspondan al estado actual y al rol de la usuaria, según R3.1, R3.2,
-   R3.3 y R4.1: el manager ve sólo **Editar borrador** si la reseña está en
-   `DRAFTED`; la owner ve **Aprobar**/**Ignorar**/**Editar borrador** en
-   `DRAFTED` y **Marcar como publicada** en `APPROVED`. Lo que no le toque
-   por permiso **no se renderiza**, y el backend es la autoridad si se
-   cuela un `403`.
+   R3.3 y R4.1: el manager ve **Editar borrador** si la reseña está en
+   `DRAFTED` (no en `APPROVED`, R3.3); la owner ve **Aprobar**/**Ignorar**/**Editar
+   borrador** en `DRAFTED` y **Marcar como publicada** en `APPROVED` (sin
+   edición, R3.3). Lo que no le toque por permiso **no se renderiza**, y el
+   backend es la autoridad si se cuela un `403`.
 5. THE SYSTEM SHALL NOT pintar `classification_attempts` (es un contador
    interno del job de clasificación y `reviews.spec` R2.4 lo explica como
    detalle de运维 que la UI no necesita), `created_at` ni `updated_at` —la
@@ -286,10 +295,18 @@ Acceptance criteria:
    `"CREATE_REVIEW_UI"` (alta a mano y edición de borrador).
 2. THE SYSTEM SHALL conceder `MANAGE_REVIEW_DECISIONS` a `TENANT_OWNER` **y**
    `CREATE_REVIEW_UI` a `PROPERTY_MANAGER`, **sin** conceder ninguno a
-   `CLEANER`, `TECHNICIAN` ni `SUPER_ADMIN`, siguiendo la línea que
-   `auth/domain/policy.py` ya fija para los cinco permisos del backend
-   (`READ_REVIEWS`, `CREATE_REVIEW`, `APPROVE_REVIEW`, `IGNORE_REVIEW`,
-   `MARK_REVIEW_POSTED`).
+   `CLEANER`, `TECHNICIAN` ni `SUPER_ADMIN`. **Esto es una elección de UX,
+   no una consecuencia del backend**: `auth/domain/policy.py` concede al
+   `PROPERTY_MANAGER` los cinco permisos de review (`_REVIEW_MANAGE` en
+   `policy.py:309-316`, agregados en `policy.py:434`), y la nota 432-433
+   documenta explícitamente que «PRD §18 y R4.2 give every action of the flow
+   to the manager». El frontend **esconde** aprobar / ignorar /
+   marcar-como-publicada al manager por el reparto de trabajo que el roadmap
+   enuncia — *«el owner aprueba, ignora y marca como publicada; el manager
+   crea»*— y porque el PRD §18 modela la aprobación como decisión de la
+   propietaria, no como tarea operativa del manager. **Si un manager dispara
+   `PATCH /reviews/{id}/response` por la API directamente, el backend lo
+   acepta** — el espejo es pista de UX, no autoridad.
 3. THE SYSTEM SHALL NOT copiar la forma de `MANAGE_CLEANING_TASKS`
    (`TENANT_OWNER: []`): eso dejaría a la propietaria mirando una cola que no
    puede decidir, con los botones ocultos por el propio frontend mientras el
@@ -315,8 +332,9 @@ Acceptance criteria:
    los miembros de cada enum que la pantalla pinta: los **cinco** valores de
    `ReviewStatus` (`NEW`, `DRAFTED`, `APPROVED`, `POSTED_MANUALLY`,
    `IGNORED`), los **tres** de `ReviewSentiment` (`POSITIVE`, `NEUTRAL`,
-   `NEGATIVE`), los **cuatro** valores del enum de `channel` que el diálogo
-   de alta expone (`AIRBNB`, `BOOKING_COM`, `DIRECT`, `OTHER`), y los
+   `NEGATIVE`), los **cinco** valores del enum `ReviewChannel` que el
+   diálogo de alta expone (`AIRBNB`, `BOOKING`, `GOOGLE`, `MANUAL`, `OTHER`),
+   y los
    **nueve** valores de `RecurringIssueTag` (`WIFI`, `NOISE`,
    `CLEANLINESS`, `ACCESS`, `COMMUNICATION`, `LOCATION`, `VALUE`,
    `AMENITIES`, `OTHER`). El test de locales recorre cada enum desde los

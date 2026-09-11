@@ -26,7 +26,7 @@ sección 8.
   completa de D17 — `tabs.*`, `detail.*`, `list.*`, `columns.*`,
   `status.{NEW,DRAFTED,APPROVED,POSTED_MANUALLY,IGNORED}`,
   `sentiment.{POSITIVE,NEUTRAL,NEGATIVE}`,
-  `channel.{AIRBNB,BOOKING_COM,DIRECT,OTHER}`,
+  `channel.{AIRBNB,BOOKING,GOOGLE,MANUAL,OTHER}`,
   `recurringIssue.{WIFI,NOISE,CLEANLINESS,ACCESS,COMMUNICATION,LOCATION,VALUE,AMENITIES,OTHER}`,
   `identity.*`, `filters.*`, `pagination.*`, `respond.*`,
   `respond.confirmQuestion.{APPROVE,IGNORE,MARK_POSTED,EDIT}`,
@@ -47,10 +47,13 @@ sección 8.
   `ReviewChannel` / `RecurringIssueTag` desde `components["schemas"]`, `ReviewAction`
   como `Extract<…, "APPROVE" | "IGNORE" | "MARK_POSTED" | "EDIT">`, `Review` **sin**
   `classification_attempts`, `created_at`, `updated_at`, `reservation_id`,
-  `approved_by`, `approved_at` (D3), `ReviewDraft` sin `ai_generated`, `ReviewFilters`,
-  `PropertySummary`, `CreateReviewInput`, `RespondInput` (unión discriminada de D4).
-  El nombre `ReviewsPage` es deliberadamente distinto de `PricingPage` y de
-  `PaginatedResponse`. [R2.4, R2.5, R5.2, R6.3, R6.5]
+  `approved_by`, `approved_at` (D3, ninguno se pinta), `ReviewDraft` **sin**
+  `ai_generated`, `approved_at`, `approved_by`, `created_at`, `edits_count` (D3,
+  tampoco se pintan — y `draftContent: string` no `string | null`, porque el
+  DTO publicado `ReviewDraftResponse.draft_content` es `string` requerido),
+  `ReviewFilters`, `PropertySummary`, `CreateReviewInput`, `RespondInput`
+  (unión discriminada de D4). El nombre `ReviewsPage` es deliberadamente
+  distinto de `PricingPage` y de `PaginatedResponse`. [R2.4, R2.5, R5.2, R6.3, R6.5]
 
 - [ ] 2.2 `features/reviews/data/reviews-source.ts` (nuevo): interfaz
   `ReviewsDataSource` con `listReviews`, `getReview`, `getDraft`, `createReview`,
@@ -100,8 +103,10 @@ sección 8.
   `legalActions(status, role): readonly ReviewAction[]` sobre dos `Record`
   exhaustivos — el primero `Record<ReviewStatus, readonly ReviewAction[]>` con las
   cinco entradas de D5 (`NEW → []`, `DRAFTED → [APPROVE, IGNORE, EDIT]`,
-  `APPROVED → [MARK_POSTED, EDIT]`, `POSTED_MANUALLY → []`, `IGNORED → []`), y el
-  segundo `Record<Role, readonly ReviewAction[]>` para filtrar `EDIT` por rol
+  `APPROVED → [MARK_POSTED]` —el borrador queda bloqueado tras aprobar,
+  `ReviewResponseDraft.edit()` rechaza con `ReviewValidationError` cuando
+  `approved_at` está fijado, spec R3.6—, `POSTED_MANUALLY → []`, `IGNORED → []`),
+  y el segundo `Record<Role, readonly ReviewAction[]>` que cruza con el primero
   (manager sólo `EDIT`, owner `APPROVE + IGNORE + EDIT`). Tests: los cinco
   estados, los dos roles, y un estado desconocido (deploy skew) devuelve `[]`.
   Comentar que es affordance y no autoridad: el backend valida y contesta `409`. [R3.1, R3.2, R6.4]
@@ -209,8 +214,9 @@ sección 8.
   «Enviando…» en la fila cuya decisión vuela. Oculto tras
   `useHasPermission("MANAGE_REVIEW_DECISIONS")` cuando no hay acciones para el
   rol. Tests: `DRAFTED` ofrece tres botones al owner (sólo **Editar borrador** al
-  manager), `APPROVED` no ofrece nada en la fila (el owner usa el detalle para
-  **Marcar como publicada**), y sin confirmar no se llama a la mutación. [R3.1, R3.2, R3.3, R6.4, R7.4]
+  manager), `APPROVED` no ofrece nada en la fila ni **Editar borrador** (el
+  draft queda bloqueado tras aprobar, R3.3; el owner usa el detalle para **Marcar
+  como publicada**), y sin confirmar no se llama a la mutación. [R3.1, R3.2, R3.3, R6.4, R7.4]
 
 - [ ] 6.6 `features/reviews/components/review-detail.tsx` (nuevo) + `.test.tsx`:
   monta encima del listado (overlay, no ruta hija). Pinta, en este orden: el

@@ -119,16 +119,29 @@ readonly ReviewAction[]`, derivado de dos `Record` exhaustivos. El primer mapa e
 |---|---|
 | `NEW` | `[]` (la pipeline aún no ha corrido) |
 | `DRAFTED` | `["APPROVE", "IGNORE", "EDIT"]` |
-| `APPROVED` | `["MARK_POSTED", "EDIT"]` |
+| `APPROVED` | `["MARK_POSTED"]` (el borrador queda bloqueado tras aprobar, R3.6 del spec) |
 | `POSTED_MANUALLY` | `[]` (terminal, R4.1 del spec) |
 | `IGNORED` | `[]` (terminal) |
 
-El segundo mapa es de **rol sobre `EDIT`**: el backend exige `APPROVE_REVIEW` para
-`EDIT` también ([specs/revenue-reviews.md R3.5](../specs/revenue-reviews.md)), así que
-`legalActions` cruza ambos: `legalActions("DRAFTED", "manager") === ["EDIT"]`,
-`legalActions("DRAFTED", "owner") === ["APPROVE", "IGNORE", "EDIT"]`. El segundo mapa
-es local de la UI y refleja lo que el espejo de permisos del frontend (D15) declara —
-no es autoridad, es la pista de UX.
+El segundo mapa es de **rol sobre las acciones de decisión**: el backend concede
+`_REVIEW_OPERATE` (`APPROVE_REVIEW`, `IGNORE_REVIEW`, `MARK_REVIEW_POSTED`,
+`READ_REVIEWS`) al `TENANT_OWNER` y `_REVIEW_MANAGE` (que añade `CREATE_REVIEW`)
+al `PROPERTY_MANAGER` ([`auth/domain/policy.py:301-316`](../specs/auth-tenancy.md)),
+así que el backend no obliga a esconder las decisiones al manager. **El espejo
+del frontend las esconde**: el roadmap enuncia que *«el owner aprueba, ignora y
+marca como publicada; el manager crea»*, y es una elección de UX, no de RBAC
+(R7.2). El segundo mapa cruza ambos y queda **explícito** para cada estado:
+
+| `status` | owner | manager |
+|---|---|---|
+| `NEW` | `[]` | `[]` |
+| `DRAFTED` | `["APPROVE", "IGNORE", "EDIT"]` | `["EDIT"]` |
+| `APPROVED` | `["MARK_POSTED"]` | `[]` |
+| `POSTED_MANUALLY` | `[]` | `[]` |
+| `IGNORED` | `[]` | `[]` |
+
+El segundo mapa es local de la UI y refleja lo que el espejo de permisos del
+frontend (D15) declara — no es autoridad, es la pista de UX.
 
 Sí, duplica la tabla de transiciones del backend. Se declara igual que `pricing-web`
 D13 (`legalMoves`): «esta reducción es una comodidad, no la autoridad». El backend
@@ -302,23 +315,48 @@ conserva los suyos al volver (R1.3).
 `setDetailReviewId` abre el detalle encima de la lista activa, sin cambiar de pestaña;
 `setDetailReviewId(null)` lo cierra.
 
-### D15 — El espejo de permisos, acertado para los dos roles
+### D15 — El espejo de permisos, una elección de UX, no de RBAC
 
 **Chosen:** `frontend/lib/auth/permissions.ts` amplía la unión a
 `Permission = ... | "MANAGE_REVIEW_DECISIONS" | "CREATE_REVIEW_UI"`, y concede
-`MANAGE_REVIEW_DECISIONS` a `TENANT_OWNER` (aprobar / ignorar / marcar-como-publicada /
-editar) y `CREATE_REVIEW_UI` a `PROPERTY_MANAGER` (alta a mano + editar borrador). El
-resto de roles sigue con `[]`. Los tres botones de decisión, el de edición, el de
+`MANAGE_REVIEW_DECISIONS` a `TENANT_OWNER` (aprobar / ignorar / marcar-como-publicada)
+y `CREATE_REVIEW_UI` a `PROPERTY_MANAGER` (alta a mano). **Editar borrador** se
+renderiza por la matriz de `legalActions` (D5) que cruza estado y rol, no por el
+espejo — owner y manager pueden editar; el manager sólo ve editar, sin las
+decisiones.
+
+El resto de roles sigue con `[]`. Los tres botones de decisión, el de
 marcar-como-publicada del diálogo y el botón **Añadir reseña** se ocultan tras
-`useHasPermission(...)` (R7.4).
+`useHasPermission(...)` (R7.4). El botón **Editar borrador** se renderiza según
+el resultado de `legalActions(status, role)`, que ya excluye al manager en
+`APPROVED` por la regla del backend (`ReviewResponseDraft.edit()` rechaza tras
+aprobar, R3.6 del spec).
 
-El mapa sigue siendo **parcial y declarado como tal** (mismo comentario que `permissions.ts`):
-sólo enumera lo que el frontend usa para ocultar. Un espejo que pretendiera ser completo
-iría obsoleto en silencio el día que el backend añadiera un permiso.
+El mapa sigue siendo **parcial y declarado como tal** (mismo comentario que
+`permissions.ts`): sólo enumera lo que el frontend usa para ocultar. Un espejo
+que pretendiera ser completo iría obsoleto en silencio el día que el backend
+añadiera un permiso.
 
-`lib/auth/permissions.test.tsx` gana los casos simétricos a los de cleaning: `CREATE_REVIEW_UI`
-concedida a `PROPERTY_MANAGER` y denegada a los otros cuatro roles; `MANAGE_REVIEW_DECISIONS`
-concedida a `TENANT_OWNER` y denegada a los otros cuatro. Y denegada sin usuario.
+**La elección de esconder las decisiones al manager es de UX, no de RBAC.**
+[`auth/domain/policy.py:301-316`](../specs/auth-tenancy.md) concede
+`_REVIEW_OPERATE` (`APPROVE_REVIEW`, `IGNORE_REVIEW`, `MARK_REVIEW_POSTED`,
+`READ_REVIEWS`) al `TENANT_OWNER` y `_REVIEW_MANAGE` (que añade `CREATE_REVIEW`)
+al `PROPERTY_MANAGER`, y la nota `policy.py:432-433` documenta explícitamente
+que «PRD §18 y R4.2 give every action of the flow to the manager». El frontend
+**esconde** aprobar / ignorar / marcar-como-publicada al manager por el reparto
+de trabajo que el roadmap enuncia — *«el owner aprueba, ignora y marca como
+publicada; el manager crea»*— y porque el PRD §18 modela la aprobación como
+decisión de la propietaria, no como tarea operativa del manager. **Si un
+manager dispara `PATCH /reviews/{id}/response` por la API directamente, el
+backend lo acepta** — el espejo es pista de UX, no autoridad. Esta es la
+misma postura que `pricing-web` D17 con `MANAGE_PRICE_RECOMMENDATIONS`, donde
+la owner decide precios por UX pese a que el backend también se los concede al
+manager.
+
+`lib/auth/permissions.test.tsx` gana los casos: `CREATE_REVIEW_UI` concedida a
+`PROPERTY_MANAGER` y denegada a los otros cuatro roles; `MANAGE_REVIEW_DECISIONS`
+concedida a `TENANT_OWNER` y denegada a los otros cuatro. Y denegada sin
+usuario.
 
 **Lo que NO hace**: el registro de ruta no lleva roles
 (`route-registry.ts:110` «carries only shell metadata»), así que el sidebar enseña
@@ -349,7 +387,7 @@ Olvidar uno deja el namespace mudo en un idioma; `catalog-parity.test.ts` sólo 
 vigilarlo una vez está en `NAMESPACES`.
 
 Estructura de claves, siguiendo `pricing.json`: `tabs.*`, `detail.*`, `list.*`,
-`columns.*`, `status.*` (5), `sentiment.*` (3), `channel.*` (4), `recurringIssue.*` (9),
+`columns.*`, `status.*` (5), `sentiment.*` (3), `channel.*` (5), `recurringIssue.*` (9),
 `identity.*`, `filters.*`, `pagination.*`, `respond.*`, `respond.error.*`, `create.*`,
 `create.error.*`, `preview.*`, `markPosted.*`.
 
@@ -360,8 +398,9 @@ registrar** (mismo cuidado que pricing-web D19 con `decide.confirmQuestion.*`):
   confirmación en línea pregunta *qué* está haciendo la usuaria, no genérico.
 - **`recurringIssue.{WIFI,NOISE,CLEANLINESS,ACCESS,COMMUNICATION,LOCATION,VALUE,AMENITIES,OTHER}`**
   — R8.2: las nueve etiquetas del enum `RecurringIssueTag`.
-- **`channel.{AIRBNB,BOOKING_COM,DIRECT,OTHER}`** — R8.2: los cuatro valores que el
-  diálogo de alta expone (los cuatro miembros del enum `ReviewChannel` que
+- **`channel.{AIRBNB,BOOKING,GOOGLE,MANUAL,OTHER}`** — R8.2: los cinco miembros
+  del enum `ReviewChannel` que `CreateReviewRequest.channel` acepta (verificado
+  contra `frontend/lib/api/generated/openapi.d.ts:4462`).
   `CreateReviewRequest.channel` acepta, todos).
 - **`status.{NEW,DRAFTED,APPROVED,POSTED_MANUALLY,IGNORED}`** — R8.2: los cinco
   estados, los cinco.
@@ -431,7 +470,7 @@ no este change.
 | Area | Files | Change |
 |---|---|---|
 | Ruta | `frontend/app/(workspace)/reviews/page.tsx` | Sustituye `RoutePlaceholder` por `<ReviewsView />`; `generateMetadata` intacto (D20) |
-| Datos — contrato | `frontend/features/reviews/data/dto.ts` **(nuevo)** | `ReviewsPage<T>`, `Review`, `ReviewDraft`, `ReviewSummary` (sin usar aquí, pero tipa el shape), `PropertySummary`, `ReviewAction`, filtros (D2, D3, D4) |
+| Datos — contrato | `frontend/features/reviews/data/dto.ts` **(nuevo)** | `ReviewsPage<T>`, `Review`, `ReviewDraft`, `PropertySummary`, `ReviewAction`, filtros (D2, D3, D4) |
 | Datos — puerto | `frontend/features/reviews/data/reviews-source.ts` **(nuevo)** | Interfaz `ReviewsDataSource`: `listReviews`, `getReview`, `getDraft`, `createReview`, `respondToReview`, `listProperties` |
 | Datos — adaptador | `frontend/features/reviews/data/http/http-reviews-source.ts` **(nuevo)** + `.test.ts` | Mapeo `items`→`ReviewsPage`, `totalPages` calculado, filtros como query, omitir `classification_attempts`/`created_at`/`updated_at`/`reservation_id` (D2, D3) |
 | Datos — composición | `frontend/features/reviews/data/index.ts` **(nuevo)** | `getReviewsDataSource()` con `createAuthenticatedClients` (D1) |
@@ -484,7 +523,7 @@ export type ReviewAction = Extract<
   "APPROVE" | "IGNORE" | "MARK_POSTED" | "EDIT"
 >;
 
-/** Sin classification_attempts, sin created_at/updated_at — D3. */
+/** Sin classification_attempts, sin created_at/updated_at, sin reservationId — D3. */
 export interface Review {
   id: string;
   propertyId: string;
@@ -498,14 +537,15 @@ export interface Review {
   publishedAt: string | null;     // ISO 8601 UTC
   channel: ReviewChannel;
   language: string | null;
-  reservationId: string | null;
 }
 
-/** Sin ai_generated — D3. */
+/** Sin ai_generated — D3. `draftContent` no es nullable porque el DTO publicado
+ *  (`ReviewDraftResponse.draft_content`, `openapi.d.ts:4480`) lo declara como
+ *  `string` requerido. */
 export interface ReviewDraft {
   reviewId: string;
-  draftContent: string | null;    // vocabulario cerrado, regla 11
-  language: string | null;
+  draftContent: string;           // vocabulario cerrado, regla 11
+  language: string;               // no nullable en el DTO publicado
 }
 
 export interface ReviewFilters {
