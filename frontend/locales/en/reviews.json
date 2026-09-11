@@ -1,0 +1,178 @@
+{
+  "tabs": {
+    "label": "Reviews sections",
+    "drafts": "Drafts",
+    "reviews": "Reviews"
+  },
+  "list": {
+    "label": "Reviews list",
+    "empty": {
+      "title": "No reviews",
+      "description": "No reviews match the selected filters."
+    },
+    "draftsEmpty": {
+      "title": "No pending drafts",
+      "description": "There are no pending drafts."
+    },
+    "error": {
+      "title": "Could not load the reviews",
+      "description": "Try again in a few seconds."
+    },
+    "draftsError": {
+      "title": "Could not load the drafts",
+      "description": "Try again in a few seconds."
+    }
+  },
+  "columns": {
+    "property": "Property",
+    "channel": "Channel",
+    "rating": "Rating",
+    "sentiment": "Sentiment",
+    "status": "Status",
+    "publishedAt": "Date"
+  },
+  "status": {
+    "NEW": "New",
+    "DRAFTED": "Draft",
+    "APPROVED": "Approved",
+    "POSTED_MANUALLY": "Posted manually",
+    "IGNORED": "Ignored"
+  },
+  "sentiment": {
+    "POSITIVE": "Positive",
+    "NEUTRAL": "Neutral",
+    "NEGATIVE": "Negative"
+  },
+  "channel": {
+    "AIRBNB": "Airbnb",
+    "BOOKING": "Booking",
+    "GOOGLE": "Google",
+    "MANUAL": "Manual",
+    "OTHER": "Other"
+  },
+  "recurringIssue": {
+    "WIFI": "Wifi",
+    "NOISE": "Noise",
+    "CLEANLINESS": "Cleanliness",
+    "ACCESS": "Access",
+    "COMMUNICATION": "Communication",
+    "LOCATION": "Location",
+    "VALUE": "Value for money",
+    "AMENITIES": "Amenities",
+    "OTHER": "Other"
+  },
+  "identity": {
+    "unavailable": "Property unavailable",
+    "loading": "Loading directory…",
+    "portfolio": "Whole portfolio"
+  },
+  "filters": {
+    "property": {
+      "label": "Property",
+      "all": "All properties"
+    },
+    "channel": {
+      "label": "Channel",
+      "all": "All channels"
+    },
+    "sentiment": {
+      "label": "Sentiment",
+      "all": "All sentiments"
+    },
+    "status": {
+      "label": "Status",
+      "all": "All statuses"
+    },
+    "rating": {
+      "label": "Rating (/5)",
+      "min": "Min",
+      "max": "Max"
+    },
+    "dateFrom": { "label": "From" },
+    "dateTo": { "label": "To" }
+  },
+  "pagination": {
+    "label": "Reviews pagination",
+    "previous": "Previous page",
+    "next": "Next page",
+    "pageOfTotal": "Page {{page}} of {{totalPages}}",
+    "totalItems": "{{total}} in total"
+  },
+  "respond": {
+    "approve": "Approve",
+    "ignore": "Ignore",
+    "markPosted": "Mark as posted",
+    "editDraft": "Edit draft",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "sending": "Sending…",
+    "success": "Review updated.",
+    "confirmQuestion": {
+      "APPROVE": "Approve this review?",
+      "IGNORE": "Ignore this review?",
+      "MARK_POSTED": "Mark this review as posted?",
+      "EDIT": "Save the draft changes?"
+    },
+    "error": {
+      "forbidden": "You do not have permission to decide on this review.",
+      "notFound": "That review no longer exists.",
+      "conflict": "That review is no longer in the state you thought. Reload the list.",
+      "invalid": "That move is not valid for this review.",
+      "generic": "Could not save the decision. Try again."
+    }
+  },
+  "create": {
+    "title": "Add review",
+    "button": "Add review",
+    "sending": "Sending…",
+    "success": "Review created.",
+    "fields": {
+      "property": "Property",
+      "channel": "Channel",
+      "reviewerName": "Guest name (optional)",
+      "rating": "Rating (/5)",
+      "content": "Review text (optional)",
+      "language": "Language (optional)"
+    },
+    "placeholders": {
+      "reviewerName": "Guest name",
+      "content": "Write the review text…",
+      "language": "es, en, …"
+    },
+    "submit": "Create review",
+    "cancel": "Cancel",
+    "error": {
+      "forbidden": "You do not have permission to create reviews.",
+      "invalid": "The submitted data is invalid.",
+      "generic": "Could not create the review. Try again."
+    }
+  },
+  "preview": {
+    "guestText": "Guest text",
+    "reviewerName": "Guest",
+    "rating": "Rating",
+    "channel": "Channel",
+    "publishedAt": "Published",
+    "sentiment": "Sentiment",
+    "aiSummary": "Auto summary",
+    "recurringIssues": "Recurring issues",
+    "draftContent": "Proposed draft",
+    "noDraft": "No draft."
+  },
+  "markPosted": {
+    "dialog": {
+      "title": "Mark as posted",
+      "body": "You are about to record that you already posted this reply on the corresponding channel. This action cannot be undone from this screen.",
+      "guestPreview": "Guest text",
+      "draftPreview": "Approved draft",
+      "confirm": "Confirm",
+      "cancel": "Cancel"
+    }
+  },
+  "detail": {
+    "title": "Review detail",
+    "close": "Close",
+    "loading": "Loading detail…",
+    "error": "Could not load the detail."
+  }
+}
