@@ -42,7 +42,7 @@ sección 8.
 
 ## 2. Costura de datos de la feature
 
-- [ ] 2.1 `features/reviews/data/dto.ts` (nuevo): `ReviewsPage<T>` (`items`, `total`,
+- [x] 2.1 `features/reviews/data/dto.ts` (nuevo): `ReviewsPage<T>` (`items`, `total`,
   `page`, `perPage`, `totalPages`), `ReviewStatus` / `ReviewSentiment` /
   `ReviewChannel` / `RecurringIssueTag` desde `components["schemas"]`, `ReviewAction`
   como `Extract<…, "APPROVE" | "IGNORE" | "MARK_POSTED" | "EDIT">`, `Review` **sin**
@@ -55,12 +55,12 @@ sección 8.
   (unión discriminada de D4). El nombre `ReviewsPage` es deliberadamente
   distinto de `PricingPage` y de `PaginatedResponse`. [R2.4, R2.5, R5.2, R6.3, R6.5]
 
-- [ ] 2.2 `features/reviews/data/reviews-source.ts` (nuevo): interfaz
+- [x] 2.2 `features/reviews/data/reviews-source.ts` (nuevo): interfaz
   `ReviewsDataSource` con `listReviews`, `getReview`, `getDraft`, `createReview`,
   `respondToReview`, `listProperties`. **No declarar** `listSummary` ni
   `regenerateDraft` (fuera de alcance, proposal «Out of scope»). [R5, R6]
 
-- [ ] 2.3 `features/reviews/data/http/http-reviews-source.ts` (nuevo) + `.test.ts`:
+- [x] 2.3 `features/reviews/data/http/http-reviews-source.ts` (nuevo) + `.test.ts`:
   mapeo `{items,page,per_page,total}` → `ReviewsPage<T>` con `totalPages = perPage >
   0 ? Math.ceil(total / perPage) : 0`; filtros `property_id`, `channel`, `sentiment`,
   `status`, `rating_min`, `rating_max`, `date_from`, `date_to` enviados como query
@@ -70,7 +70,7 @@ sección 8.
   nombres de query son los correctos, y los campos descartados no cruzan el
   boundary. [R2.1, R2.2, R2.4, R5.1, R6.5]
 
-- [ ] 2.4 `features/reviews/data/http/http-reviews-source.ts`: `getReview` pide
+- [x] 2.4 `features/reviews/data/http/http-reviews-source.ts`: `getReview` pide
   `GET /api/v1/reviews/{id}` y devuelve `Review`; `getDraft` pide
   `GET /api/v1/reviews/{id}/response` y devuelve `ReviewDraft` (404 si la reseña
   está `IGNORED`, indistinguible del 404 de inexistente, R5.4 del spec);
@@ -82,7 +82,7 @@ sección 8.
   con `page: 1, per_page: 100`, con el `ASSUMPTION` anotado en el código. Tests del
   cuerpo exacto de las dos escrituras y del 404 indistinguible del draft. [R3.1, R3.3, R4.3, R5.3, R5.4, R6.1, R6.3]
 
-- [ ] 2.5 `features/reviews/data/index.ts` (nuevo): `getReviewsDataSource()` con
+- [x] 2.5 `features/reviews/data/index.ts` (nuevo): `getReviewsDataSource()` con
   `createAuthenticatedClients`, copiando la forma de `features/cleaning/data/index.ts`
   para que los tests de componente puedan inyectar un doble. Sin
   `MockReviewsSource`. [R2.1, R5.1]
