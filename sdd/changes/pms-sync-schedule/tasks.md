@@ -16,11 +16,11 @@
 
 ## 2. Job de beat
 
-- [ ] 2.1 `backend/app/scheduler/schedule.py`: añadir `"sync_pms_reservations":
+- [x] 2.1 `backend/app/scheduler/schedule.py`: añadir `"sync_pms_reservations":
       timedelta(hours=6)` a `CADENCES`, con un comentario de docstring como los demás
       (referencia a `pms-sync-schedule`, por qué 6 h — la cadencia que Beds24 recomienda para
       sync completo — y que reemplaza la ausencia que `celery-jobs` D16 documentó). [R1]
-- [ ] 2.2 `backend/app/scheduler/tasks.py`: añadir `async def _sync_pms_reservations(session,
+- [x] 2.2 `backend/app/scheduler/tasks.py`: añadir `async def _sync_pms_reservations(session,
       tenant_id, now)` que construye `SyncReservationsFromPmsUseCase` con las mismas
       dependencias que `pms_sync.py` (`SqlAlchemyPMSAdapterFactory` +
       `SqlAlchemyPmsCredentialRepository`, `SqlAlchemyReservationRepository`,
@@ -112,3 +112,70 @@
   distintos), `tests/test_schedule.py` (17 passed), `tests/test_config.py` (110 passed),
   `tests/integrations/test_webhook_processing.py` + `test_webhook_causality.py` (23 passed) —
   todo corrido dentro de `backend/` vía `docker compose run --rm backend uv run pytest tests/...`.
+
+### Section 2 (job de beat) — para Section 4
+
+- `CADENCES["sync_pms_reservations"] = timedelta(hours=6)` quedó en
+  `backend/app/scheduler/schedule.py`, como última entrada del dict, con su comentario propio
+  encima (mismo estilo que `classify_reviews`). `beat_schedule()` lo deriva sin más — no toqué
+  `DAILY_JOBS`/`MONTHLY_JOBS`.
+- `backend/app/scheduler/tasks.py`:
+  - Función de trabajo: `async def _sync_pms_reservations(session: AsyncSession, tenant_id, now:
+    datetime)`, colocada inmediatamente después de `_reconcile_owner_approvals_for_expenses` y
+    antes de `_locked`. Construye `SyncReservationsFromPmsUseCase` con
+    `SqlAlchemyPMSAdapterFactory(credentials=SqlAlchemyPmsCredentialRepository(session))` — SIN
+    `forced_provider` — más `SqlAlchemyReservationRepository`, `SqlAlchemyPropertyRepository`,
+    `SqlAlchemyGuestRepository`, `SqlAlchemyTimelineEventRepository`, `SqlAlchemyUnitOfWork`,
+    `SqlAlchemyAuditLogRepository(session)` y `PostgresGuestEmailExclusion(session)`. Llama
+    `execute(tenant_id=tenant_id, since=now - timedelta(days=settings.pms_sync_window_days),
+    now=now, source=SCHEDULED_SOURCE)` — sin `providers` ni `actor_type`, ambos en su default
+    (`None` → todos los providers; `TimelineActorType.SYSTEM`).
+  - Tarea Celery: `@celery_app.task(name="sync_pms_reservations") def sync_pms_reservations() ->
+    dict`, al final del fichero (después de `reconcile_owner_approvals_for_expenses`). Cuerpo
+    literal: `return run_sync(_guarded("sync_pms_reservations",
+    CADENCES["sync_pms_reservations"], _sync_pms_reservations))` — nombres de string literales,
+    no constantes (mismo patrón que `check_checkin_windows`/`mark_occupied_estimated`, no el de
+    `WEBHOOK_TASK`/`PRICING_TASK`).
+  - Import añadido: `SCHEDULED_SOURCE` se coló en la línea ya existente de
+    `SyncReservationsFromPmsUseCase` →
+    `from app.integrations.application.use_cases import SCHEDULED_SOURCE,
+    SyncReservationsFromPmsUseCase`. `SqlAlchemyGuestRepository` NO hizo falta añadirlo: ya
+    estaba importado en el módulo (`from app.guests.infrastructure.repositories import
+    SqlAlchemyGuestRepository`) para `_webhook_tenant_use_case`.
+- Para llamar `_sync_pms_reservations` directamente en un test (mitad 1 de 4.2): es una
+  `async def`, se le pasa la sesión de test real, un `tenant_id` (UUID) y un `now: datetime`
+  ya tz-aware (UTC) — no abre su propia sesión ni marca el tenant, eso lo hace el caller
+  (`run_for_every_tenant`/`run_in_marked_session` en producción; en el test, márcalo a mano con
+  `bind_session_to_tenant` como hace `sync_with_session`, o usa el fixture que ya lo haga para
+  otros tests del dominio).
+- **`worker_session_factory()` apunta a la BD real de compose (`postgres:5432`), no a la sesión
+  de test de `tests/conftest.py`.** Llamar a la task de Celery de extremo a extremo
+  (`sync_pms_reservations()` o incluso `_guarded(...)` tal cual) contra esa fábrica golpea la
+  BD de dev, que el propio `conftest.py` deja intacta a propósito y que no tiene tenants — así
+  que un test que llame la task real y luego assert sobre su `report` está aserting sobre un
+  resultado vacío por construcción, no sobre lógica rota. Es exactamente la trampa que el
+  docstring de `test_generate_price_recommendations.py` ya documentó para `generate_price_
+  recommendations`; la mitad 2 de 4.2 (candado/lista de tenants) tiene que stubbear
+  `run_for_every_tenant`/`worker_session_factory` en vez de dejar que toquen la BD real, y la
+  mitad 1 (wiring) tiene que llamar `_sync_pms_reservations` directo contra la sesión de test,
+  nunca la task de Celery ni `_guarded`.
+- El TTL que le llega a `task_lock` cuando dispara esta task es `lock_ttl_for(timedelta(hours=6))`
+  = 18 h (`lock_ttl_for` en `app/scheduler/locks.py` multiplica por 3) — no hay una entrada en
+  `DAILY_JOBS`/`MONTHLY_JOBS` que lo sobrescriba, así que el camino es el mismo `_guarded` → 
+  `_locked` → `lock_ttl_for(cadence)` que usan `check_checkin_windows` y el resto de `CADENCES`.
+- Suite no tocada (fuera de alcance de Section 2): `backend/tests/scheduler/test_schedule.py`
+  falla ahora en 2 tests — `test_the_calendar_is_prd_8_3_plus_exactly_the_declared_additions` y
+  `test_the_beat_schedule_covers_both_tables_and_nothing_else` — porque su `ALL_CADENCES` /
+  `BEYOND_PRD_8_3` locales todavía no listan `sync_pms_reservations`. Es exactamente lo que 4.1
+  tiene que añadir (ver líneas ~59-69 de ese fichero para el estilo de las filas existentes).
+  El resto de `tests/scheduler/` (1581 tests) y `tests/test_layering.py` pasan limpios —
+  `app/scheduler/tasks.py` sigue siendo el único módulo bajo `backend/app/` que importa Celery.
+- Entorno: este worktree seguía sin `.env` (no versionado). Repetí el mismo procedimiento que
+  Section 1: generé uno temporal desde `.env.example` con `JWT_SECRET_KEY`/`ENCRYPTION_KEY`
+  válidos, corrí `docker compose down` al terminar y borré el `.env` — árbol limpio salvo
+  `schedule.py`, `tasks.py` y este `tasks.md`.
+- Comandos corridos (todos `docker compose run --rm backend uv run ...` desde la raíz del
+  worktree): `python -c "from app.scheduler.schedule import CADENCES, beat_schedule; ..."`
+  → `6:00:00` / `True`; `python -c "import app.scheduler.tasks"` → `ok`; `pytest tests/scheduler/
+  tests/test_layering.py -q` → 1581 passed, 2 failed (los dos de arriba, esperados y para 4.1).
+  No corrí la suite completa ni pyright — eso es Section 5.
