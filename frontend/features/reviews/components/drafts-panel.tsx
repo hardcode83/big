@@ -60,7 +60,7 @@ export function DraftsPanel({
   return (
     <div className="flex flex-col gap-3" data-testid="drafts-panel">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-h4 font-semibold text-foreground">
+        <h2 className="text-headline-md font-semibold text-foreground">
           {t("list.title")}
         </h2>
         {!createDialogOpen && (
@@ -69,7 +69,7 @@ export function DraftsPanel({
           </Button>
         )}
       </div>
-      <label className="flex flex-col gap-1 text-body-sm">
+      <label className="flex flex-col gap-1 text-body-base">
         <span className="font-medium text-foreground">{t("filters.property")}</span>
         <select
           value={slice.propertyId ?? ""}
@@ -87,15 +87,15 @@ export function DraftsPanel({
         </select>
       </label>
       {query.isPending && (
-        <p className="text-body-sm text-muted-foreground">{t("list.loading")}</p>
+        <p className="text-body-base text-muted-foreground">{t("list.loading")}</p>
       )}
       {query.isError && (
-        <p className="text-body-sm text-destructive">
+        <p className="text-body-base text-destructive">
           {t("list.error.title")}
         </p>
       )}
       {query.data && query.data.total === 0 && (
-        <p className="text-body-sm text-muted-foreground">
+        <p className="text-body-base text-muted-foreground">
           {t("list.empty")}
         </p>
       )}

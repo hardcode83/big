@@ -73,12 +73,12 @@ export function ReviewRow({
         <span className="text-body-base font-medium text-foreground">
           {propertyLabel}
         </span>
-        <span className="text-body-sm text-muted-foreground">
+        <span className="text-body-base text-muted-foreground">
           {t(`channel.${review.channel}`)}
         </span>
       </div>
       <div className="flex w-full items-baseline justify-between gap-2">
-        <span className="text-body-sm text-muted-foreground">
+        <span className="text-body-base text-muted-foreground">
           {review.rating !== null
             ? `${fmtRating(review.rating, i18n.language)}/5`
             : "–"}
@@ -87,14 +87,14 @@ export function ReviewRow({
             ? t(`sentiment.${review.sentiment}`)
             : "–"}
         </span>
-        <span className="text-body-sm text-muted-foreground">
+        <span className="text-body-base text-muted-foreground">
           {review.publishedAt !== null
             ? fmtDay(review.publishedAt, i18n.language)
             : "–"}
         </span>
       </div>
       {showStatus && (
-        <span className="text-body-sm font-medium text-foreground">
+        <span className="text-body-base font-medium text-foreground">
           {t(`status.${review.status}`)}
         </span>
       )}

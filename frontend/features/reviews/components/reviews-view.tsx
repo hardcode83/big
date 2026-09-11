@@ -131,7 +131,7 @@ export function ReviewsView() {
 
   return (
     <div className="flex flex-col gap-3" data-testid="reviews-view">
-      <h1 className="text-h3 font-semibold text-foreground">
+      <h1 className="text-headline-lg font-semibold text-foreground">
         {t("title")}
       </h1>
       <ReviewsTabs

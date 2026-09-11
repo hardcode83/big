@@ -67,7 +67,7 @@ export function MarkPostedDialog({
         </AlertDialogHeader>
         <div className="flex flex-col gap-3 border-t border-border pt-3">
           <div className="flex flex-col gap-1">
-            <span className="text-body-sm font-medium text-muted-foreground">
+            <span className="text-body-base font-medium text-muted-foreground">
               {t("preview.guestContent")}
             </span>
             <p className="whitespace-pre-wrap text-body-base text-foreground">
@@ -76,7 +76,7 @@ export function MarkPostedDialog({
           </div>
           {draft !== null && (
             <div className="flex flex-col gap-1">
-              <span className="text-body-sm font-medium text-muted-foreground">
+              <span className="text-body-base font-medium text-muted-foreground">
                 {t("preview.draftContent")}
               </span>
               <p className="whitespace-pre-wrap text-body-base text-foreground">

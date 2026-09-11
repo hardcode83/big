@@ -77,14 +77,14 @@ export function ReviewActions({
 
   if (isPending) {
     return (
-      <p className="text-body-sm text-muted-foreground">{t("respond.sending")}</p>
+      <p className="text-body-base text-muted-foreground">{t("respond.sending")}</p>
     );
   }
 
   if (pendingAction !== null) {
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-body-sm text-foreground">
+        <span className="text-body-base text-foreground">
           {t(`respond.confirmQuestion.${pendingAction}`)}
         </span>
         <Button

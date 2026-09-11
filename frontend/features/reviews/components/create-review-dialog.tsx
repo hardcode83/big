@@ -125,7 +125,7 @@ export function CreateReviewDialog({
             });
           }}
         >
-          <label className="flex flex-col gap-1 text-body-sm">
+          <label className="flex flex-col gap-1 text-body-base">
             <span className="font-medium text-foreground">
               {t("create.propertyLabel")}
             </span>
@@ -143,7 +143,7 @@ export function CreateReviewDialog({
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-body-sm">
+          <label className="flex flex-col gap-1 text-body-base">
             <span className="font-medium text-foreground">
               {t("create.channelLabel")}
             </span>
@@ -159,7 +159,7 @@ export function CreateReviewDialog({
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-body-sm">
+          <label className="flex flex-col gap-1 text-body-base">
             <span className="font-medium text-foreground">
               {t("create.reviewerNameLabel")}
             </span>
@@ -171,7 +171,7 @@ export function CreateReviewDialog({
               className="rounded-md border border-border bg-background px-2 py-1.5 text-body-base"
             />
           </label>
-          <label className="flex flex-col gap-1 text-body-sm">
+          <label className="flex flex-col gap-1 text-body-base">
             <span className="font-medium text-foreground">
               {t("create.ratingLabel")}
             </span>
@@ -190,7 +190,7 @@ export function CreateReviewDialog({
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-body-sm">
+          <label className="flex flex-col gap-1 text-body-base">
             <span className="font-medium text-foreground">
               {t("create.contentLabel")}
             </span>

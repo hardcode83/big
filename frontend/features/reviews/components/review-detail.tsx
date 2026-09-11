@@ -87,7 +87,7 @@ export function ReviewDetail({
       data-testid="review-detail"
     >
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-h4 font-semibold text-foreground">
+        <h3 className="text-headline-md font-semibold text-foreground">
           {t("detail.title")}
         </h3>
         <Button type="button" variant="ghost" onClick={onClose}>
@@ -95,7 +95,7 @@ export function ReviewDetail({
         </Button>
       </div>
       <div className="flex flex-col gap-1">
-        <span className="text-body-sm font-medium text-muted-foreground">
+        <span className="text-body-base font-medium text-muted-foreground">
           {t("detail.guestContent")}
         </span>
         <p className="whitespace-pre-wrap text-body-base text-foreground">
@@ -103,27 +103,27 @@ export function ReviewDetail({
         </p>
       </div>
       {review.rating !== null && (
-        <p className="text-body-sm text-foreground">
+        <p className="text-body-base text-foreground">
           {t("detail.rating")}
           {": "}
           {fmtRating(review.rating, i18n.language)}/5
         </p>
       )}
-      <p className="text-body-sm text-muted-foreground">
+      <p className="text-body-base text-muted-foreground">
         {t(`channel.${review.channel}`)}
         {review.publishedAt !== null
           ? ` · ${fmtDay(review.publishedAt, i18n.language)}`
           : ""}
       </p>
       {review.reviewerName !== null && (
-        <p className="text-body-sm text-muted-foreground">
+        <p className="text-body-base text-muted-foreground">
           {t("detail.reviewer")}
           {": "}
           {review.reviewerName}
         </p>
       )}
       {review.sentiment !== null && (
-        <p className="text-body-sm text-muted-foreground">
+        <p className="text-body-base text-muted-foreground">
           {t("detail.sentiment")}
           {": "}
           {t(`sentiment.${review.sentiment}`)}
@@ -131,7 +131,7 @@ export function ReviewDetail({
       )}
       {review.aiSummary !== null && (
         <div className="flex flex-col gap-1">
-          <span className="text-body-sm font-medium text-muted-foreground">
+          <span className="text-body-base font-medium text-muted-foreground">
             {t("detail.aiSummary")}
           </span>
           <p className="whitespace-pre-wrap text-body-base text-foreground">
@@ -144,7 +144,7 @@ export function ReviewDetail({
           {review.recurringIssues.map((tag) => (
             <span
               key={tag}
-              className="rounded-md bg-muted px-2 py-0.5 text-body-sm text-foreground"
+              className="rounded-md bg-muted px-2 py-0.5 text-body-base text-foreground"
             >
               {t(`recurringIssue.${tag}`)}
             </span>
@@ -153,7 +153,7 @@ export function ReviewDetail({
       )}
       {draft !== null && (
         <div className="flex flex-col gap-2 border-t border-border pt-3">
-          <span className="text-body-sm font-medium text-muted-foreground">
+          <span className="text-body-base font-medium text-muted-foreground">
             {t("detail.draft")}
           </span>
           {editing ? (
@@ -202,7 +202,7 @@ export function ReviewDetail({
         </div>
       )}
       {isPending && (
-        <p className="text-body-sm text-muted-foreground">{t("respond.sending")}</p>
+        <p className="text-body-base text-muted-foreground">{t("respond.sending")}</p>
       )}
       <div className="flex flex-wrap gap-2 border-t border-border pt-3">
         {review.status === "DRAFTED" && draft !== null && !editing && (
