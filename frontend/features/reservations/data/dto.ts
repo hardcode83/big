@@ -47,6 +47,25 @@ export type LegalRegistrationStatus =
 export type GuestDocumentStatus =
   components["schemas"]["GuestDocumentStatus"];
 
+/** The guest fields accepted by the manual reservation mutation (D4). */
+export type ManualGuestInput = components["schemas"]["ManualGuestRequest"];
+
+/**
+ * Web create input, derived from OpenAPI but without the existing-guest escape
+ * hatch. The web flow may resolve/create a guest from `guest`, never generate or
+ * request `guest_id` (D4).
+ */
+export type CreateReservationInput = Omit<
+  components["schemas"]["CreateReservationRequest"],
+  "guest_id"
+>;
+
+/** Partial web update input; explicit null remains available for nullable clears. */
+export type UpdateReservationInput = Omit<
+  components["schemas"]["UpdateReservationRequest"],
+  "guest_id"
+>;
+
 /** Civil `YYYY-MM-DD` date — the format check-in/out travel in (design D4). */
 export type CivilDate = string;
 

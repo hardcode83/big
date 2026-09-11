@@ -7,6 +7,20 @@ const useAuth = vi.hoisted(() => vi.fn());
 vi.mock("./auth-provider", () => ({ useAuth }));
 
 describe("useHasPermission (R4.3)", () => {
+  it("grants MANAGE_RESERVATIONS only to PROPERTY_MANAGER (R4)", () => {
+    useAuth.mockReturnValue({ user: { role: "PROPERTY_MANAGER" } });
+    const { result } = renderHook(() => useHasPermission("MANAGE_RESERVATIONS"));
+    expect(result.current).toBe(true);
+  });
+
+  it("hides MANAGE_RESERVATIONS from owner and field roles (R4)", () => {
+    for (const role of ["TENANT_OWNER", "CLEANER", "TECHNICIAN"] as const) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() => useHasPermission("MANAGE_RESERVATIONS"));
+      expect(result.current, `${role} should not have it`).toBe(false);
+    }
+  });
+
   it("grants MANAGE_CLEANING_TASKS to PROPERTY_MANAGER", () => {
     useAuth.mockReturnValue({ user: { role: "PROPERTY_MANAGER" } });
     const { result } = renderHook(() =>
