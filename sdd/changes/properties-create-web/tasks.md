@@ -33,9 +33,9 @@
       field-validation field-errors permissions` to confirm section 1 is
       self-consistent before section 2 depends on it.
 
-## 2. Data layer — full-detail fetch and mutations
+## 2. Data layer — full-detail fetch and mutations <!-- panel: PASS 2026-09-11 receipt:3c1acfba -->
 
-- [ ] 2.1 Add `PropertyDetailDto` to `frontend/features/properties/data/dto.ts`
+- [x] 2.1 Add `PropertyDetailDto` to `frontend/features/properties/data/dto.ts`
       (extends `PropertySummaryDto` with the fields the list omits: notes are
       already absent from `PropertySummaryDto`, so add `accessNotes`,
       `cleaningNotes`, `emergencyNotes`), plus `CreatePropertyInput` and
@@ -43,7 +43,7 @@
       input type carries `pmsProvider` (create-only, not offered by this UI —
       R1.2) or `status`/`currentOperationalState` outside the dedicated retire
       path (R2.3, R2.6). [R1.2, R2.2, R2.3]
-- [ ] 2.2 Add to `HttpPropertiesSource`
+- [x] 2.2 Add to `HttpPropertiesSource`
       (`frontend/features/properties/data/http/http-properties-source.ts`):
       `getProperty(tenantId, id)` → `GET /api/v1/properties/{id}`, mapping the
       full `PropertyResponse` to `PropertyDetailDto`; `createProperty(tenantId,
@@ -52,29 +52,29 @@
       `input` (the caller is responsible for the diffing, D8 — this method does
       not filter). Unit tests for all three: request shape, response mapping,
       that `wifi_password` is never read from any response. [R1.2, R1.4, R2.2, R2.5]
-- [ ] 2.3 Add `propertiesKeys.detail(tenantId, id)` to
+- [x] 2.3 Add `propertiesKeys.detail(tenantId, id)` to
       `frontend/features/properties/hooks/query-keys.ts`, same
       `tenantScopedKey` convention as `propertiesKeys.list`.
-- [ ] 2.4 Create `frontend/features/properties/hooks/use-property.ts`:
+- [x] 2.4 Create `frontend/features/properties/hooks/use-property.ts`:
       `useProperty(id)`, mirrors `use-properties.ts` (retry policy, tenant guard).
       [R2.2]
-- [ ] 2.5 Create `frontend/features/properties/hooks/use-create-property.ts`:
+- [x] 2.5 Create `frontend/features/properties/hooks/use-create-property.ts`:
       `useCreateProperty()` — `retry: false`, no optimistic write; `onSettled`
       invalidates `propertiesKeys.list(tenantId)` (prefix) and the hand-reproduced
       `["tenant", tenantId, "dashboard-cards"]` prefix, same pattern as
       `useResolveIncident` (design D10). [R1.4]
-- [ ] 2.6 Create `frontend/features/properties/hooks/use-update-property.ts`:
+- [x] 2.6 Create `frontend/features/properties/hooks/use-update-property.ts`:
       `useUpdateProperty()` — same skeleton; `onSettled` invalidates
       `propertiesKeys.list(tenantId)`, `propertiesKeys.detail(tenantId, id)`, and
       the hand-reproduced `["tenant", tenantId, "dashboard-cards"]` and
       `["tenant", tenantId, "property-detail", id]` prefixes (design D10). Test
       that both hooks fire exactly the documented invalidations (mock
       `queryClient.invalidateQueries`). [R2.2]
-- [ ] 2.7 Export `PropertyDetailDto`, `CreatePropertyInput`, `UpdatePropertyInput`
+- [x] 2.7 Export `PropertyDetailDto`, `CreatePropertyInput`, `UpdatePropertyInput`
       and the new hooks from `frontend/features/properties/index.ts` so
       `features/dashboard` can import them (design D3's cross-feature import,
       mirroring how `dashboard` already imports from `@/features/incidents`).
-- [ ] 2.8 Run `cd frontend && npm run typecheck && npm test -- properties` to
+- [x] 2.8 Run `cd frontend && npm run typecheck && npm test -- properties` to
       confirm the data layer compiles and its own tests pass before any UI
       depends on it.
 
@@ -200,3 +200,17 @@
 - `validatePropertyFields` only checks the fields R1.3 names (name/internal_code required+length, country format, max_guests/bedrooms/bathrooms range, wifi_password/three notes length). `pms_external_id`, address fields, `city`, `province`, `postal_code`, `wifi_name` are NOT length-checked here — Section 3/4 must rely on `maxLength` on the `<input>`/`<textarea>` itself for those (design D5).
 - `frontend/features/properties/lib/field-errors.ts`: exports `function mapPropertyFieldErrors(error: unknown, fallbackField?: string): Record<string, string>`. `422` reads `error.details.errors` by `loc` (last segment as key, `msg` as value). `409` matches the exact substrings `"internal_code"` / `"pms_external_id"` in `error.message` and attributes to that field name; if neither substring matches, falls back to `{ [fallbackField]: error.message }` when `fallbackField` is given, else `{}`.
 - `frontend/features/properties/lib/error-mapping.ts` was NOT touched — `field-errors.ts` is a separate sibling file (design D6).
+
+### Section 2 (data layer — full-detail fetch and mutations)
+
+- `frontend/features/properties/data/dto.ts` exports `PropertyDetailDto extends PropertySummaryDto { accessNotes: string | null; cleaningNotes: string | null; emergencyNotes: string | null; }` — camelCase, no `wifiPassword` field (none in the contract).
+- `dto.ts` also exports `CreatePropertyInput { name: string; internalCode: string; pmsExternalId?, addressLine1?, addressLine2?, city?, province?, postalCode?: string | null; country?, timezone?: string; maxGuests?, bedrooms?, bathrooms?: number; defaultCheckInTime?, defaultCheckOutTime?: string; wifiName?, wifiPassword?, accessNotes?, cleaningNotes?, emergencyNotes?: string | null; }` — no `pmsProvider`, no `status`.
+- `dto.ts` also exports `UpdatePropertyInput` — same field set as `CreatePropertyInput` but every field optional (including `name`/`internalCode`), plus one extra field: `status?: PropertyStatus`. `status` exists ONLY for the retire path (D9) — `EditPropertyForm` (section 4) must never set it; only the "Retire property" action may, and only as exactly `{ status: "INACTIVE" }`. No `pmsProvider`, no `currentOperationalState` field at all.
+- `HttpPropertiesSource.getProperty(tenantId, id)`, `.createProperty(tenantId, input)`, `.updateProperty(tenantId, id, input)` all return `Promise<PropertyDetailDto>`. `updateProperty` sends `input`'s keys through as-is (including explicit `null`) — it does not diff or filter; the caller (section 4's `EditPropertyForm`, or the retire button) owns that decision.
+- `frontend/features/properties/hooks/query-keys.ts`: `propertiesKeys.detail(tenantId, id)` and `propertiesKeys.listPrefix(tenantId)` (the latter is new, not in the original task text — needed because `propertiesKeys.list(tenantId, filters)` always bakes in `normalizePropertyFilters`'s `{page: 1}` default and is NOT a bare prefix; `listPrefix` is the one to invalidate by, precedent `incidentsKeys.listPrefix`).
+- `frontend/features/properties/hooks/use-property.ts`: `useProperty(id): UseQueryResult<PropertyDetailDto>`.
+- `frontend/features/properties/hooks/use-create-property.ts`: `useCreateProperty(): UseMutationResult<PropertyDetailDto, Error, CreatePropertyInput>`.
+- `frontend/features/properties/hooks/use-update-property.ts`: `useUpdateProperty(): UseMutationResult<PropertyDetailDto, Error, UpdatePropertyMutationInput>` where `UpdatePropertyMutationInput = { id: string; input: UpdatePropertyInput }` — mutate with `{ id, input: { status: "INACTIVE" } }` for retire (D9), or `{ id, input: <diffed fields> }` for a save.
+- Hand-reproduced dashboard invalidation keys used by both mutation hooks' `onSettled` (verbatim, copy these into section 4/5 code rather than re-deriving): `["tenant", tenantId, "dashboard-cards"]` (both hooks) and `["tenant", tenantId, "property-detail", id]` (update only). `features/properties` still does not import `dashboardKeys`.
+- `frontend/features/properties/index.ts` now re-exports `useProperty`, `useCreateProperty`, `useUpdateProperty` (+ `UpdatePropertyMutationInput`), and the types `PropertyDetailDto`/`CreatePropertyInput`/`UpdatePropertyInput` (via `export type {...} from "./data"`), alongside the pre-existing `PropertiesView`.
+- `cd frontend && npm run typecheck && npm test -- properties`: typecheck clean, 149/149 tests passed (12 test files).
