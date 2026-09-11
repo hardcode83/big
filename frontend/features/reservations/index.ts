@@ -4,6 +4,7 @@
 // feature into scope.
 export { ReservationsView } from "./components/list/reservations-view";
 export { ReservationsFilters } from "./components/list/reservations-filters";
+export { CreateReservationForm } from "./components/create/create-reservation-form";
 export { ReservationDetailView } from "./components/detail/reservation-detail-view";
 export {
   useCancelReservation,

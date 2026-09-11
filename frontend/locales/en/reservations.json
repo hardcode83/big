@@ -46,6 +46,7 @@
     "phone": "Phone",
     "preferredLanguage": "Language",
     "openReservation": "Open reservation",
+    "openReservationWithContext": "Open reservation: {{context}}",
     "propertyCode": "Internal code",
     "propertyName": "Property name"
   },
@@ -71,5 +72,28 @@
       "notDelivered": "The link was created, but could not be delivered by email",
       "error": "Could not complete the action. Please try again."
     }
+  },
+  "create": {
+    "title": "Create reservation",
+    "description": "Add a manual reservation for an active property.",
+    "selectProperty": "Select a property",
+    "unknownProperty": "the selected property",
+    "propertyContext": "Timezone: {{timezone}} · Default times: {{checkIn}}–{{checkOut}}",
+    "guestTitle": "Guest details (optional)",
+    "success": "Reservation created successfully.",
+    "successDetail": "Reservation {{id}} created for {{propertyName}} ({{checkInDate}}–{{checkOutDate}}), status: {{status}}.",
+    "submit": "Create reservation",
+    "submitting": "Creating reservation…",
+    "propertiesError": "Properties could not be loaded",
+    "propertiesErrorDescription": "Try again to load active properties.",
+    "propertiesEmpty": "No active properties",
+    "propertiesEmptyDescription": "Activate a property before creating a reservation.",
+    "languages": { "es": "Spanish", "en": "English" },
+    "channels": { "DIRECT": "Direct", "MANUAL": "Manual" },
+    "fields": {
+      "property": "Property", "checkInDate": "Check-in date", "checkOutDate": "Check-out date", "checkInTime": "Check-in time", "checkOutTime": "Check-out time", "adults": "Adults", "children": "Children", "channel": "Channel", "grossAmount": "Gross amount", "netAmount": "Net amount", "otaCommission": "OTA commission", "currency": "Currency", "internalNotes": "Internal notes", "specialRequests": "Special requests", "fullName": "Full name", "email": "Email", "phone": "Phone", "preferredLanguage": "Preferred language"
+    },
+    "errors": { "required": "Complete the required fields.", "requiredProperty": "Select a property.", "requiredDate": "Enter a date.", "requiredAdults": "Enter the number of adults.", "requiredChildren": "Enter the number of children.", "correctFields": "Correct the marked fields.", "dateOrder": "Check-out must be on or after check-in.", "invalidAdults": "Enter a whole number of adults that is one or greater.", "invalidGuests": "Enter a whole number of guests that is zero or greater.", "invalidAmount": "Enter a valid amount that is zero or greater.", "negativeGuests": "Adults and children cannot be negative.", "guestName": "Enter a name when adding guest contact details." }
   }
+  ,"mutation": { "errors": { "session": "Your session has expired.", "forbidden": "You do not have permission to create this reservation.", "notFound": "The property does not exist.", "conflict": "The reservation conflicts with the current data.", "validation": "The reservation data is not valid.", "server": "The reservation could not be created. Try again.", "network": "Could not connect to create the reservation." } }
 }

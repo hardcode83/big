@@ -46,6 +46,7 @@
     "phone": "Teléfono",
     "preferredLanguage": "Idioma",
     "openReservation": "Abrir reserva",
+    "openReservationWithContext": "Abrir reserva: {{context}}",
     "propertyCode": "Código interno",
     "propertyName": "Nombre de la propiedad"
   },
@@ -71,5 +72,28 @@
       "notDelivered": "El enlace se generó, pero no se pudo entregar por correo",
       "error": "No se pudo completar la acción. Inténtalo de nuevo."
     }
+  },
+  "create": {
+    "title": "Crear reserva",
+    "description": "Añade una reserva manual para una propiedad activa.",
+    "selectProperty": "Selecciona una propiedad",
+    "unknownProperty": "la propiedad seleccionada",
+    "propertyContext": "Zona horaria: {{timezone}} · Horas por defecto: {{checkIn}}–{{checkOut}}",
+    "guestTitle": "Datos del huésped (opcional)",
+    "success": "Reserva creada correctamente.",
+    "successDetail": "Reserva {{id}} creada para {{propertyName}} ({{checkInDate}}–{{checkOutDate}}), estado: {{status}}.",
+    "submit": "Crear reserva",
+    "submitting": "Creando reserva…",
+    "propertiesError": "No se pudieron cargar las propiedades",
+    "propertiesErrorDescription": "Inténtalo de nuevo para cargar las propiedades activas.",
+    "propertiesEmpty": "No hay propiedades activas",
+    "propertiesEmptyDescription": "Activa una propiedad antes de crear una reserva.",
+    "languages": { "es": "Español", "en": "Inglés" },
+    "channels": { "DIRECT": "Directa", "MANUAL": "Manual" },
+    "fields": {
+      "property": "Propiedad", "checkInDate": "Fecha de entrada", "checkOutDate": "Fecha de salida", "checkInTime": "Hora de entrada", "checkOutTime": "Hora de salida", "adults": "Adultos", "children": "Niños", "channel": "Canal", "grossAmount": "Importe bruto", "netAmount": "Importe neto", "otaCommission": "Comisión OTA", "currency": "Moneda", "internalNotes": "Notas internas", "specialRequests": "Peticiones especiales", "fullName": "Nombre completo", "email": "Correo electrónico", "phone": "Teléfono", "preferredLanguage": "Idioma preferido"
+    },
+    "errors": { "required": "Completa los campos obligatorios.", "requiredProperty": "Selecciona una propiedad.", "requiredDate": "Indica una fecha.", "requiredAdults": "Indica el número de adultos.", "requiredChildren": "Indica el número de niños.", "correctFields": "Corrige los campos marcados.", "dateOrder": "La fecha de salida debe ser posterior o igual a la entrada.", "invalidAdults": "Indica un número entero de adultos igual o mayor que uno.", "invalidGuests": "Indica un número entero de huéspedes igual o mayor que cero.", "invalidAmount": "Indica un importe válido igual o mayor que cero.", "negativeGuests": "Los adultos y niños no pueden ser negativos.", "guestName": "Indica el nombre si añades datos de contacto del huésped." }
   }
+  ,"mutation": { "errors": { "session": "Tu sesión ha caducado.", "forbidden": "No tienes permiso para crear esta reserva.", "notFound": "La propiedad no existe.", "conflict": "La reserva entra en conflicto con los datos actuales.", "validation": "Los datos de la reserva no son válidos.", "server": "No se pudo crear la reserva. Inténtalo de nuevo.", "network": "No se pudo conectar para crear la reserva." } }
 }

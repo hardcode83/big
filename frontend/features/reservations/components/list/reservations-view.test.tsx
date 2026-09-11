@@ -1,15 +1,22 @@
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@/test/render";
+import { useState } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { render, screen } from "@/test/render";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import esReservations from "@/locales/es/reservations.json";
 import esStates from "@/locales/es/states.json";
 import { ApiError } from "@/lib/api";
 
 const useReservationsMock = vi.hoisted(() => vi.fn());
+const useHasPermissionMock = vi.hoisted(() => vi.fn());
+const useActivePropertiesMock = vi.hoisted(() => vi.fn());
+const useCreateReservationMock = vi.hoisted(() => vi.fn());
 vi.mock("../../hooks/use-reservations", () => ({
   useReservations: useReservationsMock,
+  useCreateReservation: useCreateReservationMock,
 }));
+vi.mock("@/lib/auth", () => ({ useHasPermission: useHasPermissionMock }));
+vi.mock("@/features/properties", () => ({ useActiveProperties: useActivePropertiesMock }));
 
 import { ReservationsView } from "./reservations-view";
 
@@ -20,6 +27,25 @@ function renderView() {
     </I18nProvider>,
   );
 }
+
+beforeEach(() => {
+  useHasPermissionMock.mockReturnValue(false);
+  useActivePropertiesMock.mockReturnValue({
+    isPending: false,
+    isError: false,
+    data: {
+      data: [{
+        id: "property-1",
+        name: "Casa Ada",
+        internalCode: "CASA-001",
+        timezone: "Europe/Madrid",
+        defaultCheckInTime: "15:00",
+        defaultCheckOutTime: "11:00",
+      }],
+    },
+  });
+  useCreateReservationMock.mockReturnValue({ isPending: false, mutate: vi.fn() });
+});
 
 const SAMPLE = {
   data: [
@@ -91,6 +117,63 @@ describe("ReservationsView (R2, R3.5, R4, R5.2, R5.4)", () => {
     expect(
       screen.getByRole("columnheader", { name: esReservations.fields.amount }),
     ).toBeInTheDocument();
+  });
+
+  it("looks up the channel label from the create locale shape", () => {
+    useReservationsMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: SAMPLE,
+      refetch: vi.fn(),
+    });
+    renderView();
+    expect(screen.getByText("Manual")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("channels.MANUAL");
+  });
+
+  it("lets a manager submit the create form, refreshes the list, and shows the created summary", async () => {
+    useHasPermissionMock.mockReturnValue(true);
+    let currentList = { data: [], page: 1, perPage: 20, total: 0, totalPages: 0 };
+    let setVersion: ((value: (current: number) => number) => void) | undefined;
+    const refetch = vi.fn(async () => {
+      currentList = {
+        data: [{
+          ...SAMPLE.data[0],
+          guestFullName: "Ada Lovelace",
+          propertyName: "Casa Ada",
+          propertyInternalCode: "CASA-001",
+        }],
+        page: 1,
+        perPage: 20,
+        total: 1,
+        totalPages: 1,
+      };
+      setVersion?.((current) => current + 1);
+    });
+    useReservationsMock.mockImplementation(() => {
+      const [, update] = useState(0);
+      setVersion = update;
+      return { isPending: false, isError: false, data: currentList, refetch };
+    });
+    const mutate = vi.fn((_payload, options) => options.onSuccess({
+      id: "reservation-created",
+      propertyName: "Casa Ada",
+      checkInDate: "2026-09-12",
+      checkOutDate: "2026-09-14",
+      status: "PENDING",
+    }));
+    useCreateReservationMock.mockReturnValue({ isPending: false, mutate });
+
+    renderView();
+    fireEvent.change(screen.getByLabelText("Propiedad"), { target: { value: "property-1" } });
+    fireEvent.change(screen.getByLabelText(/Fecha de entrada/), { target: { value: "2026-09-12" } });
+    fireEvent.change(screen.getByLabelText(/Fecha de salida/), { target: { value: "2026-09-14" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Crear reserva" }).closest("form")!);
+
+    await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("status")).toHaveTextContent("reservation-created");
+    expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
+    expect(screen.getByText("CASA-001")).toBeInTheDocument();
   });
 
   it("renders the empty state copy when the data array is empty AND keeps the page header (F13)", () => {
@@ -289,7 +372,7 @@ describe("ReservationsView (R2, R3.5, R4, R5.2, R5.4)", () => {
     });
     renderView();
     const link = screen.getByRole("link", {
-      name: esReservations.fields.openReservation,
+      name: `${esReservations.fields.openReservation}: 2026-08-12–2026-08-15`,
     });
     expect(link).toBeInTheDocument();
     expect(link).toHaveAttribute("href", "/reservations/reservation-1");

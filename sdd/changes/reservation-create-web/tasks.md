@@ -12,12 +12,12 @@
 - [x] 2.2 Add create/update/cancel mutation hooks in `frontend/features/reservations/hooks/use-reservations.ts` with `retry: false`, tenant-scoped invalidation of list/detail keys, and awaited invalidation tests [R3, R4]
 - [x] 2.3 Add `frontend/features/reservations/lib/mutation-error-mapping.ts` and tests covering `ApiError` 401/403/404/409/422, 5xx and network errors without exposing server PII [R1, R3, R4]
 
-## 3. Manual creation flow <!-- hard -->
+## 3. Manual creation flow <!-- hard --> <!-- panel: PASS 2026-09-11 receipt:3288399d -->
 
-- [ ] 3.1 Add the create form component under `frontend/features/reservations/components/create/`, with required property/date fields, optional times/amounts/notes, adults/children and `DIRECT`/`MANUAL` channel only [R1, R2, R5]
-- [ ] 3.2 Load all active properties through the existing properties source/hooks, expose loading/error/empty states and show selected property's timezone/default times [R1, R2, R4]
-- [ ] 3.3 Build the create payload with an optional `guest` block (`full_name`, email, phone, preferred language), omit blank optional fields and never expose or send `guest_id`; keep form values after mutation errors [R1, R2, R4]
-- [ ] 3.4 Wire the form into `frontend/features/reservations/components/list/reservations-view.tsx`, guard it with `MANAGE_RESERVATIONS`, refresh the list after success, and test no duplicate submits, localized success/errors, `preventDefault`, no GET action and no URL/storage PII [R1, R4, R5]
+- [x] 3.1 Add the create form component under `frontend/features/reservations/components/create/`, with required property/date fields, optional times/amounts/notes, adults/children and `DIRECT`/`MANUAL` channel only [R1, R2, R5]
+- [x] 3.2 Load all active properties through the existing properties source/hooks, expose loading/error/empty states and show selected property's timezone/default times [R1, R2, R4]
+- [x] 3.3 Build the create payload with an optional `guest` block (`full_name`, email, phone, preferred language), omit blank optional fields and never expose or send `guest_id`; keep form values after mutation errors [R1, R2, R4]
+- [x] 3.4 Wire the form into `frontend/features/reservations/components/list/reservations-view.tsx`, guard it with `MANAGE_RESERVATIONS`, refresh the list after success, and test no duplicate submits, localized success/errors, `preventDefault`, no GET action and no URL/storage PII [R1, R4, R5]
 
 ## 4. Detail edit and cancellation flow <!-- hard -->
 
@@ -47,3 +47,7 @@
 - `npm install --ignore-scripts` was required locally because locked Vitest browser dependency was absent from node_modules.
 - Section 2 uses `useCreateReservation`, `useUpdateReservation` and `useCancelReservation`; all settle through awaited tenant-scoped list/detail invalidation, without cache writes or retries.
 - `reservationMutationErrorKey` returns only localized keys; 401 maps to session handling and server/network error payloads are discarded.
+- Section 3 uses `CreateReservationForm` with controlled local state; `useActiveProperties` follows all ACTIVE pages at 100 rows per page and aggregates them for the selector.
+- Section 3 payload construction sends only civil dates, permitted manual channels, guest contact fields and nonblank optionals; successful mutation resets the form and errors leave values untouched.
+- Section 3 list integration renders the form only for `MANAGE_RESERVATIONS` and explicitly refetches the current list after the mutation hook settles successfully.
+- Section 3 focused verification: `npm test -- features/reservations` · 11 files / 106 tests passed; `npm run lint` passed; `git diff --check` passed. `npm test -- --run frontend/features/reservations` is incompatible with the package root and matches no files. `npx tsc --noEmit` remains blocked by pre-existing `.next` validator references to missing `app/(workspace)/page.js`.

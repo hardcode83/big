@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query";
 
 import { retryPolicy } from "@/lib/api/retry-policy";
 import { useAuth } from "@/lib/auth";
@@ -42,4 +42,39 @@ export function useProperties(
     queryFn: () => getPropertiesDataSource().listProperties(tenantId, filters),
     retry: retryPolicy,
   });
+}
+
+/** Fetch every active-property page for selectors that must not silently cap options. */
+export function useActiveProperties(): UseQueryResult<PropertyList> {
+  const tenantId = useTenantId();
+  const firstPage = useProperties({ status: "ACTIVE", page: 1, perPage: 100 });
+  const pageCount = firstPage.data?.totalPages ?? 0;
+  const rest = useQueries({
+    queries: Array.from({ length: Math.max(0, pageCount - 1) }, (_, index) => {
+      const page = index + 2;
+      return {
+        queryKey: propertiesKeys.list(tenantId, { status: "ACTIVE", page, perPage: 100 }),
+        queryFn: () => getPropertiesDataSource().listProperties(tenantId, { status: "ACTIVE", page, perPage: 100 }),
+        retry: retryPolicy,
+      };
+    }),
+  });
+  const pages = [firstPage.data, ...rest.map((query) => query.data)].filter(
+    (page): page is PropertyList => page !== undefined,
+  );
+  const data = pages.length > 0
+    ? { ...pages[0], data: pages.flatMap((page) => page.data) }
+    : undefined;
+  const error = firstPage.error ?? rest.find((query) => query.error)?.error ?? null;
+  return {
+    ...firstPage,
+    data,
+    error,
+    isError: firstPage.isError || rest.some((query) => query.isError),
+    isPending: firstPage.isPending || rest.some((query) => query.isPending),
+    refetch: async () => {
+      await Promise.all([firstPage.refetch(), ...rest.map((query) => query.refetch())]);
+      return firstPage;
+    },
+  } as UseQueryResult<PropertyList>;
 }

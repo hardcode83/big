@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { TONE_BADGE_CLASS } from "@/lib/ui/status-tone";
 import { cn } from "@/lib/utils";
+import { useHasPermission } from "@/lib/auth";
 
 import { useReservations } from "../../hooks/use-reservations";
 import { mapReservationsError } from "../../lib/error-mapping";
@@ -19,6 +20,7 @@ import type {
   ReservationSummaryDto,
 } from "../../data";
 import { ReservationsFilters } from "./reservations-filters";
+import { CreateReservationForm } from "../create/create-reservation-form";
 
 /**
  * Client view for `/reservations` (proposal R2, design D5). It owns the
@@ -45,6 +47,7 @@ export function ReservationsView() {
   const { t: tStates } = useTranslation("states");
   const [filters, setFilters] = useState<ReservationFilters>({});
   const query = useReservations(filters);
+  const canManage = useHasPermission("MANAGE_RESERVATIONS");
   const state = mapReservationsError<ReservationList>(query);
 
   if (state.kind === "loading") {
@@ -91,6 +94,7 @@ export function ReservationsView() {
         {tNav("routes.reservations.title")}
       </h1>
       <ReservationsFilters value={filters} onChange={setFilters} />
+      {canManage ? <CreateReservationForm onCreated={() => void query.refetch()} /> : null}
       {page.data.length === 0 ? (
         // Empty state is rendered under the same page header so the screen
         // never loses its title (was Finding F13 of the review).
@@ -158,12 +162,17 @@ export function ReservationsView() {
 function ReservationRow({ row }: { row: ReservationSummaryDto }) {
   const { t } = useTranslation("reservations");
   const href = `/reservations/${row.id}`;
+  const rowContext = [
+    row.guestFullName,
+    row.propertyInternalCode,
+    `${row.checkInDate}–${row.checkOutDate}`,
+  ].filter(Boolean).join(", ");
   return (
     <tr className="relative border-b border-border last:border-b-0 hover:bg-accent/50 transition-colors group cursor-pointer">
       <td className="py-3 px-4">
         <Link
           href={href}
-          aria-label={t("fields.openReservation")}
+          aria-label={t("fields.openReservationWithContext", { context: rowContext || row.id })}
           className="text-primary underline after:absolute after:inset-0 after:content-['']"
         >
           {row.guestFullName ?? "—"}
@@ -183,7 +192,7 @@ function ReservationRow({ row }: { row: ReservationSummaryDto }) {
           {t(`status.${row.status}`)}
         </Badge>
       </td>
-      <td className="py-3 px-4 font-sans text-body-base">{row.channel}</td>
+      <td className="py-3 px-4 font-sans text-body-base">{t(`create.channels.${row.channel}`, { defaultValue: row.channel })}</td>
       <td className="py-3 px-4">
         <div className="flex items-center justify-between gap-2">
           <span>
