@@ -40,6 +40,12 @@ import type { components } from "@/lib/api/generated/openapi";
  * `GuestPortalLinkCard` on `/reservations/[id]`: the same two roles the
  * backend policy already grants it (`guest-portal-api` D14 — `TENANT_OWNER`
  * and `PROPERTY_MANAGER`, nobody else).
+ *
+ * `properties-create-web` D12 adds `MANAGE_PROPERTIES`, `PROPERTY_MANAGER`-only:
+ * mirrors `policy.py`'s `_PROPERTY_MANAGE` (`policy.py:214`, granted only inside
+ * `PROPERTY_MANAGER`'s bundle, `policy.py:398`). `TENANT_OWNER` keeps
+ * `_PROPERTY_READ` only (read-only) and is correctly absent from this entry,
+ * same split as `MANAGE_CONVERSATIONS` and `MANAGE_INCIDENTS`.
  */
 type UserRole = components["schemas"]["UserRole"];
 
@@ -50,7 +56,8 @@ export type Permission =
   | "MANAGE_CONVERSATIONS"
   | "MANAGE_INCIDENTS"
   | "RESPOND_OWNER_APPROVALS"
-  | "MANAGE_GUEST_ACCESS_TOKENS";
+  | "MANAGE_GUEST_ACCESS_TOKENS"
+  | "MANAGE_PROPERTIES";
 
 export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [],
@@ -76,6 +83,7 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "MANAGE_CONVERSATIONS",
     "MANAGE_INCIDENTS",
     "MANAGE_GUEST_ACCESS_TOKENS",
+    "MANAGE_PROPERTIES",
   ],
   CLEANER: [],
   TECHNICIAN: [],

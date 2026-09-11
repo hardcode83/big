@@ -1,26 +1,26 @@
 # Tasks: properties-create-web
 
-## 1. Permission mirror and shared field-level libraries
+## 1. Permission mirror and shared field-level libraries <!-- panel: PASS 2026-09-11 receipt:5fd35cc7 -->
 
-- [ ] 1.1 Add `"MANAGE_PROPERTIES"` to the `Permission` union in
+- [x] 1.1 Add `"MANAGE_PROPERTIES"` to the `Permission` union in
       `frontend/lib/auth/permissions.ts` and to `ROLE_UI_PERMISSIONS.PROPERTY_MANAGER`
       only (not `TENANT_OWNER`), mirroring backend `policy.py`'s `_PROPERTY_MANAGE`
       (design D12). Extend `frontend/lib/auth/permissions.test.ts` (or its
       equivalent) to assert `useHasPermission("MANAGE_PROPERTIES")` is `true` for
       `PROPERTY_MANAGER` and `false` for `TENANT_OWNER`/`CLEANER`/`TECHNICIAN`. [R1.1, R2.1]
-- [ ] 1.2 Create `frontend/features/properties/lib/field-limits.ts`: export
+- [x] 1.2 Create `frontend/features/properties/lib/field-limits.ts`: export
       `MAX_NAME`, `MAX_INTERNAL_CODE`, `MAX_PMS_EXTERNAL_ID`, `MAX_ADDRESS`,
       `MAX_CITY`, `MAX_PROVINCE`, `MAX_POSTAL_CODE`, `MAX_WIFI_NAME`, `MAX_NOTES`,
       `MAX_WIFI_PASSWORD`, `MAX_GUESTS`, `MAX_ROOMS`, each matching
       `backend/app/properties/api/schemas.py:41-52` with a comment citing the line
       it mirrors (design D5). [R1.3]
-- [ ] 1.3 Create `frontend/features/properties/lib/field-validation.ts`:
+- [x] 1.3 Create `frontend/features/properties/lib/field-validation.ts`:
       `validatePropertyFields(values)` returning `Record<string, string>` —
       required-field emptiness (`name`, `internal_code`), length bounds from 1.2,
       `country` exactly 2 uppercase letters, `max_guests` 1-50, `bedrooms`/
       `bathrooms` 0-50. Unit test every bound (one just-inside, one just-outside
       case each). [R1.3]
-- [ ] 1.4 Create `frontend/features/properties/lib/field-errors.ts`:
+- [x] 1.4 Create `frontend/features/properties/lib/field-errors.ts`:
       `mapPropertyFieldErrors(error, fallbackField?)` — `422` reads
       `error.details.errors` by `loc` (same shape as
       `features/platform/lib/field-errors.ts`); `409` attributes to
@@ -29,7 +29,7 @@
       `backend/app/properties/infrastructure/repositories.py:551-558` (design D6).
       Unit tests pin both exact backend message strings so a backend wording
       change fails this test loudly. [R1.5, R2.7]
-- [ ] 1.5 Run `cd frontend && npm run typecheck && npm test -- field-limits
+- [x] 1.5 Run `cd frontend && npm run typecheck && npm test -- field-limits
       field-validation field-errors permissions` to confirm section 1 is
       self-consistent before section 2 depends on it.
 
@@ -190,3 +190,13 @@
 ## Implementation Notes
 
 <!-- Append-only, written by the implementer of each section for the next one. -->
+
+### Section 1 (permission mirror and field-level libraries)
+
+- `frontend/lib/auth/permissions.ts`: `Permission` union now includes `"MANAGE_PROPERTIES"`; `ROLE_UI_PERMISSIONS.PROPERTY_MANAGER` includes it, `TENANT_OWNER` does not.
+- `frontend/features/properties/lib/field-limits.ts`: exports `MAX_NAME`, `MAX_INTERNAL_CODE`, `MAX_PMS_EXTERNAL_ID`, `MAX_ADDRESS`, `MAX_CITY`, `MAX_PROVINCE`, `MAX_POSTAL_CODE`, `MAX_WIFI_NAME`, `MAX_NOTES`, `MAX_WIFI_PASSWORD`, `MAX_GUESTS`, `MAX_ROOMS` (all `number` constants).
+- `frontend/features/properties/lib/field-validation.ts`: exports `interface PropertyFieldValues { name: string; internal_code: string; country: string; max_guests: number; bedrooms: number; bathrooms: number; wifi_password?: string | null; access_notes?: string | null; cleaning_notes?: string | null; emergency_notes?: string | null; }` (snake_case, mirrors backend request fields directly — no dependency on `data/dto.ts`) and `function validatePropertyFields(values: PropertyFieldValues): Record<string, string>`.
+- `validatePropertyFields` return values are error **keys**, not final copy: `"required"`, `"tooLong"`, `"invalidCountry"`, `"outOfRange"` — Section 3/4 must translate these via `properties.json` locale keys, not render them directly.
+- `validatePropertyFields` only checks the fields R1.3 names (name/internal_code required+length, country format, max_guests/bedrooms/bathrooms range, wifi_password/three notes length). `pms_external_id`, address fields, `city`, `province`, `postal_code`, `wifi_name` are NOT length-checked here — Section 3/4 must rely on `maxLength` on the `<input>`/`<textarea>` itself for those (design D5).
+- `frontend/features/properties/lib/field-errors.ts`: exports `function mapPropertyFieldErrors(error: unknown, fallbackField?: string): Record<string, string>`. `422` reads `error.details.errors` by `loc` (last segment as key, `msg` as value). `409` matches the exact substrings `"internal_code"` / `"pms_external_id"` in `error.message` and attributes to that field name; if neither substring matches, falls back to `{ [fallbackField]: error.message }` when `fallbackField` is given, else `{}`.
+- `frontend/features/properties/lib/error-mapping.ts` was NOT touched — `field-errors.ts` is a separate sibling file (design D6).
