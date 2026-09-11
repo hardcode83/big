@@ -1,0 +1,192 @@
+# Tasks: properties-create-web
+
+## 1. Permission mirror and shared field-level libraries
+
+- [ ] 1.1 Add `"MANAGE_PROPERTIES"` to the `Permission` union in
+      `frontend/lib/auth/permissions.ts` and to `ROLE_UI_PERMISSIONS.PROPERTY_MANAGER`
+      only (not `TENANT_OWNER`), mirroring backend `policy.py`'s `_PROPERTY_MANAGE`
+      (design D12). Extend `frontend/lib/auth/permissions.test.ts` (or its
+      equivalent) to assert `useHasPermission("MANAGE_PROPERTIES")` is `true` for
+      `PROPERTY_MANAGER` and `false` for `TENANT_OWNER`/`CLEANER`/`TECHNICIAN`. [R1.1, R2.1]
+- [ ] 1.2 Create `frontend/features/properties/lib/field-limits.ts`: export
+      `MAX_NAME`, `MAX_INTERNAL_CODE`, `MAX_PMS_EXTERNAL_ID`, `MAX_ADDRESS`,
+      `MAX_CITY`, `MAX_PROVINCE`, `MAX_POSTAL_CODE`, `MAX_WIFI_NAME`, `MAX_NOTES`,
+      `MAX_WIFI_PASSWORD`, `MAX_GUESTS`, `MAX_ROOMS`, each matching
+      `backend/app/properties/api/schemas.py:41-52` with a comment citing the line
+      it mirrors (design D5). [R1.3]
+- [ ] 1.3 Create `frontend/features/properties/lib/field-validation.ts`:
+      `validatePropertyFields(values)` returning `Record<string, string>` —
+      required-field emptiness (`name`, `internal_code`), length bounds from 1.2,
+      `country` exactly 2 uppercase letters, `max_guests` 1-50, `bedrooms`/
+      `bathrooms` 0-50. Unit test every bound (one just-inside, one just-outside
+      case each). [R1.3]
+- [ ] 1.4 Create `frontend/features/properties/lib/field-errors.ts`:
+      `mapPropertyFieldErrors(error, fallbackField?)` — `422` reads
+      `error.details.errors` by `loc` (same shape as
+      `features/platform/lib/field-errors.ts`); `409` attributes to
+      `internal_code` or `pms_external_id` by matching the exact substrings
+      `"internal_code"` / `"pms_external_id"` in `error.message`, per
+      `backend/app/properties/infrastructure/repositories.py:551-558` (design D6).
+      Unit tests pin both exact backend message strings so a backend wording
+      change fails this test loudly. [R1.5, R2.7]
+- [ ] 1.5 Run `cd frontend && npm run typecheck && npm test -- field-limits
+      field-validation field-errors permissions` to confirm section 1 is
+      self-consistent before section 2 depends on it.
+
+## 2. Data layer — full-detail fetch and mutations
+
+- [ ] 2.1 Add `PropertyDetailDto` to `frontend/features/properties/data/dto.ts`
+      (extends `PropertySummaryDto` with the fields the list omits: notes are
+      already absent from `PropertySummaryDto`, so add `accessNotes`,
+      `cleaningNotes`, `emergencyNotes`), plus `CreatePropertyInput` and
+      `UpdatePropertyInput` camelCase command shapes (design D7, D8). Neither
+      input type carries `pmsProvider` (create-only, not offered by this UI —
+      R1.2) or `status`/`currentOperationalState` outside the dedicated retire
+      path (R2.3, R2.6). [R1.2, R2.2, R2.3]
+- [ ] 2.2 Add to `HttpPropertiesSource`
+      (`frontend/features/properties/data/http/http-properties-source.ts`):
+      `getProperty(tenantId, id)` → `GET /api/v1/properties/{id}`, mapping the
+      full `PropertyResponse` to `PropertyDetailDto`; `createProperty(tenantId,
+      input)` → `POST /api/v1/properties`; `updateProperty(tenantId, id, input)`
+      → `PATCH /api/v1/properties/{id}`, sending only the keys present on
+      `input` (the caller is responsible for the diffing, D8 — this method does
+      not filter). Unit tests for all three: request shape, response mapping,
+      that `wifi_password` is never read from any response. [R1.2, R1.4, R2.2, R2.5]
+- [ ] 2.3 Add `propertiesKeys.detail(tenantId, id)` to
+      `frontend/features/properties/hooks/query-keys.ts`, same
+      `tenantScopedKey` convention as `propertiesKeys.list`.
+- [ ] 2.4 Create `frontend/features/properties/hooks/use-property.ts`:
+      `useProperty(id)`, mirrors `use-properties.ts` (retry policy, tenant guard).
+      [R2.2]
+- [ ] 2.5 Create `frontend/features/properties/hooks/use-create-property.ts`:
+      `useCreateProperty()` — `retry: false`, no optimistic write; `onSettled`
+      invalidates `propertiesKeys.list(tenantId)` (prefix) and the hand-reproduced
+      `["tenant", tenantId, "dashboard-cards"]` prefix, same pattern as
+      `useResolveIncident` (design D10). [R1.4]
+- [ ] 2.6 Create `frontend/features/properties/hooks/use-update-property.ts`:
+      `useUpdateProperty()` — same skeleton; `onSettled` invalidates
+      `propertiesKeys.list(tenantId)`, `propertiesKeys.detail(tenantId, id)`, and
+      the hand-reproduced `["tenant", tenantId, "dashboard-cards"]` and
+      `["tenant", tenantId, "property-detail", id]` prefixes (design D10). Test
+      that both hooks fire exactly the documented invalidations (mock
+      `queryClient.invalidateQueries`). [R2.2]
+- [ ] 2.7 Export `PropertyDetailDto`, `CreatePropertyInput`, `UpdatePropertyInput`
+      and the new hooks from `frontend/features/properties/index.ts` so
+      `features/dashboard` can import them (design D3's cross-feature import,
+      mirroring how `dashboard` already imports from `@/features/incidents`).
+- [ ] 2.8 Run `cd frontend && npm run typecheck && npm test -- properties` to
+      confirm the data layer compiles and its own tests pass before any UI
+      depends on it.
+
+## 3. Create flow
+
+- [ ] 3.1 Add locale keys to `frontend/locales/{es,en}/properties.json`: field
+      labels, placeholders, the `access_notes` inline guidance (design D14),
+      validation messages, `newProperty` button label, create success/generic
+      error copy. [R1, R4.1]
+- [ ] 3.2 Create `frontend/features/properties/components/form/property-fieldset.tsx`:
+      the shared ~15-field presentational list (name, internal_code,
+      pms_external_id, address block, country, timezone, capacity trio,
+      check-in/out times, wifi name/password, three notes), receiving `values`/
+      `onChange`/`fieldErrors` as props, `maxLength` wired from
+      `field-limits.ts`, one programmatically associated label per field,
+      required fields marked. Never renders `pms_provider` or `status`. [R1.2, R3.1, R3.2, R3.3, R4.2]
+- [ ] 3.3 Create
+      `frontend/features/properties/components/form/create-property-form.tsx`:
+      controlled state per field (design D1), `validatePropertyFields` on
+      submit, `useCreateProperty`, submit disabled + pending copy while in
+      flight (R1.6), `mapPropertyFieldErrors` on error, `router.push` to
+      `/properties/{id}` on `201` (design D11). Component test covering: happy
+      path navigation, client-side validation blocking submit, `409` on each of
+      `internal_code`/`pms_external_id` attributing to the right field,
+      double-submit prevention. [R1.1, R1.3, R1.4, R1.5, R1.6]
+- [ ] 3.4 Wire `PropertiesView`
+      (`frontend/features/properties/components/list/properties-view.tsx`):
+      "New property" button gated by `useHasPermission("MANAGE_PROPERTIES")`,
+      opening a `Sheet` hosting `CreatePropertyForm` (mirrors `PlatformConsole`,
+      design D2). Component test: button hidden without permission, `Sheet`
+      opens/closes. [R1.1]
+
+## 4. Edit flow <!-- hard -->
+
+- [ ] 4.1 Add locale keys to `frontend/locales/{es,en}/properties.json`: the
+      "clear stored password" checkbox copy (shared fieldset context), and to
+      `frontend/locales/{es,en}/dashboard.json`: edit button label, save/cancel,
+      edit success/generic error copy. [R2, R4.1]
+- [ ] 4.2 Create
+      `frontend/features/properties/components/form/edit-property-form.tsx`:
+      `useProperty(id)` to fetch and pre-fill (design D7); keeps the initial
+      snapshot alongside live values; on submit, builds the `PATCH` body with
+      only changed fields (design D8) — a nullable field cleared from
+      non-empty sends `null`, an already-empty nullable field left alone is
+      omitted, a non-nullable field can never produce `null` (validation blocks
+      it first). `wifi_password` starts blank (never pre-filled, R2.5), a typed
+      value is sent as a change, and a separate "clear stored password"
+      checkbox is the only way to send `wifi_password: null` — unchecked and
+      blank omits the field entirely. Does not render `pms_provider` or
+      `current_operational_state`/`status` (R2.3). Submit disabled + pending
+      copy while in flight (R2.8), `mapPropertyFieldErrors` on error (R2.7).
+      [R2.1, R2.2, R2.3, R2.4, R2.5, R2.7, R2.8]
+- [ ] 4.3 Component tests for 4.2: pre-fill from fetched data; saving with no
+      changes sends an empty/no-op body; clearing a nullable text field sends
+      `null` for exactly that field and omits untouched ones; typing a wifi
+      password sends it; checking "clear password" with the field left blank
+      sends `wifi_password: null`; leaving both untouched omits
+      `wifi_password`; `409` on either conflicting field attributes correctly;
+      double-submit prevention. [R2.2, R2.4, R2.5, R2.7, R2.8]
+- [ ] 4.4 Wire `PropertyDetailView`
+      (`frontend/features/dashboard/components/detail/property-detail-view.tsx`):
+      "Edit" button gated by `useHasPermission("MANAGE_PROPERTIES")`, opening a
+      `Sheet` hosting `EditPropertyForm` (imported from `@/features/properties`,
+      design D3/D13). Component test: button hidden without permission, `Sheet`
+      opens/closes, edit-form copy reads from the right namespaces. [R2.1]
+
+## 5. Retire flow
+
+- [ ] 5.1 Add locale keys to `frontend/locales/{es,en}/dashboard.json`: retire
+      button label, `AlertDialog` confirmation title/description/confirm/cancel
+      copy. [R2.6, R4.1]
+- [ ] 5.2 Add a "Retire property" button to `PropertyDetailView`, gated by
+      `useHasPermission("MANAGE_PROPERTIES")` AND the property's current
+      `status !== "INACTIVE"` (hidden once already retired), opening an
+      `AlertDialog` (design D9). On confirm, calls `useUpdateProperty` with
+      exactly `{ status: "INACTIVE" }` — never merged with any pending edit-form
+      changes. [R2.6]
+- [ ] 5.3 Component test: button hidden without permission and when already
+      `INACTIVE`; confirming calls the mutation with exactly that body and
+      nothing else; cancelling the dialog makes no request. [R2.6]
+
+## 6. Accessibility and responsive verification <!-- hard -->
+
+- [ ] 6.1 For both `CreatePropertyForm` and `EditPropertyForm`: verify (with
+      Testing Library, `jest-axe`/existing a11y test convention if present in
+      the tree, otherwise explicit assertions) that every field has a
+      programmatic label, required fields are marked, validation errors are
+      associated with their field, focus order follows visual order, and no
+      `:focus-visible` is suppressed. [R4.2, R4.3]
+- [ ] 6.2 Verify keyboard-only operability of both forms and the retire
+      `AlertDialog` (tab order reaches every control, Enter/Space activate
+      buttons, Escape closes the `Sheet`/`AlertDialog`). [R4.3]
+- [ ] 6.3 Verify both `Sheet`s and the fieldset render without overflow or
+      clipping at this project's minimum supported width (mobile-first,
+      `steering/frontend.md`). [R4.4]
+
+## 7. Verification
+
+- [ ] 7.1 Full frontend test suite passes: `cd frontend && npm test`
+- [ ] 7.2 Lint and typecheck pass: `cd frontend && npm run lint && npm run typecheck`
+- [ ] 7.3 Backend suite unaffected (no backend files touched by this change):
+      `docker compose exec backend uv run pytest` — confirms a clean baseline,
+      not a new requirement.
+- [ ] 7.4 Manual end-to-end pass with the stack up (`make up`): as a
+      `PROPERTY_MANAGER`, create a property with all fields including a wifi
+      password and the three notes, confirm redirect to its detail page and
+      the new values there; edit it — clear one nullable field, change the wifi
+      password, verify the "clear password" checkbox path separately; retire
+      it and confirm the button disappears afterward; repeat the visibility
+      checks as `TENANT_OWNER` (no create/edit/retire affordance visible).
+      <!-- manual -->
+
+## Implementation Notes
+
+<!-- Append-only, written by the implementer of each section for the next one. -->
