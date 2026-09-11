@@ -36,7 +36,7 @@
 - [x] 6.2 Run the full frontend suite: `cd frontend && npm test` [R1, R2, R3, R4, R5]
 - [x] 6.3 Run frontend lint: `cd frontend && npm run lint` [R4, R5]
 - [x] 6.4 Run the API contract guard without changing generated contract files: `cd frontend && npm run api:check` [R5]
-- [ ] 6.5 Perform the browser flow for create, edit and cancel with manager and owner accounts, including ES/EN and a mutation error path <!-- manual --> [R1, R2, R3, R4, R5]
+- [x] 6.5 Perform the browser flow for create, edit and cancel with manager and owner accounts, including ES/EN and a mutation error path <!-- manual --> [R1, R2, R3, R4, R5]
 
 ## Implementation Notes
 
@@ -57,3 +57,4 @@
 - Section 5 localized channel/payment/access enum labels in both catalogs, switched list/detail enum rendering to translated keys, and covered recursive locale parity plus null/undefined em-dash and zero rendering.
 - Section 5 verification: `npm test -- features/reservations` · 12 files / 147 tests passed; `npm run lint` passed; `git diff --check` passed.
 - Section 6 verification: focused equivalent path `npm test -- features/reservations` passed with 12 files / 147 tests; full suite passed with 240 files / 2716 tests; `npm run lint` and `npm run api:check` passed. The literal focused command in 6.1 is incompatible with the frontend package root and matches no files.
+- Section 6.5 verification: local Playwright Chromium flow passed for manager create/edit/cancel, ES/EN switching, owner read-only controls, and a simulated localized 409 mutation error preserving form values; cancelled test reservation `fcbb6a15-abd4-42b9-a021-5cbb540e55bb`.
