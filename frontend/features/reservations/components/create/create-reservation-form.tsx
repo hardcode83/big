@@ -243,9 +243,9 @@ export function CreateReservationForm({
   );
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4" noValidate>
+    <form onSubmit={submit} aria-labelledby="reservation-create-title" className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4" noValidate>
       <div>
-        <h2 className="text-lg font-semibold">{t("create.title")}</h2>
+        <h2 id="reservation-create-title" className="text-lg font-semibold">{t("create.title")}</h2>
         <p className="text-sm text-muted-foreground">{t("create.description")}</p>
       </div>
       {formError ? <p role="alert" className="text-sm text-destructive">{formError}</p> : null}

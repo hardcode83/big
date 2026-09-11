@@ -25,13 +25,13 @@ vi.mock("@/lib/auth", () => ({
   useHasPermission: useHasPermissionMock,
 }));
 vi.mock("@/features/properties", () => ({ useActiveProperties: useActivePropertiesMock }));
-vi.mock("../../hooks/use-reservations", () => ({
+vi.mock("../hooks/use-reservations", () => ({
   useReservation: useReservationMock,
   useCreateReservation: useCreateReservationMock,
   useUpdateReservation: useUpdateReservationMock,
   useCancelReservation: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
 }));
-vi.mock("../../hooks/use-guest-access-token", () => ({
+vi.mock("../hooks/use-guest-access-token", () => ({
   useGuestAccessTokenStatus: () => ({ isPending: false, data: undefined }),
   useIssueGuestAccessToken: () => ({ isPending: false, isError: false, data: undefined, mutate: vi.fn() }),
   useRevokeGuestAccessToken: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
