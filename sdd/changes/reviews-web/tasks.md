@@ -12,7 +12,7 @@ sección 8.
 
 ## 1. Permisos y catálogo i18n (prerrequisito, sin cambio de comportamiento)
 
-- [ ] 1.1 `lib/auth/permissions.ts`: ampliar la unión `Permission` con
+- [x] 1.1 `lib/auth/permissions.ts`: ampliar la unión `Permission` con
   `"MANAGE_REVIEW_DECISIONS"` y `"CREATE_REVIEW_UI"`, y conceder en
   `ROLE_UI_PERMISSIONS`: `MANAGE_REVIEW_DECISIONS` a `TENANT_OWNER`,
   `CREATE_REVIEW_UI` a `PROPERTY_MANAGER`. `SUPER_ADMIN`, `CLEANER` y `TECHNICIAN`
@@ -22,7 +22,7 @@ sección 8.
   `TENANT_OWNER` y denegada a los otros cuatro roles; `CREATE_REVIEW_UI` concedida a
   `PROPERTY_MANAGER` y denegada a los otros cuatro; ambas denegadas sin usuario. [R7.1, R7.2, R7.3]
 
-- [ ] 1.2 `locales/es/reviews.json` y `locales/en/reviews.json` (nuevos): estructura
+- [x] 1.2 `locales/es/reviews.json` y `locales/en/reviews.json` (nuevos): estructura
   completa de D17 — `tabs.*`, `detail.*`, `list.*`, `columns.*`,
   `status.{NEW,DRAFTED,APPROVED,POSTED_MANUALLY,IGNORED}`,
   `sentiment.{POSITIVE,NEUTRAL,NEGATIVE}`,
@@ -35,7 +35,7 @@ sección 8.
   `invalid`, `generic`) por camino. La copia de `markPosted.dialog.body` no afirma
   que el sistema publicó — habla de la acción humana (R4.1). [R8.1, R8.5]
 
-- [ ] 1.3 `lib/i18n/resources.ts`: registrar `reviews` en los **cuatro** puntos —
+- [x] 1.3 `lib/i18n/resources.ts`: registrar `reviews` en los **cuatro** puntos —
   el `import` por locale, la lista `NAMESPACES`, y la entrada dentro de `resources.es`
   y `resources.en`. Verificar que `catalog-parity.test.ts` (o el test que vigila el
   cuarto punto tras pricing-web) cubre el namespace nuevo. [R8.1]
@@ -341,3 +341,12 @@ entorno y **no** son regresión de este change.
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
+- Permission union order kept (new entries appended at end); file-header comment block updated to cite reviews-web D15 alongside the other D# references (pricing-web, messaging-ai, incident-triage-web, approvals-web, guest-link-delivery).
+- `MANAGE_REVIEW_DECISIONS` granted only to `TENANT_OWNER` (matches D15 owner-only spec); `CREATE_REVIEW_UI` granted only to `PROPERTY_MANAGER` (mirrors the PRD §18 "manager creates" split).
+- Test cases mirror the symmetric block for `MANAGE_PRICE_RECOMMENDATIONS`: granted to the one role, denied to all four others in a loop, denied without user — 6 new test cases, permissions.test.tsx now at 37 tests passing.
+- Namespace `reviews` keys follow the D17 structure: `tabs.*`, `list.*`, `columns.*`, `status.*` (5), `sentiment.*` (3), `channel.*` (5), `recurringIssue.*` (9), `identity.*`, `filters.*`, `pagination.*`, `respond.*` with `confirmQuestion.{APPROVE,IGNORE,MARK_POSTED,EDIT}`, `respond.error.*` (forbidden/notFound/conflict/invalid/generic), `create.*` with `error.*` (forbidden/invalid/generic), `preview.*`, `markPosted.dialog.*`, `detail.*`.
+- `markPosted.dialog.body` copy (ES: "Vas a registrar que ya publicaste esta respuesta en el canal correspondiente. Esta acción no se puede deshacer desde esta pantalla."; EN: "You are about to record that you already posted this reply on the corresponding channel. This action cannot be undone from this screen.") speaks of the human action only — no "the system published" wording — per R4.1.
+- `recurringIssue.VALUE` localised as "Relación calidad-precio" (ES) / "Value for money" (EN) to convey the meaning, not the literal identifier; other tags kept as the user-facing noun.
+- `filters.rating` label carries `(/5)` because the suffix is part of the field's localised meaning (R8.3 — the slash-and-5 travels with the label, not with `fmtRating`).
+- Catalog parity test (`lib/i18n/catalog-parity.test.ts`) already covers the four registration points via `catalogNames()` against `NAMESPACES` and a per-namespace key-set equality check — namespace registration verified by 22 tests passing.
+- Gotcha: the worktree's `.env` did not exist; copied from `.env.example` before `make up` could interpolate `POSTGRES_DB`/`POSTGRES_USER`/`POSTGRES_PASSWORD` (same as every other worktree under `/Users/hardcode/orca/workspaces/AutoHostAI/`). Stack came up clean on first try.
