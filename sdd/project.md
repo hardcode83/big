@@ -24,6 +24,8 @@ Fuente de verdad funcional: `docs/AutoHostAI_PRD_v5_Claude.md` (PRD técnico v5,
 - Frontend: `cd frontend && npm run dev` / `npm test`
 - E2E: `npx playwright test` (previsto — llega con `hardening-release`)
 
+isolation: always
+
 teardown: docker compose down --volumes --remove-orphans --rmi local
 
 Lo que `/sdd:archive` corre **dentro** del worktree antes de borrarlo. Se lee entero, porque
@@ -135,10 +137,12 @@ Aviso de coste, que no desaparece: los volúmenes con nombre van **por proyecto 
 ## Context
 
 - PRD: `docs/AutoHostAI_PRD_v5_Claude.md` + diagramas en `docs/diagrams/` (C4, hexagonal, ER, state machine, secuencias).
-- Roadmap: `sdd/roadmap.md` (25 entradas: los changes del PRD §26 más los añadidos de infra/CD sobre la marcha; `domain-foundation` se dividió en `-core`/`-ops`/`-financial`).
-- MCPs activados: `playwright` (verificación E2E en run), `context7` (docs de stack), `postgres` (inspección read-only del esquema local; la cadena en `.mcp.json` lleva la contraseña de dev `localdev`, exenta por `steering/security.md` regla 8) y `github` (repo/PRs/issues, OAuth al primer uso) — los dos últimos añadidos en el re-run de 2026-07-29.
+- Roadmap: `sdd/roadmap.md` (154 entradas a 2026-09-11, 124 cerradas/30 pendientes — el "25 entradas" de una nota anterior quedó obsoleto; el análisis largo de cada entrada vive en `sdd/roadmap/<feature>.md`, no en el índice, desde la migración de tamaño del re-run de 2026-09-11, `SDD025`).
+- MCPs activados: `playwright` (verificación E2E en run), `context7` (docs de stack), `postgres` (inspección read-only vía `@bytebase/dbhub`, reemplazando el server de referencia archivado — `SDD029`, re-run de 2026-09-11; la cadena sigue con la contraseña de dev `localdev`, exenta por `steering/security.md` regla 8, porque no existe rol de solo lectura separado) y `github` (repo/PRs/issues, OAuth al primer uso) — los dos últimos añadidos en el re-run de 2026-07-29.
 - LSPs activados: `pyright-lsp` (Python/backend), `typescript-lsp` (TypeScript/frontend) — binarios instalados; falta ejecutar `/plugin install pyright-lsp` y `/plugin install typescript-lsp`.
-- Reviewers de proyecto (en `.claude/agents/`, descubiertos automáticamente por `/sdd:run` y `/sdd:review`): `sdd-review-tenancy.md` (tenant isolation, `steering/security.md` regla 1) y `sdd-review-i18n.md` (i18n es/en, `steering/frontend.md`) desde 2026-07-17; `sdd-review-cicd.md` (workflows + Terraform contra las reglas EARS de `specs/infra-dev-terraform.md` y `steering/infra.md`) y `sdd-review-documentation.md` (`steering/documentation.md`, modelo haiku) desde 2026-07-29.
+- Skills: `webapp-testing` (Anthropic, copiado a `.claude/skills/webapp-testing/` desde `anthropics/skills`, no el bundle completo) desde el re-run de 2026-09-11 — verificación barata de UI para el implementador de `/sdd:run` (Playwright + `.claude/skills/webapp-testing/scripts/with_server.py`).
+- Plugins ofrecidos en el re-run de 2026-09-11, pendientes de instalación por el usuario (el agente no puede ejecutar `/plugin`): `hookify` (convertir reglas mecánicas de steering en hooks que las bloqueen, sin gastar reviewer de panel) y `security-guidance` (hook en cada Write/Edit con 8 clases de vulnerabilidad genéricas; solapa con `sdd-security` del panel — se paga en cada edición, no solo en gates).
+- Reviewers de proyecto (en `.claude/agents/`, descubiertos automáticamente por `/sdd:run` y `/sdd:review`): `sdd-review-tenancy.md` (tenant isolation, `steering/security.md` regla 1) y `sdd-review-i18n.md` (i18n es/en, `steering/frontend.md`) desde 2026-07-17; `sdd-review-cicd.md` (workflows + Terraform contra las reglas EARS de `specs/infra-dev-terraform.md` y `steering/infra.md`) y `sdd-review-documentation.md` (`steering/documentation.md`, modelo haiku) desde 2026-07-29; `sdd-review-ui-ux.md` (consistencia visual/interactiva contra `steering/frontend.md` y el design system real) — presente en disco pero nunca registrado aquí hasta este re-run.
 - Usage metrics: activado (OTEL → `http://127.0.0.1:4318`, `.sdd-usage/` en `.gitignore`). Efectivo a partir de la próxima sesión.
 - Perfil de modelos SDD: **Mixto** (opus new/design, sonnet grueso, haiku archive/status).
 - Repo git inicializado (rama `main`) en el change `local-environment`; alojado en GitHub bajo la org **`autohostai-labs`** (`git@github.com:autohostai-labs/AutoHostAI.git`) — motivo y alternativas en `docs/adr/0002-github-org-hosting.md`.

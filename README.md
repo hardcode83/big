@@ -28,6 +28,7 @@ make bootstrap         # crea el tenant y los usuarios iniciales (ver abajo)
 make seed-demo         # llena ese tenant con el dataset de demo (ver abajo); exige bootstrap antes
 make demo-reset        # resetea el tenant de demostración de `dev` (ver abajo); exige DEMO_ACCOUNT_PASSWORD
 make sim-advance TENANT=<uuid> [AT=<instante ISO>] # avanza a mano los tres jobs de reloj sobre un tenant, sin esperar a beat (solo dev/local; ver `docs/celery-jobs.md`)
+make pms-sync TENANT=<uuid> [WINDOW=<días>] [PROVIDER=<proveedor>] # dispara a mano el sync de reservas contra el PMS de ese tenant, el mismo comando que ejecuta el job periódico `sync_pms_reservations` cada 6h (sin WINDOW usa el default del CLI, 30 días)
 make openapi           # regenera el contrato de API (ver abajo)
 make check-version-parity # comprueba VERSION, backend y frontend
 make compose-stacks    # lista los stacks de Compose de la máquina y marca los huérfanos (ver abajo)

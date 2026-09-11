@@ -37,3 +37,7 @@ No es de `blocked-transitions-web`. Ninguno de los tres lo causó ese change; lo
 y se hicieron visibles porque fue la primera vez que alguien verificó esa pantalla a mano contra un
 stack real con datos. Se agrupan por petición del propietario del proyecto, no porque compartan
 causa.
+
+---
+
+un párrafo de `sdd/project.md` diagnosticaba mal un fallo de hidratación en navegador headless bajo `PORT_OFFSET` (histórico — ver el párrafo de hidratación de `sdd/project.md` §Worktree bootstrap para el estado y la medición vigentes, no repetido aquí) y la card del dashboard **se queda a medio traducir** porque `dashboard-api` compone en el `preferred_language` y no en el idioma de la interfaz …

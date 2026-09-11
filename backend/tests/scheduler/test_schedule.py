@@ -56,6 +56,13 @@ PRD_8_3 = {
 #:                                                            is idempotent on row state, so
 #:                                                            a faster one buys nothing but a
 #:                                                            tighter feedback loop.
+#:   sync_pms_reservations                        | 6 h    | `pms-sync-schedule` R1. `celery-
+#:                                                            jobs` D16 declared the sweep's
+#:                                                            cadence absent on purpose; six
+#:                                                            hours is Beds24's recommended
+#:                                                            full-resync period, unrelated to
+#:                                                            `Settings.pms_sync_window_days`
+#:                                                            (which only bounds `since`).
 BEYOND_PRD_8_3 = {
     "dispatch_notifications": timedelta(minutes=1),
     "provision_access_records": timedelta(minutes=5),
@@ -64,6 +71,7 @@ BEYOND_PRD_8_3 = {
     "reconcile_owner_approvals_for_expenses": timedelta(minutes=5),
     # `revenue-reviews` D2 — every-five-minutes classification of pending reviews.
     "classify_reviews": timedelta(minutes=5),
+    "sync_pms_reservations": timedelta(hours=6),
 }
 
 ALL_CADENCES = PRD_8_3 | BEYOND_PRD_8_3

@@ -1,0 +1,3 @@
+# platform-admin-api
+
+`POST /api/v1/tenants` (el único creador de tenants de todo el backend es `cli/bootstrap.py:129`, un comando de CLI; el router de tenants solo tiene `GET /{tenant_id}` y `PATCH /{tenant_id}`) y el alta de managers/cleaners/technicians en un tenant nombrado por el llamante —`POST /api/v1/users` deriva hoy el `tenant_id` del token, así que un `SUPER_ADMIN` sin tenant no puede usarla tal cual—. Ambas con su auditoría (`AuditLog`, regla 9 de `steering/security.md`). Depende del modelo de identidad de `super-admin-identity`, que decide la excepción de la regla 1 que estas rutas necesitan (no está en el plan original, separada de `super-admin-console` el 2026-08-31 al abrir su `/sdd:new`: censo completo en `sdd/roadmap/super-admin-console.md`) …

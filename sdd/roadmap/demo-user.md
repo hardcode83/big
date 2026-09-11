@@ -106,3 +106,7 @@ se ponga en rojo.
 Secuencia: merge → `apply` (el secreto nace con el valor de `random_password`, inerte a propósito) →
 fijar el valor definitivo out-of-band → `plan` para verificar → **sólo entonces** publicar las
 credenciales. Procedimiento y las dos salidas posibles: `infra/environments/dev/RUNBOOK.md` §10.2.
+
+---
+
+segundo tenant «AutoHostAI Demo» sembrado por los comandos que ya existen, sus cuatro cuentas `@demo.autohostai.test` con una contraseña fija **convergente** —hoy `bootstrap` y `seed_demo` son *create-only* para usuarios, así que un visitante que llame a `POST /auth/change-password` deja fuera a todos los demás hasta el siguiente reset—, un **comando de reset por tenant** que es además el teardown que hoy no existe (`RUNBOOK-seed-demo.md` §3 lo resuelve con SQL a mano) y que re-ancla las fechas, que envejecen desde el día de la siembra, y su disparo periódico desde un workflow con `schedule:` sobre el **runner self-hosted que ya corre en la VM** — que es lo que permite llegar a la base de datos sin exponer ni la BD ni la API, y lo único que puede hacerlo: el `metadata` de la instancia es `ForceNew` con `ignore_changes`, así que un cron de máquina por cloud-init no llegaría nunca a la VM viva. **Invierte deliberadamente la obligación de seguridad que `roadmap/seed-data-demo.md` dejó escrita** —«un seed que corra allí es una puerta abierta con credenciales publicadas en el PRD […] hay que decidir el mecanismo que lo impide y probarlo en rojo»—, así que el proposal la cita y **acota** la reversión en vez de rodearla …

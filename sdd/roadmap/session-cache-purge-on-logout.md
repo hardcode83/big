@@ -44,3 +44,7 @@ Si alguna vez hay urgencia de demo o de producción antes de que esta entrada ll
 `size: S · kind: tech`
 
 **Por qué `S`**: el arreglo son pocas líneas en la costura entre `auth-provider` y `lib/query`, más su test. Lo que no es trivial es decidir **dónde** va el gancho sin acoplar los dos módulos, y verificar que la purga cubre el cambio de identidad y no sólo el logout explícito. No toca backend, no toca contrato, no hay migración.
+
+---
+
+el `QueryClient` es un singleton por navegador (`frontend/lib/query/query-client.ts`) y el `logout` descarta tokens y usuario sin tocarlo (`frontend/lib/auth/auth-provider.tsx`). Las claves llevan ámbito de tenant, así que la exposición es **mismo-tenant / distinto-rol**, no cruce de tenants. Levantada dos veces por dos features independientes —el review de `conversations-inbox` (2026-08-22) y el panel de seguridad de `properties-web` (2026-08-22)—, que es la evidencia de que necesitaba casa propia en vez de morir archivada con una de ellas …

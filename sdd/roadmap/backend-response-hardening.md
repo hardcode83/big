@@ -39,3 +39,7 @@ leer»; eso sólo lo puede hacer el middleware*. Escrita una vez, deja de reinve
 es exactamente lo que `rule11-ownership-single-source` persigue para la regla 11.
 
 completes: cleaning-photos-storage · size: S · kind: tech
+
+---
+
+`nosniff` existe hoy en una sola ruta de las trece, y el error de razonamiento sobre topes de tamaño que costó dos rondas de revisión ya está reproducido en un segundo módulo, así que lo que cierra la clase es una nota de steering y no un tercer arreglo de redacción …

@@ -21,3 +21,7 @@ Es la misma disciplina que aplicó `plaintext-sink-encryption-at-rest`: la mitad
 **Es cambio de contrato en el código de error**, no sólo endurecimiento interno: un llamante que hoy recibe `500` con un `U+0000` empezará a recibir `422`. Es lo correcto —el `500` no estaba declarado en ninguna parte— pero conviene que esté escrito antes de que alguien lo lea como regresión.
 
 Y no confundirlo con [`plaintext-sink-encryption-at-rest`](plaintext-sink-encryption-at-rest.md): aquello es cifrado en reposo contra la amenaza offline, esto es validación de entrada contra un `500`. Columnas vecinas, amenazas distintas.
+
+---
+
+su esquema de petición la declara como `str` con `max_length` a secas, así que un `U+0000` en la nota de asignación sale como un `500` sin declarar, mientras el mismo carácter en `incidents.materials` —que entró con `MultiLineText`— se rechaza como `422`. Lo levantó `tech-cycle-completion` (2026-08-22) en § Risks de su design y no lo cerró porque el cuerpo de `assign` lo sirve `tech-incident-context`; ver `sdd/roadmap/assignment-note-storable-text.md`

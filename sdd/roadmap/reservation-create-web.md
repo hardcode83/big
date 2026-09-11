@@ -56,3 +56,7 @@ que aún pinta el UUID de la vivienda (`reservations-view.tsx:159`) cuando el ba
 **Fuera de alcance**: pantalla de importación CSV (candidata aparte si se necesita); cualquier
 proveedor real; edición de huésped como entidad; disponibilidad/solapes (no hay `get_availability`
 en el puerto, `docs/beds24-adapter.md:167-172`).
+
+---
+
+`POST` (:90), `PATCH` (:154) y `DELETE` (:180) de `reservations/api/router.py` existen y `http-reservations-source.ts` sólo tiene los dos `GET`. Es la única forma de **empezar** un ciclo operativo nuevo desde el navegador sin OTA ni PMS: canal `DIRECT`/`MANUAL`, nace `PENDING`, y `check_in_date`/`check_out_date`/`status` son parcheables (`schemas.py:75-79`). Cierra el «Fuera de alcance» que `reservations-web` dejó escrito sin entrada de seguimiento. Va detrás de `reservations-identity-web` para no construir un formulario sobre una lista que aún pinta UUIDs (no está en el plan original, añadida el 2026-09-04 al auditar los flujos por rol; hito «MVP operable» 1) …

@@ -49,3 +49,7 @@ token directamente en ningún momento.
 - No resuelve `auth-session-generation-semantics` — son ejes distintos (persistencia
   vs. condiciones de carrera en purga/generación) y esta entrada puede volver a
   destaparlas en el nuevo flujo de arranque; revisar ambas notas juntas al diseñar.
+
+---
+
+access y refresh JWT viven solo en memoria del runtime JS, así que cualquier runtime nuevo empieza anónimo y obliga a un login manual. Válido como mitigación de robo de token por XSS, pero cuestionable como *default* del producto dado quién lo sufre: personal operativo (manager/cleaner/technician) abriendo la app varias veces al día y en varias pestañas …

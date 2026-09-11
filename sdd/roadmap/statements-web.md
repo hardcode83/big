@@ -45,3 +45,7 @@ Sin backend, salvo lo que la descarga exija (abajo).
 **Fuera de alcance**: facturación fiscal (non-goal PRD §29); alta de gastos; envío del statement
 por email al owner (candidata cuando exista `guest-scheduled-comms`, que es quien fija la forma
 de un correo con contenido).
+
+---
+
+`revenue-statements` archivó once rutas en `statements/api/router.py` (statement mensual por propiedad, gastos, CSV, PDF) y el job mensual `generate_owner_statements` corre el día 1 a las 02:00 UTC (`schedule.py:132-139`); ningún fichero del frontend las llama. DoD §28.16 pide que «el statement mensual puede generarse y exportarse a CSV» — hoy sólo por API. Lista, detalle y descarga; la creación de gastos sólo si el design lo acota. La descarga es la primera del workspace y hereda el patrón de servir bytes firmados de las fotos (no está en el plan original, añadida el 2026-09-04: `revenue-statements` no registró su mitad `[FE]`; hito «MVP operable» 3) …

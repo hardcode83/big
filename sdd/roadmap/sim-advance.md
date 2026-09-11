@@ -63,3 +63,7 @@ job de webhooks (tienen su propia semántica de tiempo); mover `beat`; cualquier
 check-in → `AWAITING_CHECKIN`/`OCCUPIED_ESTIMATED`, `sim-advance` al checkout →
 `AWAITING_CLEANING` con `transitioned: 1 / transitioned_without_task: 0`, y la reserva conserva
 sus fechas originales.
+
+---
+
+`make sim-advance TENANT=<uuid> AT=<instante>` ejecuta `check_checkin_windows`, `mark_occupied_estimated` y `process_checkouts` síncronamente con un `now` sintético. La primitiva ya existe —`AdvancePropertyStatesUseCase` recibe `now` como parámetro (`scheduler/runner.py:176`) y `seed_demo._advance_the_clock` la usa con instantes históricos (`cli/seed_demo.py:856-1000`)—; lo que no existe es un punto de entrada. La receta vigente (RUNBOOK-seed-demo §5) es parchear las fechas de la reserva hacia atrás y lanzar los tres jobs con un heredoc de Python: funciona y **corrompe el dato**. Sólo dev/local, nunca en `docker-compose.deploy.yml`: un reloj inyectable en producción falsifica el timeline (no está en el plan original, añadida el 2026-09-04: sin ella una estancia de dos noches tarda dos días en recorrerse; hito «MVP operable» 1) …

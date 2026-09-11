@@ -66,3 +66,7 @@ configuración del proveedor (rechazada por diseño en el proposal de `whatsapp-
 **Verificación**: el handshake de Meta responde `200` con el challenge; un mensaje desde uno de
 los cinco números de la allowlist crea la conversación en `/conversations` y recibe la respuesta
 de la IA; la respuesta del manager llega al móvil (requiere `human-reply-outbound-delivery`).
+
+---
+
+`deploy-dev.yml:249-278` enumera cada clave que escribe y no hay ninguna, así que en dev `whatsapp_provider` es `mock`, el handshake de Meta compara contra `""` y toda entrega entrante responde `403` (`whatsapp_webhook_router.py:176-185`, :243-249). La ruta `/api/v1/webhooks/whatsapp` ya es pública por el proxy `/api/`. Secretos en OCI Vault leídos por nombre, el patrón de `S3_*` (`deploy-dev.yml:234-239`); IaC-first. El alta en Meta (portfolio, app, número de test, token de usuario de sistema) es operación, no change, y la nota la deja escrita porque `docs/whatsapp-cloud-adapter.md` sólo cubre los dos últimos pasos (no está en el plan original, añadida el 2026-09-04; hito «MVP operable» 2) …
