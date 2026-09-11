@@ -635,7 +635,7 @@ del sentimiento con **`sentiment`**, igual que en el resto de listados del proye
 | R7.3 sin conceder a otros roles | D15 (test de `permissions.test.tsx`) |
 | R7.4 pista de UX, no autoridad | D15 (`403` sigue siendo error, D10) |
 | R8.1 namespace en cuatro puntos | D17 |
-| R8.2 etiquetas para 5+3+4+9 valores de enum | D17 |
+| R8.2 etiquetas para 5+3+5+9 valores de enum | D17 |
 | R8.3 `rating` como `/5` | D18 (`fmtRating`) |
 | R8.4 `published_at` como día UTC | D18 (`fmtDay`) |
 | R8.5 nada hardcodeado | D17 + `catalog-parity.test.ts` + test de locales |
