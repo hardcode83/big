@@ -14,7 +14,7 @@
       cuarto valor y no una reutilización de `PMS_SOURCE`. Sin cambios en `execute()` — el
       parámetro `source: str` ya existe. [R3]
 
-## 2. Job de beat
+## 2. Job de beat <!-- panel: PASS 2026-09-11 receipt:654c6088 -->
 
 - [x] 2.1 `backend/app/scheduler/schedule.py`: añadir `"sync_pms_reservations":
       timedelta(hours=6)` a `CADENCES`, con un comentario de docstring como los demás
