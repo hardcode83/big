@@ -71,8 +71,16 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Suite completa del backend: `docker compose exec backend uv run pytest`
-- [ ] 5.2 Typecheck: `uv run pyright .` (desde `backend`, con `uv sync --frozen` ya corrido)
+- [x] 5.1 Suite completa del backend: `docker compose exec backend uv run pytest` — 11042
+      passed, 44 skipped, 0 failed (637s, `frontend` parado antes de correr per lección
+      medida de este proyecto).
+- [x] 5.2 Typecheck: `uv run pyright .` (desde `backend`, con `uv sync --frozen` ya corrido) —
+      979 errores preexistentes en todo el árbol (ninguno introducido por este change:
+      verificado que ningún fichero tocado por `pms-sync-schedule` aparece en la salida salvo
+      `app/core/config.py:727`, un `Settings()` sin kwargs en `_load_settings` que ya estaba
+      ahí desde `pms-provider-resolution`, muy lejos de la línea 403 donde vive
+      `pms_sync_window_days`). `project.md` ya declara estos findings como reportados aparte
+      de los fallos de arranque, no como gate de cero errores.
 - [ ] 5.3 Manual: `make pms-sync TENANT=<uuid-del-seed>` produce el mismo informe
       (`created`/`updated`/`skipped`) que `python -m app.integrations.cli.pms_sync <uuid>` a
       mano, y `docker compose exec backend celery -A app.worker beat` (o el log del worker tras
