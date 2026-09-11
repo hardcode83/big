@@ -394,7 +394,7 @@ llevan los labels OCI de las imágenes. Cómo se opera:
 
 La API de negocio ya tiene su primera capability: **reservas** (`/api/v1/reservations` más la
 importación por CSV `/api/v1/integrations/pms/import-csv`). Se opera por API y desde la web — el
-`PROPERTY_MANAGER` crea, edita y cancela desde `reservations-web`, mientras `TENANT_OWNER` ve
+`PROPERTY_MANAGER` crea, edita y cancela desde `reservation-create-web`, mientras `TENANT_OWNER` ve
 listado y detalle en modo solo lectura — y la sincronización con el PMS se lanza como comando:
 
 ```bash

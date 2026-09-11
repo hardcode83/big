@@ -88,7 +88,7 @@ describe("reservations locale (R4.1, R4.3)", () => {
     const esKeys = leafKeys(esReservations).sort();
     const enKeys = leafKeys(enReservations).sort();
     expect(esKeys).toEqual(enKeys);
-    expect(esKeys).toHaveLength(176);
+    expect(esKeys).toHaveLength(177);
   });
 
   it.each([
