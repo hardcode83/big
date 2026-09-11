@@ -293,6 +293,10 @@ jobs:
             echo "SMTP_PASSWORD=${SMTP_PASSWORD}"
             echo "SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL}"
             echo "SMTP_USE_TLS=${SMTP_USE_TLS}"
+            # Literal "dev", no variable: este workflow solo despliega el entorno dev, así que
+            # no hay nada que parametrizar todavía (change `sim-advance`, R2/D5). Un futuro
+            # deploy-staging.yml/deploy-prod.yml pondría aquí "staging"/"production" igual.
+            echo "APP_ENVIRONMENT=dev"
             echo "APP_VERSION=${{ needs.provenance.outputs.version }}"
             echo "APP_PROVENANCE_REPOSITORY_URL=${{ needs.provenance.outputs.repository_url }}"
             echo "APP_PROVENANCE_PULL_REQUEST_NUMBER=${{ needs.provenance.outputs.pull_request_number }}"
