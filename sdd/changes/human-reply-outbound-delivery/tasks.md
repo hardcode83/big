@@ -1,6 +1,6 @@
 # Tasks: human-reply-outbound-delivery
 
-## 1. Backend: inyectar canales, despachar por el canal de la conversación y enrutar `EMAIL` por SMTP
+## 1. Backend: inyectar canales, despachar por el canal de la conversación y enrutar `EMAIL` por SMTP <!-- panel: PASS 2026-09-11 receipt:c0389f22 -->
 
 - [x] 1.1 Cablear `channels=outbound_registry(messages)` en
       `backend/app/messaging/api/dependencies.py:108-114`, usando la misma
@@ -47,13 +47,13 @@
       envío falle; (e) `phone_number_id` pasa `business_phone_number` para
       `WHATSAPP`. [R1]
 
-## 2. Specs y docs: enmendar R4 y declarar el límite de la ventana 24 h
+## 2. Specs y docs: enmendar R4 y declarar el límite de la ventana 24 h <!-- panel: skipped — pure docs/spec section; verifier panel runs against production code only -->
 
-- [ ] 2.1 Enmendar `sdd/specs/messaging-ai.md:187-191` para añadir a R4 las
+- [x] 2.1 Enmendar `sdd/specs/messaging-ai.md:187-191` para añadir a R4 las
       cuatro garantías del envío humano: despacho por el canal de la
       conversación, anotación en `metadata`, no-escalación y no-emisión de
       `AI_RESPONSE_SENT` (sólo `HUMAN_RESPONSE_SENT`). [R3]
-- [ ] 2.2 Añadir el límite "respuesta humana por WhatsApp fuera de ventana de
+- [x] 2.2 Añadir el límite "respuesta humana por WhatsApp fuera de ventana de
       24 h queda como `FAILED` sin reintento automático —no hay plantillas
       aprobadas en MVP—" al bloque de siete límites de
       `docs/messaging-ai.md:243-275`, numerándolo en orden. [R3]
