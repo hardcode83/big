@@ -8,6 +8,28 @@
     "COMPLETED": "Completada",
     "NO_SHOW": "No presentado"
   },
+  "channels": {
+    "AIRBNB": "Airbnb",
+    "BOOKING": "Booking.com",
+    "EXPEDIA": "Expedia",
+    "DIRECT": "Directa",
+    "MANUAL": "Manual",
+    "OTHER": "Otro"
+  },
+  "paymentStatuses": {
+    "PENDING": "Pendiente",
+    "PAID": "Pagado",
+    "PARTIALLY_PAID": "Pagado parcialmente",
+    "REFUNDED": "Reembolsado"
+  },
+  "accessStatuses": {
+    "PENDING": "Pendiente",
+    "CREATED_EXTERNAL": "Creado en el canal externo",
+    "MANUAL_ADDED": "Añadido manualmente",
+    "DELIVERED": "Entregado",
+    "EXPIRED": "Caducado",
+    "NOT_REQUIRED": "No requerido"
+  },
   "fields": {
     "guest": "Huésped",
     "property": "Propiedad",

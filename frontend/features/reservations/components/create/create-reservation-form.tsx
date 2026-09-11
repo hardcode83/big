@@ -218,7 +218,7 @@ export function CreateReservationForm({
       },
       onError: (error) => {
         setIsSubmitting(false);
-        setFormError(t(reservationMutationErrorKey(error)));
+        setFormError(t(reservationMutationErrorKey(error, "create")));
       },
     });
   }

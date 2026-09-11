@@ -132,6 +132,7 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
       screen.getByText(esReservations.fields.specialRequests),
     ).toBeInTheDocument();
     expect(screen.getByText("Laura Gómez")).toBeInTheDocument();
+    expect(screen.getByText(esReservations.create.languages.es)).toBeInTheDocument();
   });
 
   it("renders the guest-empty copy when guest is null", () => {
@@ -143,6 +144,31 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
     });
     renderDetail();
     expect(screen.getByText(esReservations.fields.guestEmpty)).toBeInTheDocument();
+  });
+
+  it("renders localized enum values and keeps zero distinct from nullable fallbacks", () => {
+    useReservationMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: {
+        ...FULL_DETAIL,
+        children: 0,
+        totalGuests: 0,
+        accessStatus: null,
+        grossAmount: "0",
+        netAmount: null,
+        otaCommission: undefined,
+      },
+      refetch: vi.fn(),
+    });
+    renderDetail();
+    expect(screen.getByText("Directa")).toBeInTheDocument();
+    expect(screen.getByText("Pagado")).toBeInTheDocument();
+    expect(screen.getByText("0 EUR")).toBeInTheDocument();
+    expect(screen.getAllByText("0").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(esReservations.fields.ota).parentElement).toHaveTextContent("—");
+    expect(screen.queryByText("PAID")).not.toBeInTheDocument();
+    expect(screen.queryByText("DELIVERED")).not.toBeInTheDocument();
   });
 
   it("renders internalNotes as plain text, not as HTML (R3.3)", () => {

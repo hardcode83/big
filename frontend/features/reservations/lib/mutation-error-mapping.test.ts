@@ -6,11 +6,7 @@ import { reservationMutationErrorKey } from "./mutation-error-mapping";
 
 describe("reservationMutationErrorKey (D5)", () => {
   it.each([
-    [401, "reservations:mutation.errors.session"],
-    [403, "reservations:mutation.errors.forbidden"],
-    [404, "reservations:mutation.errors.notFound"],
-    [409, "reservations:mutation.errors.conflict"],
-    [422, "reservations:mutation.errors.validation"],
+    [401, "session"], [403, "forbidden"], [404, "notFound"], [409, "conflict"], [422, "validation"],
   ] as const)("maps ApiError %s to a localizable key", (status, expected) => {
     expect(
       reservationMutationErrorKey(
@@ -20,18 +16,18 @@ describe("reservationMutationErrorKey (D5)", () => {
           details: { email: "guest@example.com" },
           status,
         }),
+        "edit",
       ),
-    ).toBe(expected);
+    ).toBe(`reservations:mutation.errors.edit.${expected}`);
   });
 
   it("maps 5xx and network errors without exposing server data", () => {
     expect(
       reservationMutationErrorKey(
         new ApiError({ code: "INTERNAL", message: "trace PII", status: 503 }),
+        "cancel",
       ),
-    ).toBe("reservations:mutation.errors.server");
-    expect(reservationMutationErrorKey(new TypeError("network PII"))).toBe(
-      "reservations:mutation.errors.network",
-    );
+    ).toBe("reservations:mutation.errors.cancel.server");
+    expect(reservationMutationErrorKey(new TypeError("network PII"), "cancel")).toBe("reservations:mutation.errors.cancel.network");
   });
 });

@@ -25,10 +25,10 @@
 - [x] 4.2 Add localized cancel confirmation/action using DELETE as cancellation, reflect `CANCELLED` from refreshed detail and timeline, and keep 404/409/422 failures visible [R3, R4, R5]
 - [x] 4.3 Wire edit/cancel actions into `frontend/features/reservations/components/detail/reservation-detail-view.tsx`; test backend recalculation refreshes nights/total guests and controls stay hidden/disabled without permission [R3, R4]
 
-## 5. Localization and feature integration
+## 5. Localization and feature integration <!-- panel: PASS 2026-09-11 receipt:4d83c994 -->
 
-- [ ] 5.1 Add matching ES/EN keys in `frontend/locales/es/reservations.json` and `frontend/locales/en/reservations.json` for labels, help, timezone context, progress, success and mutation error states [R5]
-- [ ] 5.2 Update reservations exports and colocated locale/component tests so every visible new string is translated, nullable values use the em dash fallback, and zero remains distinct from empty [R2, R5]
+- [x] 5.1 Add matching ES/EN keys in `frontend/locales/es/reservations.json` and `frontend/locales/en/reservations.json` for labels, help, timezone context, progress, success and mutation error states [R5]
+- [x] 5.2 Update reservations exports and colocated locale/component tests so every visible new string is translated, nullable values use the em dash fallback, and zero remains distinct from empty [R2, R5]
 
 ## 6. Verification
 
@@ -54,3 +54,5 @@
 - Section 4 uses `EditReservationForm` with `buildReservationPatch` for camelCase detail-to-snake_case field diffs; decimal strings are normalized before comparison and blank nullable values emit `null`.
 - Section 4 invalidates `['tenant', tenantId, 'property-timeline']` alongside reservation list/detail after update/cancel, then explicitly refetches the visible detail on success.
 - Section 4 focused verification: `npm test -- features/reservations` · 12 files / 138 tests passed; `npm run lint` passed; `git diff --check` passed.
+- Section 5 localized channel/payment/access enum labels in both catalogs, switched list/detail enum rendering to translated keys, and covered recursive locale parity plus null/undefined em-dash and zero rendering.
+- Section 5 verification: `npm test -- features/reservations` · 12 files / 147 tests passed; `npm run lint` passed; `git diff --check` passed.

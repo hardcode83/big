@@ -192,11 +192,11 @@ function ReservationRow({ row }: { row: ReservationSummaryDto }) {
           {t(`status.${row.status}`)}
         </Badge>
       </td>
-      <td className="py-3 px-4 font-sans text-body-base">{t(`create.channels.${row.channel}`, { defaultValue: row.channel })}</td>
+      <td className="py-3 px-4 font-sans text-body-base">{t(`channels.${row.channel}`, { defaultValue: row.channel })}</td>
       <td className="py-3 px-4">
         <div className="flex items-center justify-between gap-2">
           <span>
-            {row.grossAmount !== null
+            {row.grossAmount !== null && row.grossAmount !== undefined
               ? `${row.grossAmount} ${row.currency}`
               : "—"}
           </span>
