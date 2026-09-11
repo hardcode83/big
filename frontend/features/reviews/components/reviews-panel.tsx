@@ -1,0 +1,181 @@
+"use client";
+
+import { useTranslation } from "react-i18next";
+
+import { Button } from "@/components/ui/button";
+
+import type {
+  ReviewChannel,
+  ReviewStatus,
+} from "../data";
+import { useReviewsUiStore } from "../state/use-reviews-ui-store";
+import { useReviewsList } from "../hooks/use-reviews-data";
+import { ReviewRow } from "./review-row";
+import { ReviewsPagination } from "./reviews-pagination";
+
+/**
+ * The Reseñas tab (R5.*). Lists all states, with a `status` selector on the
+ * header. **Add review** is gated on `CREATE_REVIEW_UI` (D15) at the parent.
+ */
+export interface ReviewsPanelProps {
+  catalog: ReadonlyArray<{ id: string; name: string; internalCode: string }>;
+  catalogPending: boolean;
+  createDialogOpen: boolean;
+  onOpenCreateDialog: () => void;
+  onOpenRow: (reviewId: string) => void;
+}
+
+const STATUSES: readonly ReviewStatus[] = [
+  "NEW",
+  "DRAFTED",
+  "APPROVED",
+  "POSTED_MANUALLY",
+  "IGNORED",
+] as const;
+
+const CHANNELS: readonly ReviewChannel[] = [
+  "AIRBNB",
+  "BOOKING",
+  "GOOGLE",
+  "MANUAL",
+  "OTHER",
+] as const;
+
+export function ReviewsPanel({
+  catalog,
+  catalogPending,
+  createDialogOpen,
+  onOpenCreateDialog,
+  onOpenRow,
+}: ReviewsPanelProps) {
+  const { t } = useTranslation("reviews");
+  const slice = useReviewsUiStore((state) => state.reviews);
+  const setPropertyId = useReviewsUiStore((s) => s.setReviewsPropertyId);
+  const setChannel = useReviewsUiStore((s) => s.setReviewsChannel);
+  const setStatus = useReviewsUiStore((s) => s.setReviewsStatus);
+  const setPage = useReviewsUiStore((s) => s.setReviewsPage);
+
+  const filters = {
+    ...(slice.propertyId !== undefined ? { propertyId: slice.propertyId } : {}),
+    ...(slice.channel !== undefined ? { channel: slice.channel } : {}),
+    ...(slice.status !== undefined ? { status: slice.status } : {}),
+  };
+  const query = useReviewsList(filters, slice.page);
+
+  return (
+    <div className="flex flex-col gap-3" data-testid="reviews-panel">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-h4 font-semibold text-foreground">
+          {t("list.title")}
+        </h2>
+        {!createDialogOpen && (
+          <Button type="button" onClick={onOpenCreateDialog}>
+            {t("create.trigger")}
+          </Button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-3">
+        <label className="flex flex-col gap-1 text-body-sm">
+          <span className="font-medium text-foreground">
+            {t("filters.property")}
+          </span>
+          <select
+            value={slice.propertyId ?? ""}
+            onChange={(e) =>
+              setPropertyId(e.target.value === "" ? undefined : e.target.value)
+            }
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-body-base"
+          >
+            <option value="">{t("filters.all")}</option>
+            {catalog.map((property) => (
+              <option key={property.id} value={property.id}>
+                {property.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-body-sm">
+          <span className="font-medium text-foreground">
+            {t("filters.channel")}
+          </span>
+          <select
+            value={slice.channel ?? ""}
+            onChange={(e) =>
+              setChannel(
+                e.target.value === ""
+                  ? undefined
+                  : (e.target.value as ReviewChannel),
+              )
+            }
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-body-base"
+          >
+            <option value="">{t("filters.all")}</option>
+            {CHANNELS.map((c) => (
+              <option key={c} value={c}>
+                {t(`channel.${c}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-body-sm">
+          <span className="font-medium text-foreground">{t("filters.status")}</span>
+          <select
+            value={slice.status ?? ""}
+            onChange={(e) =>
+              setStatus(
+                e.target.value === ""
+                  ? undefined
+                  : (e.target.value as ReviewStatus),
+              )
+            }
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-body-base"
+          >
+            <option value="">{t("filters.all")}</option>
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {t(`status.${s}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {query.isPending && (
+        <p className="text-body-sm text-muted-foreground">{t("list.loading")}</p>
+      )}
+      {query.isError && (
+        <p className="text-body-sm text-destructive">
+          {t("list.error.title")}
+        </p>
+      )}
+      {query.data && query.data.total === 0 && (
+        <p className="text-body-sm text-muted-foreground">
+          {t("list.empty")}
+        </p>
+      )}
+      {query.data && query.data.total > 0 && (
+        <>
+          <ul className="flex flex-col">
+            {query.data.items.map((review) => (
+              <li key={review.id}>
+                <ReviewRow
+                  review={review}
+                  catalog={catalog}
+                  catalogPending={catalogPending}
+                  showStatus={true}
+                  onOpen={onOpenRow}
+                />
+              </li>
+            ))}
+          </ul>
+          <ReviewsPagination
+            page={slice.page}
+            totalPages={query.data.totalPages}
+            total={query.data.total}
+            onPageChange={setPage}
+            labelKey="pagination.reviews"
+          />
+        </>
+      )}
+    </div>
+  );
+}

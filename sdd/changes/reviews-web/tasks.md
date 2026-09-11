@@ -178,12 +178,12 @@ sección 8.
 
 ## 6. Componentes
 
-- [ ] 6.1 `features/reviews/components/reviews-pagination.tsx` (nuevo) +
+- [x] 6.1 `features/reviews/components/reviews-pagination.tsx` (nuevo) +
   `.test.tsx`: presentacional puro (`page`, `totalPages`, `total`, `onPageChange`),
   contra `useTranslation("reviews")`, sin tocar la red y sin selector de tamaño de
   página. Test de que con `totalPages = 0` no se renderiza. [R2.3]
 
-- [ ] 6.2 `features/reviews/components/reviews-tabs.tsx` (nuevo) + `.test.tsx`:
+- [x] 6.2 `features/reviews/components/reviews-tabs.tsx` (nuevo) + `.test.tsx`:
   `role="tablist"` con dos `<button role="tab">` (`aria-selected`, `aria-controls`,
   roving `tabIndex`, flechas izquierda/derecha + Home/End) y un único
   `role="tabpanel"` con `aria-labelledby`. Se monta **sólo el panel activo**
@@ -191,13 +191,13 @@ sección 8.
   inactiva no se dispara hasta que alguien la abre (R2.1, R5.1). Tests: teclado
   completo, y el panel inactivo no está en el DOM. [R1.1]
 
-- [ ] 6.3 `features/reviews/components/review-filters.tsx` (nuevo) + `.test.tsx`:
+- [x] 6.3 `features/reviews/components/review-filters.tsx` (nuevo) + `.test.tsx`:
   selectores de vivienda (desde el catálogo), canal, sentimiento, estado (sólo en
   la pestaña Reseñas), rating `min`/`max` con `<input type="number">`, rango de
   fechas con `<input type="date">`. Nunca se deshabilitan mientras vuela una
   escritura. La etiqueta de rating lleva `/5`. [R2.1, R5.1, R6.4]
 
-- [ ] 6.4 `features/reviews/components/review-row.tsx` (nuevo) + `.test.tsx`:
+- [x] 6.4 `features/reviews/components/review-row.tsx` (nuevo) + `.test.tsx`:
   tarjeta compacta con vivienda (las cuatro formas de D6/3.4), `channel` localizado,
   `rating` con `fmtRating`, `sentiment` localizado, `publishedAt` con `fmtDay` (em-dash
   si es `null`). La pestaña Borradores NO pinta `status` (siempre es `DRAFTED`); la
@@ -205,7 +205,7 @@ sección 8.
   `aiSummary` ni `recurringIssues` (van al detalle, D11/R2.5), y un `publishedAt`
   `null` se pinta como em-dash. [R2.4, R2.5, R6.3, R6.4]
 
-- [ ] 6.5 `features/reviews/components/review-actions.tsx` (nuevo) + `.test.tsx`:
+- [x] 6.5 `features/reviews/components/review-actions.tsx` (nuevo) + `.test.tsx`:
   botones de decisión/edición en línea según `legalActions(status, role)`, con
   confirmación en dos pasos dentro de la fila («¿Aprobar esta reseña?
   [Confirmar] [Cancelar]», `pendingAction` local a la fila, texto distinto por
@@ -218,7 +218,7 @@ sección 8.
   draft queda bloqueado tras aprobar, R3.3; el owner usa el detalle para **Marcar
   como publicada**), y sin confirmar no se llama a la mutación. [R3.1, R3.2, R3.3, R6.4, R7.4]
 
-- [ ] 6.6 `features/reviews/components/review-detail.tsx` (nuevo) + `.test.tsx`:
+- [x] 6.6 `features/reviews/components/review-detail.tsx` (nuevo) + `.test.tsx`:
   monta encima del listado (overlay, no ruta hija). Pinta, en este orden: el
   nombre del huésped si existe, `content` como texto literal (etiqueta «Texto del
   huésped»), `rating`, `channel`, `publishedAt`, `sentiment` localizado,
@@ -232,7 +232,7 @@ sección 8.
   feature, `aiSummary` siempre etiquetado (R6.2), y el botón **Marcar como
   publicada** sólo aparece para owner en `APPROVED`. [R3.3, R3.8, R4.1, R6.1, R6.2, R6.3, R6.4]
 
-- [ ] 6.7 `features/reviews/components/mark-posted-dialog.tsx` (nuevo) +
+- [x] 6.7 `features/reviews/components/mark-posted-dialog.tsx` (nuevo) +
   `.test.tsx`: `AlertDialog` de `components/ui/alert-dialog.tsx` con preview de
   `content` (texto del huésped) y `draft_content` (borrador aprobado) en
   `AlertDialogDescription`, sin edición. `AlertDialogAction` localizado envía la
@@ -240,7 +240,7 @@ sección 8.
   textos, la acción sólo dispara la mutación con `action = MARK_POSTED` (sin
   `draft_content`), y cerrar con `Cancel` no llama a la mutación. [R3.3, R4.1, R4.2, R4.3, R6.4]
 
-- [ ] 6.8 `features/reviews/components/create-review-dialog.tsx` (nuevo) +
+- [x] 6.8 `features/reviews/components/create-review-dialog.tsx` (nuevo) +
   `.test.tsx`: diálogo de alta a mano con `property_id` (selector del catálogo de
   viviendas), `channel` (selector cerrado con los **cinco** valores del enum
   `ReviewChannel`: `AIRBNB`, `BOOKING`, `GOOGLE`, `MANUAL`, `OTHER`), un
@@ -253,7 +253,7 @@ sección 8.
   cuerpo tiene los nombres correctos (`property_id` snake_case), y el éxito cierra
   el diálogo. [R5.3, R5.4, R5.5]
 
-- [ ] 6.9 `features/reviews/components/drafts-panel.tsx` (nuevo) + `.test.tsx`:
+- [x] 6.9 `features/reviews/components/drafts-panel.tsx` (nuevo) + `.test.tsx`:
   cabecera con **Añadir reseña** (oculto sin `CREATE_REVIEW_UI`, abre 6.8), filtros
   de la pestaña Borradores (siempre con `status = DRAFTED` aplicado, no como
   selector), **una sola** región viva `role="status" aria-live="polite"` para
@@ -263,7 +263,7 @@ sección 8.
   estado vacío, el `409` mostrando su copia propia distinta del genérico, y el
   botón **Añadir reseña** oculto sin permiso. [R2.3, R3.5, R5.3]
 
-- [ ] 6.10 `features/reviews/components/reviews-panel.tsx` (nuevo) + `.test.tsx`:
+- [x] 6.10 `features/reviews/components/reviews-panel.tsx` (nuevo) + `.test.tsx`:
   cabecera con **Añadir reseña** (mismo botón que 6.9), filtros de la pestaña
   Reseñas (incluye selector de `status` que en Borradores no aparece), lista de
   filas (misma fila + acciones que 6.9, pero `review-actions.tsx` aplica la matriz
@@ -272,7 +272,7 @@ sección 8.
   `reviews.list.error.*`). Tests: el selector de `status` funciona, y el estado
   vacío no muestra paginación. [R2.3, R5.1, R5.2]
 
-- [ ] 6.11 `features/reviews/components/reviews-view.tsx` (nuevo) + `.test.tsx`:
+- [x] 6.11 `features/reviews/components/reviews-view.tsx` (nuevo) + `.test.tsx`:
   orquesta las dos pestañas, posee la mutación `respondToReview` y expone `isBusy =
   respond.isPending`. Replica el guardia `staleFilters` de `pricing-view.tsx` para
   que la primera petición no salga con el filtro de la sesión anterior (R1.3). Al
@@ -284,7 +284,7 @@ sección 8.
   (detalle + borrador), el guardia `staleFilters` impide la primera petición con
   filtro de la sesión anterior, y cambiar de pestaña cierra el detalle. [R1.1, R1.3, R3.3, R4.3]
 
-- [ ] 6.12 `features/reviews/index.ts` (nuevo): exporta **sólo** `ReviewsView`. [R1.1]
+- [x] 6.12 `features/reviews/index.ts` (nuevo): exporta **sólo** `ReviewsView`. [R1.1]
 
 ## 7. i18n — contrato de locales
 
