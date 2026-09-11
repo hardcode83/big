@@ -71,6 +71,11 @@ async function invalidateReservationQueries(
         queryKey: reservationsKeys.detail(tenantId, reservationId),
       }),
     );
+    invalidations.push(
+      queryClient.invalidateQueries({
+        queryKey: ["tenant", tenantId, "property-timeline"],
+      }),
+    );
   }
   await Promise.all(invalidations);
 }

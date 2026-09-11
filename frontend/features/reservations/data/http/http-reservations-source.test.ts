@@ -379,6 +379,20 @@ describe("HttpReservationsSource — reservation mutations (R1, R2, R3, D4)", ()
     expect(request.mock.calls[0][1].body).not.toHaveProperty("guest_id");
   });
 
+  it("maps backend recalculation of nights and total guests after PATCH", async () => {
+    const { source, request } = sourceWith({ ...response, nights: 4, total_guests: 5 });
+
+    await expect(source.updateReservation(TENANT, "reservation-1", {
+      check_out_date: "2026-09-16",
+      adults: 4,
+      children: 1,
+    })).resolves.toMatchObject({ nights: 4, totalGuests: 5 });
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/reservations/{reservation_id}",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
   it("allowlists runtime mutation keys and nested guest fields", async () => {
     const { source, request } = sourceWith(response);
     await source.createReservation(TENANT, {

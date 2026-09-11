@@ -248,6 +248,9 @@ describe("useReservations / useReservation", () => {
       expect(invalidate).toHaveBeenCalledWith({
         queryKey: reservationsKeys.detail("tenant-from-session", reservationId),
       });
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: ["tenant", "tenant-from-session", "property-timeline"],
+      });
     }
     expect(sourceMock).toHaveBeenCalledTimes(1);
     expect(result.current.isError).toBe(false);
@@ -270,7 +273,7 @@ describe("useReservations / useReservation", () => {
       useUpdateReservation,
       { reservationId: "reservation-1", input: {} },
       updateMock,
-      2,
+      3,
       "reservation-1",
     );
   });
@@ -280,7 +283,7 @@ describe("useReservations / useReservation", () => {
       useCancelReservation,
       { reservationId: "reservation-1" },
       cancelMock,
-      2,
+      3,
       "reservation-1",
     );
   });

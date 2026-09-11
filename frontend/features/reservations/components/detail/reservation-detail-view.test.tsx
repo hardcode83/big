@@ -1,14 +1,21 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { render, screen } from "@/test/render";
+import { act, fireEvent, render, screen, waitFor } from "@/test/render";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import esReservations from "@/locales/es/reservations.json";
 import esStates from "@/locales/es/states.json";
 import { ApiError } from "@/lib/api";
 
 const useReservationMock = vi.hoisted(() => vi.fn());
+const useHasPermissionMock = vi.hoisted(() => vi.fn(() => false));
+const cancelMutateMock = vi.hoisted(() => vi.fn());
+const updateMutateMock = vi.hoisted(() => vi.fn());
+const useCancelReservationMock = vi.hoisted(() => vi.fn(() => ({ isPending: false, isError: false, mutate: cancelMutateMock })));
+const useUpdateReservationMock = vi.hoisted(() => vi.fn(() => ({ isPending: false, isError: false, isSuccess: false, mutate: updateMutateMock })));
 vi.mock("../../hooks/use-reservations", () => ({
   useReservation: useReservationMock,
+  useCancelReservation: useCancelReservationMock,
+  useUpdateReservation: useUpdateReservationMock,
 }));
 
 // `GuestPortalLinkCard` (design D7) is rendered unconditionally by
@@ -17,7 +24,7 @@ vi.mock("../../hooks/use-reservations", () => ({
 // card's own behavior (covered by `guest-portal-link-card.test.tsx`), so the
 // permission is mocked to `false` here: the card's early return keeps every
 // assertion below about the OTHER sections unaffected by its presence.
-vi.mock("@/lib/auth", () => ({ useHasPermission: () => false }));
+vi.mock("@/lib/auth", () => ({ useHasPermission: useHasPermissionMock }));
 vi.mock("../../hooks/use-guest-access-token", () => ({
   useGuestAccessTokenStatus: () => ({ isPending: false, data: undefined }),
   useIssueGuestAccessToken: () => ({
@@ -92,6 +99,11 @@ const FULL_DETAIL = {
 } as const;
 
 describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
+  beforeEach(() => {
+    useHasPermissionMock.mockReturnValue(false);
+    cancelMutateMock.mockReset();
+    updateMutateMock.mockReset();
+  });
   it("renders the loading state when the query is pending", () => {
     useReservationMock.mockReturnValue({
       isPending: true,
@@ -209,6 +221,55 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
     });
     renderDetail();
     expect(screen.getByText(esStates.error.title)).toBeInTheDocument();
+  });
+
+  it("hides edit and cancel controls without MANAGE_RESERVATIONS", () => {
+    useReservationMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: FULL_DETAIL,
+      refetch: vi.fn(),
+    });
+    renderDetail();
+    expect(screen.queryByRole("button", { name: /editar|edit/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /cancelar|cancel/i })).not.toBeInTheDocument();
+  });
+
+  it("shows manager edit/cancel controls and keeps contract-owned fields out of the edit form", () => {
+    useHasPermissionMock.mockReturnValue(true);
+    useReservationMock.mockReturnValue({ isPending: false, isError: false, data: FULL_DETAIL, refetch: vi.fn() });
+    renderDetail();
+    expect(screen.getByRole("heading", { name: esReservations.edit.title })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: esReservations.cancel.open })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: esReservations.fields.status })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: esReservations.fields.paymentStatus })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: esReservations.fields.cleaningRequired })).not.toBeInTheDocument();
+  });
+
+  it("lets mutation hooks own refreshes while retaining localized success UI", async () => {
+    useHasPermissionMock.mockReturnValue(true);
+    const refetch = vi.fn();
+    useReservationMock.mockReturnValue({ isPending: false, isError: false, data: FULL_DETAIL, refetch });
+    renderDetail();
+
+    const checkInTime = screen.getByLabelText(esReservations.edit.fields.checkInTime);
+    fireEvent.change(checkInTime, { target: { value: "16:00" } });
+    fireEvent.click(screen.getByRole("button", { name: esReservations.edit.submit }));
+    expect(updateMutateMock).toHaveBeenCalledWith({
+      reservationId: FULL_DETAIL.id,
+      input: { check_in_time: "16:00" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: esReservations.cancel.open }));
+    fireEvent.click(screen.getByRole("button", { name: esReservations.cancel.confirm }));
+    expect(cancelMutateMock).toHaveBeenCalledWith(
+      { reservationId: FULL_DETAIL.id },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+    const [, options] = cancelMutateMock.mock.calls[0] as [{ reservationId: string }, { onSuccess: () => void }];
+    await act(async () => options.onSuccess());
+    await waitFor(() => expect(screen.getByText(esReservations.cancel.success)).toBeInTheDocument());
+    expect(refetch).not.toHaveBeenCalled();
   });
 
   it("does not render document_number, date_of_birth, document_expiry_date, or nationality (R3.4)", () => {

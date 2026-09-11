@@ -19,11 +19,11 @@
 - [x] 3.3 Build the create payload with an optional `guest` block (`full_name`, email, phone, preferred language), omit blank optional fields and never expose or send `guest_id`; keep form values after mutation errors [R1, R2, R4]
 - [x] 3.4 Wire the form into `frontend/features/reservations/components/list/reservations-view.tsx`, guard it with `MANAGE_RESERVATIONS`, refresh the list after success, and test no duplicate submits, localized success/errors, `preventDefault`, no GET action and no URL/storage PII [R1, R4, R5]
 
-## 4. Detail edit and cancellation flow <!-- hard -->
+## 4. Detail edit and cancellation flow <!-- hard --> <!-- panel: PASS 2026-09-11 receipt:05cecd0a -->
 
-- [ ] 4.1 Add an edit form under `frontend/features/reservations/components/edit/` that initializes from detail data, computes a field-only PATCH diff including explicit nullable clears, and disables `INGEST_OWNED_FIELDS` for non-manual channels [R3, R4]
-- [ ] 4.2 Add localized cancel confirmation/action using DELETE as cancellation, reflect `CANCELLED` from refreshed detail and timeline, and keep 404/409/422 failures visible [R3, R4, R5]
-- [ ] 4.3 Wire edit/cancel actions into `frontend/features/reservations/components/detail/reservation-detail-view.tsx`; test backend recalculation refreshes nights/total guests and controls stay hidden/disabled without permission [R3, R4]
+- [x] 4.1 Add an edit form under `frontend/features/reservations/components/edit/` that initializes from detail data, computes a field-only PATCH diff including explicit nullable clears, and disables `INGEST_OWNED_FIELDS` for non-manual channels [R3, R4]
+- [x] 4.2 Add localized cancel confirmation/action using DELETE as cancellation, reflect `CANCELLED` from refreshed detail and timeline, and keep 404/409/422 failures visible [R3, R4, R5]
+- [x] 4.3 Wire edit/cancel actions into `frontend/features/reservations/components/detail/reservation-detail-view.tsx`; test backend recalculation refreshes nights/total guests and controls stay hidden/disabled without permission [R3, R4]
 
 ## 5. Localization and feature integration
 
@@ -51,3 +51,6 @@
 - Section 3 payload construction sends only civil dates, permitted manual channels, guest contact fields and nonblank optionals; successful mutation resets the form and errors leave values untouched.
 - Section 3 list integration renders the form only for `MANAGE_RESERVATIONS` and explicitly refetches the current list after the mutation hook settles successfully.
 - Section 3 focused verification: `npm test -- features/reservations` · 11 files / 106 tests passed; `npm run lint` passed; `git diff --check` passed. `npm test -- --run frontend/features/reservations` is incompatible with the package root and matches no files. `npx tsc --noEmit` remains blocked by pre-existing `.next` validator references to missing `app/(workspace)/page.js`.
+- Section 4 uses `EditReservationForm` with `buildReservationPatch` for camelCase detail-to-snake_case field diffs; decimal strings are normalized before comparison and blank nullable values emit `null`.
+- Section 4 invalidates `['tenant', tenantId, 'property-timeline']` alongside reservation list/detail after update/cancel, then explicitly refetches the visible detail on success.
+- Section 4 focused verification: `npm test -- features/reservations` · 12 files / 138 tests passed; `npm run lint` passed; `git diff --check` passed.
