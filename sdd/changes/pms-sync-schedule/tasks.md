@@ -4,11 +4,11 @@
 
 ## 1. Config y atribución
 
-- [ ] 1.1 `backend/app/core/config.py`: añadir `pms_sync_window_days: int = 2` a `Settings`,
+- [x] 1.1 `backend/app/core/config.py`: añadir `pms_sync_window_days: int = 2` a `Settings`,
       junto a los demás enteros de dominio (`notification_batch_size`, `beds24_max_pages`).
       `.env.example`: añadir la línea comentada `# PMS_SYNC_WINDOW_DAYS=2` junto a
       `BEDS24_MAX_PAGES`. [R2]
-- [ ] 1.2 `backend/app/integrations/application/use_cases.py`: añadir
+- [x] 1.2 `backend/app/integrations/application/use_cases.py`: añadir
       `SCHEDULED_SOURCE = "pms_scheduled"` junto a `PMS_SOURCE`/`CSV_SOURCE`/`WEBHOOK_SOURCE`,
       con un comentario corto (mismo estilo que el de `WEBHOOK_SOURCE`) explicando por qué es un
       cuarto valor y no una reutilización de `PMS_SOURCE`. Sin cambios en `execute()` — el
@@ -82,3 +82,33 @@
 ## Implementation Notes
 
 <!-- Append-only, escrito por cada implementador de sección para la siguiente. -->
+
+### Section 1 (config y atribución) — para Section 2
+
+- `pms_sync_window_days: int = 2` quedó en `backend/app/core/config.py`, en el bloque Beds24,
+  justo después de `beds24_timeout_seconds` y antes del comentario de "Object storage for the
+  `S3` adapter" — no junto a `notification_batch_size` (que vive en el bloque de
+  `access-notifications`, lejos de PMS). El nombre exacto del campo es `pms_sync_window_days`,
+  léelo con `settings.pms_sync_window_days` (import `from app.core.config import settings`).
+- `.env.example`: la línea comentada `# PMS_SYNC_WINDOW_DAYS=2` quedó justo debajo del bloque
+  `# BEDS24_TIMEOUT_SECONDS=30.0`, con un comentario de dos líneas explicando que es distinta
+  del default de 30 días del CLI manual.
+- `SCHEDULED_SOURCE = "pms_scheduled"` quedó en `backend/app/integrations/application/use_cases.py`,
+  inmediatamente después del docstring de `WEBHOOK_SOURCE`, con su propio docstring corto en el
+  mismo estilo (referencia a este change, design D4, R3). Import exacto:
+  `from app.integrations.application.use_cases import SCHEDULED_SOURCE`.
+- Sin sorpresas en la carga de `Settings`: el campo entero simple no dispara ningún validador ni
+  interactúa con otros campos (a diferencia de `password_reset_grace_minutes`, que sí tiene un
+  `model_validator` cruzado). No hace falta añadir nada a `_default_database_url` ni a ningún
+  otro validador.
+- Nota de entorno para quien repita la verificación: este worktree no tenía `.env` (no está
+  versionado); `docker compose run --rm backend ...` falla en seco sin él
+  (`required variable JWT_SECRET_KEY is missing a value`). Generé uno temporal a partir de
+  `.env.example` con `JWT_SECRET_KEY`/`ENCRYPTION_KEY` válidos solo para las comprobaciones de
+  humo, corrí `docker compose down` al terminar y borré el `.env` — no quedó en el árbol
+  (`git status` limpio salvo los tres ficheros de código y `.env.example`).
+- Verificado: import de `settings.pms_sync_window_days` (imprime `2`), import de
+  `SCHEDULED_SOURCE`/`PMS_SOURCE`/`CSV_SOURCE`/`WEBHOOK_SOURCE` (imprime los cuatro valores
+  distintos), `tests/test_schedule.py` (17 passed), `tests/test_config.py` (110 passed),
+  `tests/integrations/test_webhook_processing.py` + `test_webhook_causality.py` (23 passed) —
+  todo corrido dentro de `backend/` vía `docker compose run --rm backend uv run pytest tests/...`.
