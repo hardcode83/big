@@ -299,6 +299,17 @@ sección 8.
 
 ## 8. Ruta final
 
+- [x] 8.1 `app/(workspace)/reviews/page.tsx`: sustituir ``RoutePlaceholder` por
+  `<ReviewsView />` desde `@/features/reviews`, conservando `generateMetadata` desde
+  `routeMetadata("reviews")`. **No tocar** `features/shell/navigation/route-registry.ts`
+  ni `locales/{es,en}/navigation.json`, no dar de alta descriptores y no cambiar
+  `match` a `"prefix"`. Verificar con `git diff --name-only` que ninguno de esos
+  ficheros aparece. [R1.2, R1.4]
+
+## 9. Verification
+
+## 8. Ruta final
+
 - [ ] 8.1 `app/(workspace)/reviews/page.tsx`: sustituir `RoutePlaceholder` por
   `<ReviewsView />` desde `@/features/reviews`, conservando `generateMetadata` desde
   `routeMetadata("reviews")`. **No tocar** `features/shell/navigation/route-registry.ts`
