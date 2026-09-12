@@ -34,9 +34,9 @@
       in `infra/environments/dev/` — no live `plan`/`apply` here (Post-merge operational steps,
       below). [R1]
 
-## 2. GitHub Actions — wiring the four secrets into `terraform apply`
+## 2. GitHub Actions — wiring the four secrets into `terraform apply` <!-- panel: PASS 2026-09-12 receipt:47eb8c32 -->
 
-- [ ] 2.1 `.github/workflows/infra-dev.yml`: add four `TF_VAR_*` mappings —
+- [x] 2.1 `.github/workflows/infra-dev.yml`: add four `TF_VAR_*` mappings —
       `TF_VAR_whatsapp_access_token`, `TF_VAR_whatsapp_phone_number_id`,
       `TF_VAR_whatsapp_app_secret`, `TF_VAR_whatsapp_webhook_verify_token` — each sourced from a
       new GitHub Actions secret of the same suffix (`secrets.WHATSAPP_ACCESS_TOKEN` etc.), in both
@@ -119,3 +119,4 @@ it live.
 - No secret resource/variable exists for `WHATSAPP_PROVIDER` — it is not sensitive and reaches the runtime `.env` via repo variable (`vars.WHATSAPP_PROVIDER`), not Vault. Section 2/3 must read the four Vault secrets **by name** (`autohostai-${ENV}-whatsapp-*`) via `get-secret-bundle-by-name`, same as tunnel/media/SMTP — the runner policy above only authorizes those four exact OCIDs.
 - `terraform fmt -check -diff`: clean (no diff). `terraform init -backend=false && terraform validate` (in `infra/environments/dev/`): `Success! The configuration is valid.`
 - Review fix (section 1, round 1): added the four whatsapp-* placeholders + dated note to infra/environments/dev/iam-policy.md's runner-policy mirror block, which the doc requires be kept in sync with main.tf.
+- Section 2 done. Added to `.github/workflows/infra-dev.yml`'s `plan` and `apply` jobs' `env:` blocks (both, right after `TF_VAR_github_app_private_key`): `TF_VAR_whatsapp_access_token` ← `secrets.WHATSAPP_ACCESS_TOKEN`, `TF_VAR_whatsapp_phone_number_id` ← `secrets.WHATSAPP_PHONE_NUMBER_ID`, `TF_VAR_whatsapp_app_secret` ← `secrets.WHATSAPP_APP_SECRET`, `TF_VAR_whatsapp_webhook_verify_token` ← `secrets.WHATSAPP_WEBHOOK_VERIFY_TOKEN`. These are the four GitHub Actions secret names for the next section (deploy-dev.yml Render `.env` step) to reference consistently. No `github` Terraform provider resource touched (R2.2 out of scope).
