@@ -1,0 +1,181 @@
+{
+  "userRole": {
+    "TENANT_OWNER": "Propietaria",
+    "PROPERTY_MANAGER": "Gestora",
+    "CLEANER": "Limpiadora",
+    "TECHNICIAN": "Técnico",
+    "SUPER_ADMIN": "Super administrador"
+  },
+  "userStatus": {
+    "ACTIVE": "Activo",
+    "INACTIVE": "Inactivo",
+    "SUSPENDED": "Suspendido"
+  },
+  "view": {
+    "usersHeading": "Usuarios",
+    "tenantHeading": "Tenant",
+    "addUser": "Añadir usuario",
+    "sheet": {
+      "close": "Cerrar",
+      "createUserTitle": "Añadir usuario"
+    }
+  },
+  "userList": {
+    "filters": {
+      "ariaLabel": "Filtrar usuarios",
+      "role": "Rol",
+      "status": "Estado",
+      "allRoles": "Todos los roles",
+      "allStatuses": "Todos los estados",
+      "clear": "Limpiar filtros"
+    },
+    "table": {
+      "caption": "Usuarios del tenant",
+      "name": "Nombre",
+      "email": "Correo electrónico",
+      "role": "Rol",
+      "status": "Estado",
+      "actions": "Acciones",
+      "view": "Ver"
+    },
+    "loading": "Cargando usuarios…",
+    "empty": {
+      "title": "No se encontraron usuarios",
+      "description": "Ningún usuario coincide con los filtros actuales."
+    },
+    "error": {
+      "title": "No se pudieron cargar los usuarios",
+      "description": "Algo salió mal al cargar el directorio de usuarios.",
+      "retry": "Reintentar"
+    },
+    "pagination": {
+      "label": "Paginación de usuarios",
+      "previous": "Página anterior",
+      "next": "Página siguiente",
+      "pageOfTotal": "Página {{page}} de {{totalPages}}",
+      "totalUsers": "{{total}} usuarios en total"
+    }
+  },
+  "rowActions": {
+    "view": "Ver",
+    "edit": "Editar",
+    "resetPassword": "Restablecer contraseña",
+    "deactivate": "Desactivar",
+    "sheet": {
+      "close": "Cerrar",
+      "viewTitle": "Detalle del usuario",
+      "editTitle": "Editar usuario"
+    }
+  },
+  "userDetail": {
+    "loading": "Cargando usuario…",
+    "error": {
+      "title": "No se pudo cargar este usuario",
+      "description": "Algo salió mal al cargar el detalle del usuario.",
+      "retry": "Reintentar"
+    },
+    "notFound": "Usuario no encontrado",
+    "ariaLabel": "Detalle del usuario",
+    "fields": {
+      "name": "Nombre",
+      "email": "Correo electrónico",
+      "phone": "Teléfono",
+      "role": "Rol",
+      "status": "Estado"
+    },
+    "unset": "—"
+  },
+  "createUser": {
+    "fields": {
+      "fullName": "Nombre completo",
+      "email": "Correo electrónico",
+      "phone": "Teléfono",
+      "role": "Rol"
+    },
+    "submit": "Crear usuario",
+    "submitting": "Creando…",
+    "genericError": "Algo salió mal. Vuelve a intentarlo."
+  },
+  "editUser": {
+    "loading": "Cargando usuario…",
+    "error": {
+      "title": "No se pudo cargar este usuario",
+      "description": "Algo salió mal al cargar el detalle del usuario.",
+      "retry": "Reintentar"
+    },
+    "fields": {
+      "fullName": "Nombre completo",
+      "email": "Correo electrónico",
+      "phone": "Teléfono",
+      "role": "Rol",
+      "status": "Estado"
+    },
+    "selfNote": "No puedes cambiar tu propio rol ni estado.",
+    "submit": "Guardar cambios",
+    "submitting": "Guardando…"
+  },
+  "deactivateConfirm": {
+    "title": "Desactivar usuario",
+    "description": "¿Seguro que quieres desactivar a {{name}}? Ya no podrá iniciar sesión.",
+    "lastCleanerWarning": "{{name}} es la única limpiadora activa de este tenant. Desactivarla dejará la limpieza de salida sin nadie asignado automáticamente — esto no bloqueará la acción.",
+    "error": "Algo salió mal al desactivar este usuario.",
+    "cancel": "Cancelar",
+    "confirm": "Desactivar",
+    "confirming": "Desactivando…"
+  },
+  "resetPasswordConfirm": {
+    "title": "Restablecer contraseña",
+    "description": "¿Generar una nueva contraseña temporal para {{name}}? Su contraseña actual dejará de funcionar de inmediato.",
+    "successTitle": "Contraseña restablecida",
+    "error": "Algo salió mal al restablecer la contraseña.",
+    "cancel": "Cancelar",
+    "close": "Cerrar",
+    "confirm": "Restablecer contraseña",
+    "confirming": "Restableciendo…"
+  },
+  "tenantConfig": {
+    "loading": "Cargando la configuración del tenant…",
+    "error": {
+      "title": "No se pudo cargar la configuración del tenant",
+      "description": "Algo salió mal al cargar la configuración del tenant.",
+      "retry": "Reintentar"
+    },
+    "readOnlyAriaLabel": "Configuración del tenant (solo lectura)",
+    "fields": {
+      "name": "Nombre",
+      "billingEmail": "Email de facturación",
+      "country": "País",
+      "timezone": "Zona horaria",
+      "defaultLanguage": "Idioma por defecto",
+      "ownerApprovalThreshold": "Umbral de aprobación del propietario (EUR)",
+      "aiConfidenceThreshold": "Umbral de confianza de la IA",
+      "slaCritical": "SLA — crítico (minutos)",
+      "slaHigh": "SLA — alto (minutos)",
+      "slaMedium": "SLA — medio (minutos)",
+      "slaLow": "SLA — bajo (minutos)",
+      "checkinWindow": "Ventana de check-in (horas antes)",
+      "checkoutWindow": "Ventana de checkout listo (horas después)",
+      "autoCreateCleaningTask": "Crear tarea de limpieza automáticamente tras el checkout",
+      "cleaningPhotoRequired": "Requerir foto de limpieza",
+      "storageType": "Tipo de almacenamiento",
+      "notificationEmail": "Notificaciones por email",
+      "notificationWhatsapp": "Notificaciones por WhatsApp",
+      "reviewRecurringIssuesTopN": "Incidencias recurrentes mostradas"
+    },
+    "enabled": "Activado",
+    "disabled": "Desactivado",
+    "languageNote": "Cambiar esto no afecta al idioma preferido ya establecido en los usuarios existentes.",
+    "thresholdNote": "Cambiar esto no reevalúa las aprobaciones del propietario ya generadas.",
+    "submit": "Guardar cambios",
+    "submitting": "Guardando…",
+    "success": "Configuración del tenant actualizada."
+  },
+  "validation": {
+    "notANumber": "Debe ser un número.",
+    "negative": "No puede ser negativo.",
+    "outOfConfidenceRange": "Debe estar entre 0 y 1.",
+    "notPositive": "{{label}} debe ser mayor que cero.",
+    "timezoneEmpty": "La zona horaria no puede estar vacía.",
+    "timezoneInvalid": "Zona horaria IANA no reconocida (p. ej. Europe/Madrid)."
+  }
+}

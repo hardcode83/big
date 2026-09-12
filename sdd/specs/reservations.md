@@ -266,7 +266,14 @@ definitiva. Abrir esas dos operaciones es trabajo de esta capacidad y está pend
   `RESERVATION_CANCELLED`, igual que la cancelación por `DELETE`: una reserva no puede
   quedar cancelada sin que exista su evento de cancelación.
 - WHEN una reserva se crea por sincronización con el PMS, THE SYSTEM SHALL persistir un
-  `RESERVATION_IMPORTED` con `actor_type` `SYSTEM` y sin `actor_user_id`.
+  `RESERVATION_IMPORTED` con `actor_type` `SYSTEM` y sin `actor_user_id`. `source` distingue
+  el disparador de ese mismo caso de uso: `PMS_SOURCE = "pms"` para el CLI manual (`pms_sync`),
+  `WEBHOOK_SOURCE = "webhook"` para el recorte de un aviso del proveedor
+  (`reservations-webhooks`), y `SCHEDULED_SOURCE = "pms_scheduled"` para el barrido periódico de
+  beat cada 6 horas (`pms-sync-schedule` R3, `celery-jobs` §El calendario). Los tres llaman a
+  `SyncReservationsFromPmsUseCase.execute(...)` sin una segunda implementación; lo único que
+  cambia entre ellos es `source`, `since` y, para el CLI, un `forced_provider` opcional que
+  ni el webhook ni el barrido pasan nunca.
 - WHEN una reserva se crea por importación CSV, THE SYSTEM SHALL persistir un
   `RESERVATION_IMPORTED` con `actor_type` `USER` y el `actor_user_id` de quien subió el
   fichero.
@@ -332,9 +339,13 @@ definitiva. Abrir esas dos operaciones es trabajo de esta capacidad y está pend
 - THE SYSTEM SHALL tratar un email en blanco como ausencia de email: no coincide con nadie
   y no se almacena, de modo que dos filas sin email son dos personas y no una.
 - WHEN se ejecuta el comando `python -m app.integrations.cli.pms_sync <tenant> [días]
-  [--provider {mock,channex,beds24}]`, THE SYSTEM SHALL sincronizar ese tenant e imprimir el
-  informe, marcando la sesión con el tenant indicado porque un comando no atraviesa la
-  verificación del token.
+  [--provider {mock,channex,beds24}]` (`make pms-sync TENANT=<uuid> [WINDOW=<días>]
+  [PROVIDER=<proveedor>]`), THE SYSTEM SHALL sincronizar ese tenant e imprimir el informe,
+  marcando la sesión con el tenant indicado porque un comando no atraviesa la verificación del
+  token. Sin `[días]`, THE SYSTEM SHALL usar una ventana de 30 días — distinta de los 2 días por
+  defecto de `Settings.pms_sync_window_days` que usa el barrido periódico de beat cada 6 horas
+  (`celery-jobs` §El calendario), porque un disparo manual bajo demanda no tiene el mismo margen
+  de recuperación que un ciclo corto y repetido.
 - WHEN no se pasa `--provider`, THE SYSTEM SHALL dejar que **cada propiedad resuelva el suyo**
   (`sdd/specs/pms-provider-resolution.md`), y una propiedad que no declara ninguno cae al
   proveedor por defecto, `MOCK` — de modo que el comportamiento de la suite y del arranque local

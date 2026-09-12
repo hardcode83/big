@@ -124,6 +124,7 @@ function AlertDialogAction({
   );
 }
 
+/** Forwards `className` to the `Button` for the same reason as `AlertDialogAction`. */
 function AlertDialogCancel({
   className,
   ...props
