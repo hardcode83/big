@@ -33,15 +33,15 @@
       event and stays counted `skipped`; `created`/`updated`/`skipped` counts match today's
       behavior exactly (R6) regardless of whether an event fired. [R1, R2, R6]
 
-## 2. Thread `advance` through the Sync and CSV use cases
+## 2. Thread `advance` through the Sync and CSV use cases <!-- panel: PASS 2026-09-12 receipt:e8b40f2a -->
 
-- [ ] 2.1 `SyncReservationsFromPmsUseCase.__init__` (`backend/app/integrations/application/
+- [x] 2.1 `SyncReservationsFromPmsUseCase.__init__` (`backend/app/integrations/application/
       use_cases.py`) gains `advance: PropertyStateAdvancer | None = None`, passed straight into
       its internal `ReservationIngestor(...)`. [R3.3]
-- [ ] 2.2 `ImportReservationsFromCsvUseCase.__init__` (same file) gains the identical
+- [x] 2.2 `ImportReservationsFromCsvUseCase.__init__` (same file) gains the identical
       `advance: PropertyStateAdvancer | None = None`, passed into its internal
       `ReservationIngestor(...)`. [R3.3, R4]
-- [ ] 2.3 Confirm every existing construction of `SyncReservationsFromPmsUseCase` and
+- [x] 2.3 Confirm every existing construction of `SyncReservationsFromPmsUseCase` and
       `ImportReservationsFromCsvUseCase` in `backend/tests/` still passes with the new parameter
       defaulting to `None` (no behavior change for a caller that doesn't supply it) — fix any
       test helper whose constructor call uses positional args that this shifts.
@@ -119,3 +119,6 @@
 - Section 1: `_record_updated(self, *, tenant_id, reservation, newly_cancelled: bool, applied: dict[str, object], now, actor_type, actor_user_id) -> None` — no `source` param (unlike `_record_imported`), since its title is a fixed string, not "from {source}".
 - Section 1: `ReservationIngestor.__init__`'s new `advance` param is keyword-only with a default, so the three existing construction sites (`use_cases.py:108`, `use_cases.py:650`, `cli/seed_demo.py:1900`, `tests/properties/test_inactive_property_guard.py:181`) needed no changes — confirmed by running their tests.
 - Section 1: no existing assertion in `test_sync.py`/`test_import_csv.py` asserted "no event on update" — both still pass unchanged, nothing for section 4 to reconcile there.
+- Section 2: `PropertyStateAdvancer` was NOT yet imported in `use_cases.py`; added it to the existing `from app.integrations.domain.ports import (...)` block alongside `PMSAdapterFactory` and `ReservationCsvParser`.
+- Section 2: both `SyncReservationsFromPmsUseCase.__init__` and `ImportReservationsFromCsvUseCase.__init__` gained `advance: PropertyStateAdvancer | None = None` as the LAST keyword-only param (after `email_exclusion`/`max_rows`+`email_exclusion` respectively), forwarded verbatim as `advance=advance` into their internal `ReservationIngestor(...)` call. Section 3 can pass `advance=` by keyword at either composition root with no other signature changes.
+- Section 2: no test in `backend/tests/` constructs `ImportReservationsFromCsvUseCase(...)` directly (grep found zero hits) — nothing there could break. All `SyncReservationsFromPmsUseCase(...)` construction sites already use keyword args exclusively (the class is `*`-only), so the new trailing default param was a no-op for them; confirmed by running `tests/integrations` (976 passed, same as section 1's baseline, 0 failures).

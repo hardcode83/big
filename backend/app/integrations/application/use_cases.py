@@ -47,7 +47,11 @@ from app.integrations.domain.enums import (
     PmsCredentialScope,
     credential_scope_for,
 )
-from app.integrations.domain.ports import PMSAdapterFactory, ReservationCsvParser
+from app.integrations.domain.ports import (
+    PMSAdapterFactory,
+    PropertyStateAdvancer,
+    ReservationCsvParser,
+)
 from app.integrations.domain.repositories import WebhookEndpointRepository
 from app.integrations.domain.webhook_auth import (
     generate_header_secret,
@@ -99,6 +103,7 @@ class SyncReservationsFromPmsUseCase:
         uow: UnitOfWork,
         audit: AuditLogRepository,
         email_exclusion: GuestEmailExclusion,
+        advance: PropertyStateAdvancer | None = None,
     ) -> None:
         # A FACTORY, not an adapter. ADR 0006 decision 7 is explicit that use cases must never
         # receive an adapter injected as a singleton, because that is precisely what makes
@@ -110,6 +115,7 @@ class SyncReservationsFromPmsUseCase:
             guests=guests,
             timeline=timeline,
             email_exclusion=email_exclusion,
+            advance=advance,
         )
         self._uow = uow
         # REQUIRED, not optional. It defaulted to `None` and `_record_credential_reads` returned
@@ -644,6 +650,7 @@ class ImportReservationsFromCsvUseCase:
         uow: UnitOfWork,
         max_rows: int,
         email_exclusion: GuestEmailExclusion,
+        advance: PropertyStateAdvancer | None = None,
     ) -> None:
         self._parser = parser
         self._properties = properties
@@ -652,6 +659,7 @@ class ImportReservationsFromCsvUseCase:
             guests=guests,
             timeline=timeline,
             email_exclusion=email_exclusion,
+            advance=advance,
         )
         self._uow = uow
         self._max_rows = max_rows
