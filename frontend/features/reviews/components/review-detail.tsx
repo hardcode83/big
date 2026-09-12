@@ -96,7 +96,7 @@ export function ReviewDetail({
       </div>
       <div className="flex flex-col gap-1">
         <span className="text-body-base font-medium text-muted-foreground">
-          {t("detail.guestContent")}
+          {t("preview.guestText")}
         </span>
         <p className="whitespace-pre-wrap text-body-base text-foreground">
           {review.content ?? t("preview.empty")}
@@ -104,27 +104,27 @@ export function ReviewDetail({
       </div>
       {review.rating !== null && (
         <p className="text-body-base text-foreground">
-          {t("detail.rating")}
+          {t("preview.rating")}
           {": "}
           {fmtRating(review.rating, i18n.language)}/5
         </p>
       )}
       <p className="text-body-base text-muted-foreground">
-        {t(`channel.${review.channel}`)}
+        {t(`preview.channel`)}
         {review.publishedAt !== null
           ? ` · ${fmtDay(review.publishedAt, i18n.language)}`
           : ""}
       </p>
       {review.reviewerName !== null && (
         <p className="text-body-base text-muted-foreground">
-          {t("detail.reviewer")}
+          {t("preview.reviewerName")}
           {": "}
           {review.reviewerName}
         </p>
       )}
       {review.sentiment !== null && (
         <p className="text-body-base text-muted-foreground">
-          {t("detail.sentiment")}
+          {t("preview.sentiment")}
           {": "}
           {t(`sentiment.${review.sentiment}`)}
         </p>
@@ -132,7 +132,7 @@ export function ReviewDetail({
       {review.aiSummary !== null && (
         <div className="flex flex-col gap-1">
           <span className="text-body-base font-medium text-muted-foreground">
-            {t("detail.aiSummary")}
+            {t("preview.aiSummary")}
           </span>
           <p className="whitespace-pre-wrap text-body-base text-foreground">
             {review.aiSummary}
@@ -154,7 +154,7 @@ export function ReviewDetail({
       {draft !== null && (
         <div className="flex flex-col gap-2 border-t border-border pt-3">
           <span className="text-body-base font-medium text-muted-foreground">
-            {t("detail.draft")}
+            {t("preview.draftContent")}
           </span>
           {editing ? (
             <>
@@ -171,14 +171,14 @@ export function ReviewDetail({
                   disabled={isBusy || editValue.trim().length === 0}
                   onClick={submitEdit}
                 >
-                  {t("respond.edit.save")}
+                  {t("respond.editSave")}
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   onClick={() => setEditing(false)}
                 >
-                  {t("respond.edit.cancel")}
+                  {t("respond.editCancel")}
                 </Button>
               </div>
             </>
@@ -194,7 +194,7 @@ export function ReviewDetail({
                   disabled={isBusy}
                   onClick={startEdit}
                 >
-                  {t("respond.edit")}
+                  {t("respond.editDraft")}
                 </Button>
               )}
             </>

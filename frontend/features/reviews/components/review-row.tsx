@@ -60,7 +60,7 @@ export function ReviewRow({
     identity.kind === "resolved"
       ? identity.value.name
       : identity.kind === "pending"
-        ? t("identity.pending")
+        ? t("identity.loading")
         : t("identity.unavailable");
 
   return (

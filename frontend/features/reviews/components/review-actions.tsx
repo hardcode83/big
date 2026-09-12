@@ -19,16 +19,16 @@ import type { ReviewerRole } from "../lib/review-actions";
  * content (D12, R4.2 reserved the dialog for **Marcar como publicada**
  * specifically).
  *
- * **`legalActions(status, role)`** decides which buttons appear. This is
- * affordance, not authority: the backend validates and answers `409` (R3.5).
+ * **`legalActions(status, role)`** decides which buttons appear, with two
+ * further exclusions applied here:
+ *  - `MARK_POSTED` is filtered out — it lives in the detail's dialog.
+ *  - `EDIT` is filtered out — it lives in the detail's inline textarea.
+ *
+ * This is affordance, not authority: the backend validates and answers
+ * `409` (R3.5).
  *
  * **EDIT after APPROVED is omitted** (R3.3 / entities.py:369): the draft is
  * locked once `approved_at` is set.
- *
- * `MARK_POSTED` does **not** appear in the row's action bar (D5, R4.2): it
- * lives in the detail's `AlertDialog` because the operator needs the preview
- * of the `content` and the approved `draft_content` to confirm before the
- * row goes to a terminal state (no undo).
  */
 export interface ReviewActionsProps {
   reviewId: string;
@@ -38,20 +38,25 @@ export interface ReviewActionsProps {
   isPending: boolean;
   /** Any review mutation is in flight — global disable (D9). */
   isBusy: boolean;
+  /**
+   * Mutation handler wired through the parent (R3.1). The row-level
+   * ReviewActions only ever sends APPROVE / IGNORE — `MARK_POSTED` lives
+   * in the detail (D12, R4.2) and `EDIT` lives in the detail's textarea
+   * (R3.3). The row button therefore does not carry a `draft_content`.
+   */
   onConfirm: (input: {
     reviewId: string;
-    action: Exclude<ReviewAction, "MARK_POSTED">;
+    action: Exclude<ReviewAction, "MARK_POSTED" | "EDIT">;
   }) => void;
 }
 
 /** The i18n key of each move's button label. */
 const LABEL_KEY: Record<
-  Exclude<ReviewAction, "MARK_POSTED">,
+  Exclude<ReviewAction, "MARK_POSTED" | "EDIT">,
   string
 > = {
   APPROVE: "respond.approve",
   IGNORE: "respond.ignore",
-  EDIT: "respond.edit",
 };
 
 export function ReviewActions({
@@ -64,12 +69,13 @@ export function ReviewActions({
 }: ReviewActionsProps) {
   const { t } = useTranslation("reviews");
   const moves = legalActions(status, role).filter(
-    (a): a is Exclude<ReviewAction, "MARK_POSTED"> => a !== "MARK_POSTED",
+    (a): a is Exclude<ReviewAction, "MARK_POSTED" | "EDIT"> =>
+      a !== "MARK_POSTED" && a !== "EDIT",
   );
 
   /** Local to this row: two two can never be mid-confirmation of each other. */
   const [pendingAction, setPendingAction] =
-    useState<Exclude<ReviewAction, "MARK_POSTED"> | null>(null);
+    useState<Exclude<ReviewAction, "MARK_POSTED" | "EDIT"> | null>(null);
 
   if (moves.length === 0) {
     return null;
