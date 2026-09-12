@@ -47,6 +47,15 @@ import type { components } from "@/lib/api/generated/openapi";
  * the backend but not the `MANAGE_*` one, so `/settings` renders read-only for
  * that role (D5) — same "owner operates, manager reads" split as
  * `RESPOND_OWNER_APPROVALS` above, not the `MANAGE_CLEANING_TASKS` one.
+ *
+ * `reviews-web` D15 adds `MANAGE_REVIEW_DECISIONS` (owner-only: approve / ignore /
+ * mark-as-posted) and `CREATE_REVIEW_UI` (manager-only: high-by-hand and edit
+ * draft). The split mirrors the PRD §18 division of labour — the owner decides,
+ * the manager operates — and is a UX choice, not an RBAC consequence: `policy.py`
+ * grants the manager every permission of the flow via `_REVIEW_MANAGE`. The
+ * frontend hides approve/ignore/mark-posted from the manager; if she calls the
+ * API directly, the backend accepts. Same posture as `MANAGE_PRICE_RECOMMENDATIONS`
+ * above and `RESPOND_OWNER_APPROVALS` in `approvals-web`.
  */
 type UserRole = components["schemas"]["UserRole"];
 
@@ -56,10 +65,13 @@ export type Permission =
   | "EXECUTE_INCIDENTS"
   | "MANAGE_CONVERSATIONS"
   | "MANAGE_INCIDENTS"
+  | "MANAGE_RESERVATIONS"
   | "RESPOND_OWNER_APPROVALS"
   | "MANAGE_GUEST_ACCESS_TOKENS"
   | "MANAGE_USERS"
-  | "MANAGE_TENANT_SETTINGS";
+  | "MANAGE_TENANT_SETTINGS"
+  | "MANAGE_REVIEW_DECISIONS"
+  | "CREATE_REVIEW_UI";
 
 export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [],
@@ -79,6 +91,11 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "MANAGE_GUEST_ACCESS_TOKENS",
     "MANAGE_USERS",
     "MANAGE_TENANT_SETTINGS",
+    // `MANAGE_REVIEW_DECISIONS` is the owner's side of the reviews split
+    // (reviews-web D15): she approves, ignores, and marks-as-posted. The
+    // manager does not get it on the UX mirror — see the file header — even
+    // though `policy.py:_REVIEW_MANAGE` would grant her the action.
+    "MANAGE_REVIEW_DECISIONS",
   ],
   PROPERTY_MANAGER: [
     "MANAGE_CLEANING_TASKS",
@@ -86,7 +103,15 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "EXECUTE_INCIDENTS",
     "MANAGE_CONVERSATIONS",
     "MANAGE_INCIDENTS",
+    "MANAGE_RESERVATIONS",
     "MANAGE_GUEST_ACCESS_TOKENS",
+    // `CREATE_REVIEW_UI` is the manager's side of the reviews split
+    // (reviews-web D15): she creates reviews by hand and edits drafts. The
+    // owner does not get it on the UX mirror, mirroring the PRD §18 split
+    // — *«el owner aprueba, ignora y marca como publicada; el manager
+    // crea»*. `policy.py:309-316` and `:432-433` already grant it to both
+    // roles; the UX mirror narrows it to the manager.
+    "CREATE_REVIEW_UI",
   ],
   CLEANER: [],
   TECHNICIAN: [],

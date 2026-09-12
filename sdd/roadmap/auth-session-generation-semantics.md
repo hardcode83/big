@@ -60,3 +60,7 @@ interleavings descritos arriba: hoy ninguno de los dos tiene test que falle.
   coordinador y la purga siguen siendo los de `frontend-auth-session`.
 - **No arregla nada que un usuario note hoy**: (1) es latente y (2) degrada a un `401` que se recupera
   solo. Es deuda de semántica que el siguiente consumidor de mutaciones optimistas volverá a pisar.
+
+---
+
+(1) el `catch` de `refresh()` llama a `purgeSessionCache()` sola, sin mover `sessionGeneration`, así que un snapshot optimista tomado en esa generación pasa la guarda y reescribe filas del usuario saliente sobre la caché recién vaciada —latente hoy, porque ningún `useAuth()` desestructura `refresh`—; (2) limpiar tokens al expirar la sesión anula la guarda de `refresh-coordinator.ts:57` y un refresco viejo puede tirar los tokens de la sesión nueva, que se recupera sola en el siguiente `401`. No se arreglaron en la bandeja porque cambian la semántica de un módulo compartido (no está en el plan original, añadida el 2026-08-29; encargo del `/sdd:archive` de `notifications-inbox-web`) …

@@ -39,7 +39,7 @@ export function DetailHeader({
     <header className="flex flex-wrap items-baseline gap-2">
       <span className="font-mono text-xs text-muted-foreground">{id}</span>
       <span className="text-sm font-medium">{t(`status.${status}`)}</span>
-      <span className="text-xs text-muted-foreground">{channel}</span>
+      <span className="text-xs text-muted-foreground">{t(`channels.${channel}`, { defaultValue: channel })}</span>
     </header>
   );
 }
@@ -134,9 +134,9 @@ export function DetailFinancialBlock({
   otaCommission,
   currency,
 }: {
-  grossAmount: string | null;
-  netAmount: string | null;
-  otaCommission: string | null;
+  grossAmount: string | null | undefined;
+  netAmount: string | null | undefined;
+  otaCommission: string | null | undefined;
   currency: string;
 }) {
   const { t } = useTranslation("reservations");
@@ -146,7 +146,7 @@ export function DetailFinancialBlock({
         <div>
           <dt className="text-muted-foreground">{t("fields.gross")}</dt>
           <dd>
-            {grossAmount !== null
+            {grossAmount != null
               ? `${grossAmount} ${currency}`
               : "—"}
           </dd>
@@ -154,7 +154,7 @@ export function DetailFinancialBlock({
         <div>
           <dt className="text-muted-foreground">{t("fields.net")}</dt>
           <dd>
-            {netAmount !== null
+            {netAmount != null
               ? `${netAmount} ${currency}`
               : "—"}
           </dd>
@@ -162,7 +162,7 @@ export function DetailFinancialBlock({
         <div>
           <dt className="text-muted-foreground">{t("fields.ota")}</dt>
           <dd>
-            {otaCommission !== null
+            {otaCommission != null
               ? `${otaCommission} ${currency}`
               : "—"}
           </dd>
@@ -187,11 +187,11 @@ export function DetailPaymentBlock({
       <dl className="grid grid-cols-2 gap-2 text-sm">
         <div>
           <dt className="text-muted-foreground">{t("fields.paymentStatus")}</dt>
-          <dd>{paymentStatus}</dd>
+          <dd>{t(`paymentStatuses.${paymentStatus}`, { defaultValue: paymentStatus })}</dd>
         </div>
         <div>
           <dt className="text-muted-foreground">{t("fields.accessStatus")}</dt>
-          <dd>{accessStatus ?? "—"}</dd>
+          <dd>{accessStatus === null || accessStatus === undefined ? "—" : t(`accessStatuses.${accessStatus}`, { defaultValue: accessStatus })}</dd>
         </div>
         <div>
           <dt className="text-muted-foreground">{t("fields.cleaningRequired")}</dt>
@@ -228,7 +228,7 @@ export function DetailGuestBlock({ guest }: { guest: GuestSummaryDto | null }) {
         </div>
         <div>
           <dt className="text-muted-foreground">{t("fields.preferredLanguage")}</dt>
-          <dd>{guest.preferredLanguage}</dd>
+          <dd>{t(`create.languages.${guest.preferredLanguage}`, { defaultValue: guest.preferredLanguage })}</dd>
         </div>
       </dl>
     </section>

@@ -271,3 +271,11 @@ frases que un cambio bienintencionado usaría.
   inbox, no un fallo. La bandeja en `/conversations` y `/conversations/[id]` (**change
   `conversations-inbox`**) sigue siendo funcional y se demuestra creando una conversación por
   la API o transcribiendo un mensaje desde el panel antes de abrir el listado.
+- **Respuesta humana por WhatsApp fuera de la ventana de 24 h queda como `FAILED`**: una vez
+  pasadas las 24 h del último mensaje del huésped, Meta sólo permite plantillas aprobadas y
+  ninguna está aprobada en MVP, así que `DelegatingOutboundAdapter` devuelve
+  `OUTSIDE_SESSION_WINDOW`, el `Message` se persiste con `metadata.delivery_status="FAILED"`
+  y `delivery_error_code="OUTSIDE_SESSION_WINDOW"`, y no se reintenta automáticamente. La fila
+  es la verdad —la consulta `GET /api/v1/conversations/{id}/messages` la devuelve—. La
+  plantillas son trabajo posterior a MVP (change `whatsapp-dev-credentials-render` lo deja
+  declarado).

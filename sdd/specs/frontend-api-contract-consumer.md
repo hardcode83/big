@@ -50,6 +50,19 @@ backend runtime y evita que el artefacto generado derive silenciosamente entre d
   servicios de dominio ni funciones wrapper por endpoint.
 - THE SYSTEM SHALL mantener el dashboard y el shell sin llamadas funcionales al backend real.
 
+### Mutaciones de reservas
+
+- WHEN la web de reservations crea o actualiza una reserva, THE SYSTEM SHALL usar los schemas
+  `CreateReservationRequest` y `UpdateReservationRequest` generados desde OpenAPI para tipar
+  el payload, y SHALL consumir la respuesta como `ReservationSummaryDto`.
+- WHEN la web cancela una reserva, THE SYSTEM SHALL usar el método `DELETE` declarado por
+  OpenAPI y SHALL tratar una respuesta `204` como `void`, sin inventar un DTO de cancelación.
+- THE SYSTEM SHALL mantener `createReservation`, `updateReservation` y `cancelReservation`
+  dentro de `HttpReservationsSource`, sin `fetch` directo en componentes ni cliente específico
+  por recurso.
+- THE SYSTEM SHALL conservar `npm run api:check` como guardia de que estas operaciones y sus
+  DTOs siguen alineados con `backend/openapi.json`.
+
 ## Key files
 
 - `backend/openapi.json` — fuente versionada del contrato.
@@ -61,3 +74,6 @@ backend runtime y evita que el artefacto generado derive silenciosamente entre d
 - `frontend/package.json` / `frontend/package-lock.json` — generador y comandos fijados.
 - `.github/workflows/frontend-api-contract.yml` — gate de deriva en CI.
 - `README.md` y `frontend/README.md` — flujo documentado para contributors.
+- `frontend/features/reservations/data/dto.ts` y
+  `frontend/features/reservations/data/http/http-reservations-source.ts` — DTOs y operaciones
+  mutantes consumidas desde el contrato generado.

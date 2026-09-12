@@ -143,3 +143,7 @@ medias**: unos componentes con tokens nuevos y otros con la paleta neutra, que e
 estado peor que cualquiera de los dos extremos. El criterio de terminado tiene que ser
 «ningún consumidor referencia una escala cruda de Tailwind para color de superficie,
 texto o borde», comprobable con un grep, no «se ve bien».
+
+---
+
+no definitive branding or full design system»*). Traduce el `DESIGN.md` del export de Stitch (`docs/design/2026-08-23-stitch-export/`) a la capa `@theme` de Tailwind v4, con **tema claro y oscuro y conmutador** (decisión de Jose, 2026-08-23, sobre un export que solo trae el oscuro). No toca pantallas ni backend …

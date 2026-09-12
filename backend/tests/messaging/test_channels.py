@@ -124,6 +124,30 @@ def test_the_email_and_whatsapp_entries_delegate_to_the_notifications_adapters()
     assert isinstance(whatsapp._delegate, MockWhatsAppAdapter)
 
 
+def test_the_email_entry_resolves_through_the_email_adapter_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`human-reply-outbound-delivery` R2/D5: with `smtp_host` configured, `outbound_registry`
+    picks `SMTPEmailAdapter` for `EMAIL` rather than the literal `ConsoleEmailAdapter` —
+    the wiring change is what gets `smtp-delivery-adapter` actually called by the human-reply
+    path. With `smtp_host` empty, the same selector falls back to `ConsoleEmailAdapter`."""
+    from app.notifications.infrastructure.adapters import SMTPEmailAdapter
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "smtp_host", "")
+    no_smtp = registry()[ConversationChannel.EMAIL]
+    assert isinstance(no_smtp._delegate, ConsoleEmailAdapter)
+
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(settings, "smtp_port", 587)
+    monkeypatch.setattr(settings, "smtp_from_email", "noreply@example.com")
+    monkeypatch.setattr(settings, "smtp_username", "user")
+    monkeypatch.setattr(settings, "smtp_password", "secret")
+    monkeypatch.setattr(settings, "smtp_use_tls", True)
+    with_smtp = registry()[ConversationChannel.EMAIL]
+    assert isinstance(with_smtp._delegate, SMTPEmailAdapter)
+
+
 # --- What each adapter does --------------------------------------------------------------
 
 

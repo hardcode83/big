@@ -36,3 +36,7 @@ la petición ya habría terminado y la siguiente tendría una sesión nueva.
 
 Valor al cerrarlo: la suite pasaría a ejercitar la sesión-por-petición real, y la divergencia
 documentada en `test_recovery_api.py` dejaría de existir en vez de estar anotada.
+
+---
+
+(2026-08-18), que se topó con ello al introducir `require_unmarked_session` y lo dejó fuera de alcance porque el arreglo obliga a revisar el `commit` de toda la suite …

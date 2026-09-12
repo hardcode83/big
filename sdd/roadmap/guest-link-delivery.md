@@ -61,3 +61,7 @@ huésped hizo en el portal (check-in completado, documentos) si no está ya.
 **Verificación**: emitir desde `/reservations/[id]`, recibir el email (SMTP de dev o
 `ConsoleEmailAdapter` en local), abrir el enlace en un móvil, enviar un mensaje, leer la
 respuesta de la IA, y que el manager la vea en `/conversations`.
+
+---
+
+emisión y revocación del token existen (`guests/api/router.py:151`, :184), sólo `openapi.d.ts` los conoce, y la única emisión en claro de todo el árbol es el `stdout` de `cli/demo_reset.py:1322`. Ninguna fila de `notification_logs` tiene hoy como destinatario a un huésped. Entrega: emitir/revocar desde el detalle de la reserva con el enlace copiable una sola vez, y el envío por email al `Guest.email` sobre el SMTP ya entregado. **No** son las instrucciones de acceso ni los recordatorios —eso es `guest-scheduled-comms`—: aquí viaja sólo el enlace, y la nota dice por qué esa frontera importa para la regla 11 (no está en el plan original, añadida el 2026-09-04 al auditar la comunicación con el huésped; hito «MVP operable» 2) …
