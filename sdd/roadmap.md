@@ -273,7 +273,7 @@ Categorías:
   needs: reservations, reservations-web, reservations-identity-web, reservation-manual-guest-resolution · size: S · kind: feature
 - [x] shell-topbar-overflow-360 — [FE] **la cabecera compartida desborda a 360 px, en todas las superficies** … → changes/archive/2026-09-01-shell-topbar-overflow-360/
   needs: · size: S · kind: fix
-- [ ] tenant-settings-web — [FE] **`/settings`, hoy `RoutePlaceholder` …
+- [x] tenant-settings-web — [FE] **`/settings`, hoy `RoutePlaceholder` … → changes/archive/2026-09-12-tenant-settings-web/
   needs: user-management, frontend-auth-session, frontend-auth-role-routing · size: M · kind: feature
 - [ ] hardening-release — [CROSS] suite E2E Playwright, docker + README, DoD §28 completo (PRD §26.25-28). …
   needs: incident-triage-web, approvals-web, reservation-create-web, cleaning-task-manage-web, sim-advance · size: L · kind: tech
