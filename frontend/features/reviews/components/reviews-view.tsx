@@ -16,7 +16,7 @@ import {
   useReviewDetail,
   useReviewDraft,
 } from "../hooks/use-reviews-data";
-import { createErrorKey, respondErrorKey } from "../lib/reviews-error";
+import { createErrorKey, readErrorKey, respondErrorKey } from "../lib/reviews-error";
 import { CreateReviewDialog } from "./create-review-dialog";
 import { DraftsPanel } from "./drafts-panel";
 import { ReviewDetail } from "./review-detail";
@@ -164,6 +164,7 @@ export function ReviewsView() {
               <DraftsPanel
                 catalog={catalogData ?? []}
                 catalogPending={catalog.isPending}
+                canCreate={canCreate}
                 createDialogOpen={createDialogOpen}
                 onOpenCreateDialog={() => canCreate && setCreateDialogOpen(true)}
                 isMutationPending={isBusy}
@@ -184,6 +185,7 @@ export function ReviewsView() {
               <ReviewsPanel
                 catalog={catalogData ?? []}
                 catalogPending={catalog.isPending}
+                canCreate={canCreate}
                 createDialogOpen={createDialogOpen}
                 onOpenCreateDialog={() => canCreate && setCreateDialogOpen(true)}
                 onOpenRow={openRow}
@@ -200,6 +202,16 @@ export function ReviewsView() {
           },
         }}
       />
+      {detailReviewId !== null && detail.isPending && (
+        <p role="status" aria-live="polite" className="text-body-base text-muted-foreground">
+          {t("detail.loading")}
+        </p>
+      )}
+      {detailReviewId !== null && detail.isError && (
+        <p role="status" aria-live="polite" className="text-body-base text-destructive">
+          {t(readErrorKey(detail.error))}
+        </p>
+      )}
       {detailReviewId !== null && detail.data && (
         <ReviewDetail
           review={detail.data}

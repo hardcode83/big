@@ -96,6 +96,7 @@ export function CreateReviewDialog({
   const [reviewerName, setReviewerName] = useState("");
   const [rating, setRating] = useState<number>(5);
   const [content, setContent] = useState("");
+  const [language, setLanguage] = useState("");
 
   const canSubmit = propertyId !== "" && !isBusy;
 
@@ -105,6 +106,7 @@ export function CreateReviewDialog({
     setReviewerName("");
     setRating(5);
     setContent("");
+    setLanguage("");
   }
 
   return (
@@ -132,6 +134,7 @@ export function CreateReviewDialog({
               ...(reviewerName !== "" ? { reviewerName } : {}),
               rating,
               ...(content !== "" ? { content } : {}),
+              ...(language !== "" ? { language } : {}),
             });
           }}
         >
@@ -209,6 +212,18 @@ export function CreateReviewDialog({
               maxLength={CONTENT_MAX}
               onChange={(e) => setContent(e.target.value)}
               rows={4}
+              className="rounded-md border border-border bg-background px-2 py-1.5 text-body-base"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-body-base">
+            <span className="font-medium text-foreground">
+              {t("create.fields.language")}
+            </span>
+            <input
+              type="text"
+              value={language}
+              placeholder={t("create.placeholders.language")}
+              onChange={(e) => setLanguage(e.target.value)}
               className="rounded-md border border-border bg-background px-2 py-1.5 text-body-base"
             />
           </label>
