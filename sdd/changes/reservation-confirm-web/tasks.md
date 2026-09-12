@@ -2,10 +2,10 @@
 
 ## 1. Mutation hook and error-mapping <!-- hard -->
 
-- [ ] 1.1 Add `useConfirmReservation` to `frontend/features/reservations/hooks/use-reservations.ts`; payload fijo `{ status: "CONFIRMED" }`, `retry: false`, awaited tenant-scoped invalidation through the existing `invalidateReservationQueries` helper (list, detail, `property-timeline`) [R1, R4]
-- [ ] 1.2 Extend `ReservationMutationOperation` union with `"confirm"` in `frontend/features/reservations/lib/mutation-error-mapping.ts`; exporta el nuevo tipo [R4]
-- [ ] 1.3 Add colocated test for `useConfirmReservation` (payload fijo, sin retries, invalidación tras `onSettled`) y otro para `reservationMutationErrorKey` con `operation="confirm"` cubriendo `ApiError` 401/403/404/409/422, 5xx y error de red [R1, R4]
-- [ ] 1.4 Export `useConfirmReservation` from `frontend/features/reservations/index.ts` [R1]
+- [x] 1.1 Add `useConfirmReservation` to `frontend/features/reservations/hooks/use-reservations.ts`; payload fijo `{ status: "CONFIRMED" }`, `retry: false`, awaited tenant-scoped invalidation through the existing `invalidateReservationQueries` helper (list, detail, `property-timeline`) [R1, R4]
+- [x] 1.2 Extend `ReservationMutationOperation` union with `"confirm"` in `frontend/features/reservations/lib/mutation-error-mapping.ts`; exporta el nuevo tipo [R4]
+- [x] 1.3 Add colocated test for `useConfirmReservation` (payload fijo, sin retries, invalidación tras `onSettled`) y otro para `reservationMutationErrorKey` con `operation="confirm"` cubriendo `ApiError` 401/403/404/409/422, 5xx y error de red [R1, R4]
+- [x] 1.4 Export `useConfirmReservation` from `frontend/features/reservations/index.ts` [R1]
 
 ## 2. Confirm button and visibility gating
 
@@ -38,3 +38,7 @@
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
+- 1.1 `useConfirmReservation` added next to `useCancelReservation` in `hooks/use-reservations.ts`; signature `UseMutationResult<ReservationSummaryDto, Error, ConfirmReservationVariables>` where `ConfirmReservationVariables = { reservationId: string }`; payload is the literal `{ status: "CONFIRMED" }` from the design — no caller field can override it.
+- 1.2 `ReservationMutationOperation` now includes `"confirm"` (alphabetical order kept: `create | edit | cancel | confirm`); `ReservationMutationErrorKey` template literal updated in lockstep so a non-`confirm` operation cannot accidentally resolve a `confirm.*` key (and vice versa) at compile time.
+- 1.3 New colocated `hooks/use-confirm-reservation.test.tsx` covers: (a) `updateReservation` is called with the fixed `{ status: "CONFIRMED" }` payload, (b) `retry: false` (no retries even on 4xx with `defaultOptions.mutations.retry = 3`), (c) `onSettled` invalidates `listPrefix` + `detail` + `property-timeline`, (d) invalidation runs to completion before the mutation resolves (`isSuccess=false` until the promise releases), (e) no `setQueryData` (no optimistic writes). Extended `lib/mutation-error-mapping.test.ts` with a `operation="confirm"` block covering 401/403/404/409/422, 5xx and `TypeError` network error.
+- 1.4 `useConfirmReservation` and `ConfirmReservationVariables` are exported alphabetically from `features/reservations/index.ts`; no other barrel change.

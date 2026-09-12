@@ -162,3 +162,33 @@ export function useCancelReservation(): UseMutationResult<
     },
   });
 }
+
+export interface ConfirmReservationVariables {
+  reservationId: string;
+}
+
+/**
+ * Confirm a PENDING reservation (proposal R1, design D2). The payload is
+ * fixed to `{ status: "CONFIRMED" }` so the only caller-supplied argument is
+ * the reservation id; the hook is the one and only way the UI can drive that
+ * transition. Reuses `updateReservation` (the transport already accepts the
+ * field) and the shared tenant-scoped invalidation.
+ */
+export function useConfirmReservation(): UseMutationResult<
+  ReservationSummaryDto,
+  Error,
+  ConfirmReservationVariables
+> {
+  const tenantId = useTenantId();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ reservationId }: ConfirmReservationVariables) =>
+      getReservationsDataSource().updateReservation(tenantId, reservationId, {
+        status: "CONFIRMED",
+      }),
+    retry: false,
+    onSettled: async (_data, _error, variables) => {
+      await invalidateReservationQueries(queryClient, tenantId, variables.reservationId);
+    },
+  });
+}
