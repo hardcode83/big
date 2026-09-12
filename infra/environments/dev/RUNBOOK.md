@@ -97,12 +97,12 @@ Recordatorio del bug histórico: `docker-compose-plugin` no está en los repos p
 
 La app se despliega con `.github/workflows/deploy-dev.yml`: un **push a `main`** que toque `backend/**`/`frontend/**` (o `workflow_dispatch`) construye las imágenes `prod` arm64, las publica en **GHCR** (tag `sha-<commit>` + `dev`), y un job `deploy` en un **runner self-hosted que corre EN la VM** hace el deploy **localmente** (`docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml pull && up -d --wait`) — sin SSH ni puertos entrantes. El `.env` de runtime lo **lee del OCI Vault** por instance principal en cada deploy (secrets generados por Terraform); el `docker login ghcr.io` usa el **`GITHUB_TOKEN`** del propio job (la GitHub App **solo** registra el runner, no interviene en el pull de GHCR). **Cero secrets de app a mano.**
 
-### 6.1 GitHub App (único secret-zero) + variables
+### 6.1 GitHub App (secret-zero del runner) + variables
 
 Una **sola GitHub App** (reutilizable por todos los entornos) con permiso de repo `Administration: read/write` (registrar runners). *(El pull de GHCR **no** usa la App — lo hace el `GITHUB_TOKEN` del job de deploy; conceder `Packages: read` a la App sería vestigial y puede omitirse.)* Tras crearla e instalarla en el repo:
 
 - **Variables** de repo (no sensibles): `GH_APP_ID`, `GH_APP_INSTALLATION_ID`, `NEXT_PUBLIC_APP_ENV` (p. ej. `dev`).
-- **Secret** de repo: `GH_APP_PRIVATE_KEY` = contenido del `.pem` de la App. Es el **único secret-zero**; Terraform lo lee (`TF_VAR_github_app_private_key`) y lo escribe al Vault de cada entorno (`oci_vault_secret.github_app_key`). **Rotar** = regenerar el `.pem` en la App, actualizar el secret y re-aplicar.
+- **Secret** de repo: `GH_APP_PRIVATE_KEY` = contenido del `.pem` de la App. Es el secret-zero del runner (no el único de este tipo — el change `whatsapp-dev-credentials-render` añadió las cuatro credenciales de la App de Meta bajo el mismo patrón, ver la tabla de `README.md`); Terraform lo lee (`TF_VAR_github_app_private_key`) y lo escribe al Vault de cada entorno (`oci_vault_secret.github_app_key`). **Rotar** = regenerar el `.pem` en la App, actualizar el secret y re-aplicar.
 
 Los secrets de runtime (`POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`) **no se crean a mano**: los genera Terraform (`random_*`) → Vault.
 
