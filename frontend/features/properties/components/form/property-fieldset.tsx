@@ -77,19 +77,56 @@ export interface PropertyFieldsetProps {
   wifiPasswordHintId?: string;
 }
 
-function FieldError({ message }: { message?: string }) {
+/** The `id` of a field's control: `property-<field with `_` as `-`>`. */
+function fieldId(field: keyof PropertyFormFields): string {
+  return `property-${field.replace(/_/g, "-")}`;
+}
+
+/**
+ * The `id` of a field's error paragraph, so the control can point at it with
+ * `aria-describedby` (R4.2, task 6.1). Before section 6 the error was only
+ * *visually* adjacent — a sighted user saw it under the input, a screen-reader
+ * user moving field by field heard nothing at all, because `role="alert"` only
+ * announces the message when it appears, not when focus later lands on the
+ * field it belongs to.
+ */
+function errorId(field: keyof PropertyFormFields): string {
+  return `${fieldId(field)}-error`;
+}
+
+/** Joins the `aria-describedby` ids that actually exist, or omits the attribute. */
+function describedBy(
+  ...ids: ReadonlyArray<string | undefined>
+): string | undefined {
+  const present = ids.filter((id): id is string => Boolean(id));
+  return present.length > 0 ? present.join(" ") : undefined;
+}
+
+function FieldError({
+  field,
+  message,
+}: {
+  field: keyof PropertyFormFields;
+  message?: string;
+}) {
   if (!message) {
     return null;
   }
   return (
-    <p role="alert" className="text-sm text-state-error-text">
+    <p id={errorId(field)} role="alert" className="text-sm text-state-error-text">
       {message}
     </p>
   );
 }
 
+/**
+ * `tap-target` (`app/globals.css`: `min-height: 44px; min-width: 44px`) is what
+ * keeps these controls on the 44×44 floor of `steering/frontend.md`: the
+ * padding/font-size trio alone renders ~36px tall. Same class string, same
+ * reason, as `features/guest-portal/components/fields/guest-fields.tsx`.
+ */
 const inputClass =
-  "rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50";
+  "tap-target rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50";
 const textareaClass = `${inputClass} resize-y`;
 
 /**
@@ -125,11 +162,28 @@ export function PropertyFieldset({
 }: PropertyFieldsetProps) {
   const { t } = useTranslation("properties");
 
-  function textFieldProps(field: TextFieldName) {
+  /**
+   * The `aria-invalid` / `aria-describedby` pair every control shares (R4.2).
+   * `hintId` is the field's own static hint, when it has one — it comes first so
+   * assistive technology reads the guidance before the error, in visual order.
+   */
+  function a11yProps(field: keyof PropertyFormFields, hintId?: string) {
+    const invalid = Boolean(fieldErrors[field]);
     return {
-      id: `property-${field.replace(/_/g, "-")}`,
+      "aria-invalid": invalid || undefined,
+      "aria-describedby": describedBy(
+        hintId,
+        invalid ? errorId(field) : undefined,
+      ),
+    };
+  }
+
+  function textFieldProps(field: TextFieldName, hintId?: string) {
+    return {
+      id: fieldId(field),
       value: values[field],
       disabled,
+      ...a11yProps(field, hintId),
       onChange: (
         event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
       ) => onChange(field, event.target.value),
@@ -149,7 +203,7 @@ export function PropertyFieldset({
           required
           {...textFieldProps("name")}
         />
-        <FieldError message={fieldErrors.name} />
+        <FieldError field="name" message={fieldErrors.name} />
       </div>
 
       <div className="flex flex-col gap-1">
@@ -163,7 +217,7 @@ export function PropertyFieldset({
           required
           {...textFieldProps("internal_code")}
         />
-        <FieldError message={fieldErrors.internal_code} />
+        <FieldError field="internal_code" message={fieldErrors.internal_code} />
       </div>
 
       <div className="flex flex-col gap-1">
@@ -175,7 +229,7 @@ export function PropertyFieldset({
           maxLength={MAX_PMS_EXTERNAL_ID}
           {...textFieldProps("pms_external_id")}
         />
-        <FieldError message={fieldErrors.pms_external_id} />
+        <FieldError field="pms_external_id" message={fieldErrors.pms_external_id} />
       </div>
 
       {/* Address block */}
@@ -188,7 +242,7 @@ export function PropertyFieldset({
           maxLength={MAX_ADDRESS}
           {...textFieldProps("address_line1")}
         />
-        <FieldError message={fieldErrors.address_line1} />
+        <FieldError field="address_line1" message={fieldErrors.address_line1} />
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="property-address-line2" className="text-sm font-medium">
@@ -199,7 +253,7 @@ export function PropertyFieldset({
           maxLength={MAX_ADDRESS}
           {...textFieldProps("address_line2")}
         />
-        <FieldError message={fieldErrors.address_line2} />
+        <FieldError field="address_line2" message={fieldErrors.address_line2} />
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="property-city" className="text-sm font-medium">
@@ -210,7 +264,7 @@ export function PropertyFieldset({
           maxLength={MAX_CITY}
           {...textFieldProps("city")}
         />
-        <FieldError message={fieldErrors.city} />
+        <FieldError field="city" message={fieldErrors.city} />
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="property-province" className="text-sm font-medium">
@@ -221,7 +275,7 @@ export function PropertyFieldset({
           maxLength={MAX_PROVINCE}
           {...textFieldProps("province")}
         />
-        <FieldError message={fieldErrors.province} />
+        <FieldError field="province" message={fieldErrors.province} />
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="property-postal-code" className="text-sm font-medium">
@@ -232,7 +286,7 @@ export function PropertyFieldset({
           maxLength={MAX_POSTAL_CODE}
           {...textFieldProps("postal_code")}
         />
-        <FieldError message={fieldErrors.postal_code} />
+        <FieldError field="postal_code" message={fieldErrors.postal_code} />
       </div>
 
       <div className="flex flex-col gap-1">
@@ -248,7 +302,7 @@ export function PropertyFieldset({
             onChange("country", event.target.value.toUpperCase())
           }
         />
-        <FieldError message={fieldErrors.country} />
+        <FieldError field="country" message={fieldErrors.country} />
       </div>
 
       <div className="flex flex-col gap-1">
@@ -264,7 +318,7 @@ export function PropertyFieldset({
           placeholder={t("createForm.placeholders.timezone")}
           {...textFieldProps("timezone")}
         />
-        <FieldError message={fieldErrors.timezone} />
+        <FieldError field="timezone" message={fieldErrors.timezone} />
       </div>
 
       {/* Capacity trio */}
@@ -280,9 +334,10 @@ export function PropertyFieldset({
           max={MAX_GUESTS}
           value={values.max_guests}
           disabled={disabled}
+          {...a11yProps("max_guests")}
           onChange={(event) => onChange("max_guests", Number(event.target.value))}
         />
-        <FieldError message={fieldErrors.max_guests} />
+        <FieldError field="max_guests" message={fieldErrors.max_guests} />
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="property-bedrooms" className="text-sm font-medium">
@@ -296,9 +351,10 @@ export function PropertyFieldset({
           max={MAX_ROOMS}
           value={values.bedrooms}
           disabled={disabled}
+          {...a11yProps("bedrooms")}
           onChange={(event) => onChange("bedrooms", Number(event.target.value))}
         />
-        <FieldError message={fieldErrors.bedrooms} />
+        <FieldError field="bedrooms" message={fieldErrors.bedrooms} />
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="property-bathrooms" className="text-sm font-medium">
@@ -312,9 +368,10 @@ export function PropertyFieldset({
           max={MAX_ROOMS}
           value={values.bathrooms}
           disabled={disabled}
+          {...a11yProps("bathrooms")}
           onChange={(event) => onChange("bathrooms", Number(event.target.value))}
         />
-        <FieldError message={fieldErrors.bathrooms} />
+        <FieldError field="bathrooms" message={fieldErrors.bathrooms} />
       </div>
 
       {/* Check-in / check-out */}
@@ -327,7 +384,7 @@ export function PropertyFieldset({
           className={inputClass}
           {...textFieldProps("default_check_in_time")}
         />
-        <FieldError message={fieldErrors.default_check_in_time} />
+        <FieldError field="default_check_in_time" message={fieldErrors.default_check_in_time} />
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="property-default-check-out-time" className="text-sm font-medium">
@@ -338,7 +395,7 @@ export function PropertyFieldset({
           className={inputClass}
           {...textFieldProps("default_check_out_time")}
         />
-        <FieldError message={fieldErrors.default_check_out_time} />
+        <FieldError field="default_check_out_time" message={fieldErrors.default_check_out_time} />
       </div>
 
       {/* WiFi */}
@@ -351,7 +408,7 @@ export function PropertyFieldset({
           maxLength={MAX_WIFI_NAME}
           {...textFieldProps("wifi_name")}
         />
-        <FieldError message={fieldErrors.wifi_name} />
+        <FieldError field="wifi_name" message={fieldErrors.wifi_name} />
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="property-wifi-password" className="text-sm font-medium">
@@ -362,10 +419,9 @@ export function PropertyFieldset({
           autoComplete="new-password"
           className={inputClass}
           maxLength={MAX_WIFI_PASSWORD}
-          aria-describedby={wifiPasswordHintId}
-          {...textFieldProps("wifi_password")}
+          {...textFieldProps("wifi_password", wifiPasswordHintId)}
         />
-        <FieldError message={fieldErrors.wifi_password} />
+        <FieldError field="wifi_password" message={fieldErrors.wifi_password} />
       </div>
 
       {/* The three free-text sinks (R3.3: plain, unstructured text, never parsed). */}
@@ -380,10 +436,9 @@ export function PropertyFieldset({
           rows={3}
           className={textareaClass}
           maxLength={MAX_NOTES}
-          aria-describedby="property-access-notes-hint"
-          {...textFieldProps("access_notes")}
+          {...textFieldProps("access_notes", "property-access-notes-hint")}
         />
-        <FieldError message={fieldErrors.access_notes} />
+        <FieldError field="access_notes" message={fieldErrors.access_notes} />
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="property-cleaning-notes" className="text-sm font-medium">
@@ -395,7 +450,7 @@ export function PropertyFieldset({
           maxLength={MAX_NOTES}
           {...textFieldProps("cleaning_notes")}
         />
-        <FieldError message={fieldErrors.cleaning_notes} />
+        <FieldError field="cleaning_notes" message={fieldErrors.cleaning_notes} />
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="property-emergency-notes" className="text-sm font-medium">
@@ -407,7 +462,7 @@ export function PropertyFieldset({
           maxLength={MAX_NOTES}
           {...textFieldProps("emergency_notes")}
         />
-        <FieldError message={fieldErrors.emergency_notes} />
+        <FieldError field="emergency_notes" message={fieldErrors.emergency_notes} />
       </div>
     </div>
   );

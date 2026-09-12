@@ -74,6 +74,24 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
   const retireMutation = useUpdateProperty();
   const [isRetireOpen, setIsRetireOpen] = useState(false);
   const retireSubmittingRef = useRef(false);
+  /*
+   * Where focus goes when the edit `Sheet` or the retire `AlertDialog` closes
+   * (R4.3, task 6.2).
+   *
+   * Radix returns focus on close only through the trigger's own ref: modal
+   * `DialogContent` — which `AlertDialogContent` is built on — installs an
+   * `onCloseAutoFocus` that calls `event.preventDefault()` and then
+   * `triggerRef.current?.focus()` (`@radix-ui/react-dialog`). Both surfaces
+   * here are opened from a detached, state-controlled `Button` rather than a
+   * `SheetTrigger`/`AlertDialogTrigger`, so `triggerRef.current` is `null`, the
+   * `preventDefault()` has already suppressed `FocusScope`'s own restore, and
+   * focus lands on `<body>`: a keyboard user who presses Escape, or confirms
+   * the retire, is dumped at the top of the document. Restoring it from here is
+   * what makes the close path operable. Same fix, same reason, as
+   * `features/properties/components/list/properties-view.tsx`'s create sheet.
+   */
+  const editTriggerRef = useRef<HTMLButtonElement>(null);
+  const retireTriggerRef = useRef<HTMLButtonElement>(null);
 
   if (query.isPending) {
     return <LoadingState label={tStates("loading.label")} />;
@@ -141,13 +159,26 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
         </h1>
         {canManageProperties ? (
           <div className="flex items-center gap-2">
-            <Button type="button" onClick={() => setIsEditOpen(true)}>
+            {/*
+              `tap-target` on every button in this group (task 6.1/6.2):
+              `Button`'s default size is `h-10` — 40px, under the 44×44 floor of
+              `steering/frontend.md`. The class adds a `min-height`/`min-width`
+              and nothing else, so the variants' colours are untouched.
+            */}
+            <Button
+              ref={editTriggerRef}
+              type="button"
+              className="tap-target"
+              onClick={() => setIsEditOpen(true)}
+            >
               {t("detail.edit.button")}
             </Button>
             {canRetire ? (
               <Button
+                ref={retireTriggerRef}
                 type="button"
                 variant="destructive"
+                className="tap-target"
                 onClick={() => setIsRetireOpen(true)}
               >
                 {t("detail.retire.button")}
@@ -159,7 +190,29 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
       <PropertyDetailSections detail={detail} />
       <PropertyTimeline propertyId={propertyId} />
       <Sheet open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <SheetContent closeLabel={t("detail.edit.close")}>
+        {/*
+          `overflow-y-auto` (task 6.3, R4.4): `SheetContent`'s `side="right"`
+          variant is `inset-y-0 h-full` — exactly the viewport's height — and
+          declares no scrolling of its own, while `EditPropertyForm` renders
+          twenty stacked fields plus a checkbox and two buttons. Without a
+          scroll container everything past the fold is unreachable at every
+          width, and worst at the mobile-first minimum this project supports.
+          Precedent: `features/notifications/.../notification-inbox-sheet.tsx`.
+        */}
+        <SheetContent
+          closeLabel={t("detail.edit.close")}
+          className="overflow-y-auto"
+          // See `editTriggerRef`: `preventDefault` is what replaces Radix's own
+          // `triggerRef` restore, which has no trigger to aim at here.
+          onCloseAutoFocus={(event) => {
+            const trigger = editTriggerRef.current;
+            if (!trigger) {
+              return;
+            }
+            event.preventDefault();
+            trigger.focus();
+          }}
+        >
           <SheetHeader>
             <SheetTitle>{t("detail.edit.title")}</SheetTitle>
           </SheetHeader>
@@ -170,7 +223,21 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
         </SheetContent>
       </Sheet>
       <AlertDialog open={isRetireOpen} onOpenChange={setIsRetireOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent
+          // See `retireTriggerRef`. Skipped when the trigger is gone, which is
+          // the ordinary outcome of a successful retire: the property is
+          // `INACTIVE`, `canRetire` turns false and the button unmounts, so
+          // there is nothing left to return focus to and Radix's own behaviour
+          // stands.
+          onCloseAutoFocus={(event) => {
+            const trigger = retireTriggerRef.current;
+            if (!trigger) {
+              return;
+            }
+            event.preventDefault();
+            trigger.focus();
+          }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>{t("detail.retire.title")}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -183,10 +250,21 @@ export function PropertyDetailView({ propertyId }: { propertyId: string }) {
             </p>
           ) : null}
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={retireMutation.isPending}>
+            {/*
+              `tap-target` reaches the wrapped `Button` only because section 6
+              also fixed `components/ui/alert-dialog.tsx`, which used to
+              destructure `className` out of these two and never forward it —
+              the class was silently dropped, so the 44×44 floor could not be
+              met from the call site at all.
+            */}
+            <AlertDialogCancel
+              className="tap-target"
+              disabled={retireMutation.isPending}
+            >
               {t("detail.retire.cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
+              className="tap-target"
               onClick={handleRetireConfirm}
               disabled={retireMutation.isPending}
               aria-busy={retireMutation.isPending}

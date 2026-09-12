@@ -420,9 +420,18 @@ export function EditPropertyForm({
         >
           {t("editForm.wifiPasswordHint")}
         </p>
+        {/*
+          `tap-target` sits on the `<label>`, not on the `<input>`: a `<label
+          htmlFor>` IS the checkbox's pointer target (clicking anywhere in it
+          toggles the box), so raising the row to a 44px minimum height gives
+          the control a real 44×44 hit area without inflating the native
+          checkbox glyph to the size of a button — the documented shape of this
+          exception, per `steering/frontend.md`'s «salvo que una excepción
+          objetiva quede documentada junto al componente».
+        */}
         <label
           htmlFor="property-clear-wifi-password"
-          className="flex items-center gap-2 text-sm font-medium"
+          className="tap-target flex items-center gap-2 text-sm font-medium"
         >
           <input
             id="property-clear-wifi-password"
@@ -435,8 +444,16 @@ export function EditPropertyForm({
         </label>
       </div>
 
+      {/*
+        `tap-target` on both: `Button`'s default size is `h-10` (40px), under the
+        44×44 floor of `steering/frontend.md` (task 6.1/6.2).
+      */}
       <div className="flex items-center gap-2">
-        <Button type="submit" disabled={mutation.isPending}>
+        <Button
+          type="submit"
+          className="tap-target"
+          disabled={mutation.isPending}
+        >
           {mutation.isPending
             ? tDashboard("detail.edit.submitting")
             : tDashboard("detail.edit.submit")}
@@ -445,6 +462,7 @@ export function EditPropertyForm({
           <Button
             type="button"
             variant="outline"
+            className="tap-target"
             disabled={mutation.isPending}
             onClick={onCancel}
           >

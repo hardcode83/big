@@ -2,7 +2,7 @@ import { fireEvent } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
-import { render, screen } from "@/test/render";
+import { getA11yViolations, render, screen, waitFor } from "@/test/render";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import esDashboard from "@/locales/es/dashboard.json";
 
@@ -307,5 +307,123 @@ describe("PropertyDetailView — retire affordance (R2.6, design D9)", () => {
     expect(
       screen.getByRole("heading", { name: esDashboard.detail.retire.title }),
     ).toBeInTheDocument();
+  });
+});
+
+/**
+ * Section 6 (task 6.2, R4.3) for the two overlays this view owns.
+ *
+ * `property-forms-a11y.test.tsx` covers the two forms; this covers what hosts
+ * them — the edit `Sheet` and the retire `AlertDialog`, which task 6.2 names
+ * explicitly. The rendered boxes (44×44 for real, no clipping at 360px) are
+ * measured in Chromium by
+ * `features/properties/components/form/property-forms-layout.browser.test.tsx`;
+ * everything here is about the DOM jsdom can answer for.
+ */
+describe("PropertyDetailView — the overlays' keyboard contract (R4.3, task 6.2)", () => {
+  function ok() {
+    usePropertyDetail.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: detail,
+    });
+  }
+
+  /** Focuses the named trigger the way a keyboard user reaches it, then activates it. */
+  function openFrom(name: string): HTMLElement {
+    ok();
+    renderView();
+    const trigger = screen.getByRole("button", { name });
+    // Radix records `document.activeElement` at open time; opening from an
+    // unfocused trigger would leave the assertions below measuring nothing.
+    trigger.focus();
+    fireEvent.click(trigger);
+    return trigger;
+  }
+
+  it("closes the edit Sheet on Escape and returns focus to the Edit button", async () => {
+    const trigger = openFrom(esDashboard.detail.edit.button);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    // The half a "did it close?" check misses: without the `onCloseAutoFocus`
+    // in `property-detail-view.tsx` focus lands on `<body>` and a keyboard user
+    // restarts from the top of the document.
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("closes the retire AlertDialog on Escape, makes no request, and returns focus", async () => {
+    const trigger = openFrom(esDashboard.detail.retire.button);
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
+    );
+    // Escape is a dismissal, never a confirmation of a destructive action.
+    expect(updatePropertyMutate).not.toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("keeps both retire buttons in the tab sequence and focusable", async () => {
+    openFrom(esDashboard.detail.retire.button);
+    const dialog = await screen.findByRole("alertdialog");
+
+    const buttons = Array.from(dialog.querySelectorAll("button"));
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      esDashboard.detail.retire.cancel,
+      esDashboard.detail.retire.confirm,
+    ]);
+
+    for (const button of buttons) {
+      expect(button).not.toHaveAttribute("tabindex", "-1");
+      expect(button).not.toBeDisabled();
+      // Native `<button>` with a real `type`, not a `<div role="button">`:
+      // that is what makes Enter and Space activate it in a real browser, which
+      // jsdom does not implement and so cannot be pressed for here.
+      expect(button.tagName).toBe("BUTTON");
+      expect(button.getAttribute("type")).toBe("button");
+      button.focus();
+      expect(document.activeElement).toBe(button);
+    }
+  });
+
+  it("gives every trigger and both dialog buttons a 44×44 target", async () => {
+    /*
+     * The class, not the pixels — jsdom computes no layout. The two dialog
+     * buttons are the regression guard for the shared-primitive fix in
+     * `components/ui/alert-dialog.tsx`: `AlertDialogAction`/`AlertDialogCancel`
+     * used to destructure `className` and never forward it to the wrapped
+     * `Button`, so this exact assertion failed while the call site looked
+     * correct. Measured for real in `property-forms-layout.browser.test.tsx`.
+     */
+    expect(openFrom(esDashboard.detail.edit.button)).toHaveClass("tap-target");
+    fireEvent.keyDown(await screen.findByRole("dialog"), { key: "Escape" });
+
+    const retire = screen.getByRole("button", {
+      name: esDashboard.detail.retire.button,
+    });
+    expect(retire).toHaveClass("tap-target");
+
+    fireEvent.click(retire);
+    const dialog = await screen.findByRole("alertdialog");
+    for (const button of dialog.querySelectorAll("button")) {
+      expect(
+        button.getAttribute("class")?.split(/\s+/),
+        `«${button.textContent}» is under the 44px floor`,
+      ).toContain("tap-target");
+    }
+  });
+
+  it("has no axe violations with the retire AlertDialog open", async () => {
+    openFrom(esDashboard.detail.retire.button);
+    const dialog = await screen.findByRole("alertdialog");
+    // Scoped to the dialog: a component test renders no landmarks, so a
+    // document-wide scan reports `region` against the portal rather than
+    // against this surface (same reason `properties-view.test.tsx` records).
+    expect(await getA11yViolations(dialog)).toEqual([]);
   });
 });

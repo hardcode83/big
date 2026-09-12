@@ -166,7 +166,13 @@ export function CreatePropertyForm() {
         fieldErrors={fieldErrors}
         disabled={mutation.isPending}
       />
-      <Button type="submit" disabled={mutation.isPending}>
+      {/*
+        `tap-target` because `Button`'s default size is `h-10` (40px), under the
+        44×44 floor of `steering/frontend.md`. The class layers a `min-height`/
+        `min-width` on top; `Button` merges what it is given through
+        `cn(buttonVariants(...))`, so the variant colours are untouched.
+      */}
+      <Button type="submit" className="tap-target" disabled={mutation.isPending}>
         {mutation.isPending
           ? t("createForm.submitting")
           : t("createForm.submit")}

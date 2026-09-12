@@ -4,7 +4,14 @@ import { ApiError } from "@/lib/api";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import esDashboard from "@/locales/es/dashboard.json";
 import esProperties from "@/locales/es/properties.json";
-import { fireEvent, render, screen, within } from "@/test/render";
+import {
+  fireEvent,
+  getA11yViolations,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@/test/render";
 
 const usePropertiesMock = vi.hoisted(() => vi.fn());
 vi.mock("../../hooks/use-properties", () => ({
@@ -421,5 +428,85 @@ describe("PropertiesView — the create flow (R1.1, design D2/D12)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: esProperties.sheet.close }));
     expect(screen.queryByText("create-property-form-stub")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Section 6 (tasks 6.2 and 6.3) for the create surface. The form inside the
+ * `Sheet` is stubbed here, as everywhere in this file; its own accessibility and
+ * keyboard contract is `features/properties/components/form/property-forms-a11y.test.tsx`,
+ * and the rendered pixels are `property-forms-layout.browser.test.tsx`.
+ */
+describe("PropertiesView — the create Sheet's keyboard and layout contract (R4.3, R4.4)", () => {
+  /**
+   * Opens the create `Sheet` the way a keyboard user does — focus on the
+   * trigger first, then activate it. The focus matters beyond realism: Radix's
+   * `FocusScope` records `document.activeElement` at open time and restores it
+   * on unmount, so a sheet opened from an unfocused trigger has nowhere to
+   * return focus to and the assertion below would be measuring the harness.
+   */
+  function openSheet() {
+    useHasPermissionMock.mockReturnValue(true);
+    ok(page());
+    renderView();
+    const trigger = screen.getByRole("button", {
+      name: esProperties.newProperty,
+    });
+    trigger.focus();
+    fireEvent.click(trigger);
+    return trigger;
+  }
+
+  it("closes on Escape and returns focus to the trigger (task 6.2)", async () => {
+    const trigger = openSheet();
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    // Half the contract, and the half a "did it close?" check misses: a
+    // keyboard user who escapes out of the sheet lands back on the control
+    // they opened it from, not at the top of the document. Radix restores it
+    // through `FocusScope`'s `onUnmountAutoFocus`, asynchronously — hence the
+    // `waitFor` rather than a bare read.
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("gives the 'New property' trigger a 44×44 target (task 6.1)", () => {
+    useHasPermissionMock.mockReturnValue(true);
+    ok(page());
+    renderView();
+    // The class, not the pixels: jsdom does no layout. Measured for real in
+    // `property-forms-layout.browser.test.tsx`.
+    expect(
+      screen.getByRole("button", { name: esProperties.newProperty }),
+    ).toHaveClass("tap-target");
+  });
+
+  it("scrolls its own content rather than clipping it (task 6.3, R4.4)", async () => {
+    /*
+     * `SheetContent`'s `side="right"` variant is `inset-y-0 … h-full` — pinned
+     * to the viewport's height — and declares no overflow behaviour of its own,
+     * so a twenty-field form inside it renders past the bottom edge with no way
+     * to reach the rest: not a scrollbar short, unreachable. The fix is the
+     * caller's `overflow-y-auto`, the same one
+     * `features/notifications/components/notification-inbox-sheet.tsx` carries.
+     * Asserted on the class because jsdom computes no scroll height either.
+     */
+    openSheet();
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveClass("overflow-y-auto");
+    expect(dialog).toHaveClass("h-full");
+  });
+
+  it("has no axe violations with the sheet open (task 6.1)", async () => {
+    openSheet();
+    const dialog = await screen.findByRole("dialog");
+    // Scoped to the dialog for the reason `topbar-overflow-sheet.test.tsx`
+    // records: a component test renders no landmarks, so a document-wide scan
+    // reports `region` against the portal rather than against this surface.
+    expect(await getA11yViolations(dialog)).toEqual([]);
   });
 });

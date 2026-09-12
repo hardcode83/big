@@ -101,6 +101,16 @@ function AlertDialogDescription({
  * Wraps a click handler in the destructive confirm pattern: closes the dialog
  * and then runs the callback. The cancel button (`AlertDialogCancel`) handles
  * the close-on-cancel path on its own.
+ *
+ * `className` is forwarded to the wrapped `Button` rather than swallowed. It
+ * used to be destructured out and dropped on the floor, which made a
+ * `className="tap-target"` at a call site a silent no-op — the defect
+ * `properties-create-web` section 6 had to fix before the retire dialog's two
+ * buttons could reach the 44×44 floor of `steering/frontend.md`. `Button`
+ * already merges what it receives through `cn(buttonVariants({…, className }))`
+ * (tailwind-merge), so passing it straight through layers on top of the variant
+ * classes instead of replacing them, exactly as every other primitive in
+ * `components/ui/` does.
  */
 function AlertDialogAction({
   className,
@@ -109,7 +119,7 @@ function AlertDialogAction({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Action>) {
   return (
     <AlertDialogPrimitive.Action asChild>
-      <Button variant="destructive" onClick={onClick} {...props} />
+      <Button variant="destructive" className={className} onClick={onClick} {...props} />
     </AlertDialogPrimitive.Action>
   );
 }
@@ -120,7 +130,7 @@ function AlertDialogCancel({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Cancel>) {
   return (
     <AlertDialogPrimitive.Cancel asChild>
-      <Button variant="outline" {...props} />
+      <Button variant="outline" className={className} {...props} />
     </AlertDialogPrimitive.Cancel>
   );
 }
