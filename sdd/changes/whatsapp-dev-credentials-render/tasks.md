@@ -44,16 +44,16 @@
       `TF_VAR_github_app_private_key`. Do not register these secrets with the `github` Terraform
       provider (R2.2 — out of scope, `infra-github-iac`). [R2.1, R2.2]
 
-## 3. Deploy pipeline — render the five `WHATSAPP_*` into the runtime `.env`
+## 3. Deploy pipeline — render the five `WHATSAPP_*` into the runtime `.env` <!-- panel: PASS 2026-09-12 receipt:21a0654c -->
 
-- [ ] 3.1 `.github/workflows/deploy-dev.yml`'s "Render .env" step: add four `read_secret_by_name`
+- [x] 3.1 `.github/workflows/deploy-dev.yml`'s "Render .env" step: add four `read_secret_by_name`
       calls for `autohostai-${ENV}-whatsapp-access-token`, `-whatsapp-phone-number-id`,
       `-whatsapp-app-secret`, `-whatsapp-webhook-verify-token` — same fail-fast contract as the
       existing by-name reads (tunnel token, media, SMTP). [R3.1, R3.5]
-- [ ] 3.2 Same step: read `WHATSAPP_PROVIDER` from a new repo variable
+- [x] 3.2 Same step: read `WHATSAPP_PROVIDER` from a new repo variable
       (`${{ vars.WHATSAPP_PROVIDER }}`, added to the step's own `env:` block) — same pattern as
       `PUBLIC_HOSTNAME`, no Vault involved. [R3.2]
-- [ ] 3.3 Same step: write the five lines to `$RUNTIME_ENV_FILE` —
+- [x] 3.3 Same step: write the five lines to `$RUNTIME_ENV_FILE` —
       `WHATSAPP_PROVIDER=${WHATSAPP_PROVIDER:-}`, `WHATSAPP_ACCESS_TOKEN=...`,
       `WHATSAPP_PHONE_NUMBER_ID=...`, `WHATSAPP_APP_SECRET=...`,
       `WHATSAPP_WEBHOOK_VERIFY_TOKEN=...` — unset `vars.WHATSAPP_PROVIDER` renders an empty value,
@@ -117,6 +117,7 @@ it live.
 - Vault secret resources (in `infra/environments/dev/main.tf`, appended after `oci_vault_secret.smtp_use_tls`): `oci_vault_secret.whatsapp_access_token`, `.whatsapp_phone_number_id`, `.whatsapp_app_secret`, `.whatsapp_webhook_verify_token` — secret names `autohostai-${var.env}-whatsapp-access-token`, `-whatsapp-phone-number-id`, `-whatsapp-app-secret`, `-whatsapp-webhook-verify-token`.
 - `oci_identity_policy.dev_runner_read_secrets`'s single statement extended with the four new `target.secret.id` clauses (same statement, same apply) — no `iam-policy.md` edit needed: confirmed same conclusion as `ingress-https-dev` (secret-family + policies already granted).
 - No secret resource/variable exists for `WHATSAPP_PROVIDER` — it is not sensitive and reaches the runtime `.env` via repo variable (`vars.WHATSAPP_PROVIDER`), not Vault. Section 2/3 must read the four Vault secrets **by name** (`autohostai-${ENV}-whatsapp-*`) via `get-secret-bundle-by-name`, same as tunnel/media/SMTP — the runner policy above only authorizes those four exact OCIDs.
+- Section 3 done. In `deploy-dev.yml`'s "Render .env" step: local shell vars `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN` read via `read_secret_by_name` (added right after the SMTP block); `WHATSAPP_PROVIDER` added to the step's `env:` block as `${{ vars.WHATSAPP_PROVIDER }}` (next to `PUBLIC_HOSTNAME`). Written to `$RUNTIME_ENV_FILE` as `WHATSAPP_PROVIDER=${WHATSAPP_PROVIDER:-}` (optional, `:-` not `:?`) then the four `WHATSAPP_ACCESS_TOKEN=${WHATSAPP_ACCESS_TOKEN}` / `WHATSAPP_PHONE_NUMBER_ID=...` / `WHATSAPP_APP_SECRET=...` / `WHATSAPP_WEBHOOK_VERIFY_TOKEN=...` lines (mandatory, `read_secret_by_name` already fails fast on empty). Section 4 (`docker-compose.deploy.yml`) should reference these exact five env var names verbatim.
 - `terraform fmt -check -diff`: clean (no diff). `terraform init -backend=false && terraform validate` (in `infra/environments/dev/`): `Success! The configuration is valid.`
 - Review fix (section 1, round 1): added the four whatsapp-* placeholders + dated note to infra/environments/dev/iam-policy.md's runner-policy mirror block, which the doc requires be kept in sync with main.tf.
 - Section 2 done. Added to `.github/workflows/infra-dev.yml`'s `plan` and `apply` jobs' `env:` blocks (both, right after `TF_VAR_github_app_private_key`): `TF_VAR_whatsapp_access_token` ← `secrets.WHATSAPP_ACCESS_TOKEN`, `TF_VAR_whatsapp_phone_number_id` ← `secrets.WHATSAPP_PHONE_NUMBER_ID`, `TF_VAR_whatsapp_app_secret` ← `secrets.WHATSAPP_APP_SECRET`, `TF_VAR_whatsapp_webhook_verify_token` ← `secrets.WHATSAPP_WEBHOOK_VERIFY_TOKEN`. These are the four GitHub Actions secret names for the next section (deploy-dev.yml Render `.env` step) to reference consistently. No `github` Terraform provider resource touched (R2.2 out of scope).
