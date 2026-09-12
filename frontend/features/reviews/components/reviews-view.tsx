@@ -16,6 +16,7 @@ import {
   useReviewDetail,
   useReviewDraft,
 } from "../hooks/use-reviews-data";
+import { createErrorKey, respondErrorKey } from "../lib/reviews-error";
 import { CreateReviewDialog } from "./create-review-dialog";
 import { DraftsPanel } from "./drafts-panel";
 import { ReviewDetail } from "./review-detail";
@@ -39,6 +40,17 @@ import { ReviewsTabs } from "./reviews-tabs";
  * detail itself can show its own "sending…" state. We do not expose per-row
  * isPending to the listing rows here — they use the global `isBusy` and
  * the detail dialog has its own `isPending`.
+ *
+ * **A single `role="status" aria-live="polite"` error region** (D9, R3.5,
+ * R3.7, R5.5) surfaces `respond.error`/`create.error` through
+ * `respondErrorKey`/`createErrorKey` — mapping by HTTP status only, never
+ * the backend's raw message (R3.6). Without this the mutation still runs
+ * and the `onSettled` refetch still happens, but a `409` (someone else
+ * already decided the row) or a `422` (invalid create) fails **silently**:
+ * the row just resets with no explanation. `respondErrorKey`/`createErrorKey`
+ * existed and were unit-tested from the start (`lib/reviews-error.test.ts`)
+ * but were never called from a component — QA's final-gate pass caught this
+ * before archive.
  */
 export function ReviewsView() {
   const { t } = useTranslation("reviews");
@@ -123,11 +135,25 @@ export function ReviewsView() {
     }
   }
 
+  // Create's error renders inside CreateReviewDialog, not here: that dialog
+  // is a full-screen portal overlay and this banner would sit invisibly
+  // behind it while the form is still open (see CreateReviewDialogProps.errorKey).
+  const respondError = respond.isError ? respondErrorKey(respond.error) : null;
+
   return (
     <div className="flex flex-col gap-3" data-testid="reviews-view">
       <h1 className="text-headline-lg font-semibold text-foreground">
         {t("title")}
       </h1>
+      {respondError !== null && (
+        <p
+          role="status"
+          aria-live="polite"
+          className="rounded-md border border-destructive bg-destructive/10 px-3 py-2 text-body-base text-destructive"
+        >
+          {t(respondError)}
+        </p>
+      )}
       <ReviewsTabs
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -194,6 +220,7 @@ export function ReviewsView() {
           onOpenChange={setCreateDialogOpen}
           catalog={catalogData ?? []}
           isBusy={isBusy}
+          errorKey={create.isError ? createErrorKey(create.error) : null}
           onSubmit={(input: CreateReviewInput) => {
             create.mutate(input, {
               onSuccess: () => setCreateDialogOpen(false),
