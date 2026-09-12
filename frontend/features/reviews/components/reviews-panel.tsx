@@ -34,6 +34,12 @@ export interface ReviewsPanelProps {
   role: "owner" | "manager" | "other";
   /** Set by the parent so we can refresh the listings after a mutation. */
   isMutationPending: boolean;
+  /**
+   * The id of the review whose mutation is currently in flight, or `null`.
+   * Lets each row's `ReviewActions` show its own "Enviando…" (D9) instead of
+   * every row reporting `false` regardless of which one is actually pending.
+   */
+  pendingReviewId: string | null;
   /** Mutation handler wired through the parent (R3.1). */
   onConfirm: (input: {
     reviewId: string;
@@ -66,6 +72,7 @@ export function ReviewsPanel({
   onOpenRow,
   role,
   isMutationPending,
+  pendingReviewId,
   onConfirm,
 }: ReviewsPanelProps) {
   const { t } = useTranslation("reviews");
