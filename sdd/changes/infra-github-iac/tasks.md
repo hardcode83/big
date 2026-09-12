@@ -12,7 +12,7 @@
 
 ## 1. Bootstrap & module scaffolding <!-- hard --> <!-- panel: PASS 2026-09-12 receipt:88e0cc8e -->
 
-- [ ] 1.1 Crear el bucket de Object Storage `autohostai-tfstate-github` (mismo compartimento que `autohostai-tfstate-dev`) con `versioning = enabled` — **bootstrap irreducible**, no codificable. <!-- manual -->
+- [ ] 1.1 Verificar que el bucket `autohostai-tfstate-dev` existe con `versioning = enabled` (lo creó `infra/environments/dev/`); si no existe, el bootstrap irreducible original queda referenciado en `infra/environments/dev/README.md` §"Backend de state". **El módulo `infra/github/` no introduce ningún bucket nuevo.** [D3 amend]
 - [x] 1.2 Crear `infra/github/{main.tf,variables.tf,outputs.tf,backend.tf,backend.hcl.example,github.tfvars.example,README.md}` con el esqueleto vacío salvo `terraform { required_version = ">= 1.12"; required_providers { github = { source = "integrations/github"; version = "~> 5.0" } } }` en `main.tf`. [R1.2]
 - [x] 1.3 `backend.tf`: backend nativo `oci` con configuración parcial vía `-backend-config`. [R1]
 - [x] 1.4 `backend.hcl.example`: plantilla con placeholders para namespace/bucket/region/tenancy/user/fingerprint/private_key (comentado: NUNCA versionar con valores reales). [R1]

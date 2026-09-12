@@ -8,17 +8,11 @@
 
 La superficie GitHub-side es **por-organización**, no por-entorno. Acoplarla al módulo dev obligaría a duplicarla en `staging`/`prod` cuando se decida proveedor para ellos, y crea un acoplamiento de orden (el `apply` de infra podría depender del `apply` de GitHub-side para que los secrets existan antes del deploy). Decisión completa en `sdd/changes/infra-github-iac/design.md` D1.
 
-## Backend de state: `oci` nativo, bucket propio
+## Backend de state: `oci` nativo, bucket compartido con `infra/environments/dev/`
 
-El state vive en Object Storage (backend nativo `oci` de Terraform), en el bucket **`autohostai-tfstate-github`** — paralelo al `autohostai-tfstate-dev`, no reutilizado (D3). Requiere **Terraform >= 1.12**.
+El state vive en Object Storage (backend nativo `oci` de Terraform), en el bucket **`autohostai-tfstate-dev`** — el **mismo** que ya usa el módulo dev, separado por la `key` `github.tfstate`. Patrón estándar de Terraform ("un bucket, varios states"): la separación entre los dos módulos es la `key`, no el bucket. Requiere **Terraform >= 1.12** (versión mínima con backend `oci`).
 
-### Bootstrap manual (una sola vez, tarea 1.1)
-
-El bucket **no** lo crea este Terraform — mismo motivo que el bucket dev: no se puede usar Terraform para crear el almacén de su propio state.
-
-1. Consola OCI → **Storage → Object Storage & Archive Storage → Buckets**.
-2. **Create Bucket** → nombre `autohostai-tfstate-github`, tier Standard, **versioning = enabled** (recomendado para el state — mismo patrón que `autohostai-tfstate-dev`).
-3. Anotar el **namespace** de la tenancy (aparece en la propia consola).
+El bucket ya existe — lo creó `infra/environments/dev/` con `versioning = enabled`. **No hay bootstrap irreducible** para este módulo en lo que al bucket se refiere: confirmar antes del primer `init` que `autohostai-tfstate-dev` existe y tiene versioning (revisar `infra/environments/dev/README.md` §"Backend de state" si hay duda).
 
 ### Inicializar localmente
 
@@ -49,7 +43,6 @@ El workflow `infra-github` (job `plan`/`apply`, disparo `workflow_dispatch`, aú
 
 ## Pendiente (no automatizable por este change)
 
-- Crear el bucket `autohostai-tfstate-github` (tarea 1.1, bootstrap irreducible).
 - Crear la GitHub App con los permisos que `RUNBOOK.md` §1 detallará (sección 5).
 
 ## Operación
