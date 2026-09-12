@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { useAuth } from "@/lib/auth";
+import { useAuth, useHasPermission } from "@/lib/auth";
 
 import type { CreateReviewInput, ReviewAction } from "../data";
 import { useReviewsUiStore } from "../state/use-reviews-ui-store";
@@ -50,8 +50,17 @@ export function ReviewsView() {
       : user?.role === "PROPERTY_MANAGER"
         ? "manager"
         : "other";
-  const canCreate = user?.role === "PROPERTY_MANAGER";
-  const canDecide = user?.role === "TENANT_OWNER";
+  // Gated through the declared permission mirror (D15, R7.4), not a role
+  // literal comparison: the mirror is the single place the UX split between
+  // owner-decides / manager-creates is recorded, and a future permission
+  // change only has to touch permissions.ts. There is no equivalent
+  // `canDecide` gate here: `legalActions(status, role)` already encodes the
+  // full per-status/per-role decision matrix (D5) that Approve/Ignore/Edit/
+  // MarkPosted need, and gating `role` itself behind a second boolean
+  // (`canDecide ? role : "other"`, the shape this replaced) silently
+  // collapsed the manager to "other" everywhere — hiding Edit from the
+  // manager too, since MANAGE_REVIEW_DECISIONS is owner-only.
+  const canCreate = useHasPermission("CREATE_REVIEW_UI");
 
   const adoptTenant = useReviewsUiStore((s) => s.adoptTenant);
   const activeTab = useReviewsUiStore((s) => s.activeTab);
@@ -132,8 +141,13 @@ export function ReviewsView() {
                 createDialogOpen={createDialogOpen}
                 onOpenCreateDialog={() => canCreate && setCreateDialogOpen(true)}
                 isMutationPending={isBusy}
+                pendingReviewId={
+                  respond.isPending && respond.variables && "reviewId" in respond.variables
+                    ? respond.variables.reviewId
+                    : null
+                }
                 onOpenRow={openRow}
-                role={canDecide ? role : "other"}
+                role={role}
                 onConfirm={respondFromRow}
               />
             ),
@@ -147,8 +161,13 @@ export function ReviewsView() {
                 createDialogOpen={createDialogOpen}
                 onOpenCreateDialog={() => canCreate && setCreateDialogOpen(true)}
                 onOpenRow={openRow}
-                role={canDecide ? role : "other"}
+                role={role}
                 isMutationPending={isBusy}
+                pendingReviewId={
+                  respond.isPending && respond.variables && "reviewId" in respond.variables
+                    ? respond.variables.reviewId
+                    : null
+                }
                 onConfirm={respondFromRow}
               />
             ),
@@ -161,6 +180,7 @@ export function ReviewsView() {
           draft={draft.data ?? null}
           isBusy={isBusy}
           isPending={isPendingThisRow(detailReviewId)}
+          role={role}
           onClose={closeDetail}
           onConfirm={respondFromRow}
           onMarkPosted={(reviewId) => {

@@ -31,6 +31,12 @@ export interface DraftsPanelProps {
   onOpenCreateDialog: () => void;
   /** Set by the parent so we can refresh the listings after a mutation. */
   isMutationPending: boolean;
+  /**
+   * The id of the review whose mutation is currently in flight, or `null`.
+   * Lets each row's `ReviewActions` show its own "Enviando…" (D9) instead of
+   * every row reporting `false` regardless of which one is actually pending.
+   */
+  pendingReviewId: string | null;
   onOpenRow: (reviewId: string) => void;
   /** The current user's role for the action matrix (D5). */
   role: "owner" | "manager" | "other";
@@ -48,6 +54,7 @@ export function DraftsPanel({
   createDialogOpen,
   onOpenCreateDialog,
   isMutationPending,
+  pendingReviewId,
   onOpenRow,
   role,
   onConfirm,
@@ -123,7 +130,7 @@ export function DraftsPanel({
                   status={review.status}
                   role={role}
                   isBusy={isMutationPending}
-                  isPending={false}
+                  isPending={pendingReviewId === review.id}
                   onConfirm={(input) =>
                     onConfirm({
                       reviewId: input.reviewId,
