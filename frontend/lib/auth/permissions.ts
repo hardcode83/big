@@ -41,6 +41,13 @@ import type { components } from "@/lib/api/generated/openapi";
  * backend policy already grants it (`guest-portal-api` D14 — `TENANT_OWNER`
  * and `PROPERTY_MANAGER`, nobody else).
  *
+ * `tenant-settings-web` D2 adds `MANAGE_USERS` and `MANAGE_TENANT_SETTINGS`,
+ * `TENANT_OWNER`-only: it mirrors `policy.py`'s `_USER_MANAGE`/`_TENANT_MANAGE`
+ * bundles exactly. `PROPERTY_MANAGER` holds the paired `READ_*` permission on
+ * the backend but not the `MANAGE_*` one, so `/settings` renders read-only for
+ * that role (D5) — same "owner operates, manager reads" split as
+ * `RESPOND_OWNER_APPROVALS` above, not the `MANAGE_CLEANING_TASKS` one.
+ *
  * `reviews-web` D15 adds `MANAGE_REVIEW_DECISIONS` (owner-only: approve / ignore /
  * mark-as-posted) and `CREATE_REVIEW_UI` (manager-only: high-by-hand and edit
  * draft). The split mirrors the PRD §18 division of labour — the owner decides,
@@ -61,6 +68,8 @@ export type Permission =
   | "MANAGE_RESERVATIONS"
   | "RESPOND_OWNER_APPROVALS"
   | "MANAGE_GUEST_ACCESS_TOKENS"
+  | "MANAGE_USERS"
+  | "MANAGE_TENANT_SETTINGS"
   | "MANAGE_REVIEW_DECISIONS"
   | "CREATE_REVIEW_UI";
 
@@ -80,6 +89,8 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "MANAGE_PRICE_RECOMMENDATIONS",
     "RESPOND_OWNER_APPROVALS",
     "MANAGE_GUEST_ACCESS_TOKENS",
+    "MANAGE_USERS",
+    "MANAGE_TENANT_SETTINGS",
     // `MANAGE_REVIEW_DECISIONS` is the owner's side of the reviews split
     // (reviews-web D15): she approves, ignores, and marks-as-posted. The
     // manager does not get it on the UX mirror — see the file header — even
