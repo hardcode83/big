@@ -14,6 +14,7 @@ from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.core.unit_of_work import CallerOwnedUnitOfWork, SqlAlchemyUnitOfWork
 from app.guests.infrastructure.models import GuestModel
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
+from app.integrations.infrastructure.postgres_reservation_ingest_lock import PostgresReservationIngestLock
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
 from app.integrations.domain.dtos import PmsFetchResult, PmsRowFailure, ReservationDTO
@@ -83,6 +84,7 @@ def _build(db_session, factory) -> SyncReservationsFromPmsUseCase:
         uow=SqlAlchemyUnitOfWork(db_session),
         audit=SqlAlchemyAuditLogRepository(db_session),
         email_exclusion=PostgresGuestEmailExclusion(db_session),
+        ingest_lock=PostgresReservationIngestLock(db_session),
     )
 
 
@@ -647,6 +649,7 @@ def _build_with_advance(db_session, adapter) -> SyncReservationsFromPmsUseCase:
         uow=SqlAlchemyUnitOfWork(db_session),
         audit=SqlAlchemyAuditLogRepository(db_session),
         email_exclusion=PostgresGuestEmailExclusion(db_session),
+        ingest_lock=PostgresReservationIngestLock(db_session),
         advance=AdvancePropertyStatesUseCase(
             properties=SqlAlchemyPropertyRepository(db_session),
             reservations=SqlAlchemyReservationRepository(db_session),
@@ -702,6 +705,69 @@ async def test_a_sync_that_cancels_a_stay_frees_the_property(
         )
     )
     assert reservation.status is ReservationStatus.CANCELLED
+
+
+TENANT_B_EXTERNAL_ID = "PMS-SYNC-CANCEL-TENANT-B"
+
+
+def _stay_for(property_external_id: str, external_id: str, status: str) -> ReservationDTO:
+    """Same shape as `_stay`, for a property/external id that is not tenant A's own."""
+    return ReservationDTO(
+        external_id=external_id,
+        channel="AIRBNB",
+        property_external_id=property_external_id,
+        check_in_date=date(2026, 8, 1),
+        check_out_date=date(2026, 8, 4),
+        check_in_time=time(15, 0),
+        check_out_time=time(11, 0),
+        guest_name="Grace Hopper",
+        adults=2,
+        status=status,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_tenants_cancellation_does_not_advance_another_tenants_property(
+    db_session, tenant_a, tenant_b, property_a, property_b
+) -> None:
+    """Review finding 2 (sdd-review-tenancy): the `advance=` wiring this change adds to the
+    sync route must not leak a cancellation's property-state advance across tenants.
+
+    Both tenants' properties sit in `AWAITING_CHECKIN`; only tenant A's stay is cancelled.
+    `AdvancePropertyStatesUseCase.execute` is always called with the acting tenant's own
+    `tenant_id` (design D2), so tenant B's unrelated property and its zero
+    `PropertyStateTransition` rows must be untouched by tenant A's sync.
+    """
+    await _awaiting_checkin(db_session, property_a)
+    await _awaiting_checkin(db_session, property_b)
+
+    # Tenant B has its own, unrelated stay — confirmed, and never cancelled by this test.
+    await _build_with_advance(
+        db_session,
+        _AdapterWithFailures(
+            [], [_stay_for(property_b.pms_external_id, TENANT_B_EXTERNAL_ID, "CONFIRMED")]
+        ),
+    ).execute(tenant_id=tenant_b.id, since=SINCE, now=NOW)
+
+    # Tenant A creates, then cancels, its own stay.
+    await _build_with_advance(db_session, _AdapterWithFailures([], [_stay("CONFIRMED")])).execute(
+        tenant_id=tenant_a.id, since=SINCE, now=NOW
+    )
+    report = await _build_with_advance(
+        db_session, _AdapterWithFailures([], [_stay("CANCELLED")])
+    ).execute(tenant_id=tenant_a.id, since=SINCE, now=NOW)
+    assert report.updated == 1
+
+    await db_session.refresh(property_a)
+    await db_session.refresh(property_b)
+    assert property_a.current_operational_state is PropertyOperationalState.VACANT_READY
+    assert property_b.current_operational_state is PropertyOperationalState.AWAITING_CHECKIN
+
+    a_transitions = await _transitions_of(db_session, property_a)
+    b_transitions = await _transitions_of(db_session, property_b)
+    assert len(a_transitions) == 1
+    assert a_transitions[0].to_state is PropertyOperationalState.VACANT_READY
+    assert b_transitions == []
 
 
 @pytest.mark.asyncio

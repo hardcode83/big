@@ -42,6 +42,9 @@ from app.core.db import async_session_factory, bind_session_to_tenant
 from app.core.unit_of_work import CallerOwnedUnitOfWork, SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
+from app.integrations.infrastructure.postgres_reservation_ingest_lock import (
+    PostgresReservationIngestLock,
+)
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.integrations.application.ingest import IngestReport
 from app.integrations.domain.enums import PMSProvider
@@ -150,6 +153,7 @@ async def sync_with_session(
         uow=SqlAlchemyUnitOfWork(session),
         audit=SqlAlchemyAuditLogRepository(session),
         email_exclusion=PostgresGuestEmailExclusion(session),
+        ingest_lock=PostgresReservationIngestLock(session),
         # A cancellation this sweep discovers must also free the flat that was waiting for
         # that guest (`pms-ingest-change-events` R3.3) — the manual sweep never called the
         # advancer before this line either. `CallerOwnedUnitOfWork` and NOT

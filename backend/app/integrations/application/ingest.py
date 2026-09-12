@@ -19,7 +19,7 @@ from app.guests.application.resolution import ManualGuestIdentityInput, ResolveO
 from app.guests.domain.ports import GuestEmailExclusion
 from app.guests.domain.repositories import GuestRepository
 from app.integrations.domain.dtos import ReservationDTO
-from app.integrations.domain.ports import PropertyStateAdvancer
+from app.integrations.domain.ports import PropertyStateAdvancer, ReservationIngestLock
 from app.properties.domain.entities import Property
 from app.properties.domain.enums import PropertyStatus
 from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
@@ -118,12 +118,14 @@ class ReservationIngestor:
         guests: GuestRepository,
         timeline: TimelineEventRepository,
         email_exclusion: GuestEmailExclusion,
+        ingest_lock: ReservationIngestLock,
         advance: PropertyStateAdvancer | None = None,
     ) -> None:
         self._reservations = reservations
         self._guests = guests
         self._timeline = timeline
         self._resolver = ResolveOrCreateGuest(guests, email_exclusion)
+        self._ingest_lock = ingest_lock
         self._advance = advance
 
     async def ingest(
@@ -240,6 +242,14 @@ class ReservationIngestor:
             )
             return False
 
+        if row.external_id:
+            # Serialize concurrent ingest of the SAME PMS-side booking (review finding 1): the
+            # periodic sync beat, the webhook re-read and the CSV upload each run in their own
+            # session/transaction, so two truly concurrent passes could otherwise both read this
+            # row's pre-cancellation state and both emit a cancellation. Locking here, before the
+            # lookup that decides create-vs-update, serializes both races — a second concurrent
+            # caller blocks until the first commits or rolls back, then re-reads a settled row.
+            await self._ingest_lock.acquire(tenant_id, row.external_id)
         existing = (
             await self._reservations.find_by_external_pms_id(tenant_id, row.external_id)
             if row.external_id

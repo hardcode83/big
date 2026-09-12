@@ -51,6 +51,7 @@ from app.integrations.domain.ports import (
     PMSAdapterFactory,
     PropertyStateAdvancer,
     ReservationCsvParser,
+    ReservationIngestLock,
 )
 from app.integrations.domain.repositories import WebhookEndpointRepository
 from app.integrations.domain.webhook_auth import (
@@ -103,6 +104,7 @@ class SyncReservationsFromPmsUseCase:
         uow: UnitOfWork,
         audit: AuditLogRepository,
         email_exclusion: GuestEmailExclusion,
+        ingest_lock: ReservationIngestLock,
         advance: PropertyStateAdvancer | None = None,
     ) -> None:
         # A FACTORY, not an adapter. ADR 0006 decision 7 is explicit that use cases must never
@@ -115,6 +117,7 @@ class SyncReservationsFromPmsUseCase:
             guests=guests,
             timeline=timeline,
             email_exclusion=email_exclusion,
+            ingest_lock=ingest_lock,
             advance=advance,
         )
         self._uow = uow
@@ -650,6 +653,7 @@ class ImportReservationsFromCsvUseCase:
         uow: UnitOfWork,
         max_rows: int,
         email_exclusion: GuestEmailExclusion,
+        ingest_lock: ReservationIngestLock,
         advance: PropertyStateAdvancer | None = None,
     ) -> None:
         self._parser = parser
@@ -659,6 +663,7 @@ class ImportReservationsFromCsvUseCase:
             guests=guests,
             timeline=timeline,
             email_exclusion=email_exclusion,
+            ingest_lock=ingest_lock,
             advance=advance,
         )
         self._uow = uow

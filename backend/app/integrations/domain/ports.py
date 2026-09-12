@@ -227,6 +227,23 @@ class PropertyStateAdvancer(Protocol):
         ...
 
 
+class ReservationIngestLock(Protocol):
+    """Transaction-scoped exclusion for one tenant and one PMS-side booking (review finding 1).
+
+    Same shape and same reason as `app.guests.domain.ports.GuestEmailExclusion`: with three
+    unsynchronized writers reaching `ReservationIngestor` (the periodic sync beat, the webhook
+    re-read, and the CSV upload endpoint), each its own session under READ COMMITTED with no row
+    locking, two truly concurrent transactions can both read a reservation's pre-cancellation
+    state, both compute "newly cancelled", and both write a `RESERVATION_CANCELLED` event plus a
+    `PropertyStateTransition` row for one real-world cancellation. Acquired once per
+    `external_pms_id`, before the create-vs-update lookup, so it serializes both races.
+    """
+
+    async def acquire(self, tenant_id: uuid.UUID, external_pms_id: str) -> None:
+        """Block concurrent ingest of the same tenant/external_pms_id until the transaction ends."""
+        ...
+
+
 class ReservationCsvParser(Protocol):
     """Turns an uploaded CSV into rows, reporting per-row failures instead of raising (R4.2).
 

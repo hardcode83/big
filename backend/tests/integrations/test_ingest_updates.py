@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import select
 
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
+from app.integrations.infrastructure.postgres_reservation_ingest_lock import PostgresReservationIngestLock
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.integrations.application.ingest import IngestRow, ReservationIngestor
 from app.integrations.domain.dtos import ReservationDTO
@@ -34,6 +35,7 @@ def _ingestor(db_session, *, advance=None) -> ReservationIngestor:
         guests=SqlAlchemyGuestRepository(db_session),
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         email_exclusion=PostgresGuestEmailExclusion(db_session),
+        ingest_lock=PostgresReservationIngestLock(db_session),
         advance=advance,
     )
 

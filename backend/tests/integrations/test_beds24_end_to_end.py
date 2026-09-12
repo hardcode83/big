@@ -22,6 +22,7 @@ from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
+from app.integrations.infrastructure.postgres_reservation_ingest_lock import PostgresReservationIngestLock
 from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
 from app.integrations.domain.enums import PMSProvider
 from app.integrations.infrastructure.beds24.adapter import Beds24Adapter
@@ -99,6 +100,7 @@ def _use_case(db_session, payload: dict) -> SyncReservationsFromPmsUseCase:
         uow=SqlAlchemyUnitOfWork(db_session),
         audit=SqlAlchemyAuditLogRepository(db_session),
         email_exclusion=PostgresGuestEmailExclusion(db_session),
+        ingest_lock=PostgresReservationIngestLock(db_session),
     )
 
 

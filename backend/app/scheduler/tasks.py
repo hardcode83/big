@@ -44,6 +44,9 @@ from app.core.config import settings
 from app.core.unit_of_work import CallerOwnedUnitOfWork, SqlAlchemyUnitOfWork
 from app.guests.infrastructure.legal import SqlAlchemyLegalRegistrationInitialiser
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
+from app.integrations.infrastructure.postgres_reservation_ingest_lock import (
+    PostgresReservationIngestLock,
+)
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.integrations.application.use_cases import SCHEDULED_SOURCE, SyncReservationsFromPmsUseCase
 from app.integrations.application.webhooks import (
@@ -366,6 +369,7 @@ async def _sync_pms_reservations(session: AsyncSession, tenant_id, now: datetime
         uow=SqlAlchemyUnitOfWork(session),
         audit=SqlAlchemyAuditLogRepository(session),
         email_exclusion=PostgresGuestEmailExclusion(session),
+        ingest_lock=PostgresReservationIngestLock(session),
         # `pms-ingest-change-events` R3.3: until this line the periodic sweep never called the
         # advancer at all, so a cancellation the PMS reported left the flat sitting in
         # `AWAITING_CHECKIN` until a person moved it. Composed with `CallerOwnedUnitOfWork`
@@ -525,6 +529,7 @@ def _webhook_tenant_use_case(
             uow=SqlAlchemyUnitOfWork(session),
             audit=SqlAlchemyAuditLogRepository(session),
             email_exclusion=PostgresGuestEmailExclusion(session),
+            ingest_lock=PostgresReservationIngestLock(session),
             # A SECOND advancer, and deliberately not the one below
             # (`pms-ingest-change-events` D2). This one is nested inside the re-read's own
             # transaction, so it defers the commit; the one below is a sequential step of

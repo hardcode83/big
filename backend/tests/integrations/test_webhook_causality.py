@@ -24,6 +24,7 @@ from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.core.unit_of_work import CallerOwnedUnitOfWork, SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
+from app.integrations.infrastructure.postgres_reservation_ingest_lock import PostgresReservationIngestLock
 from app.integrations.application.use_cases import (
     WEBHOOK_SOURCE,
     SyncReservationsFromPmsUseCase,
@@ -159,6 +160,7 @@ def _use_case(
             uow=SqlAlchemyUnitOfWork(db_session),
             audit=SqlAlchemyAuditLogRepository(db_session),
             email_exclusion=PostgresGuestEmailExclusion(db_session),
+            ingest_lock=PostgresReservationIngestLock(db_session),
             # The NESTED advancer `pms-ingest-change-events` added, mirrored from
             # `_webhook_tenant_use_case` exactly — including `CallerOwnedUnitOfWork`, which is
             # what keeps the re-read one transaction with one commit (its D2). Two advancers
@@ -427,6 +429,7 @@ def _counted_use_case(
             uow=SqlAlchemyUnitOfWork(db_session),
             audit=SqlAlchemyAuditLogRepository(db_session),
             email_exclusion=PostgresGuestEmailExclusion(db_session),
+            ingest_lock=PostgresReservationIngestLock(db_session),
             advance=nested,
         ),
         advance=outer,

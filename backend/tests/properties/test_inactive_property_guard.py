@@ -23,6 +23,7 @@ from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.infrastructure.models import UserModel
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
+from app.integrations.infrastructure.postgres_reservation_ingest_lock import PostgresReservationIngestLock
 from app.integrations.application.ingest import IngestRow, ReservationIngestor
 from app.integrations.domain.dtos import ReservationDTO
 from app.properties.domain.enums import PropertyStatus
@@ -183,6 +184,7 @@ async def test_the_batch_routes_skip_a_retired_property_without_aborting(
         guests=SqlAlchemyGuestRepository(db_session),
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         email_exclusion=PostgresGuestEmailExclusion(db_session),
+        ingest_lock=PostgresReservationIngestLock(db_session),
     )
     report = await ingestor.ingest(
         tenant_id=tenant.id,
