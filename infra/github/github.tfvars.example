@@ -1,0 +1,18 @@
+# Copia como `github.tfvars` (NO versionado) o pasa cada valor por separado con
+# `-var`/`TF_VAR_*`. Igual que `backend.hcl.example`: solo nombres y valores no
+# sensibles, nunca secretos reales aquí.
+#
+# Por qué este fichero contiene solo placeholders no sensibles:
+#   - Los IDs públicos del repo (`github_owner`, `github_repository_name`) no
+#     son secretos y por eso pueden llevar valor real — son nombres DNS
+#     públicos de la organización.
+#   - Las variables SENSIBLES (credenciales OCI, claves, CIDRs, etc.) van por
+#     `TF_VAR_*` desde los GitHub Secrets del repo (ver `README.md` §"Secrets
+#     de GitHub Actions esperados"). Si se copiaran aquí con el placeholder
+#     puesto, Terraform lo aceptaría como string válido y el fallo llegaría
+#     tarde y confuso (error de auth del provider) en vez de temprano y claro
+#     ("No value for required variable", comportamiento verificado en la tarea
+#     1.5 de `infra/environments/dev/`).
+
+github_owner           = "autohostai-labs"
+github_repository_name = "AutoHostAI"

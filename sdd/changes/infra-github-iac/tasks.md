@@ -13,13 +13,13 @@
 ## 1. Bootstrap & module scaffolding <!-- hard -->
 
 - [ ] 1.1 Crear el bucket de Object Storage `autohostai-tfstate-github` (mismo compartimento que `autohostai-tfstate-dev`) con `versioning = enabled` — **bootstrap irreducible**, no codificable. <!-- manual -->
-- [ ] 1.2 Crear `infra/github/{main.tf,variables.tf,outputs.tf,backend.tf,backend.hcl.example,github.tfvars.example,README.md}` con el esqueleto vacío salvo `terraform { required_version = ">= 1.12"; required_providers { github = { source = "integrations/github"; version = "~> 5.0" } } }` en `main.tf`. [R1.2]
-- [ ] 1.3 `backend.tf`: backend nativo `oci` con configuración parcial vía `-backend-config`. [R1]
-- [ ] 1.4 `backend.hcl.example`: plantilla con placeholders para namespace/bucket/region/tenancy/user/fingerprint/private_key (comentado: NUNCA versionar con valores reales). [R1]
-- [ ] 1.5 `github.tfvars.example`: placeholders no sensibles (`github_owner = "autohostai-labs"`, `github_repository_name = "AutoHostAI"`) con comentario de que las sensibles van por `TF_VAR_*`. [R1.3]
-- [ ] 1.6 `variables.tf`: declarar las 14 variables (12 sensibles + 2 no sensibles) según §"Variables nuevas (resumen)" del design — validar CIDRs (≥/24 para `allowed_ssh_cidrs`, ≥/16 para `allowed_ssh_cidrs_wide`, ≥1 entrada SSH) y formato de clave pública (regex SSH) en línea con `infra/environments/dev/variables.tf`. [R1.3, R3]
-- [ ] 1.7 `outputs.tf`: tres outputs (`github_repository_full_name`, `github_repository_default_branch`, `github_app_installation_id`) — nunca valores de secrets. [R1]
-- [ ] 1.8 Verificación local: `terraform -chdir=infra/github init -backend=false && terraform -chdir=infra/github validate && terraform -chdir=infra/github fmt -check -recursive` deben pasar. [R1.4]
+- [x] 1.2 Crear `infra/github/{main.tf,variables.tf,outputs.tf,backend.tf,backend.hcl.example,github.tfvars.example,README.md}` con el esqueleto vacío salvo `terraform { required_version = ">= 1.12"; required_providers { github = { source = "integrations/github"; version = "~> 5.0" } } }` en `main.tf`. [R1.2]
+- [x] 1.3 `backend.tf`: backend nativo `oci` con configuración parcial vía `-backend-config`. [R1]
+- [x] 1.4 `backend.hcl.example`: plantilla con placeholders para namespace/bucket/region/tenancy/user/fingerprint/private_key (comentado: NUNCA versionar con valores reales). [R1]
+- [x] 1.5 `github.tfvars.example`: placeholders no sensibles (`github_owner = "autohostai-labs"`, `github_repository_name = "AutoHostAI"`) con comentario de que las sensibles van por `TF_VAR_*`. [R1.3]
+- [x] 1.6 `variables.tf`: declarar las 14 variables (12 sensibles + 2 no sensibles) según §"Variables nuevas (resumen)" del design — validar CIDRs (≥/24 para `allowed_ssh_cidrs`, ≥/16 para `allowed_ssh_cidrs_wide`, ≥1 entrada SSH) y formato de clave pública (regex SSH) en línea con `infra/environments/dev/variables.tf`. [R1.3, R3]
+- [x] 1.7 `outputs.tf`: tres outputs (`github_repository_full_name`, `github_repository_default_branch`, `github_app_installation_id`) — nunca valores de secrets. [R1]
+- [x] 1.8 Verificación local: `terraform -chdir=infra/github init -backend=false && terraform -chdir=infra/github validate && terraform -chdir=infra/github fmt -check -recursive` deben pasar. [R1.4]
 
 ## 2. Repository settings + App installation
 
@@ -81,3 +81,10 @@
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
+
+- Tarea 1.1 (manual) queda PENDIENTE — el bucket `autohostai-tfstate-github` no lo crea este Terraform.
+- Variables: declaradas EXACTAMENTE 14 (12 sensibles + 2 no sensibles) siguiendo el conteo literal de la tarea 1.6. `github_app_id`, `github_app_installation_id` y `github_repository_full_name` NO están declaradas como variables — sección 2 las añade (las dos primeras) y la tercera es un `local.*` (computado, como dice el design §"Variables nuevas").
+- `outputs.tf` referencia `local.*` placeholders (`github_repository_default_branch = "main"`, `github_app_installation_id = "0"`); sección 2 los cablea a los recursos reales — esto evita pre-comprometer nombres de atributos del provider pinado y hace que `terraform validate` pase ya en sección 1.
+- `backend.hcl.example` usa `key = "github.tfstate"` (el módulo dev usa `dev.tfstate`); el bucket queda fijo a `autohostai-tfstate-github` en el ejemplo — el bootstrap irreducible (tarea 1.1) sigue siendo quien lo crea.
+- Provider pinado: `~> 5.0` resuelve a `v5.45.0` (verificado en `terraform init`). OJO si sección 2 mira atributos — la doc debe ser de esa versión.
+- `.terraform.lock.hcl` se commitea (whitelisted en `.gitignore` raíz, mismo patrón que el módulo dev).
