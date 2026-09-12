@@ -1,8 +1,12 @@
-# Variables del módulo `infra/github/` (change infra-github-iac, sección 1).
+# Variables del módulo `infra/github/` (change infra-github-iac, secciones 1+2).
 #
 # Conteo verificado contra el §"Variables nuevas (resumen)" de `design.md`:
-# 14 variables declaradas — 12 sensibles + 2 no sensibles (los placeholders que
-# viajan en `github.tfvars.example`).
+# 16 variables declaradas — 12 sensibles + 4 no sensibles.
+# - Sección 1 añadió 14 (12 sensibles + 2 no sensibles: `github_owner`,
+#   `github_repository_name`).
+# - Sección 2 añadió 2 no sensibles (`github_app_id`, `github_app_installation_id`)
+#   que la tarea 2.1 declara explícitamente sin `sensitive = true` por ser
+#   IDs públicos (mismo patrón que el módulo dev).
 #
 # Patrón de validación copiado de `infra/environments/dev/variables.tf`:
 # - `allowed_ssh_cidrs` (mínimo /24) — el suelo por defecto para operadores.
@@ -139,4 +143,21 @@ variable "github_repository_name" {
   description = "Nombre del repo en GitHub. Default `AutoHostAI`."
   type        = string
   default     = "AutoHostAI"
+}
+
+# --- Identificadores públicos de la GitHub App (no sensibles) ---
+# IDs públicos del App y de su instalación sobre la org. Mismo patrón que
+# `infra/environments/dev/variables.tf`: el `app_id` y el `installation_id`
+# son nombres que aparecen en la URL de configuración de la App, NO secretos.
+# Por eso llegan en `github.tfvars` sin `sensitive = true` y NO se filtran
+# al loggear el provider. La clave privada `.pem` (el único secreto real)
+# sigue por `github_app_private_key_path` con `sensitive = true` (D2).
+variable "github_app_id" {
+  description = "ID público de la GitHub App que autentica el provider `integrations/github`. La misma App que `infra/environments/dev/cloud-init.yaml.tftpl` usa para mintear el installation token del runner."
+  type        = string
+}
+
+variable "github_app_installation_id" {
+  description = "ID público de la instalación de la GitHub App sobre el repo/owner. Es el identificador que `github_app_installation_repositories.this` referencia."
+  type        = string
 }
