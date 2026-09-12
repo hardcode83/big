@@ -250,10 +250,11 @@ export interface EditPropertyFormProps {
  * labels itself), while the save/cancel/result copy comes from `dashboard`,
  * where the hosting detail view's own strings live.
  *
- * `noValidate` for the same reason `CreatePropertyForm` carries it: `name` and
- * `internal_code` keep their HTML `required` attribute for a11y (R4.2), but
- * native constraint validation would block the `submit` event before
- * `validatePropertyFields` — the single validation path — ever ran.
+ * `noValidate` for the same reason `CreatePropertyForm` carries it: `name`,
+ * `internal_code` and `timezone` keep their HTML `required` attribute for
+ * a11y (R4.2), but native constraint validation would block the `submit`
+ * event before `validatePropertyFields` — the single validation path — ever
+ * ran.
  */
 export function EditPropertyForm({
   propertyId,

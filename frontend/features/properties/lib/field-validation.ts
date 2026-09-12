@@ -21,6 +21,7 @@ export interface PropertyFieldValues {
   name: string;
   internal_code: string;
   country: string;
+  timezone: string;
   max_guests: number;
   bedrooms: number;
   bathrooms: number;
@@ -49,14 +50,18 @@ function checkMaxLength(
  * `field -> errorKey` map (empty when every checked field is within bounds);
  * callers translate `errorKey` via their own locale namespace (Section 3/4).
  *
- * Only the fields R1.3 names are checked here: `name`/`internal_code`
- * (required + max length), `country` (exact 2 uppercase letters), `max_guests`
- * (1-50), `bedrooms`/`bathrooms` (0-50), and the length caps on
- * `pms_external_id`, the three notes and `wifi_password`. Address/city/
- * province/postal_code/wifi_name/timezone/check-in-out are enforced only via
- * `maxLength` on the `<input>` itself (design D5) — HTML already prevents a
- * user from ever producing a too-long value there, so there is nothing this
- * pure function needs to flag for them.
+ * Only the fields R1.3 names are checked here: `name`/`internal_code`/
+ * `timezone` (required; `name`/`internal_code` also have a max length),
+ * `country` (exact 2 uppercase letters), `max_guests` (1-50),
+ * `bedrooms`/`bathrooms` (0-50), and the length caps on `pms_external_id`,
+ * the three notes and `wifi_password`. Address/city/province/postal_code/
+ * wifi_name/check-in-out are enforced only via `maxLength` on the `<input>`
+ * itself (design D5) — HTML already prevents a user from ever producing a
+ * too-long value there, so there is nothing this pure function needs to flag
+ * for them. `timezone` carries the same `max_length=50` bound on its
+ * `<input>`, but backend/app/properties/api/schemas.py:106 also requires it
+ * non-empty (`min_length=1`), so unlike those other fields it needs an
+ * explicit required check here too.
  */
 export function validatePropertyFields(
   values: PropertyFieldValues,
@@ -77,6 +82,10 @@ export function validatePropertyFields(
 
   if (!COUNTRY_PATTERN.test(values.country ?? "")) {
     errors.country = "invalidCountry";
+  }
+
+  if (!values.timezone || values.timezone.trim().length === 0) {
+    errors.timezone = "required";
   }
 
   if (

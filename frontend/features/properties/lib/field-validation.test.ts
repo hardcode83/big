@@ -18,6 +18,7 @@ function baseValues(
     name: "Casa Azul",
     internal_code: "CASA-01",
     country: "ES",
+    timezone: "Europe/Madrid",
     max_guests: 4,
     bedrooms: 2,
     bathrooms: 1,
@@ -71,6 +72,18 @@ describe("validatePropertyFields (R1.3, design D5)", () => {
     const internal_code = "a".repeat(MAX_INTERNAL_CODE + 1);
     expect(validatePropertyFields(baseValues({ internal_code }))).toEqual({
       internal_code: "tooLong",
+    });
+  });
+
+  it("flags an empty timezone as required (sdd-qa finding 1)", () => {
+    expect(validatePropertyFields(baseValues({ timezone: "" }))).toEqual({
+      timezone: "required",
+    });
+  });
+
+  it("flags a whitespace-only timezone as required (sdd-qa finding 1)", () => {
+    expect(validatePropertyFields(baseValues({ timezone: "   " }))).toEqual({
+      timezone: "required",
     });
   });
 

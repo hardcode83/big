@@ -141,9 +141,14 @@ const textareaClass = `${inputClass} resize-y`;
  * accidentally wire up (R1.2).
  *
  * Every field has one programmatically associated `<label htmlFor>` (R4.2);
- * `name`/`internal_code` are the only two marked `required` — every other
- * field carries a backend default (R1.2) so leaving it blank is a valid
- * submission, not an error `validatePropertyFields` would ever raise.
+ * `name`/`internal_code`/`timezone` are the only three marked `required` —
+ * every other field carries a backend default (R1.2) so leaving it blank is
+ * a valid submission, not an error `validatePropertyFields` would ever
+ * raise. `timezone` also has a backend default (`"Europe/Madrid"`), but
+ * unlike the others it cannot be sent as an empty string —
+ * `backend/app/properties/api/schemas.py:106` declares it `min_length=1` —
+ * so it is required in the sense of "must be non-empty", not "has no
+ * default".
  *
  * `access_notes` carries an inline hint (design D14, R3.1) associated via
  * `aria-describedby`, stating it is guest-facing free text for arrival
@@ -308,13 +313,16 @@ export function PropertyFieldset({
       <div className="flex flex-col gap-1">
         <label htmlFor="property-timezone" className="text-sm font-medium">
           {t("createForm.fields.timezone")}
+          <span aria-hidden="true"> *</span>
         </label>
         <input
           className={inputClass}
           // `timezone` has no named constant in `field-limits.ts` (Section 1
           // exported only the fields task 1.2 named); mirrors
-          // `backend/app/properties/api/schemas.py:106` (`max_length=50`) directly.
+          // `backend/app/properties/api/schemas.py:106` (`max_length=50`,
+          // `min_length=1`) directly — `required` below enforces the latter.
           maxLength={50}
+          required
           placeholder={t("createForm.placeholders.timezone")}
           {...textFieldProps("timezone")}
         />

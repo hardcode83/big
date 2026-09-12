@@ -1,4 +1,5 @@
 import { fireEvent } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
@@ -34,9 +35,28 @@ const usePropertyMock = vi.hoisted(() => vi.fn());
 const useUpdatePropertyMock = vi.hoisted(() => vi.fn());
 const updatePropertyMutate = vi.hoisted(() => vi.fn());
 vi.mock("@/features/properties", () => ({
-  EditPropertyForm: ({ propertyId }: { propertyId: string }) => (
-    <div>edit-property-form-stub:{propertyId}</div>
-  ),
+  // The stub owns its own local state (`useState`), same as the real
+  // `EditPropertyForm` — its own field values live in a component instance
+  // entirely separate from `PropertyDetailView`'s retire state (R2.6, design
+  // D9). The extra labelled field lets a test dirty it without saving, so
+  // `property-detail-view.test.tsx` can prove the retire `AlertDialog` never
+  // reads from — or resets — it (sdd-qa finding 2). The identifying text sits
+  // in its own `<span>` so it keeps matching `getByText("edit-property-form-
+  // stub:<id>")` exactly, unaffected by the field markup alongside it.
+  EditPropertyForm: ({ propertyId }: { propertyId: string }) => {
+    const [value, setValue] = useState("");
+    return (
+      <div>
+        <span>edit-property-form-stub:{propertyId}</span>
+        <label htmlFor="edit-form-stub-field">edit-form-stub-field</label>
+        <input
+          id="edit-form-stub-field"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+        />
+      </div>
+    );
+  },
   useProperty: usePropertyMock,
   useUpdateProperty: useUpdatePropertyMock,
 }));
@@ -307,6 +327,65 @@ describe("PropertyDetailView — retire affordance (R2.6, design D9)", () => {
     expect(
       screen.getByRole("heading", { name: esDashboard.detail.retire.title }),
     ).toBeInTheDocument();
+  });
+});
+
+/**
+ * R2.6/design D9: the edit `Sheet` and the retire `AlertDialog` are backed by
+ * two wholly separate component instances (`EditPropertyForm`'s own local
+ * state vs. `PropertyDetailView`'s own `useUpdateProperty()` call for
+ * retire) — confirmed correct by earlier section reviews, but never
+ * exercised together in one test before sdd-qa finding 2.
+ */
+describe("PropertyDetailView — the edit Sheet and retire AlertDialog stay independent (R2.6, design D9)", () => {
+  it("keeps the edit form's dirtied-but-unsaved field untouched by the retire mutation, and vice versa", () => {
+    usePropertyDetail.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: detail,
+    });
+    renderView();
+
+    // Dirty the edit form's own field without ever saving it.
+    fireEvent.click(
+      screen.getByRole("button", { name: esDashboard.detail.edit.button }),
+    );
+    const editField = screen.getByLabelText("edit-form-stub-field");
+    fireEvent.change(editField, { target: { value: "unsaved-change" } });
+    expect(editField).toHaveValue("unsaved-change");
+
+    // Open and confirm the retire AlertDialog — the edit Sheet stays mounted
+    // and open throughout, exactly as design D9 says it must be able to.
+    // Radix's modal `Sheet` marks the rest of the page `aria-hidden` while
+    // it is open, so the retire trigger (outside the Sheet's own portal)
+    // needs `{ hidden: true }` here to still be queryable by role — it is
+    // otherwise fully present and clickable, same as a real pointer click
+    // would be.
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: esDashboard.detail.retire.button,
+        hidden: true,
+      }),
+    );
+    // Confirm is queried without `hidden: true`: the AlertDialog being open
+    // now hides everything else (main page and edit Sheet alike), including
+    // the retire trigger that shares this exact same label, so only the
+    // dialog's own button is left in the accessible tree.
+    fireEvent.click(
+      screen.getByRole("button", { name: esDashboard.detail.retire.confirm }),
+    );
+
+    // The retire mutation carries exactly `{ status: "INACTIVE" }` — nothing
+    // merged in from the edit form's pending, unsaved value.
+    expect(updatePropertyMutate).toHaveBeenCalledTimes(1);
+    expect(updatePropertyMutate).toHaveBeenCalledWith(
+      { id: "redes11", input: { status: "INACTIVE" } },
+      expect.any(Object),
+    );
+
+    // ...and the edit form's own unsaved value is still exactly what was
+    // typed: neither mutation call leaked state into the other.
+    expect(editField).toHaveValue("unsaved-change");
   });
 });
 

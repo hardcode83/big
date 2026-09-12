@@ -195,15 +195,22 @@ describe.each(FORMS)("%s — programmatic labelling (R4.2, task 6.1)", (_name, m
     }
   });
 
-  it("marks exactly the two required fields, and marks them programmatically", () => {
+  it("marks exactly the three required fields, and marks them programmatically", () => {
     // The visible " *" is `aria-hidden`, so `required` is the only thing a
     // screen reader has to go on. R1.2: every other field has a backend
     // default, so requiring it here would be a lie the backend contradicts.
+    // `timezone` has a default too, but the backend also rejects it empty
+    // (`min_length=1`), so it is required in that narrower sense (sdd-qa
+    // finding 1).
     const { container } = mount();
     const required = fields(container)
       .filter((control) => control.hasAttribute("required"))
       .map((control) => control.id);
-    expect(required).toEqual(["property-name", "property-internal-code"]);
+    expect(required).toEqual([
+      "property-name",
+      "property-internal-code",
+      "property-timezone",
+    ]);
   });
 
   it("has no axe violations as rendered", async () => {

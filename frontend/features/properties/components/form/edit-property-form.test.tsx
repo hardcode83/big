@@ -360,6 +360,20 @@ describe("EditPropertyForm — explicit clear vs. left alone (R2.4)", () => {
       screen.getByText(esProperties.createForm.errors.required),
     ).toBeInTheDocument();
   });
+
+  it("blocks the submit instead of clearing timezone (sdd-qa finding 1)", () => {
+    const mutate = setUp();
+
+    fireEvent.change(field(esProperties.createForm.fields.timezone), {
+      target: { value: "" },
+    });
+    submit();
+
+    expect(mutate).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(esProperties.createForm.errors.required),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("EditPropertyForm — the write-only WiFi password (R2.5, design D8)", () => {

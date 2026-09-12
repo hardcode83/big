@@ -129,6 +129,28 @@ describe("CreatePropertyForm — client-side validation blocks submit (R1.3)", (
     ).toBeGreaterThan(0);
   });
 
+  it("does not call the mutation and shows the required error for an emptied timezone (sdd-qa finding 1)", () => {
+    const mutate = vi.fn();
+    useCreatePropertyMock.mockReturnValue(mutationState({ mutate }));
+    renderForm();
+
+    fillRequiredFields();
+    fireEvent.change(
+      screen.getByLabelText(
+        labelMatcher(esProperties.createForm.fields.timezone),
+      ),
+      { target: { value: "" } },
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: esProperties.createForm.submit }),
+    );
+
+    expect(mutate).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(esProperties.createForm.errors.required),
+    ).toBeInTheDocument();
+  });
+
   it("does not call the mutation when country is not exactly 2 uppercase letters", () => {
     const mutate = vi.fn();
     useCreatePropertyMock.mockReturnValue(mutationState({ mutate }));

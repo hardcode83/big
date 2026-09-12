@@ -46,11 +46,12 @@ function escapeRegExp(value: string): string {
 }
 
 /**
- * `name`/`internal_code` append a visible, `aria-hidden` " *" required
- * marker (UI-UX finding 1) that is not part of the translated label string
- * itself — matched here as an optional suffix, anchored, so a short label
- * (e.g. "Nombre") cannot ambiguously match a longer, unrelated one that
- * merely contains it as a substring (e.g. "Nombre del WiFi").
+ * `name`/`internal_code`/`timezone` append a visible, `aria-hidden` " *"
+ * required marker (UI-UX finding 1; `timezone` added for sdd-qa finding 1)
+ * that is not part of the translated label string itself — matched here as
+ * an optional suffix, anchored, so a short label (e.g. "Nombre") cannot
+ * ambiguously match a longer, unrelated one that merely contains it as a
+ * substring (e.g. "Nombre del WiFi").
  */
 function labelMatcher(label: string): RegExp {
   return new RegExp(`^${escapeRegExp(label)}( \\*)?$`);
@@ -64,7 +65,7 @@ describe("PropertyFieldset — the ~15-field list (R1.2, R4.2)", () => {
     }
   });
 
-  it("marks only name and internal_code as required", () => {
+  it("marks only name, internal_code and timezone as required", () => {
     renderFieldset();
     expect(
       screen.getByLabelText(labelMatcher(esProperties.createForm.fields.name)),
@@ -75,26 +76,37 @@ describe("PropertyFieldset — the ~15-field list (R1.2, R4.2)", () => {
       ),
     ).toBeRequired();
     expect(
+      screen.getByLabelText(
+        labelMatcher(esProperties.createForm.fields.timezone),
+      ),
+    ).toBeRequired();
+    expect(
       screen.getByLabelText(esProperties.createForm.fields.city),
     ).not.toBeRequired();
   });
 
-  it("visibly marks name and internal_code as required, unlike the optional fields (UI-UX finding 1)", () => {
+  it("visibly marks name, internal_code and timezone as required, unlike the optional fields (UI-UX finding 1; timezone added for sdd-qa finding 1)", () => {
     const { container } = renderFieldset();
     const nameLabel = container.querySelector('label[for="property-name"]')!;
     const internalCodeLabel = container.querySelector(
       'label[for="property-internal-code"]',
     )!;
+    const timezoneLabel = container.querySelector(
+      'label[for="property-timezone"]',
+    )!;
     const cityLabel = container.querySelector('label[for="property-city"]')!;
 
     expect(nameLabel.textContent).toContain("*");
     expect(internalCodeLabel.textContent).toContain("*");
+    expect(timezoneLabel.textContent).toContain("*");
     expect(cityLabel.textContent).not.toContain("*");
 
     // The asterisk is hidden from assistive tech (`required` already conveys
     // it there) — it must not be announced as literal "asterisk" text.
     const nameMarker = nameLabel.querySelector("span");
     expect(nameMarker).toHaveAttribute("aria-hidden", "true");
+    const timezoneMarker = timezoneLabel.querySelector("span");
+    expect(timezoneMarker).toHaveAttribute("aria-hidden", "true");
   });
 
   it("never renders a pms_provider or status control (R1.2)", () => {
