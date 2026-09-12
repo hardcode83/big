@@ -81,9 +81,9 @@
       run a cancellation through it, and assert exactly **one** `PropertyStateTransition` row for
       that reservation — not two. [R3.2]
 
-## 4. CSV/date-change coverage and regression sweep
+## 4. CSV/date-change coverage and regression sweep <!-- panel: PASS 2026-09-12 receipt:1c6bee42 -->
 
-- [ ] 4.1 `backend/tests/integrations/test_sync.py`, `test_import_csv.py`,
+- [x] 4.1 `backend/tests/integrations/test_sync.py`, `test_import_csv.py`,
       `test_beds24_end_to_end.py`, `test_channex_end_to_end.py`,
       `backend/tests/integrations/test_webhook_processing.py`: re-run and inspect every existing
       assertion that counts or enumerates `TimelineEvent`s after an *update* to an existing
@@ -91,17 +91,17 @@
       `RESERVATION_UPDATED`/`RESERVATION_CANCELLED` event, without weakening what it was actually
       checking (creation-only assertions like `test_the_imported_events_are_system_events` need
       no change — they run before any update happens). [R1, R2]
-- [ ] 4.2 New test for R4: a CSV re-import that changes `check_in_date`/`status` on a row
+- [x] 4.2 New test for R4: a CSV re-import that changes `check_in_date`/`status` on a row
       matching an existing `external_pms_id` emits the same `RESERVATION_UPDATED`/
       `RESERVATION_CANCELLED` event as the sync path, with `actor_type=USER` — the same actor the
       CSV creation path already asserts for `RESERVATION_IMPORTED`. [R4]
-- [ ] 4.3 New test for R5: a sync/webhook update that changes `check_in_date` or
+- [x] 4.3 New test for R5: a sync/webhook update that changes `check_in_date` or
       `check_out_date` on a reservation whose property is `AWAITING_CHECKIN` for that same stay
       emits `RESERVATION_UPDATED` and does **not** raise, does **not** need a new
       `PropertyStateTrigger`, and does not touch `current_operational_state`. [R5]
-- [ ] 4.4 Full backend suite passes: `docker compose exec backend uv run pytest` (stack already
+- [x] 4.4 Full backend suite passes: `docker compose exec backend uv run pytest` (stack already
       up in this worktree via `make up`).
-- [ ] 4.5 Static typing passes: `docker compose exec backend uv run pyright .` — run from
+- [x] 4.5 Static typing passes: `docker compose exec backend uv run pyright .` — run from
       `backend` per `sdd/project.md`'s documented invocation (`uv sync --frozen` first if not
       already run in this worktree).
 - [ ] 4.6 Manual smoke of the roadmap note's verification script: `make pms-sync
@@ -133,3 +133,8 @@
 - Section 3: `tests/scheduler/test_sync_pms_reservations.py` drives its cancellation by monkeypatching `app.scheduler.tasks.SqlAlchemyPMSAdapterFactory` only — everything below it (repos, both uows, `_nested_advance`) stays real. `MockPMSAdapter`'s own seed rows cannot be used: neither stay falls inside `candidate_window` AND before check-in at once.
 - Section 3: task 3.5 named three test files and none of them covers `cli/pms_sync.py`, so 3.3's wiring is verified by reading plus `tests/integrations/test_pms_sync_cli.py` still passing — the CLI and the beat job compose the identical `SyncReservationsFromPmsUseCase(advance=...)`, which `tests/scheduler/test_sync_pms_reservations.py` does cover end to end. Section 4 may want one CLI-level cancellation test if it wants the route asserted rather than inferred.
 - Section 3 (review follow-up, sdd-qa finding on `pms_sync.py:159`): the gap above was real — no test asserted the manual CLI actually triggers `RESERVATION_CANCELLED_BEFORE_CHECKIN`. Closed by adding `test_a_cancellation_the_manual_sync_discovers_frees_the_property` to `backend/tests/integrations/test_pms_sync_cli.py`, same shape as the scheduler's cancellation test: monkeypatches only `pms_sync.SqlAlchemyPMSAdapterFactory`, drives `sync_with_session` twice (CONFIRMED then CANCELLED), asserts the property lands `VACANT_READY` with exactly one `PropertyStateTransition` row. `backend/tests/integrations/test_pms_sync_cli.py` is now implicitly one of task 3.5's satisfied files alongside the three it named. No production code changed — `sync_with_session`'s `advance=` wiring (line 159) was already correct.
+- Section 4 (4.1): re-inspected `test_sync.py`, `test_import_csv.py`, `test_beds24_end_to_end.py`, `test_channex_end_to_end.py`, `test_webhook_processing.py` for any assertion counting/enumerating `TimelineEvent`s after an update to an EXISTING reservation. None exists: every event-count assertion in those five files runs on the creation path only (or on a same-payload re-run whose `update_details` applies nothing, so no event fires either way), and the one exact-count query in `test_beds24_end_to_end.py`'s cross-tenant test and `test_channex_end_to_end.py`'s isolation test both cover a single ingest, not an update. Confirmed by running all five files (70 passed, 0 changed) both before and after 4.2/4.3's edits — nothing needed reconciling.
+- Section 4 (4.2): added two tests to `TestCancellationFreesTheProperty` in `test_import_csv.py` — `test_an_updating_re_import_is_attributed_to_the_uploader` (date-changing re-import → one `RESERVATION_UPDATED`, `actor_type=USER`, `actor_user_id=manager.id`) and `test_a_cancelling_re_import_is_attributed_to_the_uploader` (status-changing re-import → one `RESERVATION_CANCELLED`, same actor). Reused `_row()`'s relative-date helper so the "before check-in" precondition holds regardless of when the suite runs; did not call `_awaiting_checkin` since R4 is only about actor attribution, not the property transition (already covered by 3.5's tests in the same class).
+- Section 4 (4.3): added `test_a_date_change_on_an_awaiting_checkin_property_emits_an_event_but_no_transition` to `test_ingest_updates.py`, following its `_ingestor`/`_seed`/`_resolve_property_a` pattern from section 1. Sets `property_a.current_operational_state = AWAITING_CHECKIN` directly (same fixture pattern `test_import_csv.py`'s `_awaiting_checkin` uses) before a `check_in_date`-only update, passes a real spy `_CountingAdvancer` (not `None`) so the assertion "D3: no new trigger" is actually exercised rather than vacuously true, and asserts `advance.calls == []` plus the property's `current_operational_state` is unchanged after `db_session.refresh`.
+- Section 4 (4.4): full suite — `docker compose exec -T backend uv run pytest -q` from repo root (paths relative to `backend/` per the container's `/app` mount) — **11066 passed, 44 skipped in 568.80s**, 0 failures.
+- Section 4 (4.5): `docker compose exec -T backend uv run pyright .` (container cwd `/app` already *is* `backend/`, so no `cd` needed) — 985 errors total, but ALL FIVE of this change's production files (`ingest.py`, `use_cases.py`, `scheduler/tasks.py`, `cli/pms_sync.py`, `api/dependencies.py`) report zero errors. The 985 are a pre-existing, unrelated baseline (confirmed by running pyright against `test_ingest_updates.py` with 4.2/4.3's edits stashed out: the same 2 errors at the same `metadata_["changed"]`-indexing pattern were already present in sections 1-3's own code before this section touched the file). This section's only new pyright surface is one more instance of that same pre-existing idiom in the new R5 test (`metadata_` typed `dict[str, Any] | None`); left as-is, matching the file's established convention, per the contract's "pre-existing and unrelated, note and do not touch" rule. Did not touch pyright's 984 other pre-existing errors (elsewhere in `tests/`, e.g. `test_http_limits.py`, `test_route_authorization.py`, `test_event_factory.py`) — out of scope for this change.

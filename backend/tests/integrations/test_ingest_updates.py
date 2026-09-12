@@ -16,6 +16,7 @@ from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.integrations.application.ingest import IngestRow, ReservationIngestor
 from app.integrations.domain.dtos import ReservationDTO
 from app.properties.domain.entities import Property as PropertyEntity
+from app.properties.domain.enums import PropertyOperationalState
 from app.reservations.infrastructure.models import ReservationModel
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType
@@ -211,3 +212,53 @@ async def test_ingest_does_not_crash_with_no_advancer_even_on_a_cancellation(
         )
     ).scalar_one()
     assert row.status == "CANCELLED"
+
+
+class _CountingAdvancer:
+    """Stands in for `AdvancePropertyStatesUseCase`; proves R5/D3 by never being called."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    async def execute(self, *, tenant_id, trigger, now):
+        self.calls.append((tenant_id, trigger))
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_date_change_on_an_awaiting_checkin_property_emits_an_event_but_no_transition(
+    db_session, tenant_a, property_a
+) -> None:
+    """R5 and design D3: a date-only update is evidence enough on its own — it deliberately
+    gets no new `PropertyStateTrigger`, must not raise, and must not touch
+    `current_operational_state`, even while the property is `AWAITING_CHECKIN` for this very
+    stay (the same precondition `RESERVATION_CANCELLED_BEFORE_CHECKIN` cares about)."""
+    await _seed(db_session, tenant_a, property_a)
+    property_a.current_operational_state = PropertyOperationalState.AWAITING_CHECKIN
+    await db_session.flush()
+
+    advance = _CountingAdvancer()
+    new_check_in = NOW.date() + timedelta(days=1)
+    report = await _ingestor(db_session, advance=advance).ingest(
+        tenant_id=tenant_a.id,
+        rows=[_row(check_in_date=new_check_in)],
+        resolve_property=await _resolve_property_a(property_a),
+        now=LATER,
+        actor_type=TimelineActorType.SYSTEM,
+        actor_user_id=None,
+        source="test",
+    )
+
+    assert report.created == 0
+    assert report.updated == 1
+    assert report.skipped == 0
+
+    events = await _events(db_session)
+    updated_events = [e for e in events if e.event_type is TimelineEventType.RESERVATION_UPDATED]
+    assert len(updated_events) == 1
+    assert "check_in_date" in updated_events[0].metadata_["changed"]
+
+    # D3: no new trigger fired, and the property's state is untouched.
+    assert advance.calls == []
+    await db_session.refresh(property_a)
+    assert property_a.current_operational_state is PropertyOperationalState.AWAITING_CHECKIN

@@ -326,3 +326,74 @@ class TestCancellationFreesTheProperty:
             PropertyOperationalState.AWAITING_CHECKIN
         )
         assert await self._transitions(db_session, property_a) == []
+
+    @pytest.mark.asyncio
+    async def test_an_updating_re_import_is_attributed_to_the_uploader(
+        self, api, manager, property_a, db_session
+    ) -> None:
+        """R4: the CSV update path emits `RESERVATION_UPDATED` with the same `actor_type=USER`
+        `test_the_event_is_attributed_to_the_uploader` already pins for the creation path
+        (`RESERVATION_IMPORTED`) — proving the SAME actor rule holds for an update, not just a
+        different event type by coincidence."""
+        first = await api.post(
+            ENDPOINT,
+            files=_upload(self.HEADER_WITH_STATUS + self._row("CONFIRMED")),
+            headers=auth_header(api, manager),
+        )
+        assert first.json()["created"] == 1
+
+        moved_in = date.fromisoformat(self._row("CONFIRMED").split(",")[2]) + timedelta(days=1)
+        changed_row = (
+            f"REDES11,AIRBNB,{moved_in.isoformat()},"
+            f"{(moved_in + timedelta(days=2)).isoformat()},2,"
+            "Ada Lovelace,ada@example.com,CSV-CANCEL-1,CONFIRMED\n"
+        )
+        second = await api.post(
+            ENDPOINT,
+            files=_upload(self.HEADER_WITH_STATUS + changed_row),
+            headers=auth_header(api, manager),
+        )
+        assert second.json()["updated"] == 1
+
+        events = (
+            await db_session.execute(
+                select(TimelineEventModel).order_by(TimelineEventModel.created_at)
+            )
+        ).scalars().all()
+        updated_events = [e for e in events if e.event_type is TimelineEventType.RESERVATION_UPDATED]
+        assert len(updated_events) == 1
+        assert updated_events[0].actor_type is TimelineActorType.USER
+        assert updated_events[0].actor_user_id == manager.id
+        assert "check_in_date" in updated_events[0].metadata_["changed"]
+
+    @pytest.mark.asyncio
+    async def test_a_cancelling_re_import_is_attributed_to_the_uploader(
+        self, api, manager, property_a, db_session
+    ) -> None:
+        """R4: the CSV cancellation path emits `RESERVATION_CANCELLED` with `actor_type=USER`,
+        the same actor rule as the creation and plain-update paths."""
+        first = await api.post(
+            ENDPOINT,
+            files=_upload(self.HEADER_WITH_STATUS + self._row("CONFIRMED")),
+            headers=auth_header(api, manager),
+        )
+        assert first.json()["created"] == 1
+
+        second = await api.post(
+            ENDPOINT,
+            files=_upload(self.HEADER_WITH_STATUS + self._row("CANCELLED")),
+            headers=auth_header(api, manager),
+        )
+        assert second.json()["updated"] == 1
+
+        events = (
+            await db_session.execute(
+                select(TimelineEventModel).order_by(TimelineEventModel.created_at)
+            )
+        ).scalars().all()
+        cancelled_events = [
+            e for e in events if e.event_type is TimelineEventType.RESERVATION_CANCELLED
+        ]
+        assert len(cancelled_events) == 1
+        assert cancelled_events[0].actor_type is TimelineActorType.USER
+        assert cancelled_events[0].actor_user_id == manager.id
