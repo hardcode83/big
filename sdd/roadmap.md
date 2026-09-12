@@ -133,7 +133,7 @@ Categorías:
   needs: maintenance, frontend-auth-session · size: M · kind: feature
 - [x] properties-web — [FE] **la pantalla de listado de propiedades, `/properties` … → changes/archive/2026-08-22-properties-web/
   needs: properties-crud, frontend-auth-session · size: S · kind: feature
-- [ ] properties-create-web — [FE] **alta y edición de propiedad desde `/properties`**, que hoy es sólo lectura …
+- [x] properties-create-web — [FE] **alta y edición de propiedad desde `/properties`**, que hoy es sólo lectura … → changes/archive/2026-09-12-properties-create-web/
   needs: properties-crud, properties-web · size: S · kind: feature
 - [x] timeline-web — [FE] **la pantalla `/timeline`, que hoy es un placeholder sobre un backend entregado** … → changes/archive/2026-08-22-timeline-web/
   needs: dashboard-api, dashboard-web · size: S · kind: feature

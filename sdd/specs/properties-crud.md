@@ -23,7 +23,11 @@ router es el de `app/dashboard/`; ambos se describen en [`dashboard-api.md`](das
 **Y ya no es sólo API**: `properties-web` entregó `/properties`, el índice paginado de sólo lectura
 del portfolio, que es la única pantalla donde se ve el `status` de una vivienda y el único sitio
 donde un UUID de propiedad se resuelve a un nombre. Se describe abajo, en «La pantalla del
-portfolio»; el alta, la edición y la retirada siguen siendo sólo API.
+portfolio». `properties-create-web` cerró el hueco que ese cambio dejó abierto: el alta, la
+edición y la retirada ya no son sólo API — `/properties` ofrece un formulario de alta y el
+detalle (`/properties/{id}`, propiedad de `dashboard-web-frontend.md`) gana edición y retirada,
+las tres detrás de `MANAGE_PROPERTIES`. Se describe en «Registrar y editar una propiedad desde la
+web», más abajo.
 
 El *cómo se opera* está en [`docs/properties.md`](../../docs/properties.md); aquí vive el *qué
 hace*.
@@ -386,6 +390,81 @@ el `403` del backend es toda la historia de acceso, y es el backend quien decide
 y un `PROPERTY_MANAGER` la ven; `CLEANER`, `TECHNICIAN` y `SUPER_ADMIN` reciben el estado
 «prohibido» localizado.
 
+### Registrar y editar una propiedad desde la web
+
+`frontend/features/properties/components/form/` añade lo que «La pantalla del portfolio» dejaba
+sólo en API: un formulario de alta en `/properties` y uno de edición en el detalle
+(`/properties/{id}`, que sirve `features/dashboard`'s `PropertyDetailView` — ver
+`dashboard-web-frontend.md`), y una acción de retirada separada. Los dos formularios llaman a los
+mismos `POST`/`PATCH /api/v1/properties[/{id}]` de este documento; no hay endpoint, esquema ni
+regla de validación de servidor nueva.
+
+- WHERE el rol tiene `MANAGE_PROPERTIES`, THE SYSTEM SHALL ofrecer la acción «Nueva propiedad» en
+  `/properties` y las acciones «Editar propiedad»/«Retirar propiedad» en el detalle; SHALL
+  ocultar las tres para cualquier otro rol (`TENANT_OWNER` incluido), con
+  `useHasPermission("MANAGE_PROPERTIES")` — la misma guarda de sólo-ocultación que ya usa
+  `blocked-transitions-section.tsx`: el `403` del backend sigue siendo la autorización real.
+- WHERE la propiedad ya tiene `status = INACTIVE`, THE SYSTEM SHALL ocultar «Retirar propiedad» y
+  SHALL seguir ofreciendo «Editar propiedad».
+- THE SYSTEM SHALL recoger en el alta exactamente los campos que acepta `CreatePropertyRequest`
+  —`name`, `internal_code`, `pms_external_id`, los seis de dirección, `timezone`, `max_guests`,
+  `bedrooms`, `bathrooms`, las horas de check-in/out, `wifi_name`, `wifi_password` y las tres
+  notas— y NEVER SHALL ofrecer `pms_provider` ni `status`: toda alta nace `ACTIVE`/`VACANT_READY`
+  y el proveedor de PMS se asigna sólo por CLI (ver «Proveedor de PMS», arriba).
+- THE SYSTEM SHALL aplicar en el cliente, antes de enviar, las mismas cotas que declara
+  `backend/app/properties/api/schemas.py` —`name`/`internal_code` no vacíos y acotados (200/50),
+  `country` de dos letras mayúsculas, `max_guests` 1-50, `bedrooms`/`bathrooms` 0-50, las tres
+  notas y `wifi_password` acotadas a `MAX_NOTES` (5000) / `MAX_WIFI_PASSWORD` (200)—, declaradas
+  una sola vez en `features/properties/lib/field-limits.ts` con un comentario a la línea exacta
+  que cada constante espeja. Un valor fuera de cota se marca antes de enviar la petición, no sólo
+  tras un `422` del servidor.
+- WHEN el alta responde `201`, THE SYSTEM SHALL navegar a `/properties/{id}` de la propiedad
+  creada.
+- THE SYSTEM SHALL pre-rellenar el formulario de edición con los valores actuales de la propiedad,
+  obtenidos de un `GET /api/v1/properties/{id}` propio (`useProperty(id)`, distinto del agregado
+  de `dashboard`, que no lleva dirección, huso horario, notas ni campos de wifi), y SHALL enviar
+  por `PATCH` únicamente los campos que el usuario cambió realmente, comparando cada valor con su
+  snapshot inicial — nunca el formulario completo.
+- THE SYSTEM SHALL NOT ofrecer `pms_provider` ni `current_operational_state` en la edición: el
+  primero es de sólo alta (arriba, «Proveedor de PMS»); el segundo no existe en
+  `UpdatePropertyRequest` y sólo lo mueve `PropertyStateMachine`.
+- THE SYSTEM SHALL permitir vaciar explícitamente un campo nullable (`pms_external_id`, los
+  campos de dirección, `wifi_name`, `wifi_password`, las tres notas), enviando `field: null`
+  **sólo** cuando el usuario lo vació activamente — nunca para un campo que quedó igual que su
+  valor inicial, aunque ese valor ya fuera vacío.
+- THE SYSTEM SHALL mantener el campo `wifi_password` del formulario de edición **siempre vacío**
+  al abrir (la API nunca devuelve la contraseña guardada, sólo `has_wifi_password`): dejarlo en
+  blanco y guardar NEVER SHALL enviar un cambio; escribir un valor nuevo lo envía como reemplazo.
+  THE SYSTEM SHALL ofrecer un checkbox explícito «Borrar la contraseña guardada», independiente
+  del campo de texto, como única vía para enviar `wifi_password: null` — necesaria porque
+  `wifi_password` es nullable y "en blanco" es ambiguo entre «no tocar» y «borrar».
+- THE SYSTEM SHALL exigir una confirmación explícita antes de retirar («Retirar propiedad» abre un
+  diálogo de confirmación) y SHALL enviar exactamente `{status: "INACTIVE"}` en esa petición,
+  nunca el estado acumulado sin guardar del formulario de edición, aunque ese formulario esté
+  abierto a la vez: son dos mutaciones independientes y una no puede filtrar en la otra.
+  Retirar es irreversible desde esta pantalla — no hay vía para reactivar.
+- IF la API responde `409` por colisión de `internal_code` o `pms_external_id`, THEN THE SYSTEM
+  SHALL atribuir el error al campo correspondiente (inspeccionando la subcadena del mensaje —
+  `repositories.py:551-558` no envía `loc` para estos dos casos, así que no hay campo estructurado
+  que leer) en vez de mostrar un aviso genérico, tanto en el alta como en la edición.
+- WHILE una petición de alta o edición está en curso, THE SYSTEM SHALL deshabilitar el control de
+  envío y mostrar un estado de espera, para impedir un envío duplicado.
+- WHERE se muestra el campo `access_notes`, THE SYSTEM SHALL mostrar un texto de ayuda en línea
+  que aclare que es de cara al huésped y no es el lugar para un código de puerta o cerradura (eso
+  pertenece a un `AccessRecord`).
+- THE SYSTEM SHALL tratar las tres notas y `wifi_password` como texto plano sin estructurar en los
+  dos formularios, sin intentar parsear su contenido, igual que el backend las almacena.
+- THE SYSTEM SHALL invalidar, al terminar el alta o la edición, la caché de lista de esta
+  feature (`propertiesKeys.list`) y, en la edición, también su caché de detalle
+  (`propertiesKeys.detail`) más los prefijos de `dashboard` (`dashboard-cards` y, en edición,
+  `property-detail`) reproducidos a mano — el mismo patrón que ya usa
+  `useResolveIncident` para las mismas dos claves, porque `features/properties` no importa el
+  factory de claves de `dashboard`.
+- THE SYSTEM SHALL enrutar cada string visible de ambos formularios por `locales/es/properties.json`
+  y `locales/en/properties.json` (el copy de los botones «Editar»/«Retirar» y el diálogo de
+  confirmación vive en `dashboard.json`, porque esa pantalla ya lee ese namespace en exclusiva),
+  con etiqueta asociada y foco visible en cada control.
+
 ## Key files
 
 - `backend/app/properties/api/` — `router.py` (los cuatro endpoints de PRD §23 más
@@ -413,14 +492,28 @@ y un `PROPERTY_MANAGER` la ven; `CLEANER`, `TECHNICIAN` y `SUPER_ADMIN` reciben 
 - Tests: `backend/tests/properties/`.
 - `frontend/features/properties/` — la pantalla: `data/dto.ts` (23 campos en camelCase, con
   `PropertyStatus`/`PropertyOperationalState`/`PMSProvider` **re-exportadas** del generado en vez de
-  transcritas), `data/http/http-properties-source.ts` (el único llamante HTTP), `data/index.ts`
+  transcritas, más `PropertyDetailDto`/`CreatePropertyInput`/`UpdatePropertyInput`),
+  `data/http/http-properties-source.ts` (el único llamante HTTP: `listProperties`, `getProperty`,
+  `createProperty`, `updateProperty`), `data/index.ts`
   (punto de composición `getPropertiesDataSource()`, sin `Mock*Source`), `hooks/query-keys.ts`
-  (`propertiesKeys.list` sobre `tenantScopedKey` + `normalizePropertyFilters`),
-  `hooks/use-properties.ts`, `lib/error-mapping.ts` (la unión discriminada de estados),
-  `components/list/{properties-view,properties-filters}.tsx`, `locales/properties-locale.test.ts`,
-  `index.ts` (fachada: sólo `PropertiesView`).
+  (`propertiesKeys.list`/`propertiesKeys.detail` sobre `tenantScopedKey` +
+  `normalizePropertyFilters`), `hooks/use-properties.ts`, `hooks/use-property.ts` (detalle
+  completo, distinto del agregado de `dashboard`), `hooks/use-create-property.ts`,
+  `hooks/use-update-property.ts` (las dos mutaciones, invalidación cruzada con `dashboard` — D10
+  del design), `lib/error-mapping.ts` (la unión discriminada de estados de lectura),
+  `lib/field-limits.ts` (las cotas que espejan `schemas.py`), `lib/field-validation.ts`
+  (`validatePropertyFields`), `lib/field-errors.ts` (`mapPropertyFieldErrors`, la atribución del
+  `409` por subcadena), `components/form/{property-fieldset,create-property-form,
+  edit-property-form}.tsx`, `components/list/{properties-view,properties-filters}.tsx`,
+  `locales/properties-locale.test.ts`, `index.ts` (fachada: `PropertiesView` y, para el cruce con
+  `dashboard`, `EditPropertyForm` y su tipo de entrada).
 - `frontend/components/property-state-badge.tsx` — el mapa de colores de PRD §9.1, compartido con
   `/dashboard` (ver [`dashboard-web-frontend.md`](dashboard-web-frontend.md)).
 - `frontend/app/(workspace)/properties/page.tsx` — monta `PropertiesView`; `generateMetadata` intacto.
-- `frontend/locales/{es,en}/properties.json`, registrado en `frontend/lib/i18n/resources.ts`;
-  `frontend/app/route-coverage.test.ts` (la página graduada en `REAL_PAGE_ROUTE_IDS`).
+- `frontend/lib/auth/permissions.ts` — `"MANAGE_PROPERTIES"` en el union `Permission` y en
+  `ROLE_UI_PERMISSIONS.PROPERTY_MANAGER` únicamente (`TENANT_OWNER` se queda sin ella, lectura
+  sólo).
+- `frontend/locales/{es,en}/properties.json`, registrado en `frontend/lib/i18n/resources.ts`
+  (campos del formulario, validación, alta, guía de `access_notes`); `frontend/locales/{es,en}/dashboard.json`
+  (copy de «Editar»/«Retirar propiedad» y su confirmación); `frontend/app/route-coverage.test.ts`
+  (la página graduada en `REAL_PAGE_ROUTE_IDS`).
