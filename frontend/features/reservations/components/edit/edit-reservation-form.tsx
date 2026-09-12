@@ -17,6 +17,7 @@ export const INGEST_OWNED_FIELDS = [
 const EDITABLE_FIELDS = [
   "checkInDate", "checkOutDate", "checkInTime", "checkOutTime", "adults", "children",
   "grossAmount", "otaCommission", "netAmount", "currency", "specialRequests", "internalNotes",
+  "paymentStatus",
 ] as const;
 type EditableField = (typeof EDITABLE_FIELDS)[number];
 export type EditFormValues = Record<EditableField, string>;
@@ -25,13 +26,13 @@ const DETAIL_TO_FORM: Record<EditableField, keyof ReservationDetailDto> = {
   checkInDate: "checkInDate", checkOutDate: "checkOutDate", checkInTime: "checkInTime",
   checkOutTime: "checkOutTime", adults: "adults", children: "children", grossAmount: "grossAmount",
   otaCommission: "otaCommission", netAmount: "netAmount", currency: "currency",
-  specialRequests: "specialRequests", internalNotes: "internalNotes",
+  specialRequests: "specialRequests", internalNotes: "internalNotes", paymentStatus: "paymentStatus",
 };
 const API_FIELDS: Record<EditableField, string> = {
   checkInDate: "check_in_date", checkOutDate: "check_out_date", checkInTime: "check_in_time",
   checkOutTime: "check_out_time", adults: "adults", children: "children", grossAmount: "gross_amount",
   otaCommission: "ota_commission", netAmount: "net_amount", currency: "currency",
-  specialRequests: "special_requests", internalNotes: "internal_notes",
+  specialRequests: "special_requests", internalNotes: "internal_notes", paymentStatus: "payment_status",
 };
 
 function formValue(detail: ReservationDetailDto, field: EditableField): string {
@@ -139,7 +140,14 @@ export function EditReservationForm({ detail }: { detail: ReservationDetailDto }
         const common = { id, name: field, className: fieldClass, value: values[field], disabled: isDisabled, required, "aria-required": required, "aria-invalid": Boolean(error), "aria-describedby": describedBy };
         const control = field === "specialRequests" || field === "internalNotes"
           ? <textarea {...common} onChange={(event) => setField(field, event.target.value)} />
-          : <input {...common} type={field.includes("Date") ? "date" : field.includes("Time") ? "time" : ["adults", "children", "grossAmount", "otaCommission", "netAmount"].includes(field) ? "number" : "text"} onChange={(event) => setField(field, event.target.value)} />;
+          : field === "paymentStatus"
+            ? <select {...common} onChange={(event) => setField(field, event.target.value)}>
+                <option value="PENDING">{t("paymentStatuses.PENDING")}</option>
+                <option value="PARTIALLY_PAID">{t("paymentStatuses.PARTIALLY_PAID")}</option>
+                <option value="PAID">{t("paymentStatuses.PAID")}</option>
+                <option value="REFUNDED">{t("paymentStatuses.REFUNDED")}</option>
+              </select>
+            : <input {...common} type={field.includes("Date") ? "date" : field.includes("Time") ? "time" : ["adults", "children", "grossAmount", "otaCommission", "netAmount"].includes(field) ? "number" : "text"} onChange={(event) => setField(field, event.target.value)} />;
         return <label key={field} htmlFor={id} className="flex flex-col gap-1 text-sm">{t(`edit.fields.${field}`)}{required ? ` (${t("edit.required")})` : null}{control}{error ? <span id={errorId} role="alert">{t(`edit.errors.${error}`)}</span> : null}</label>;
       })}
     </div>
