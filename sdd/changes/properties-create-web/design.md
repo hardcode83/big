@@ -169,9 +169,26 @@ session set concurrently (however unlikely for this resource).
 `MANAGE_PROPERTIES`, and only for a property whose `status` is not already `INACTIVE`) opens
 `AlertDialog` (shadcn, already in `components/ui/alert-dialog.tsx`) with an explicit confirm
 step, then calls the same `useUpdateProperty` mutation with a body of exactly
-`{ status: "INACTIVE" }` — nothing else, even if the edit form has unsaved changes. This
-matches R2.6 ("acción distinta y explícitamente confirmada, separada del guardado general")
-and the irreversibility called out there (no `DELETE`, no un-retire path in scope).
+`{ status: "INACTIVE" }` — nothing else, even where a pending, unsaved edit exists in the
+`Sheet`. This matches R2.6 ("acción distinta y explícitamente confirmada, separada del
+guardado general") and the irreversibility called out there (no `DELETE`, no un-retire path
+in scope).
+
+**What "even where a pending edit exists" does and does not claim.** The two overlays are
+**mutually exclusive in the UI**, not simultaneously operable: the edit `Sheet` is a modal
+Radix dialog (`components/ui/sheet.tsx` is `SheetPrimitive.Root` from `@radix-ui/react-dialog`
+with a `Portal` + a full-screen `Overlay`), so while it is open the Retire trigger behind it is
+neither clickable (the overlay takes the pointer events) nor keyboard-reachable (outside the
+focus trap, `aria-hidden` in the accessibility tree). The user closes the Sheet, then retires.
+R2.6 asks for separation from *the general edit save*, not for both surfaces to be live at
+once, so this is conformant. What the fixed `{ status: "INACTIVE" }` body guards against is
+therefore **implementation coupling** — a retire body derived from, merged with, or otherwise
+observing `EditPropertyForm`'s diffed state — which is structurally impossible here because
+the retire path holds its own `useUpdateProperty()` instance, wholly separate from the one
+inside the form. Making the two genuinely simultaneous (Radix's `modal={false}`) was
+considered and rejected: it has no precedent in this tree, no requirement asks for it, and it
+would strip the focus trap and outside-click protection from a form that can hold unsaved
+changes — a worse footgun than the one it removes.
 
 Rejected: a `status` select inside the general edit form — the proposal explicitly asks for
 retirement to be its own confirmed step, not a value silently included in a broader save.

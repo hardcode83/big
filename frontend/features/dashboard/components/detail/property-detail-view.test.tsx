@@ -336,6 +336,23 @@ describe("PropertyDetailView — retire affordance (R2.6, design D9)", () => {
  * state vs. `PropertyDetailView`'s own `useUpdateProperty()` call for
  * retire) — confirmed correct by earlier section reviews, but never
  * exercised together in one test before sdd-qa finding 2.
+ *
+ * **What this proves, precisely.** It is a *state-independence* guard between
+ * two mutation call sites, driven by direct DOM events against mocked hooks:
+ * a retire body can never pick up whatever `EditPropertyForm` is holding,
+ * because the two never share an instance. It is NOT a claim that a user can
+ * operate both overlays at once — they cannot. The edit `Sheet` is a modal
+ * Radix dialog (`components/ui/sheet.tsx` → `SheetPrimitive.Root` with a
+ * `Portal` + full-screen `Overlay`), so in a real browser the Retire trigger
+ * behind it is neither clickable (the overlay takes the pointer events) nor
+ * keyboard-reachable (outside the focus trap, `aria-hidden` in the
+ * accessibility tree); the two are mutually exclusive by construction and the
+ * user closes the Sheet before reaching Retire. This test can drive them
+ * together only because `fireEvent` dispatches events directly on the node,
+ * bypassing the hit-testing, `pointer-events` and `aria-hidden` enforcement
+ * that a browser and a screen reader apply — which is exactly what makes it a
+ * usable probe for the coupling question, and exactly why it says nothing
+ * about simultaneous interactivity. See design D9.
  */
 describe("PropertyDetailView — the edit Sheet and retire AlertDialog stay independent (R2.6, design D9)", () => {
   it("keeps the edit form's dirtied-but-unsaved field untouched by the retire mutation, and vice versa", () => {
@@ -354,13 +371,17 @@ describe("PropertyDetailView — the edit Sheet and retire AlertDialog stay inde
     fireEvent.change(editField, { target: { value: "unsaved-change" } });
     expect(editField).toHaveValue("unsaved-change");
 
-    // Open and confirm the retire AlertDialog — the edit Sheet stays mounted
-    // and open throughout, exactly as design D9 says it must be able to.
-    // Radix's modal `Sheet` marks the rest of the page `aria-hidden` while
-    // it is open, so the retire trigger (outside the Sheet's own portal)
-    // needs `{ hidden: true }` here to still be queryable by role — it is
-    // otherwise fully present and clickable, same as a real pointer click
-    // would be.
+    // Open and confirm the retire AlertDialog with the edit Sheet left
+    // mounted and open — the hostile arrangement for the coupling question,
+    // not a reachable one for a user (see this describe's note).
+    // Radix's modal `Sheet` marks the rest of the page `aria-hidden` while it
+    // is open, so the retire trigger (outside the Sheet's own portal) needs
+    // `{ hidden: true }` here to be queryable by role at all. That flag is
+    // the tell: in a real browser this trigger is hidden from assistive tech
+    // and sits behind the Sheet's overlay, so `fireEvent` reaching it is a
+    // deliberate bypass of hit-testing — it drives the two mutation call
+    // sites together to prove they share no state, and asserts nothing about
+    // whether a user could do this.
     fireEvent.click(
       screen.getByRole("button", {
         name: esDashboard.detail.retire.button,
