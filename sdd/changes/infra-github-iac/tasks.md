@@ -82,9 +82,9 @@
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
 
-- Tarea 1.1 (manual) queda PENDIENTE — el bucket `autohostai-tfstate-github` no lo crea este Terraform.
+- Tarea 1.1 quedó reconvertida a **verificación**: comprobar que `autohostai-tfstate-dev` existe con `versioning = enabled` (lo creó `infra/environments/dev/`, no es bootstrap irreducible de este módulo). El módulo `infra/github/` no introduce ningún bucket nuevo (D3 amend tras pushback del usuario — la separación entre los dos módulos es la `key`, no el bucket).
 - Variables: declaradas EXACTAMENTE 14 (12 sensibles + 2 no sensibles) siguiendo el conteo literal de la tarea 1.6. `github_app_id`, `github_app_installation_id` y `github_repository_full_name` NO están declaradas como variables — sección 2 las añade (las dos primeras) y la tercera es un `local.*` (computado, como dice el design §"Variables nuevas").
 - `outputs.tf` referencia `local.*` placeholders (`github_repository_default_branch = "main"`, `github_app_installation_id = "0"`); sección 2 los cablea a los recursos reales — esto evita pre-comprometer nombres de atributos del provider pinado y hace que `terraform validate` pase ya en sección 1.
-- `backend.hcl.example` usa `key = "github.tfstate"` (el módulo dev usa `dev.tfstate`); el bucket queda fijo a `autohostai-tfstate-github` en el ejemplo — el bootstrap irreducible (tarea 1.1) sigue siendo quien lo crea.
+- `backend.hcl.example` usa `key = "github.tfstate"` (el módulo dev usa `dev.tfstate`) sobre el **mismo bucket** `autohostai-tfstate-dev`. No hay bootstrap irreducible: el bucket ya existe (lo creó `infra/environments/dev/` con versioning).
 - Provider pinado: `~> 5.0` resuelve a `v5.45.0` (verificado en `terraform init`). OJO si sección 2 mira atributos — la doc debe ser de esa versión.
 - `.terraform.lock.hcl` se commitea (whitelisted en `.gitignore` raíz, mismo patrón que el módulo dev).

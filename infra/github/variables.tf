@@ -69,13 +69,13 @@ variable "oci_compartment_ocid" {
 # para que un `terraform plan` no las filtre en logs aunque viajen por
 # `TF_VAR_*` desde secrets.
 variable "tfstate_namespace" {
-  description = "Namespace de Object Storage donde vive el bucket `autohostai-tfstate-github` (lo imprime la consola de OCI)."
+  description = "Namespace de Object Storage donde vive el bucket de state (lo imprime la consola de OCI). Hoy `autohostai-tfstate-dev` (compartido con el módulo dev, key separada)."
   type        = string
   sensitive   = true
 }
 
 variable "tfstate_bucket" {
-  description = "Nombre del bucket de state. Hoy fijado a `autohostai-tfstate-github` (D3); se deja variable para no hardcodear el bootstrap irreducible en el módulo."
+  description = "Nombre del bucket de state. Hoy fijado a `autohostai-tfstate-dev` (D3 amend: compartido con el módulo dev, separados por `key`); se deja variable para no hardcodear."
   type        = string
   sensitive   = true
 }

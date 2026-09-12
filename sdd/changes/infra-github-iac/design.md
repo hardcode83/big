@@ -183,7 +183,8 @@ terraform {
 
 ```
 namespace    = "<OCI_NAMESPACE>"
-bucket       = "autohostai-tfstate-github"
+bucket       = "autohostai-tfstate-dev"
+key          = "github.tfstate"
 region       = "<OCI_REGION>"
 tenancy_ocid = "<TENANCY_OCID>"
 user_ocid    = "<USER_OCID>"
@@ -191,7 +192,7 @@ fingerprint  = "<FINGERPRINT>"
 private_key  = "<PRIVATE_KEY_BASE64_OR_PATH>"
 ```
 
-(El bucket se crea una vez a mano, igual que `autohostai-tfstate-dev`.)
+(Bucket **compartido** con `infra/environments/dev/`, separado por `key = "github.tfstate"`. El bucket ya existe — lo creó `infra/environments/dev/` con `versioning = enabled`; este módulo no añade bootstrap irreducible.)
 
 ## Risks & mitigations
 
@@ -205,7 +206,7 @@ private_key  = "<PRIVATE_KEY_BASE64_OR_PATH>"
 
 5. **Drift entre `infra/github/` y la realidad de la consola de GitHub** (alguien cambia un setting a mano). Mitigación: misma que para `infra/environments/dev/` — un `terraform plan` desde `main` lo detecta. No hay automation extra: el `apply` se ejecuta por `workflow_dispatch` igual que el módulo dev.
 
-6. **El secreto de la GitHub App queda en el `tfstate` de `infra/github/`** (igual que en `infra-dev-terraform` con la misma clave — `steering/security.md` regla 8, ámbito dev/test). Mitigación: el bucket `autohostai-tfstate-github` es privado, versionado, y la IAM del servicio `svc-terraform-dev` aplica. Mismo patrón que el bucket dev; no introduce una relajación nueva.
+6. **El secreto de la GitHub App queda en el `tfstate` de `infra/github/`** (igual que en `infra-dev-terraform` con la misma clave — `steering/security.md` regla 8, ámbito dev/test). Mitigación: vive en el bucket `autohostai-tfstate-dev` (compartido, privado + versionado + IAM mínima de `svc-terraform-dev`), bajo la `key = "github.tfstate"` separada del state dev. Mismo patrón que el bucket dev; no introduce una relajación nueva.
 
 ## Open questions
 
