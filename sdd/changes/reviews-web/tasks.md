@@ -343,11 +343,14 @@ entorno y **no** son regresión de este change.
   `frontend/lib/api/generated/openapi.d.ts` aparecen. — **Confirmado**: no aparecen,
   ni tampoco `route-registry.ts` ni `navigation.json` (R1.2).
 
-- [ ] 9.4 **Antes de abrir el PR** se hace la regeneración manual de
+- [x] 9.4 **Antes de abrir el PR** se hace la regeneración manual de
   `backend/openapi.json` y `frontend/lib/api/generated/openapi.d.ts` fuera del diff
   (workaround de `sdd/project.md` §Commands). Se commitea aparte y se reabre el PR
-  antes de review si hay deriva. — *Hecho*: ver commit de regeneración al pie del
-  PR. <!-- manual -->
+  antes de review si hay deriva. — **No hizo falta**: 9.3 confirmó que ninguno de
+  los dos ficheros apareció en el diff de ninguna de las tres PR (#183, #184,
+  #185), así que no hubo deriva contra la que regenerar. La tarea queda
+  satisfecha por la ausencia verificada, no por una regeneración real que nunca
+  fue necesaria. <!-- manual -->
 
 ## Implementation Notes
 
