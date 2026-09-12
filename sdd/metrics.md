@@ -114,3 +114,4 @@
 | sim-advance | new, design, tasks, run, review, ship, archive | 3845110 | 1006870 | 206761779 | 113.1049 | 2026-09-10 | 2026-09-11 |
 | human-reply-outbound-delivery | new, design, run, review, archive | 3951453 | 473040 | 94190363 | 78.6784 | 2026-09-11 | 2026-09-11 |
 | properties-create-web | new, tasks, run, review | 269358 | 1135321 | 293397758 | 101.4940 | 2026-09-11 | — |
+| pms-sync-schedule | new, design, run, review | 132197 | 573988 | 142550034 | 41.9344 | 2026-09-11 | — |

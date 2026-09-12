@@ -6,8 +6,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api";
 
 import * as dataModule from "../data";
+import type { PropertyFilters } from "../data";
 import { normalizePropertyFilters, propertiesKeys } from "./query-keys";
-import { useProperties } from "./use-properties";
+import { useActiveProperties, useProperties } from "./use-properties";
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ user: { tenant_id: "tenant-from-session" } }),
@@ -91,6 +92,49 @@ describe("useProperties — tenant-scoped query key (R1, design D6)", () => {
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(listMock).toHaveBeenCalledWith("tenant-from-session", {});
+  });
+});
+
+describe("useActiveProperties — selector context and pagination", () => {
+  it("aggregates every active-property page while preserving property context", async () => {
+    const first = {
+      id: "property-1",
+      name: "Casa Ada",
+      internalCode: "CASA-001",
+      timezone: "Europe/Madrid",
+      defaultCheckInTime: "15:00",
+      defaultCheckOutTime: "11:00",
+    };
+    const second = {
+      id: "property-2",
+      name: "Casa Beatrice",
+      internalCode: "CASA-002",
+      timezone: "America/New_York",
+      defaultCheckInTime: "16:00",
+      defaultCheckOutTime: "10:00",
+    };
+    listMock.mockImplementation(async (_tenantId: string, filters: PropertyFilters) =>
+      filters.page === 2
+        ? { data: [second], page: 2, perPage: 100, total: 2, totalPages: 2 }
+        : { data: [first], page: 1, perPage: 100, total: 2, totalPages: 2 },
+    );
+
+    const { result } = renderHook(() => useActiveProperties(), {
+      wrapper: freshWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.data?.data).toHaveLength(2));
+    expect(result.current.data?.data).toEqual([first, second]);
+    expect(listMock).toHaveBeenCalledWith("tenant-from-session", {
+      status: "ACTIVE",
+      page: 1,
+      perPage: 100,
+    });
+    expect(listMock).toHaveBeenCalledWith("tenant-from-session", {
+      status: "ACTIVE",
+      page: 2,
+      perPage: 100,
+    });
   });
 });
 

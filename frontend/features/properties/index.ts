@@ -20,3 +20,4 @@ export type {
   CreatePropertyInput,
   UpdatePropertyInput,
 } from "./data";
+export { useActiveProperties, useProperties } from "./hooks/use-properties";

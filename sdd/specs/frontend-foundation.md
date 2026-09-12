@@ -32,6 +32,29 @@ The frontend is a Next.js App Router application (TypeScript strict) that provid
 - WHERE both layouts are present in the DOM at once, THE SYSTEM SHALL hide the inactive one with `display: none` (Tailwind's `hidden` / `sm:hidden`) and SHALL NOT use `invisible`, `opacity-0` or `sr-only`, so that at any width assistive technology finds exactly **one** instance of each control — no duplicated accessible name, no repeated tab stop. The three rejected utilities hide from sight only, and the difference is invisible in a code review.
 - THE SYSTEM SHALL guard that overflow with an automated check that measures a **real browser** rather than jsdom, which performs no layout and reports `scrollWidth` 0, so an assertion written against the ordinary suite would measure nothing at all. A second Vitest project (`npm run test:layout`, `features/shell/components/topbar-overflow.browser.test.tsx`) renders the compositions at 360×780 in Chromium against **compiled Tailwind CSS** — without that build step the guard measures an unstyled DOM and always passes — names the offending composition and the measured width when it fails, and asserts both the root width **and** the 44×44 floor on rendered geometry, because a width-only assertion goes green over a control its parent has crushed. A structural guard (`frontend/test/topbar-overflow.test.ts`) complements it by pinning the shape rather than the widths: that no shell mounts the preference controls directly, that the wide branch is hidden with `hidden` and not with `sr-only`, and that the trigger carries `tap-target`. Both run in CI.
 
+### Reservations mutation surface
+
+- WHEN un `PROPERTY_MANAGER` abre `/reservations`, THE SYSTEM SHALL ofrecer el alta manual
+  integrada en la superficie funcional de reservations, con los canales `DIRECT` y `MANUAL`,
+  campos de huésped opcionales sin `guest_id`, estados de carga/error/éxito y refresco del
+  listado tras crear.
+- WHEN un `PROPERTY_MANAGER` abre `/reservations/[id]`, THE SYSTEM SHALL ofrecer edición y
+  cancelación, enviando solo los campos modificados mediante `PATCH` y usando `DELETE` para
+  cancelar sin borrar el histórico.
+- WHEN una persona cambia el idioma entre español e inglés, THE SYSTEM SHALL traducir todas
+  las etiquetas, ayudas, confirmaciones y errores visibles del flujo de reservations.
+- IF la persona no posee `MANAGE_RESERVATIONS`, THEN THE SYSTEM SHALL mantener reservations en
+  modo lectura y ocultar los controles de escritura; esta protección de UI no sustituye al
+  RBAC del backend.
+- WHILE una mutación está pendiente, THE SYSTEM SHALL impedir envíos duplicados, comunicar el
+  progreso de forma accesible e invalidar las queries tenant-scoped de reservations tras su
+  resolución.
+- IF la API devuelve un error de mutación, THEN THE SYSTEM SHALL mostrar un mensaje localizado
+  sin exponer PII del servidor y conservar los valores editables del formulario.
+
+La página operativa y la matriz de roles viven en [`docs/reservations.md`](../../docs/reservations.md);
+esta spec describe el comportamiento frontend vigente, no un historial de cambios.
+
 ### Route registry
 
 - THE SYSTEM SHALL maintain a single typed route registry (`features/shell/navigation/route-registry.ts`) covering exactly the surfaces defined in PRD §24 (26 descriptors), as the source of truth for navigation, breadcrumbs, metadata, and placeholders.

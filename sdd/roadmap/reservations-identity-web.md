@@ -53,3 +53,7 @@ enlazar a `/properties/[id]` desde la fila (candidato menor si sale gratis); toc
 **Verificación**: `/reservations` en dev muestra `REDES11` y `John Smith` en las filas del seed, el
 detalle también, y una reserva sin huésped enlazado muestra `—`. `npm test` sin ficheros nuevos
 en rojo respecto a la cifra de partida (`sdd/project.md` explica los dos `ENOENT` del worktree).
+
+---
+
+`reservation-property-identity` (mergeado el 2026-08-25) añadió `property_name`, `property_internal_code` y `guest_full_name` a `GET /api/v1/reservations` y a su detalle, y **nadie los consume** — medido el 2026-08-30, `frontend/features/reservations/components/list/reservations-view.tsx:159` sigue con `{row.propertyId}` y ninguno de los tres campos aparece en el frontend. Es la mitad que cierra el defecto que abrió aquella entrada: la columna **Property** de la maqueta de Stitch enseñando `981b5c2e-…` en vez de `REDES11`. Trabajo: regenerar el DTO desde el contrato y pintar las dos columnas (Property y Guest) en lista y detalle, con el em-dash de `frontend-foundation.md` para los `null` que el contrato declara. **Sin backend**: el contrato ya está publicado (no está en el plan original, candidata de `/sdd:archive` el 2026-08-30 al comprobar que la mitad `[FE]` nunca se abrió) …

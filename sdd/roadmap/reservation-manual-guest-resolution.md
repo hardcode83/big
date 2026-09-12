@@ -1,0 +1,3 @@
+# reservation-manual-guest-resolution
+
+reutilizar por email normalizado, crear cuando no haya coincidencia, mantener la ausencia de email como ausencia de identidad y serializar las altas concurrentes mediante un servicio compartido con lock transaccional. El resolver se comparte con `ReservationIngestor`; la constraint UNIQUE y la reconciliación de duplicados históricos quedan fuera, para un hardening posterior con política explícita de merge (no está en el plan original; prerequisite añadido antes de `reservation-create-web` tras el análisis de concurrencia de Guest, 2026-09-09) …

@@ -41,3 +41,7 @@ marcar-como-publicada (owner). Gateado por permiso con `useHasPermission`. Sin b
 **Fuera de alcance**: ingesta de reseñas desde OTAs (no hay API ni la habrá en el MVP); posting
 automático; IA real; notificar al owner de un borrador nuevo más allá de lo que
 `notification-writers-gap` ya cubra.
+
+---
+
+`revenue-reviews` archivó seis rutas en `reviews/api/router.py` (alta, análisis, borrador de respuesta, aprobar/ignorar/marcar-publicada) y `classify_reviews` corre cada 5 min (`schedule.py:75`). El reparto de permisos ya está decidido en `policy.py` —el owner aprueba/ignora/marca, el manager crea (`CREATE_REVIEW`)— y la pantalla lo respeta, no lo redefine. Sin posting automático en OTAs (PRD §29). Misma forma que `pricing-web`: cola de borradores con decisión (no está en el plan original, añadida el 2026-09-04: `revenue-reviews` no registró su mitad `[FE]`; hito «MVP operable» 3) …

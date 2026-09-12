@@ -62,3 +62,7 @@ propio (`specs/reservations.md:213-218`) — candidata aparte, `reservation-life
 adapter mock (o fixture), `make pms-sync` → `updated: 1`, un evento nuevo en `/timeline` de
 REDES11; cancelar `SEED-BOOKING-1` → reserva `CANCELLED`, evento, y REDES11 no se queda en
 `AWAITING_CHECKIN` si estaba ahí.
+
+---
+
+`ReservationIngestor._ingest_row` sólo escribe `RESERVATION_IMPORTED` al crear (`integrations/application/ingest.py:253-260`); en el camino de actualización (:218-228) aplica `changes` —incluido `status`, que es `INGEST_OWNED` (:345-346)— y no emite ningún `TimelineEvent`. `specs/reservations.md:226-228` promete que «una reserva no puede acabar `CANCELLED` sin su evento», pero sólo para los caminos de API; y `RESERVATION_CANCELLED_BEFORE_CHECKIN` lo emite hoy un único sitio, el procesador de webhooks (`webhooks.py:575`). Con el sync programado delante, el hueco pasa de teórico a diario. Decide qué eventos gana el camino de ingest y si la cancelación por ingest dispara el mismo trigger que la del webhook (no está en el plan original, añadida el 2026-09-04; hito «MVP operable» 3) …

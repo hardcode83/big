@@ -54,3 +54,7 @@ tarea en curso (no existe operación, `cleaning-stall-blocks-next-stay` lo dejó
 **Verificación**: crear una limpieza sobre una vivienda en `VACANT_READY`, ver el aviso de
 «no asignable todavía»; recorrer un checkout con `sim-advance`, asignar, que la limpiadora
 complete en `/cleaner`, validar desde `/cleaning`.
+
+---
+
+`POST /cleaning-tasks` (`tasks_router.py:147`) y `validate` (:384) no tienen ningún llamante en el frontend, y `cancel` (:287) sólo se ofrece en `cancel-cleaning-dialog.tsx` sobre una fila de `blocked-transitions`. Hoy una tarea sólo nace si `process_checkouts` la crea, y el manager no puede cerrar el bucle sobre una limpieza terminada. Hereda la trampa medida en RUNBOOK-seed-demo §4: una tarea creada a mano nace inasignable (`CLEANER_ASSIGNED` sólo es legal desde `AWAITING_CLEANING`), así que la pantalla tiene que decir qué pasa con ella, con el `assignment_blocked_by` que `cleaning-assign-preconditions` ya publica (no está en el plan original, añadida el 2026-09-04 al auditar los flujos por rol; hito «MVP operable» 1) …

@@ -111,3 +111,7 @@ no lo calcula ni lo evita.
 `frontend/app/(field)/tech/incidents/[id]/page.tsx` están puestos, con `TechnicianShell` y
 `AuthGuard`, y las dos páginas son `RoutePlaceholder`. `tech-app` los sustituye; no crea el
 segmento ni el shell.
+
+---
+
+`/tech` (mis incidencias) y `/tech/incidents/[id]` (detalle + actualizar estado + fotos + coste), PRD §26.20 y §24. Estrena el rol TECHNICIAN en el frontend; el umbral de aprobación del propietario (PRD §11) lo decide el backend, aquí solo se muestra. El andamio ya está puesto: `frontend/app/(field)/tech/` con `TechnicianShell`, `AuthGuard` y las dos páginas como `RoutePlaceholder` (no está en el plan original: `field-apps` se partió en cuatro el 2026-08-18, porque agrupaba cuatro superficies de frontend sobre tres dominios distintos —limpieza, mantenimiento, mensajería— y estrenaba dos roles nuevos, así que no cabía en un solo change; mismo criterio que partió `revenue` en tres el 2026-08-16. Su `/sdd:new` se abrió y se cerró **sin proposal** el 2026-08-19: de las once cosas que PRD §12 pide, solo cuatro tenían backend, así que salieron de ahí las tres entradas `[BE]` de arriba — censo en `sdd/roadmap/tech-app.md`) …
