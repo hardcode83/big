@@ -327,12 +327,20 @@ renderiza por la matriz de `legalActions` (D5) que cruza estado y rol, no por el
 espejo — owner y manager pueden editar; el manager sólo ve editar, sin las
 decisiones.
 
-El resto de roles sigue con `[]`. Los tres botones de decisión, el de
-marcar-como-publicada del diálogo y el botón **Añadir reseña** se ocultan tras
-`useHasPermission(...)` (R7.4). El botón **Editar borrador** se renderiza según
-el resultado de `legalActions(status, role)`, que ya excluye al manager en
-`APPROVED` por la regla del backend (`ReviewResponseDraft.edit()` rechaza tras
-aprobar, R3.6 del spec).
+El resto de roles sigue con `[]`. El botón **Añadir reseña** se oculta tras
+`useHasPermission("CREATE_REVIEW_UI")` (R7.4) — sí es un botón de nivel de
+vista, sin estado de reseña que cruzar. Los tres botones de decisión, el de
+marcar-como-publicada del diálogo y **Editar borrador** se ocultan en cambio
+por el resultado de `legalActions(status, role)` (D5), no por un segundo
+`useHasPermission` independiente. La ronda 2 de revisión de este mismo change
+probó el diseño original (`role={canDecide ? role : "other"}` con
+`canDecide = useHasPermission("MANAGE_REVIEW_DECISIONS")`) y encontró que
+colapsaba también a "other" el `role` que `legalActions` usa para **Editar
+borrador** — ocultándoselo al manager, que sí debe verlo. La matriz de
+`legalActions` ya es, por construcción, el espejo completo de a quién le
+toca qué (segunda tabla de D5): un segundo gate redundante no añade
+seguridad — el backend sigue siendo la autoridad real — y sólo repite la
+forma de fallar que la ronda 2 encontró.
 
 El mapa sigue siendo **parcial y declarado como tal** (mismo comentario que
 `permissions.ts`): sólo enumera lo que el frontend usa para ocultar. Un espejo

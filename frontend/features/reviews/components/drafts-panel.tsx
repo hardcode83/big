@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import type { Review, ReviewAction, ReviewStatus } from "../data";
 import { useReviewsUiStore } from "../state/use-reviews-ui-store";
 import { useReviewsList } from "../hooks/use-reviews-data";
+import { readErrorKey } from "../lib/reviews-error";
 import { ReviewActions } from "./review-actions";
+import { ReviewFilters } from "./review-filters";
 import { ReviewRow } from "./review-row";
 import { ReviewsPagination } from "./reviews-pagination";
 
@@ -18,13 +20,17 @@ import { ReviewsPagination } from "./reviews-pagination";
  * decision queue the roadmap asked for (proposal "Una cola de borradores
  * con decisión").
  *
- * **Add review** is gated on `CREATE_REVIEW_UI` (D15). The button opens
- * `CreateReviewDialog` from the view, not here — the panel only knows
- * whether the button is enabled.
+ * **Add review** is gated on `CREATE_REVIEW_UI` (D15, R7.1, R7.4): the button
+ * itself does not render for a role without the permission — R7.1's own user
+ * story is «ver los controles que me tocan y sólo esos», so a role without
+ * `CREATE_REVIEW_UI` must not be offered a button at all, not merely a
+ * disabled or inert one.
  */
 export interface DraftsPanelProps {
   catalog: ReadonlyArray<{ id: string; name: string; internalCode: string }>;
   catalogPending: boolean;
+  /** Gates whether the Add review button renders at all (D15, R7.1, R7.4). */
+  canCreate: boolean;
   /** Is the create-review dialog currently open? */
   createDialogOpen: boolean;
   /** Open the create-review dialog. */
@@ -51,6 +57,7 @@ export interface DraftsPanelProps {
 export function DraftsPanel({
   catalog,
   catalogPending,
+  canCreate,
   createDialogOpen,
   onOpenCreateDialog,
   isMutationPending,
@@ -62,11 +69,27 @@ export function DraftsPanel({
   const { t } = useTranslation("reviews");
   const slice = useReviewsUiStore((state) => state.drafts);
   const setPropertyId = useReviewsUiStore((s) => s.setDraftsPropertyId);
+  const setChannel = useReviewsUiStore((s) => s.setDraftsChannel);
+  const setSentiment = useReviewsUiStore((s) => s.setDraftsSentiment);
+  const setRatingMin = useReviewsUiStore((s) => s.setDraftsRatingMin);
+  const setRatingMax = useReviewsUiStore((s) => s.setDraftsRatingMax);
+  const setDateFrom = useReviewsUiStore((s) => s.setDraftsDateFrom);
+  const setDateTo = useReviewsUiStore((s) => s.setDraftsDateTo);
   const setPage = useReviewsUiStore((s) => s.setDraftsPage);
 
   /** The Borradores filter is always `status = DRAFTED`. It is not a selector. */
   const filters = {
     ...(slice.propertyId !== undefined ? { propertyId: slice.propertyId } : {}),
+    ...(slice.channel !== undefined ? { channel: slice.channel } : {}),
+    ...(slice.sentiment !== undefined ? { sentiment: slice.sentiment } : {}),
+    ...(slice.ratingMin !== undefined
+      ? { ratingMin: Number(slice.ratingMin) }
+      : {}),
+    ...(slice.ratingMax !== undefined
+      ? { ratingMax: Number(slice.ratingMax) }
+      : {}),
+    ...(slice.dateFrom !== undefined ? { dateFrom: slice.dateFrom } : {}),
+    ...(slice.dateTo !== undefined ? { dateTo: slice.dateTo } : {}),
     status: "DRAFTED" as ReviewStatus,
   };
   const query = useReviewsList(filters, slice.page);
@@ -77,35 +100,35 @@ export function DraftsPanel({
         <h2 className="text-headline-md font-semibold text-foreground">
           {t("list.label")}
         </h2>
-        {!createDialogOpen && (
+        {canCreate && !createDialogOpen && (
           <Button type="button" onClick={onOpenCreateDialog}>
             {t("create.button")}
           </Button>
         )}
       </div>
-      <label className="flex flex-col gap-1 text-body-base">
-        <span className="font-medium text-foreground">{t("filters.property.label")}</span>
-        <select
-          value={slice.propertyId ?? ""}
-          onChange={(e) =>
-            setPropertyId(e.target.value === "" ? undefined : e.target.value)
-          }
-          className="rounded-md border border-border bg-background px-2 py-1.5 text-body-base"
-        >
-          <option value="">{t("filters.property.all")}</option>
-          {catalog.map((property) => (
-            <option key={property.id} value={property.id}>
-              {property.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <ReviewFilters
+        catalog={catalog}
+        propertyId={slice.propertyId}
+        onPropertyIdChange={setPropertyId}
+        channel={slice.channel}
+        onChannelChange={setChannel}
+        sentiment={slice.sentiment}
+        onSentimentChange={setSentiment}
+        ratingMin={slice.ratingMin}
+        onRatingMinChange={setRatingMin}
+        ratingMax={slice.ratingMax}
+        onRatingMaxChange={setRatingMax}
+        dateFrom={slice.dateFrom}
+        onDateFromChange={setDateFrom}
+        dateTo={slice.dateTo}
+        onDateToChange={setDateTo}
+      />
       {query.isPending && (
         <p className="text-body-base text-muted-foreground">{t("list.loading")}</p>
       )}
       {query.isError && (
-        <p className="text-body-base text-destructive">
-          {t("list.error.title")}
+        <p role="status" aria-live="polite" className="text-body-base text-destructive">
+          {t(readErrorKey(query.error))}
         </p>
       )}
       {query.data && query.data.total === 0 && (
