@@ -158,6 +158,6 @@ variable "github_app_id" {
 }
 
 variable "github_app_installation_id" {
-  description = "ID público de la instalación de la GitHub App sobre el repo/owner. Es el identificador que `github_app_installation_repositories.this` referencia."
+  description = "ID público (no sensible) de la instalación de la GitHub App sobre el repo/owner. El módulo NO declara `github_app_installation_repositories` (D11 — bootstrap irreducible: `github_app_installation_repositories` es incompatible con `app_auth` en el provider v5.45.0, documentado en `infra/github/RUNBOOK.md` §1); este valor lo aporta el operador porque la App ya está creada, registrada en la org e instalada sobre el repo."
   type        = string
 }

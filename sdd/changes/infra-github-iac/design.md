@@ -91,11 +91,19 @@ Rejected:
 - **Pin sin `ignore_changes`** — los providers maduros no suelen derivar timestamps en nombres de recursos, pero algunos exponen contadores o hashes en atributos que cambian entre planes. Sin `ignore_changes` defensivo, el primer run de "deploy from zero" (R7.3) puede mostrar un diff inocuo que no es drift real.
 - **`ignore_changes` agresivo sobre todo** — esconde drift real. La lista se mantiene ajustada a los atributos derivados del provider, no a los que el módulo declara (esos deben aparecer en el `plan` si cambian).
 
+### D11 — App installation como bootstrap irreducible (no recurso Terraform)
+
+**Chosen**: La instalación de la GitHub App sobre el repo NO se modela como recurso Terraform (`github_app_installation_repositories`). El provider `integrations/github` v5.45.0 documenta que ese recurso es incompatible con la autenticación GitHub App Installation (`app_auth`), que es la que D2 eligió. Modelar la instalación requeriría una excepción a D2 (PAT scoped) o relajar R4.1 (mover a bootstrap irreducible). Se elige la segunda: la instalación es una acción one-time, no un recurso sujeto a drift significativo; documentar el `gh` comando en `infra/github/RUNBOOK.md` §1 cubre el bootstrap irreducible; el job `verify-ghcr` de la sección 6 detecta en runtime si la App deja de tener los permisos que el CD necesita. `github_app_installation_id` queda como output que lee directamente de `var.github_app_installation_id` (el ID público lo conoce el operador; sigue siendo útil exponerlo para que el workflow de CI lo consuma).
+
+Rejected:
+- **PAT scoped como excepción a D2** — añade una credencial nueva (PAT), contradice D2 explícitamente (PAT de owner rechazado por radio de daño y ADR 0002). El blast radius de un fine-grained PAT con `repo:write` sobre un repo es más estrecho, pero igualmente requiere rotación, secret store y monitorización — coste no justificado por un recurso que, instalado una vez, rara vez cambia.
+- **Provider block alias + `data "github_app"` para resolver el `app_id` por nombre** — el `data "github_app"` hereda la misma restricción de auth (`app_auth` o PAT, igual que el recurso); no resuelve el problema, solo lo desplaza.
+
 ## Changes by area
 
 | Area | Files | Change |
 |---|---|---|
-| New module | `infra/github/main.tf` | Recursos `github_repository_settings`, `github_actions_secret`, `github_actions_variable`, `github_branch_protection`, `github_app_installation_repositories`, y el recurso de packages (D9) que el provider vigente ofrezca para el acceso a GHCR del repo. `lifecycle { ignore_changes = [...] }` defensivo sobre atributos derivados del provider (D10). Provider `integrations/github` autenticado por App. |
+| New module | `infra/github/main.tf` | Recursos `github_repository_settings`, `github_actions_secret`, `github_actions_variable`, `github_branch_protection`, y el recurso de packages (D9) que el provider vigente ofrezca para el acceso a GHCR del repo. `lifecycle { ignore_changes = [...] }` defensivo sobre atributos derivados del provider (D10). Provider `integrations/github` autenticado por App. |
 | New module | `infra/github/variables.tf` | Variables sensibles (`github_app_private_key_path`, los seis `oci_*` y los dos `tfstate_*`, `allowed_ssh_cidrs`, `allowed_ssh_cidrs_wide`, `ssh_public_keys`) y **no sensibles** (`github_app_id` y `github_app_installation_id` — son identificadores públicos, mismo patrón que `infra/environments/dev/variables.tf` líneas 196-199 y siguientes donde se documentan como "Identificador no sensible" sin `sensitive = true`; `github_owner`, `github_repository_name`, `github_repository_full_name`). Validación de CIDRs y de la clave SSH (mismas reglas que el módulo dev). `github_app_private_key_path` mapea desde el **mismo** GitHub Secret `GH_APP_PRIVATE_KEY` que `infra-dev` lee como `github_app_private_key` (contenido inline): el workflow escribe el secret a un fichero en `$RUNNER_TEMP` y pasa la ruta — patrón ya documentado en `infra/environments/dev/README.md` §"Secrets de GitHub Actions esperados". |
 | New module | `infra/github/outputs.tf` | `github_repository_full_name`, `github_repository_default_branch`, `github_app_installation_id`. Nunca valores de secrets. |
 | New module | `infra/github/backend.tf` | Backend nativo `oci` con configuración parcial (`-backend-config`). Terraform `>= 1.12`. |
@@ -157,12 +165,6 @@ resource "github_actions_variable" "gh_app_id" {
   repository    = var.github_repository_name
   variable_name = "GH_APP_ID"
   value         = var.github_app_id  # no sensible (es un ID público)
-}
-
-# Recurso: instalación de la App sobre el repo (R4) — `installation_id` se pasa por variable (ya validada en `app-deploy-dev`); el `data "github_app"` por `slug` solo se usaría si quisiéramos resolver el App ID por nombre (no es el caso aquí).
-resource "github_app_installation_repositories" "this" {
-  installation_id       = var.github_app_installation_id
-  selected_repositories = [var.github_repository_full_name]
 }
 ```
 

@@ -6,8 +6,10 @@
 #   variables no sensibles.
 # - `github_repository_default_branch` — cableado al recurso
 #   `github_repository.this.default_branch` (sección 2).
-# - `github_app_installation_id` — cableado al recurso
-#   `github_app_installation_repositories.this.installation_id` (sección 2).
+# - `github_app_installation_id` — re-cableado a la variable Terraform
+#   `var.github_app_installation_id` (D11 — el módulo NO modela la
+#   instalación como recurso; el ID público lo conoce el operador y se
+#   expone para que el workflow de CI lo consuma).
 
 output "github_repository_full_name" {
   description = "Nombre completo del repo en GitHub (`owner/name`). Lo consume el workflow `deploy-dev.yml` para validar la instalación de la App sobre el repo correcto."
@@ -20,6 +22,6 @@ output "github_repository_default_branch" {
 }
 
 output "github_app_installation_id" {
-  description = "ID de la instalación de la GitHub App sobre el repo. Cableado al recurso `github_app_installation_repositories.this.installation_id` en sección 2. Nunca el valor de la clave privada (R1)."
-  value       = github_app_installation_repositories.this.installation_id
+  description = "ID público de la instalación de la GitHub App sobre el repo. Lo declara el operador como variable Terraform; el módulo NO modifica la instalación (D11 — bootstrap irreducible, documentada en RUNBOOK.md §1)."
+  value       = var.github_app_installation_id
 }

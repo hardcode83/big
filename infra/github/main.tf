@@ -3,8 +3,13 @@
 # En esta sección se cablea el provider `integrations/github` autenticado por
 # la misma GitHub App del runner (D2) y se declaran los recursos que R2/R4
 # piden: `github_repository` (OQ2 fallback — `github_repository_settings`
-# no existe en la versión pinada v5.45.0, ver `## Implementation Notes`)
-# y `github_app_installation_repositories`.
+# no existe en la versión pinada v5.45.0, ver `## Implementation Notes`).
+#
+# NOTA: la instalación de la GitHub App sobre el repo NO se modela como
+# recurso Terraform — el provider v5.45.0 documenta que
+# `github_app_installation_repositories` es incompatible con `app_auth`
+# (que es la autenticación de este provider por D2). La instalación es
+# bootstrap irreducible (D11) y se documenta en RUNBOOK.md §1.
 
 terraform {
   required_version = ">= 1.12"
@@ -40,9 +45,9 @@ locals {
 }
 
 # R2 — settings del repo (description, homepage, topics, visibility,
-# default_branch, has_issues/has_projects/has_wiki, archived). El provider
-# `integrations/github` v5.45.0 NO expone `github_repository_settings` como
-# recurso dedicado (verificado contra `website/docs/r/` del tag v5.45.0 y
+# default_branch, has_issues/has_projects/has_wiki, archived, merge flags).
+# El provider `integrations/github` v5.45.0 NO expone `github_repository_settings`
+# como recurso dedicado (verificado contra `website/docs/r/` del tag v5.45.0 y
 # contra `## Implementation Notes`); por OQ2 fallback se usa
 # `github_repository` con `count = 1` y se importa el repo existente en el
 # primer apply (procedimiento en `import.sh`, sección 3/5).
@@ -52,6 +57,15 @@ locals {
 # `Repositories.Get` y adopte los settings del repo ya existente; el
 # recurso queda "managing" el repo, sin recrearlo, mientras ningún atributo
 # del bloque cambie.
+#
+# Merge flags (R2.1 + D11 adyacente): para que el provider aplique estos
+# flags en un `apply`, la GitHub App de autenticación debe tener
+# `contents: write`. R1.5 fail-fast en el primer `plan` con mensaje
+# nombrando el permiso ausente — no se llega a un `apply` parcial.
+# Valores leídos del repo vivo `autohostai-labs/AutoHostAI` el 2026-09-12
+# (`gh api /repos/autohostai-labs/AutoHostAI | jq '{...merge flags...}'`):
+# allow_merge_commit=true, allow_squash_merge=true, allow_rebase_merge=true,
+# allow_auto_merge=false, delete_branch_on_merge=false.
 resource "github_repository" "this" {
   name = var.github_repository_name
 
@@ -69,6 +83,14 @@ resource "github_repository" "this" {
 
   archived = false
 
+  # Merge flags (R2.1) — leídos del repo vivo el 2026-09-12; el App debe
+  # tener `contents: write` para que el provider los pueda aplicar (R1.5).
+  allow_merge_commit     = true
+  allow_squash_merge     = true
+  allow_rebase_merge     = true
+  allow_auto_merge       = false
+  delete_branch_on_merge = false
+
   # D10 — `lifecycle { ignore_changes = [] }` defensivo. Lista inicial vacía
   # porque la doc del provider v5.45.0 no expone atributos derivados de
   # timestamps/contadores en estos campos (todos los del bloque son user-set);
@@ -77,16 +99,4 @@ resource "github_repository" "this" {
   lifecycle {
     ignore_changes = []
   }
-}
-
-# R4 — instalación de la GitHub App sobre el repo. `installation_id` llega
-# por variable (la App ya está creada y registrada en la org, bootstrap
-# irreducible, R4.3/R4.4); `selected_repositories` referencia el repo por
-# su nombre (NO full name — la doc del provider en v5.45.0 dice "list of
-# repository names"; el provider hace `Repositories.Get(ctx, owner, repo)`
-# con `owner` del bloque provider y `repo` = cada elemento de la lista).
-# Ver `## Implementation Notes` por la discrepancia con la tarea original.
-resource "github_app_installation_repositories" "this" {
-  installation_id       = var.github_app_installation_id
-  selected_repositories = [var.github_repository_name]
 }
