@@ -117,3 +117,4 @@
 | properties-create-web | new, tasks, run, review, ship, archive | 271467 | 1238775 | 417813500 | 128.9786 | 2026-09-11 | 2026-09-12 |
 | pms-sync-schedule | new, design, run, review, ship, archive | 132517 | 619440 | 159754893 | 48.7891 | 2026-09-11 | 2026-09-12 |
 | reviews-web | new, design, tasks, run | 2077351 | 964782 | 425992934 | 159.7995 | 2026-09-11 | 2026-09-12 |
+| pms-ingest-change-events | new, tasks, run, review | 114628 | 421740 | 87252244 | 35.3325 | 2026-09-12 | — |
