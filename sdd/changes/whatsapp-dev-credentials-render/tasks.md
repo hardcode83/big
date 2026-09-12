@@ -90,8 +90,17 @@
 - [x] 5.3 Full backend test suite unaffected: `docker compose exec backend uv run pytest` (this
       change touches no `backend/` code — confirms no regression). Verified: **11049 passed, 44
       skipped, 0 failed** (563.62s), on a freshly-bootstrapped worktree stack (`make up`).
-- [ ] 5.4 Manual: after the next real `infra-dev` apply and `deploy-dev` run, confirm the four new
+- [x] 5.4 Manual: after the next real `infra-dev` apply and `deploy-dev` run, confirm the four new
       Vault secrets exist and the VM's `.env` carries all five `WHATSAPP_*`. <!-- manual -->
+      Verified: `infra-dev` run 34711638428 (2026-09-12T18:35Z, success) applied Terraform on
+      `main` post-merge; `deploy-dev` run 34711759753 (2026-09-12T18:37Z, success) then rendered
+      the VM's `.env` — step "Render .env leyendo los secrets del OCI Vault" calls
+      `read_secret_by_name` (which `exit 1`s under `set -euo pipefail` on any missing/empty
+      secret) for all four `autohostai-dev-whatsapp-*` Vault secrets and echoes
+      `WHATSAPP_PROVIDER`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`,
+      `WHATSAPP_APP_SECRET`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN` into the rendered `.env`; the step
+      and the overall job completed successfully, and the subsequent health/ingress checks in the
+      same job passed, so all four secrets resolved and all five `WHATSAPP_*` keys are present.
 
 ## Post-merge operational steps (not gated by `mark-local-verified`)
 
