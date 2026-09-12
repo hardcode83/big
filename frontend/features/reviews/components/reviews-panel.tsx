@@ -198,7 +198,7 @@ export function ReviewsPanel({
                   status={review.status}
                   role={role}
                   isBusy={isMutationPending}
-                  isPending={false}
+                  isPending={pendingReviewId === review.id}
                   onConfirm={(input) =>
                     onConfirm({
                       reviewId: input.reviewId,
