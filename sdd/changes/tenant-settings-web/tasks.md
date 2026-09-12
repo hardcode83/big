@@ -45,7 +45,7 @@
 - [x] 6.1 Full frontend test suite passes: `cd frontend && npm test` → 259 files, 2778 tests, all passing.
 - [x] 6.2 Lint passes: `cd frontend && npm run lint` → clean.
 - [x] 6.3 Typecheck passes: `cd frontend && npm run typecheck` → clean.
-- [ ] 6.4 Manual check of the end-to-end flow in a browser: as `TENANT_OWNER`, list/create/edit/deactivate/reactivate/reset-password a user and edit the tenant config at `/settings`; as `PROPERTY_MANAGER`, confirm both sections render read-only with no mutation controls; as `CLEANER`/`TECHNICIAN`, confirm `/settings` redirects. <!-- manual -->
+- [x] 6.4 Manual check of the end-to-end flow in a browser: as `TENANT_OWNER`, list/create/edit/deactivate/reactivate/reset-password a user and edit the tenant config at `/settings`; as `PROPERTY_MANAGER`, confirm both sections render read-only with no mutation controls; as `CLEANER`/`TECHNICIAN`, confirm `/settings` redirects. <!-- manual --> Verified 2026-09-12 post-merge via Playwright against a locally bootstrapped+seeded stack (`make bootstrap && make seed-demo`, `PORT_OFFSET=20`): `TENANT_OWNER` sees the full Usuarios+Tenant UI (list of 4 users, "Añadir usuario" opens the create Sheet, row "Ver" opens detail with Editar/Restablecer contraseña/Desactivar, deactivating the tenant's only active cleaner shows the R3.4 warning with correct Spanish grammar and an enabled confirm button); `PROPERTY_MANAGER` sees both sections fully read-only (no "Añadir usuario", no row mutation controls, no "Guardar cambios"); `CLEANER`/`TECHNICIAN` are redirected away from `/settings` to `/cleaner`/`/tech` respectively.
 
 ## Implementation Notes
 
