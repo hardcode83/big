@@ -249,7 +249,7 @@ Categorías:
   needs: revenue-statements, frontend-auth-session · size: M · kind: feature
 - [x] revenue-reviews — [BE] **gestión de reseñas**: `Review` + `ReviewResponseDraft`, análisis de sentimiento, detección de problemas recurrentes y borrador de respuesta, con aprobación humana y **sin posting automático en OTAs** (PRD §26.23, … → changes/archive/2026-09-02-revenue-reviews/
   needs: messaging-ai · size: M · kind: feature
-- [ ] reviews-web — [FE] **`/reviews`, hoy `RoutePlaceholder` sobre un backend entregado** …
+- [x] reviews-web — [FE] **`/reviews`, hoy `RoutePlaceholder` sobre un backend entregado** … → changes/archive/2026-09-12-reviews-web/
   needs: revenue-reviews, frontend-auth-session · size: M · kind: feature
 - [x] public-zone-hardening — [FE] **endurecimiento de la zona pública tras el primer deploy** … → changes/archive/2026-08-26-public-zone-hardening/
   size: S · kind: fix
