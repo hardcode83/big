@@ -460,9 +460,9 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
   });
 
   // --- Confirm button (section 2, R1 / R3 / R4 / R5) ---
-  // The `confirm.*` i18n keys are introduced in section 4; until then react-i18next
-  // emits the dotted key as a fallback string (no test break). Tests below match
-  // against that fallback so they remain stable when section 4 lands.
+  // Section 4 introduced the ES locale entries (`confirm.*`, `edit.fields.paymentStatus`,
+  // `mutation.errors.confirm.*`), so the assertions match the translated strings via
+  // `esReservations` rather than the dotted-key fallback.
 
   it("renders the Confirm button when status is PENDING AND MANAGE_RESERVATIONS is granted (R1, R4)", () => {
     useHasPermissionMock.mockReturnValue(true);
@@ -473,7 +473,7 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
       refetch: vi.fn(),
     });
     renderDetail();
-    const button = screen.getByRole("button", { name: /confirm\.label/ });
+    const button = screen.getByRole("button", { name: esReservations.confirm.label });
     expect(button).toBeInTheDocument();
     expect(button).not.toBeDisabled();
     expect(button).toHaveAttribute("aria-busy", "false");
@@ -488,7 +488,7 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
       refetch: vi.fn(),
     });
     renderDetail();
-    expect(screen.queryByRole("button", { name: /confirm\.label/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: esReservations.confirm.label })).not.toBeInTheDocument();
   });
 
   it("hides the Confirm button when status is CANCELLED (R1, R3)", () => {
@@ -500,7 +500,7 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
       refetch: vi.fn(),
     });
     renderDetail();
-    expect(screen.queryByRole("button", { name: /confirm\.label/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: esReservations.confirm.label })).not.toBeInTheDocument();
   });
 
   it("hides the Confirm button without MANAGE_RESERVATIONS even when status is PENDING (R1, R4)", () => {
@@ -512,7 +512,7 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
       refetch: vi.fn(),
     });
     renderDetail();
-    expect(screen.queryByRole("button", { name: /confirm\.label/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: esReservations.confirm.label })).not.toBeInTheDocument();
   });
 
   it("clicking the Confirm button fires the mutation with { reservationId } and announces the localised success (R1, R5)", async () => {
@@ -524,7 +524,7 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
       refetch: vi.fn(),
     });
     renderDetail();
-    fireEvent.click(screen.getByRole("button", { name: /confirm\.label/ }));
+    fireEvent.click(screen.getByRole("button", { name: esReservations.confirm.label }));
     expect(confirmMutateMock).toHaveBeenCalledWith(
       { reservationId: FULL_DETAIL.id },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
@@ -536,10 +536,10 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
     await act(async () => options.onSuccess());
     await waitFor(() =>
       expect(
-        screen.getByText(/confirm\.success/),
+        screen.getByText(esReservations.confirm.success),
       ).toBeInTheDocument(),
     );
-    const announcement = screen.getByText(/confirm\.success/);
+    const announcement = screen.getByText(esReservations.confirm.success);
     expect(announcement).toHaveAttribute("role", "status");
     expect(announcement).toHaveAttribute("aria-live", "polite");
   });
@@ -558,7 +558,7 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
       mutate: confirmMutateMock,
     });
     renderDetail();
-    const button = screen.getByRole("button", { name: /confirm\.submitting/ });
+    const button = screen.getByRole("button", { name: esReservations.confirm.submitting });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("aria-busy", "true");
   });
@@ -582,11 +582,11 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
       renderDetail();
       const alert = screen.getByRole("alert");
       const expected = status === 404
-        ? /mutation\.errors\.confirm\.notFound/
+        ? esReservations.mutation.errors.confirm.notFound
         : status === 409
-        ? /mutation\.errors\.confirm\.conflict/
-        : /mutation\.errors\.confirm\.validation/;
-      expect(alert.textContent ?? "").toMatch(expected);
+        ? esReservations.mutation.errors.confirm.conflict
+        : esReservations.mutation.errors.confirm.validation;
+      expect(alert.textContent ?? "").toBe(expected);
       expect(alert.textContent ?? "").not.toContain("should-not-leak");
       expect(alert.textContent ?? "").not.toContain("X");
     },
