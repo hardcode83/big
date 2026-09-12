@@ -25,9 +25,13 @@ variable Terraform sensible por cada una, inyectada por Actions secret vía `TF_
 túnel, los cuatro secretos de medios y los seis `SMTP_*`. `WHATSAPP_PROVIDER` no es un secreto (el
 propio `.env.example` ya lo aclara) y sigue el patrón de `PUBLIC_HOSTNAME`: variable de repo
 (`vars.WHATSAPP_PROVIDER`) leída directamente en el workflow, sin pasar por Vault ni por Terraform.
-Ningún cambio en `app/core/config.py`, en el adaptador ni en el webhook — ya existen y ya validan
-estas cinco variables; este change es exclusivamente el tramo de aprovisionamiento e infraestructura
-que falta entre el Vault/GitHub y el `.env` que la VM arranca.
+El `.env` renderizado por sí solo no basta: `docker-compose.deploy.yml` pasa cada variable al
+contenedor explícitamente por servicio (igual que hace hoy con las seis `SMTP_*`), así que
+`backend` y `worker` — los dos que construyen `WhatsAppCloudAdapter`/`outbound_registry()` — también
+declaran las cinco en su bloque `environment:`. Ningún cambio en `app/core/config.py`, en el
+adaptador ni en el webhook — ya existen y ya validan estas cinco variables; este change es
+exclusivamente el tramo de aprovisionamiento e infraestructura que falta entre el Vault/GitHub y el
+proceso que de verdad las lee.
 
 ## Requirements
 
@@ -93,7 +97,29 @@ Acceptance criteria:
    SHALL fallar el paso "Render .env" nombrando la clave ausente, antes de tocar contenedores —
    mismo contrato fail-fast que el resto de secretos por nombre de este mismo paso.
 
-### R4 — Ningún valor real en el repo
+### R4 — El `.env` renderizado llega al proceso, no solo al fichero
+
+**As a** operador de dev, **I want** que las cinco `WHATSAPP_*` alcancen los contenedores que
+realmente las usan, **so that** rellenar `$RUNTIME_ENV_FILE` no sea un ejercicio inútil que ningún
+proceso lee.
+
+Acceptance criteria:
+
+1. THE SYSTEM SHALL declarar las cinco `WHATSAPP_*` en el bloque `environment:` de `backend` en
+   `docker-compose.deploy.yml` — mismo patrón `${VAR:-}` que las seis `SMTP_*` — porque
+   `WhatsAppCloudAdapter`/`outbound_registry()` se construyen ahí para el envío síncrono de la
+   respuesta humana (`messaging/api/dependencies.py`) y el webhook entrante corre en `backend`.
+2. THE SYSTEM SHALL declarar las mismas cinco en el bloque `environment:` de `worker` — mismo
+   patrón — porque `backend/app/scheduler/whatsapp_tasks.py` construye `outbound_registry()` para
+   el envío en segundo plano y lo ejecuta el `worker`, nunca `beat` (que solo programa).
+3. THE SYSTEM SHALL NOT añadir estas variables al bloque `environment:` de `beat`: no ejecuta
+   cuerpo de tarea alguno, mismo motivo por el que hoy no lleva `SMTP_*`.
+4. THE SYSTEM SHALL NOT usar la sintaxis `:?` (obligatoria) para estas cinco en `docker-compose.deploy.yml`:
+   mismo motivo que `S3_*`/`SMTP_*` — la ventana entre el merge y el primer "Render .env" real no
+   tiene ninguna, y `Settings` ya resuelve la ausencia a `WHATSAPP_PROVIDER=mock` sin fallar el
+   arranque del contenedor.
+
+### R5 — Ningún valor real en el repo
 
 **As a** cualquiera que lea el repositorio, **I want** que ningún valor real de estas cinco
 variables aparezca commiteado, **so that** las credenciales de la App de Meta de dev no se filtren
