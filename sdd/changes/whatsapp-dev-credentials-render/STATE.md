@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/whatsapp-dev-credentials-render
 implementation_sha: 72bbd4ddc6a617118702293b54c18f7219d90498
 pr_number:
 pr_url:
