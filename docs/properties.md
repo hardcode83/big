@@ -209,7 +209,9 @@ viviendas en el MVP, N es dos.
 ## Ver el portfolio desde `/properties`
 
 `properties-web` graduó la ruta: donde antes había un cartel de «en preparación» ahora está el
-índice del portfolio, **sólo lectura**, sobre `GET /api/v1/properties`. Es la única pantalla donde
+índice del portfolio sobre `GET /api/v1/properties` — **la tabla es de lectura**; lo que se
+escribe desde aquí es el alta, que `properties-create-web` añadió después y que cuenta la sección
+siguiente. Es la única pantalla donde
 se ve el `status` de una vivienda —`ACTIVE` o `INACTIVE` no aparecía en ninguna parte del
 frontend— y el único sitio donde un UUID de propiedad, de los que `/reservations` e `/incidents`
 imprimen en crudo, se resuelve a un nombre.
@@ -235,13 +237,51 @@ las devuelve (ver la sección de arriba) y la pantalla no pide el detalle de cad
 rellenarlas — eso reconstruiría la superficie de bulto que se cerró a propósito, y encima con una
 llamada por vivienda.
 
-Quién la ve es cosa del backend, no de la pantalla: no hay guarda de permiso en el frontend.
+Quién **la ve** es cosa del backend, no de la pantalla: no hay guarda de permiso en el frontend
+para el listado en sí (quién puede **escribir** sí se gatea en el cliente, y eso lo cuenta la
+sección siguiente).
 `PROPERTY_MANAGER` y `TENANT_OWNER` ven el listado; `CLEANER`, `TECHNICIAN` y `SUPER_ADMIN` reciben
 un estado «prohibido» localizado, que es el `403` del backend con otra cara. Un `401` no se pinta
 como error sino como carga, para que la pantalla no parpadee mientras se rota el token.
 
 El *qué hace* con sus criterios verificables está en
 [`sdd/specs/properties-crud.md`](../sdd/specs/properties-crud.md) §«La pantalla del portfolio».
+
+## Dar de alta, editar y retirar desde la web
+
+`properties-create-web` cerró el bucle: lo que antes sólo se hacía por API ahora tiene pantalla.
+Las tres acciones están gateadas por `MANAGE_PROPERTIES`, que en el frontend tiene **sólo el
+`PROPERTY_MANAGER`** (espeja `_PROPERTY_MANAGE` de `policy.py`; la `TENANT_OWNER` lee el portfolio
+pero no escribe en él). Quien no lo tiene no ve ningún botón, y el backend sigue siendo la
+autoridad: la guarda del cliente esconde afordancias, no sustituye al `403`.
+
+- **Alta**, desde el listado `/properties`: el botón «Nueva propiedad» abre un panel lateral con el
+  formulario completo. Valida en cliente los límites que `schemas.py` ya impone —campos
+  obligatorios, longitudes, país ISO, rangos numéricos— para no gastar un viaje al servidor en un
+  error evidente, y atribuye el `409` de `internal_code`/`pms_external_id` al campo que colisiona en
+  vez de mostrar un error suelto. `pms_provider` **no** se ofrece: conectar una vivienda a un PMS
+  real sigue siendo CLI (ver el punto de credenciales más abajo).
+- **Edición**, desde el detalle `/properties/[id]`: el botón «Editar» abre el mismo panel lateral
+  con los valores actuales precargados y envía por `PATCH` **sólo los campos que se tocaron**. Un
+  campo anulable que se vacía a propósito viaja como `null`; uno que simplemente no se tocó no
+  viaja. No se pueden editar ni `pms_provider` (es de alta, por el índice único parcial) ni
+  `current_operational_state` (lo mueve la máquina de estados, nunca un formulario). La contraseña
+  del wifi **nunca** aparece precargada —la API no la devuelve, sólo dice si existe—, así que el
+  campo empieza vacío y dejarlo así no se interpreta como borrarla: para eso hay una casilla
+  explícita.
+- **Retirada**, desde el detalle: el botón «Retirar propiedad» abre un diálogo de confirmación y,
+  al confirmar, manda exactamente `{ "status": "INACTIVE" }` y nada más. Es una acción aparte del
+  guardado general a propósito (no es una casilla dentro del formulario) y **desde esta pantalla no
+  tiene vuelta atrás**: no hay `DELETE` ni des-retirar. El botón no aparece si la vivienda ya está
+  `INACTIVE`.
+
+El panel de edición y el diálogo de retirada son **excluyentes entre sí**: el panel es modal, así
+que hay que cerrarlo antes de poder llegar al botón de retirar. Lo que sí está garantizado es que
+retirar no arrastra nada del formulario —son dos llamadas independientes—, de modo que una edición
+a medio escribir y sin guardar no se cuela en el cuerpo de la retirada.
+
+El *qué hace* con sus criterios verificables está en
+[`sdd/specs/properties-crud.md`](../sdd/specs/properties-crud.md).
 
 ## Qué queda registrado
 
@@ -254,8 +294,9 @@ De los campos sensibles y de los de texto libre (`access_notes`, `cleaning_notes
 
 ## Lo que todavía no existe
 
-- **No hay pantalla para dar de alta, editar ni retirar**: eso sigue siendo sólo API. La pantalla
-  que sí existe es de lectura y está arriba, en «Ver el portfolio desde `/properties`».
+- **No hay des-retirar desde la web**: la retirada (`status: INACTIVE`) tiene pantalla —arriba, en
+  «Dar de alta, editar y retirar desde la web»— pero volver a activar una vivienda no, y tampoco
+  hay borrado físico: no existe `DELETE`.
 - **Las credenciales del PMS no se tocan por API**, ni siquiera enmascaradas. Se gestionan con
   `python -m app.integrations.cli.pms_credentials`, y es a propósito: una credencial robada da
   escritura sobre la cuenta del cliente, así que no existe superficie HTTP que pueda filtrarla.

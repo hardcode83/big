@@ -101,6 +101,25 @@
     "notFound": {
       "title": "Property not found",
       "description": "There is no property with that identifier."
+    },
+    "edit": {
+      "button": "Edit property",
+      "title": "Edit property",
+      "close": "Close",
+      "submit": "Save changes",
+      "submitting": "Saving…",
+      "cancel": "Cancel",
+      "success": "Changes saved.",
+      "genericError": "The changes could not be saved. Please try again."
+    },
+    "retire": {
+      "button": "Retire property",
+      "title": "Retire property",
+      "description": "This action permanently retires the property. It cannot be undone from this screen.",
+      "cancel": "Cancel",
+      "confirm": "Retire property",
+      "confirming": "Retiring…",
+      "genericError": "The property could not be retired. Please try again."
     }
   },
   "financial": {

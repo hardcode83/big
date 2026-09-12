@@ -114,4 +114,5 @@
 | sim-advance | new, design, tasks, run, review, ship, archive | 3845110 | 1006870 | 206761779 | 113.1049 | 2026-09-10 | 2026-09-11 |
 | tenant-settings-web | new, design, tasks, run, review, ship, archive | 272162 | 1352598 | 287757813 | 96.7433 | 2026-09-11 | 2026-09-12 |
 | human-reply-outbound-delivery | new, design, run, review, archive | 3951453 | 473040 | 94190363 | 78.6784 | 2026-09-11 | 2026-09-11 |
+| properties-create-web | new, tasks, run, review | 269358 | 1135321 | 293397758 | 101.4940 | 2026-09-11 | — |
 | pms-sync-schedule | new, design, run, review, ship, archive | 132517 | 619440 | 159754893 | 48.7891 | 2026-09-11 | 2026-09-12 |

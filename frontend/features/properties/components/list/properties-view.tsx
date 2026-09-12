@@ -1,17 +1,26 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { PropertyStateBadge } from "@/components/property-state-badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { useHasPermission } from "@/lib/auth";
 
 import type { PropertyFilters, PropertySummaryDto } from "../../data";
 import { useProperties } from "../../hooks/use-properties";
 import { mapPropertiesError } from "../../lib/error-mapping";
+import { CreatePropertyForm } from "../form/create-property-form";
 import { PropertiesFilters } from "./properties-filters";
 
 /** The six columns, closed list, in this order (R1.2 / design D11). */
@@ -184,6 +193,26 @@ export function PropertiesView() {
   const [filters, setFilters] = useState<PropertyFilters>({ page: 1 });
   const query = useProperties(filters);
   const state = mapPropertiesError(query);
+  // Gated by `MANAGE_PROPERTIES` (R1.1, design D12) — a UX courtesy, the
+  // backend still 403s a `POST` from anyone lacking it
+  // (`steering/frontend.md`: "RBAC del backend decide, el frontend solo oculta").
+  const canManageProperties = useHasPermission("MANAGE_PROPERTIES");
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  /*
+   * Where focus goes when the create `Sheet` closes (R4.3, task 6.2).
+   *
+   * Radix returns focus on close only through `DialogTrigger`'s own ref: modal
+   * `DialogContent` installs an `onCloseAutoFocus` that calls
+   * `event.preventDefault()` and then `triggerRef.current?.focus()`
+   * (`@radix-ui/react-dialog`). This `Sheet` is opened from a detached,
+   * state-controlled `Button` rather than a `SheetTrigger` — the other three
+   * sheets in the tree wrap theirs (`more-menu.tsx` records exactly this as the
+   * reason) — so `triggerRef.current` is `null`, the `preventDefault()` has
+   * already suppressed `FocusScope`'s own restore, and focus lands on
+   * `<body>`: a keyboard user who presses Escape is dumped at the top of the
+   * document. Restoring it from here is what makes the close path operable.
+   */
+  const createTriggerRef = useRef<HTMLButtonElement>(null);
 
   function body() {
     if (state.kind === "loading") {
@@ -309,11 +338,59 @@ export function PropertiesView() {
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      <h1 className="text-headline-md font-semibold text-foreground">
-        {tNav("routes.properties.title")}
-      </h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-headline-md font-semibold text-foreground">
+          {tNav("routes.properties.title")}
+        </h1>
+        {canManageProperties ? (
+          // `tap-target`: `Button`'s default size is `h-10` (40px), under the
+          // 44×44 floor of `steering/frontend.md` (task 6.1/6.2).
+          <Button
+            ref={createTriggerRef}
+            type="button"
+            className="tap-target"
+            onClick={() => setIsCreateOpen(true)}
+          >
+            {t("newProperty")}
+          </Button>
+        ) : null}
+      </div>
       <PropertiesFilters value={filters} onChange={setFilters} />
       {body()}
+      <Sheet open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        {/*
+          `overflow-y-auto` (task 6.3, R4.4): `SheetContent`'s `side="right"`
+          variant is `inset-y-0 h-full` — exactly the viewport's height — and
+          declares no scrolling of its own, while `CreatePropertyForm` renders
+          twenty stacked fields plus the submit button. Without a scroll
+          container everything past the fold is unreachable at every width, and
+          worst at the mobile-first minimum this project supports. Precedent:
+          `features/notifications/.../notification-inbox-sheet.tsx`.
+        */}
+        <SheetContent
+          closeLabel={t("sheet.close")}
+          className="overflow-y-auto"
+          // `preventDefault` is load-bearing: Radix composes this handler ahead
+          // of its own and skips its own once the default is prevented, so this
+          // replaces the `triggerRef` restore that has no trigger to aim at
+          // rather than racing it — and is skipped entirely when the trigger
+          // itself is gone, leaving Radix's behaviour untouched in that case.
+          // See `createTriggerRef`.
+          onCloseAutoFocus={(event) => {
+            const trigger = createTriggerRef.current;
+            if (!trigger) {
+              return;
+            }
+            event.preventDefault();
+            trigger.focus();
+          }}
+        >
+          <SheetHeader>
+            <SheetTitle>{t("sheet.newPropertyTitle")}</SheetTitle>
+          </SheetHeader>
+          <CreatePropertyForm />
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

@@ -41,6 +41,12 @@ import type { components } from "@/lib/api/generated/openapi";
  * backend policy already grants it (`guest-portal-api` D14 — `TENANT_OWNER`
  * and `PROPERTY_MANAGER`, nobody else).
  *
+ * `properties-create-web` D12 adds `MANAGE_PROPERTIES`, `PROPERTY_MANAGER`-only:
+ * mirrors `policy.py`'s `_PROPERTY_MANAGE` (`policy.py:214`, granted only inside
+ * `PROPERTY_MANAGER`'s bundle, `policy.py:398`). `TENANT_OWNER` keeps
+ * `_PROPERTY_READ` only (read-only) and is correctly absent from this entry,
+ * same split as `MANAGE_CONVERSATIONS` and `MANAGE_INCIDENTS`.
+ *
  * `tenant-settings-web` D2 adds `MANAGE_USERS` and `MANAGE_TENANT_SETTINGS`,
  * `TENANT_OWNER`-only: it mirrors `policy.py`'s `_USER_MANAGE`/`_TENANT_MANAGE`
  * bundles exactly. `PROPERTY_MANAGER` holds the paired `READ_*` permission on
@@ -68,6 +74,7 @@ export type Permission =
   | "MANAGE_RESERVATIONS"
   | "RESPOND_OWNER_APPROVALS"
   | "MANAGE_GUEST_ACCESS_TOKENS"
+  | "MANAGE_PROPERTIES"
   | "MANAGE_USERS"
   | "MANAGE_TENANT_SETTINGS"
   | "MANAGE_REVIEW_DECISIONS"
@@ -105,6 +112,7 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "MANAGE_INCIDENTS",
     "MANAGE_RESERVATIONS",
     "MANAGE_GUEST_ACCESS_TOKENS",
+    "MANAGE_PROPERTIES",
     // `CREATE_REVIEW_UI` is the manager's side of the reviews split
     // (reviews-web D15): she creates reviews by hand and edits drafts. The
     // owner does not get it on the UX mirror, mirroring the PRD §18 split

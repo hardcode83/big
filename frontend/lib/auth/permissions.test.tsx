@@ -285,6 +285,40 @@ it("denies MANAGE_CONVERSATIONS to TENANT_OWNER — owner reads but does not ope
     expect(result.current).toBe(false);
   });
 
+  it("grants MANAGE_PROPERTIES to PROPERTY_MANAGER (properties-create-web D12)", () => {
+    useAuth.mockReturnValue({ user: { role: "PROPERTY_MANAGER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_PROPERTIES"),
+    );
+    expect(result.current).toBe(true);
+  });
+
+  it("denies MANAGE_PROPERTIES to TENANT_OWNER — owner keeps _PROPERTY_READ only (D12)", () => {
+    useAuth.mockReturnValue({ user: { role: "TENANT_OWNER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_PROPERTIES"),
+    );
+    expect(result.current).toBe(false);
+  });
+
+  it("denies MANAGE_PROPERTIES to CLEANER and TECHNICIAN (D12)", () => {
+    for (const role of ["CLEANER", "TECHNICIAN"]) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() =>
+        useHasPermission("MANAGE_PROPERTIES"),
+      );
+      expect(result.current, `${role} should not have it`).toBe(false);
+    }
+  });
+
+  it("denies MANAGE_PROPERTIES without an authenticated user", () => {
+    useAuth.mockReturnValue({ user: null });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_PROPERTIES"),
+    );
+    expect(result.current).toBe(false);
+  });
+
   it("grants MANAGE_USERS to TENANT_OWNER only (tenant-settings-web D2)", () => {
     for (const role of [
       "TENANT_OWNER",
