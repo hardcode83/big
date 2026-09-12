@@ -19,9 +19,11 @@ from app.guests.application.resolution import ManualGuestIdentityInput, ResolveO
 from app.guests.domain.ports import GuestEmailExclusion
 from app.guests.domain.repositories import GuestRepository
 from app.integrations.domain.dtos import ReservationDTO
+from app.integrations.domain.ports import PropertyStateAdvancer
 from app.properties.domain.entities import Property
 from app.properties.domain.enums import PropertyStatus
 from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
+from app.properties.domain.transition_enums import PropertyStateTrigger
 from app.reservations.domain.entities import (
     INGEST_OWNED_FIELDS,
     Reservation,
@@ -116,11 +118,13 @@ class ReservationIngestor:
         guests: GuestRepository,
         timeline: TimelineEventRepository,
         email_exclusion: GuestEmailExclusion,
+        advance: PropertyStateAdvancer | None = None,
     ) -> None:
         self._reservations = reservations
         self._guests = guests
         self._timeline = timeline
         self._resolver = ResolveOrCreateGuest(guests, email_exclusion)
+        self._advance = advance
 
     async def ingest(
         self,
@@ -141,10 +145,11 @@ class ReservationIngestor:
         programming error, which is not caught on purpose.
         """
         report = IngestReport()
+        any_newly_cancelled = False
         for item in rows:
             row = item.dto
             try:
-                await self._ingest_row(
+                newly_cancelled = await self._ingest_row(
                     tenant_id=tenant_id,
                     row=row,
                     line=item.line,
@@ -155,6 +160,7 @@ class ReservationIngestor:
                     source=source,
                     report=report,
                 )
+                any_newly_cancelled = any_newly_cancelled or newly_cancelled
             except (
                 ReservationValidationError,
                 DuplicateExternalReservationError,
@@ -169,6 +175,15 @@ class ReservationIngestor:
                         line=item.line,
                     )
                 )
+        if self._advance is not None and any_newly_cancelled:
+            # Once per batch, not per row (design D2): the advancer re-evaluates every property
+            # of the tenant for this trigger, so calling it once already covers every reservation
+            # the batch cancelled.
+            await self._advance.execute(
+                tenant_id=tenant_id,
+                trigger=PropertyStateTrigger.RESERVATION_CANCELLED_BEFORE_CHECKIN,
+                now=now,
+            )
         return report
 
     async def _ingest_row(
@@ -183,7 +198,13 @@ class ReservationIngestor:
         actor_user_id: uuid.UUID | None,
         source: str,
         report: IngestReport,
-    ) -> None:
+    ) -> bool:
+        """Ingest one row, returning whether it newly cancelled a reservation (R3.1, design D2).
+
+        The return value feeds `ingest()`'s batch-wide decision of whether to call `advance` —
+        it is never used for anything per-row, since the property-transition trigger fires once
+        for the whole batch, not once per cancelled row.
+        """
         prop = await resolve_property(row)
         if prop is None:
             report.skipped += 1
@@ -194,7 +215,7 @@ class ReservationIngestor:
                     line=line,
                 )
             )
-            return
+            return False
         if prop.status is PropertyStatus.INACTIVE:
             # A retired home does not take new bookings (`properties-crud` design D11). Both
             # batch paths — the CSV import and the PMS sync — reach this one branch, so the
@@ -217,7 +238,7 @@ class ReservationIngestor:
                     line=line,
                 )
             )
-            return
+            return False
 
         existing = (
             await self._reservations.find_by_external_pms_id(tenant_id, row.external_id)
@@ -227,16 +248,31 @@ class ReservationIngestor:
         guest_id = await self._link_guest(tenant_id=tenant_id, row=row, now=now)
 
         if existing is not None:
+            was_cancelled = existing.status is ReservationStatus.CANCELLED
             changes = _updatable_fields(row, guest_id=guest_id)
             applied = existing.update_details(changes, now=now)
             if applied:
                 await self._reservations.save(tenant_id, existing)
+                newly_cancelled = (
+                    not was_cancelled and existing.status is ReservationStatus.CANCELLED
+                )
+                await self._record_updated(
+                    tenant_id=tenant_id,
+                    reservation=existing,
+                    newly_cancelled=newly_cancelled,
+                    applied=applied,
+                    now=now,
+                    actor_type=actor_type,
+                    actor_user_id=actor_user_id,
+                )
                 report.updated += 1
+                return newly_cancelled
             else:
                 # Known and unchanged: neither an update nor an error. Counting it as
-                # updated would make a second identical sync look like it did work (R3.3).
+                # updated would make a second identical sync look like it did work (R3.3), and
+                # with nothing applied there is no evidence to record (R2.1).
                 report.skipped += 1
-            return
+            return False
 
         reservation = Reservation.create(
             id=uuid.uuid4(),
@@ -270,6 +306,7 @@ class ReservationIngestor:
             source=source,
         )
         report.created += 1
+        return False
 
     async def _link_guest(
         self, *, tenant_id: uuid.UUID, row: ReservationDTO, now: datetime
@@ -322,6 +359,46 @@ class ReservationIngestor:
                     "check_in_date": reservation.check_in_date.isoformat(),
                     "check_out_date": reservation.check_out_date.isoformat(),
                 },
+            )
+        )
+        await self._timeline.add(tenant_id, event)
+
+    async def _record_updated(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        reservation: Reservation,
+        newly_cancelled: bool,
+        applied: dict[str, object],
+        now: datetime,
+        actor_type: TimelineActorType,
+        actor_user_id: uuid.UUID | None,
+    ) -> None:
+        """Record the update path's evidence of change (R1), mirroring `_record_imported`.
+
+        The event-selection rule is the one `use_cases.py:294-319`'s manual `PATCH` already
+        proved: `RESERVATION_CANCELLED` only when this update is what newly cancelled the
+        reservation, `RESERVATION_UPDATED` for every other applied change — and `applied` is
+        passed straight through as `metadata["changed"]` rather than recomputed, since
+        `update_details` already returns it in the shape the timeline wants.
+        """
+        event = TimelineEventFactory.create(
+            TimelineEventData(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                property_id=reservation.property_id,
+                reservation_id=reservation.id,
+                actor_type=actor_type,
+                actor_user_id=actor_user_id,
+                event_type=(
+                    TimelineEventType.RESERVATION_CANCELLED
+                    if newly_cancelled
+                    else TimelineEventType.RESERVATION_UPDATED
+                ),
+                title="Reservation cancelled" if newly_cancelled else "Reservation updated",
+                created_at=now,
+                severity=TimelineSeverity.INFO,
+                metadata={"changed": applied},
             )
         )
         await self._timeline.add(tenant_id, event)

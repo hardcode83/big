@@ -1,17 +1,17 @@
 # Tasks: pms-ingest-change-events
 
-## 1. Ingest core emits timeline evidence on update
+## 1. Ingest core emits timeline evidence on update <!-- panel: PASS 2026-09-12 receipt:3b0c3539 -->
 
-- [ ] 1.1 `ReservationIngestor.__init__` (`backend/app/integrations/application/ingest.py`) gains
+- [x] 1.1 `ReservationIngestor.__init__` (`backend/app/integrations/application/ingest.py`) gains
       `advance: PropertyStateAdvancer | None = None` (import `PropertyStateAdvancer` from
       `app.integrations.domain.ports`), stored as `self._advance`. [R3]
-- [ ] 1.2 `_ingest_row`: capture `was_cancelled = existing.status is ReservationStatus.CANCELLED`
+- [x] 1.2 `_ingest_row`: capture `was_cancelled = existing.status is ReservationStatus.CANCELLED`
       immediately before `existing.update_details(changes, now=now)`. When `applied` (the dict
       `update_details` returns) is non-empty, call a new `_record_updated` method instead of
       falling straight through to `report.updated += 1`; when empty, behavior is unchanged
       (`report.skipped += 1`, no event). `_ingest_row` returns `bool` — whether this row's status
       became `CANCELLED` and was not before. [R1, R2, R6]
-- [ ] 1.3 New `_record_updated` method on `ReservationIngestor`, mirroring `_record_imported`:
+- [x] 1.3 New `_record_updated` method on `ReservationIngestor`, mirroring `_record_imported`:
       builds a `TimelineEventFactory.create(TimelineEventData(...))` with
       `event_type=TimelineEventType.RESERVATION_CANCELLED` if the update left the reservation
       newly `CANCELLED`, else `TimelineEventType.RESERVATION_UPDATED`; `title="Reservation
@@ -19,12 +19,12 @@
       use_cases.py:294-325` already uses; `metadata={"changed": applied}`;
       `actor_type`/`actor_user_id` from `ingest()`'s own parameters (same as
       `_record_imported`). [R1]
-- [ ] 1.4 `ingest()`: track whether any row in the batch newly cancelled (from 1.2's return
+- [x] 1.4 `ingest()`: track whether any row in the batch newly cancelled (from 1.2's return
       value). After the row loop, `if self._advance is not None and <any newly cancelled>:
       await self._advance.execute(tenant_id=tenant_id,
       trigger=PropertyStateTrigger.RESERVATION_CANCELLED_BEFORE_CHECKIN, now=now)` — once per
       batch, not per row. [R3.1]
-- [ ] 1.5 Unit tests (new module `backend/tests/integrations/test_ingest_updates.py`, constructing
+- [x] 1.5 Unit tests (new module `backend/tests/integrations/test_ingest_updates.py`, constructing
       `ReservationIngestor` directly against `db_session` the way `test_sync.py`'s `_use_case`
       helper does): an update that changes `check_in_date` emits exactly one
       `RESERVATION_UPDATED` event with `metadata["changed"]` naming the field; an update that
@@ -114,3 +114,8 @@
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
+
+- Section 1: `_ingest_row` now returns `bool` (whether this row newly cancelled a reservation); its only call site is `ingest()`'s row loop, which now does `any_newly_cancelled = any_newly_cancelled or newly_cancelled` per row and calls `self._advance.execute(...)` once after the loop — no other call sites existed.
+- Section 1: `_record_updated(self, *, tenant_id, reservation, newly_cancelled: bool, applied: dict[str, object], now, actor_type, actor_user_id) -> None` — no `source` param (unlike `_record_imported`), since its title is a fixed string, not "from {source}".
+- Section 1: `ReservationIngestor.__init__`'s new `advance` param is keyword-only with a default, so the three existing construction sites (`use_cases.py:108`, `use_cases.py:650`, `cli/seed_demo.py:1900`, `tests/properties/test_inactive_property_guard.py:181`) needed no changes — confirmed by running their tests.
+- Section 1: no existing assertion in `test_sync.py`/`test_import_csv.py` asserted "no event on update" — both still pass unchanged, nothing for section 4 to reconcile there.
