@@ -14,7 +14,8 @@ import {
 } from "@/test/render";
 
 const usePropertiesMock = vi.hoisted(() => vi.fn());
-vi.mock("../../hooks/use-properties", () => ({
+vi.mock("../../hooks/use-properties", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../hooks/use-properties")>()),
   useProperties: usePropertiesMock,
 }));
 

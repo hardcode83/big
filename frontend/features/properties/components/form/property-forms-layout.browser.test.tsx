@@ -81,7 +81,8 @@ const DETAIL = {
   emergencyNotes: null,
 };
 
-vi.mock("@/features/properties/hooks/use-properties", () => ({
+vi.mock("@/features/properties/hooks/use-properties", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/properties/hooks/use-properties")>()),
   useProperties: () => ({
     isPending: false,
     isError: false,
