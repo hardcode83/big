@@ -117,4 +117,4 @@
 | properties-create-web | new, tasks, run, review, ship, archive | 271467 | 1238775 | 417813500 | 128.9786 | 2026-09-11 | 2026-09-12 |
 | pms-sync-schedule | new, design, run, review, ship, archive | 132517 | 619440 | 159754893 | 48.7891 | 2026-09-11 | 2026-09-12 |
 | reviews-web | new, design, tasks, run | 2077351 | 964782 | 425992934 | 159.7995 | 2026-09-11 | 2026-09-12 |
-| whatsapp-dev-credentials-render | new, tasks, run, review | 26531 | 477762 | 511265190 | 114.9351 | 2026-09-12 | — |
+| whatsapp-dev-credentials-render | new, tasks, run, review, ship, archive | 29110 | 535016 | 556620487 | 125.3342 | 2026-09-12 | 2026-09-12 |
