@@ -48,7 +48,6 @@ como placeholder**, y una demo que las anuncie decepciona. Lo que hay hoy:
 | `/conversations` | placeholder | `conversations-inbox` |
 | `/pricing` | placeholder | `pricing-web` |
 | `/cleaner`, `/cleaner/tasks/[id]` | placeholder | `cleaner-app` |
-| `/reviews` | placeholder, y **tampoco hay backend**: `app/reviews/` tiene entidades y modelos, ni capa de aplicación ni router | `revenue-reviews` |
 | `/statements`, `/approvals` | placeholder | `revenue-statements` |
 | `/settings`, `/settings/integrations` | placeholder | pendiente |
 | `/forgot-password` | placeholder | `auth-account-recovery` (los endpoints existen; la pantalla no) |
