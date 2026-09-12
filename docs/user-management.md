@@ -3,6 +3,11 @@
 Cómo se opera. El *qué hace* está en las specs EARS de `sdd/specs/user-management.md`; la
 autenticación que hay debajo, en [`auth-tenancy.md`](auth-tenancy.md).
 
+**Vía UI:** todo lo que sigue con `curl` también se hace desde `/settings` (pantalla del
+`TENANT_OWNER`, solo lectura para el `PROPERTY_MANAGER` — ver
+[`tenant-settings-web.md`](../sdd/specs/tenant-settings-web.md)). Esta página describe el
+contrato HTTP subyacente; la UI no cambia ninguna de las reglas de abajo.
+
 ## Los ocho endpoints
 
 Todos bajo `/api/v1/`, con el sobre de error `{"error": {"code", "message", "details"}}` de

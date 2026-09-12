@@ -102,7 +102,7 @@ Categorías:
   deferred-until: **dos condiciones, no una**. (1) La cuenta de medición de Beds24 esté viva: su trial venció el 2026-08-17 sin convertirse a pago y la API responde 401, así que hoy no hay contra qué medir — reactivarla cuesta ~€15,50/mes y es decisión de negocio, no de desarrollo (`docs/beds24-spike.md` §Alta de la cuenta). (2) Los canales OTA reales se conecten (ventana de corte de los dos anuncios de Madrid, sin fecha). El banco de medición ya está construido y probado, así que no espera a ningún desarrollo · size: S · kind: spike
 - [ ] beds24-messaging-adapter — [BE] **la mensajería de Beds24: el primer implementador real de `PMSMessagingPort`**, que llega vacío de `pms-provider-resolution` y sigue vacío después de `pms-beds24-adapter`.
   needs: pms-beds24-adapter · deferred-until: los canales OTA reales se conecten a la cuenta de Beds24 (misma ventana de corte que `beds24-webhook-cutover-measurement`, sin fecha), porque sin canal no hay conversación que leer ni reserva de OTA a la que responder. **Ese «ni» está sin comprobar y hay sonda para ello**: lo medido fue un GET vacío, que solo prueba que no hay nada que *leer*; si `POST /bookings/messages` acepta `source: guest`, el camino de entrada de `messaging-ai` tiene fuente hoy y el aplazamiento se reduce a la mitad de lectura. El subcomando `beds24_probe.py messages` está construido, probado y mergeado (PR #93), y espera a que la cuenta de medición vuelva a estar viva — la condición (1) de `beds24-webhook-cutover-measurement` · size: M · kind: feature
-- [ ] pms-sync-schedule — [BE] **el sync periódico del PMS que hoy no existe** …
+- [x] pms-sync-schedule — [BE] **el sync periódico del PMS que hoy no existe** … → changes/archive/2026-09-12-pms-sync-schedule/
   needs: celery-jobs, pms-provider-resolution, pms-beds24-adapter · size: S · kind: feature
 - [ ] pms-ingest-change-events — [BE] **una modificación o cancelación que llega del PMS actualiza la fila en silencio** …
   needs: reservations, reservations-webhooks, pms-sync-schedule · size: S · kind: feature
@@ -133,7 +133,7 @@ Categorías:
   needs: maintenance, frontend-auth-session · size: M · kind: feature
 - [x] properties-web — [FE] **la pantalla de listado de propiedades, `/properties` … → changes/archive/2026-08-22-properties-web/
   needs: properties-crud, frontend-auth-session · size: S · kind: feature
-- [ ] properties-create-web — [FE] **alta y edición de propiedad desde `/properties`**, que hoy es sólo lectura …
+- [x] properties-create-web — [FE] **alta y edición de propiedad desde `/properties`**, que hoy es sólo lectura … → changes/archive/2026-09-12-properties-create-web/
   needs: properties-crud, properties-web · size: S · kind: feature
 - [x] timeline-web — [FE] **la pantalla `/timeline`, que hoy es un placeholder sobre un backend entregado** … → changes/archive/2026-08-22-timeline-web/
   needs: dashboard-api, dashboard-web · size: S · kind: feature
@@ -273,7 +273,7 @@ Categorías:
   needs: reservations, reservations-web, reservations-identity-web, reservation-manual-guest-resolution · size: S · kind: feature
 - [x] shell-topbar-overflow-360 — [FE] **la cabecera compartida desborda a 360 px, en todas las superficies** … → changes/archive/2026-09-01-shell-topbar-overflow-360/
   needs: · size: S · kind: fix
-- [ ] tenant-settings-web — [FE] **`/settings`, hoy `RoutePlaceholder` …
+- [x] tenant-settings-web — [FE] **`/settings`, hoy `RoutePlaceholder` … → changes/archive/2026-09-12-tenant-settings-web/
   needs: user-management, frontend-auth-session, frontend-auth-role-routing · size: M · kind: feature
 - [ ] hardening-release — [CROSS] suite E2E Playwright, docker + README, DoD §28 completo (PRD §26.25-28). …
   needs: incident-triage-web, approvals-web, reservation-create-web, cleaning-task-manage-web, sim-advance · size: L · kind: tech

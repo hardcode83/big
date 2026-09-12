@@ -35,6 +35,23 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   contradicción; los cuatro originales no se tocaron. `dispatch_notifications` va a un minuto porque
   una fila solo puede incumplir su plazo **después** de entregarse: un emisor más lento retrasaría
   cada escalado en su propia cadencia.
+- THE SYSTEM SHALL registrar `sync_pms_reservations` en `CADENCES` cada 6 horas — la cadencia
+  que el propio Beds24 recomienda para un re-sync completo del portfolio (`pms-sync-schedule`
+  R1.1) — como un `timedelta` literal igual que el resto de la tabla, y no derivado de
+  `Settings.pms_sync_window_days`: esa variable acota **cuánto atrás** llega `since`, no cada
+  cuánto dispara el job. `celery-jobs` design D16 declaró este barrido ausente a propósito,
+  aplazando la decisión de cadencia a quien lo programara sobre un adapter real; esta entrada es
+  esa decisión.
+- WHEN `sync_pms_reservations` dispara, THE SYSTEM SHALL ejecutarlo para cada tenant `ACTIVE`
+  (incluidos los que solo tienen propiedades `MOCK`) con la misma sesión marcada por tenant, nunca
+  re-marcada, que usan `check_checkin_windows` y el resto (`run_for_every_tenant` /
+  `run_in_marked_session`), y SHALL tomar el mismo candado mutex de `scheduler/locks.py`, con TTL
+  derivado de la cadencia (`lock_ttl_for`, 3× = 18 h), informando `skipped_locked` en vez de fallar
+  cuando no lo consigue. IF un tenant falla —proveedor caído, credencial rota—, THEN THE SYSTEM
+  SHALL continuar con el resto de tenants y con el resto de proveedores de ese mismo tenant, el
+  mismo aislamiento por tenant de `run_for_every_tenant` y por proveedor de `_sync_one_provider`,
+  sin que el fallo de uno marque a los demás como `skipped_locked` ni interrumpa el resto del ciclo
+  (`pms-sync-schedule` R1.2-R1.4).
 - THE SYSTEM SHALL tratar la cadencia de `process_webhook_events` como un **parámetro de seguridad,
   no de tuning**: ese job coalesce todo un tick en una llamada saliente por destino
   (`specs/reservations-webhooks.md`), así que su cadencia **es** el techo de llamadas al proveedor y
@@ -324,10 +341,18 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   que comparte el generador con el job— tiene consumidor de frontend: el botón «Regenerar ahora»
   de `/pricing`. No cambia nada del calendario, y se anota porque el reloj deja de ser la única
   vía por la que se ejercita ese generador en la práctica.
-- **No hay sync periódico del PMS.** La cadencia sería función del presupuesto de créditos, ya
-  medido contra Beds24, pero su adapter no existe: programarlo hoy sincronizaría el mock. Llega
-  con `pms-beds24-adapter`, dueño de la `PMSAdapterFactory`. `pms_sync` sigue siendo la única
-  vía de sincronización.
+- **El sync periódico del PMS ya está** (`pms-sync-schedule`, 2026-09-12): `sync_pms_reservations`
+  cada 6 horas, con `since = now - Settings.pms_sync_window_days` (2 días por defecto), y un
+  tercer valor de `source` en el `TimelineEvent` de la reserva (`SCHEDULED_SOURCE =
+  "pms_scheduled"`) que distingue el barrido periódico del CLI manual (`PMS_SOURCE`) y del
+  webhook (`WEBHOOK_SOURCE`) — ver `reservations.md` §Sincronización con el PMS. El bloqueo que
+  esta entrada describía ya no aplica: el adapter existe desde `pms-beds24-adapter`, dueño de la
+  `PMSAdapterFactory`, y este job es exactamente el que ese texto anunciaba. `python -m
+  app.integrations.cli.pms_sync` (`make pms-sync`) sigue existiendo sin cambios, como disparador
+  manual bajo demanda con su propia ventana de 30 días, y el mismo caso de uso
+  (`SyncReservationsFromPmsUseCase`) sirve a los tres caminos sin una segunda implementación. El
+  consumo *real* de crédito de Beds24, a diferencia de la cadencia teórica que D16 ya midió,
+  sigue sin instrumentar — asunto de `beds24-webhook-cutover-measurement`, no de esta entrada.
 - **Una excepción a nivel de tarea depende del aislamiento de Celery**, no de código propio, y
   no tiene test de primera parte.
 - **`AdvancePropertyStatesUseCase` ya no se invoca sólo desde beat** (2026-08-17). El comando
@@ -401,7 +426,11 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   wiring de `scheduler/tasks.py::_advance` (comentario que apunta a la fuente) para no arrastrar
   Celery al proceso del CLI.
 - `backend/app/core/config.py` — `Settings.environment`, la guardia que cierra `sim-advance` a
-  `local`/`dev`.
+  `local`/`dev`, y `Settings.pms_sync_window_days` (2 por defecto), la ventana del barrido
+  periódico del PMS.
+- `backend/app/integrations/application/use_cases.py` — `SyncReservationsFromPmsUseCase`, que
+  `sync_pms_reservations` invoca sin `forced_provider`, y las constantes de `source`
+  (`PMS_SOURCE`, `WEBHOOK_SOURCE`, `SCHEDULED_SOURCE`).
 - `docker-compose.yml`, `docker-compose.deploy.yml` — el servicio `beat`; `deploy.yml` además fija
   `APP_ENVIRONMENT` como obligatoria en `backend`/`worker`/`beat`/`migrate`.
 - `docs/celery-jobs.md` — cómo se opera, incluida la sección de avance manual.

@@ -1,4 +1,5 @@
 export { PlatformConsole } from "./components/platform-console";
+export { TemporaryPasswordReveal } from "./components/temporary-password-reveal";
 
 export { useTenants } from "./hooks/use-tenants";
 export { useCreateTenant } from "./hooks/use-create-tenant";

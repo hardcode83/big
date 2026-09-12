@@ -51,5 +51,52 @@
     "title": "Invalid filters",
     "description": "Check the selected filters and try again."
   },
-  "cityEmpty": "No city"
+  "cityEmpty": "No city",
+  "newProperty": "New property",
+  "sheet": {
+    "close": "Close",
+    "newPropertyTitle": "New property"
+  },
+  "createForm": {
+    "fields": {
+      "name": "Name",
+      "internalCode": "Internal code",
+      "pmsExternalId": "PMS external ID",
+      "addressLine1": "Address line 1",
+      "addressLine2": "Address line 2",
+      "city": "City",
+      "province": "Province",
+      "postalCode": "Postal code",
+      "country": "Country",
+      "timezone": "Timezone",
+      "maxGuests": "Max guests",
+      "bedrooms": "Bedrooms",
+      "bathrooms": "Bathrooms",
+      "defaultCheckInTime": "Check-in time",
+      "defaultCheckOutTime": "Check-out time",
+      "wifiName": "WiFi name",
+      "wifiPassword": "WiFi password",
+      "accessNotes": "Access notes",
+      "cleaningNotes": "Cleaning notes",
+      "emergencyNotes": "Emergency notes"
+    },
+    "placeholders": {
+      "country": "ES",
+      "timezone": "Europe/Madrid"
+    },
+    "accessNotesHint": "Guest-facing text shown for arrival instructions. It is not the place for a door or lock code — that belongs to an access record.",
+    "errors": {
+      "required": "This field is required.",
+      "tooLong": "This value is too long.",
+      "invalidCountry": "Enter a 2-letter country code (e.g. ES).",
+      "outOfRange": "Enter a value within the allowed range."
+    },
+    "submit": "Create property",
+    "submitting": "Creating…",
+    "genericError": "The property could not be created. Please try again."
+  },
+  "editForm": {
+    "wifiPasswordHint": "Leave it blank to keep the stored password. Type a new one to replace it.",
+    "clearWifiPassword": "Clear the stored password"
+  }
 }
