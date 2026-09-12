@@ -71,6 +71,15 @@
       [R4.2, R4.4]
 - [ ] 4.3 Same file: do NOT add them to `beat`'s `environment:` block — same reasoning already
       documented there for `SMTP_*` (beat only schedules, never runs a task body). [R4.3]
+- [ ] 4.4 `sdd/steering/security.md` line ~46 (the "Excepción acotada al `${VAR:?}`" paragraph for
+      the four Meta credentials) currently claims they "llegan al contenedor por `env_file: .env`
+      en los dos compose" — **false for `docker-compose.deploy.yml`**, which has no `env_file`
+      directive at all and (before this change) no `WHATSAPP_*` mention anywhere; only
+      `docker-compose.yml` (local) bulk-loads via `env_file`. Correct the sentence to say the two
+      composes reach the exception the same way (`${VAR:-}`, no `${VAR:?}`) but by different
+      mechanisms — `docker-compose.yml` via `env_file: .env`, `docker-compose.deploy.yml` via
+      explicit `environment:` entries added by this change (4.1/4.2). Keep the rest of the
+      paragraph (the `Settings` validator rationale) unchanged — it was already correct. [R4]
 
 ## 5. Verification
 
