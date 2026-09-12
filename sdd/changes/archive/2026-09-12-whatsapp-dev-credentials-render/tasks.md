@@ -86,7 +86,7 @@
 - [x] 5.1 `terraform fmt -check -diff` and `terraform validate` (from `infra/environments/dev/`,
       `terraform init -backend=false` first) pass clean. Verified: `fmt -check -diff` no diff;
       `validate` → "Success! The configuration is valid."
-- [x] 5.2 `grep -rn "WHATSAPP_ACCESS_TOKEN=.\+\|WHATSAPP_APP_SECRET=.\+\|WHATSAPP_PHONE_NUMBER_ID=.\+\|WHATSAPP_WEBHOOK_VERIFY_TOKEN=.\+" .github .env.example infra` finds no committed real value (every match is either a `${...}` reference or the bare, unset name). Verified: all 8 matches are in `.github/workflows/deploy-dev.yml` (`read_secret_by_name(...)` assignments and `${VAR}` echoes) — no literal secret value anywhere.
+- [x] 5.2 `grep -rn "WHATSAPP_ACCESS_TOKEN=.\+\|WHATSAPP_APP_SECRET=.\+\|WHATSAPP_PHONE_NUMBER_ID=.\+\|WHATSAPP_WEBHOOK_VERIFY_TOKEN=.\+" .github .env.example infra` finds no committed real value (every match is either a `${...}` reference or the bare, unset name). Verified: all 8 matches are in `.github/workflows/deploy-dev.yml` (`read_secret_by_name(...)` assignments and `${VAR}` echoes) — no literal secret value anywhere. [R5]
 - [x] 5.3 Full backend test suite unaffected: `docker compose exec backend uv run pytest` (this
       change touches no `backend/` code — confirms no regression). Verified: **11049 passed, 44
       skipped, 0 failed** (563.62s), on a freshly-bootstrapped worktree stack (`make up`).
