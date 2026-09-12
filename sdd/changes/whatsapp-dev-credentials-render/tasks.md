@@ -60,18 +60,18 @@
       matching `.env.example`'s documented default (`config.py` resolves blank/absent identically
       to `"mock"`). [R3.3, R3.4]
 
-## 4. Compose passthrough — the rendered `.env` reaching the containers that use it
+## 4. Compose passthrough — the rendered `.env` reaching the containers that use it <!-- panel: PASS 2026-09-12 receipt:d137abd0 -->
 
-- [ ] 4.1 `docker-compose.deploy.yml`: add the five `WHATSAPP_*` (`${VAR:-}`, no `:?`) to
+- [x] 4.1 `docker-compose.deploy.yml`: add the five `WHATSAPP_*` (`${VAR:-}`, no `:?`) to
       `backend`'s `environment:` block — it builds `WhatsAppCloudAdapter`/`outbound_registry()` for
       the inbound webhook and the synchronous human-reply send
       (`messaging/api/dependencies.py`). [R4.1, R4.4]
-- [ ] 4.2 Same file: add the same five to `worker`'s `environment:` block — it executes
+- [x] 4.2 Same file: add the same five to `worker`'s `environment:` block — it executes
       `backend/app/scheduler/whatsapp_tasks.py`'s background sends via `outbound_registry()`.
       [R4.2, R4.4]
-- [ ] 4.3 Same file: do NOT add them to `beat`'s `environment:` block — same reasoning already
+- [x] 4.3 Same file: do NOT add them to `beat`'s `environment:` block — same reasoning already
       documented there for `SMTP_*` (beat only schedules, never runs a task body). [R4.3]
-- [ ] 4.4 `sdd/steering/security.md` line ~46 (the "Excepción acotada al `${VAR:?}`" paragraph for
+- [x] 4.4 `sdd/steering/security.md` line ~46 (the "Excepción acotada al `${VAR:?}`" paragraph for
       the four Meta credentials) currently claims they "llegan al contenedor por `env_file: .env`
       en los dos compose" — **false for `docker-compose.deploy.yml`**, which has no `env_file`
       directive at all and (before this change) no `WHATSAPP_*` mention anywhere; only
@@ -117,6 +117,7 @@ it live.
 - Vault secret resources (in `infra/environments/dev/main.tf`, appended after `oci_vault_secret.smtp_use_tls`): `oci_vault_secret.whatsapp_access_token`, `.whatsapp_phone_number_id`, `.whatsapp_app_secret`, `.whatsapp_webhook_verify_token` — secret names `autohostai-${var.env}-whatsapp-access-token`, `-whatsapp-phone-number-id`, `-whatsapp-app-secret`, `-whatsapp-webhook-verify-token`.
 - `oci_identity_policy.dev_runner_read_secrets`'s single statement extended with the four new `target.secret.id` clauses (same statement, same apply) — no `iam-policy.md` edit needed: confirmed same conclusion as `ingress-https-dev` (secret-family + policies already granted).
 - No secret resource/variable exists for `WHATSAPP_PROVIDER` — it is not sensitive and reaches the runtime `.env` via repo variable (`vars.WHATSAPP_PROVIDER`), not Vault. Section 2/3 must read the four Vault secrets **by name** (`autohostai-${ENV}-whatsapp-*`) via `get-secret-bundle-by-name`, same as tunnel/media/SMTP — the runner policy above only authorizes those four exact OCIDs.
+- Section 4 done. `docker-compose.deploy.yml`: five `WHATSAPP_*` (`${VAR:-}`) added to `backend`'s and `worker`'s `environment:` blocks (not `beat`'s), same comment pattern as `SMTP_*`/`S3_*` but with the reason spelled out as `whatsapp_provider` unset → `Settings` resolves to `"mock"`, not "sin relay still boots". `sdd/steering/security.md`'s "Excepción acotada" paragraph corrected: the "llegan por `env_file: .env` en los dos compose" claim was false for `docker-compose.deploy.yml` (no `env_file` directive there at all); now states both composes reach the exception via different mechanisms (`env_file` for `docker-compose.yml`, explicit `environment:` entries for `docker-compose.deploy.yml`) — `Settings` validator rationale left untouched. Verified: `yaml.safe_load` OK, `grep -c WHATSAPP_` = 10, no `WHATSAPP_` line inside `beat`'s block.
 - Section 3 done. In `deploy-dev.yml`'s "Render .env" step: local shell vars `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN` read via `read_secret_by_name` (added right after the SMTP block); `WHATSAPP_PROVIDER` added to the step's `env:` block as `${{ vars.WHATSAPP_PROVIDER }}` (next to `PUBLIC_HOSTNAME`). Written to `$RUNTIME_ENV_FILE` as `WHATSAPP_PROVIDER=${WHATSAPP_PROVIDER:-}` (optional, `:-` not `:?`) then the four `WHATSAPP_ACCESS_TOKEN=${WHATSAPP_ACCESS_TOKEN}` / `WHATSAPP_PHONE_NUMBER_ID=...` / `WHATSAPP_APP_SECRET=...` / `WHATSAPP_WEBHOOK_VERIFY_TOKEN=...` lines (mandatory, `read_secret_by_name` already fails fast on empty). Section 4 (`docker-compose.deploy.yml`) should reference these exact five env var names verbatim.
 - `terraform fmt -check -diff`: clean (no diff). `terraform init -backend=false && terraform validate` (in `infra/environments/dev/`): `Success! The configuration is valid.`
 - Review fix (section 1, round 1): added the four whatsapp-* placeholders + dated note to infra/environments/dev/iam-policy.md's runner-policy mirror block, which the doc requires be kept in sync with main.tf.
