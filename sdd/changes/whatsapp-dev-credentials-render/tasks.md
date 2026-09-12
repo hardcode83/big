@@ -10,18 +10,18 @@
      it may travel with the PR as a deferred entry; it may sit on any line of
      the task item, not only the checkbox line. -->
 
-## 1. Terraform — variables + Vault secrets for the four sensitive credentials
+## 1. Terraform — variables + Vault secrets for the four sensitive credentials <!-- panel: PASS 2026-09-12 receipt:3c654e1b -->
 
-- [ ] 1.1 `infra/environments/dev/variables.tf`: add four sensitive Terraform variables —
+- [x] 1.1 `infra/environments/dev/variables.tf`: add four sensitive Terraform variables —
       `whatsapp_access_token`, `whatsapp_phone_number_id`, `whatsapp_app_secret`,
       `whatsapp_webhook_verify_token` (all `type = string`, `sensitive = true`, no default) — same
       shape as `github_app_private_key`. [R1.1]
-- [ ] 1.2 `infra/environments/dev/main.tf`: add four `oci_vault_secret` resources named
+- [x] 1.2 `infra/environments/dev/main.tf`: add four `oci_vault_secret` resources named
       `autohostai-${var.env}-whatsapp-access-token`, `-whatsapp-phone-number-id`,
       `-whatsapp-app-secret`, `-whatsapp-webhook-verify-token`, each `secret_content` =
       `base64encode(var.whatsapp_*)` — same shape as `oci_vault_secret.github_app_key`. Terraform
       only transports these; none is `random_*`-generated. [R1.2, R1.4]
-- [ ] 1.3 Same file: extend the single statement of `oci_identity_policy.dev_runner_read_secrets`
+- [x] 1.3 Same file: extend the single statement of `oci_identity_policy.dev_runner_read_secrets`
       (the one enumerating the runner's `target.secret.id` clauses) with the four new secret IDs
       from 1.2, in the same apply that creates them — mirrors the pattern already used for the
       tunnel token, the four media secrets and the six `SMTP_*`. No new IAM resource-type grant is
@@ -30,7 +30,7 @@
       records for `ingress-https-dev`'s single secret + policy extension — verify this still holds
       by reading `infra/environments/dev/iam-policy.md` before assuming no admin step is needed).
       [R1.3]
-- [ ] 1.4 `terraform fmt -check -diff` and (`terraform init -backend=false && terraform validate`)
+- [x] 1.4 `terraform fmt -check -diff` and (`terraform init -backend=false && terraform validate`)
       in `infra/environments/dev/` — no live `plan`/`apply` here (Post-merge operational steps,
       below). [R1]
 
@@ -112,3 +112,10 @@ it live.
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
+
+- Section 1 (Terraform) done. Variables: `whatsapp_access_token`, `whatsapp_phone_number_id`, `whatsapp_app_secret`, `whatsapp_webhook_verify_token` — all in `infra/environments/dev/variables.tf`, appended at end of file (after `public_hostname`), `sensitive = true`, no default.
+- Vault secret resources (in `infra/environments/dev/main.tf`, appended after `oci_vault_secret.smtp_use_tls`): `oci_vault_secret.whatsapp_access_token`, `.whatsapp_phone_number_id`, `.whatsapp_app_secret`, `.whatsapp_webhook_verify_token` — secret names `autohostai-${var.env}-whatsapp-access-token`, `-whatsapp-phone-number-id`, `-whatsapp-app-secret`, `-whatsapp-webhook-verify-token`.
+- `oci_identity_policy.dev_runner_read_secrets`'s single statement extended with the four new `target.secret.id` clauses (same statement, same apply) — no `iam-policy.md` edit needed: confirmed same conclusion as `ingress-https-dev` (secret-family + policies already granted).
+- No secret resource/variable exists for `WHATSAPP_PROVIDER` — it is not sensitive and reaches the runtime `.env` via repo variable (`vars.WHATSAPP_PROVIDER`), not Vault. Section 2/3 must read the four Vault secrets **by name** (`autohostai-${ENV}-whatsapp-*`) via `get-secret-bundle-by-name`, same as tunnel/media/SMTP — the runner policy above only authorizes those four exact OCIDs.
+- `terraform fmt -check -diff`: clean (no diff). `terraform init -backend=false && terraform validate` (in `infra/environments/dev/`): `Success! The configuration is valid.`
+- Review fix (section 1, round 1): added the four whatsapp-* placeholders + dated note to infra/environments/dev/iam-policy.md's runner-policy mirror block, which the doc requires be kept in sync with main.tf.

@@ -86,10 +86,16 @@ Allow dynamic-group autohostai-dev-runner to read secret-bundles in compartment 
              target.secret.id = '<smtp-username>',
              target.secret.id = '<smtp-password>',
              target.secret.id = '<smtp-from-email>',
-             target.secret.id = '<smtp-use-tls>'}
+             target.secret.id = '<smtp-use-tls>',
+             target.secret.id = '<whatsapp-access-token>',
+             target.secret.id = '<whatsapp-phone-number-id>',
+             target.secret.id = '<whatsapp-app-secret>',
+             target.secret.id = '<whatsapp-webhook-verify-token>'}
 ```
 
 Los seis últimos entran con `smtp-delivery-adapter` (2026-09-02), en el mismo apply que crea los seis secretos (`oci_vault_secret.smtp_*` en `main.tf`) — misma mitigación que los cuatro de medios: olvidar uno haría fallar "Render .env" nombrando la clave, en vez de dejar el runner ciego a un secreto que sí existe.
+
+Los cuatro `whatsapp-*` entran con `whatsapp-dev-credentials-render` (2026-09-12), en el mismo apply que crea los cuatro secretos (`oci_vault_secret.whatsapp_*` en `main.tf`) — misma mitigación que el resto: olvidar uno haría fallar "Render .env" nombrando la clave, en vez de dejar el runner ciego a un secreto que sí existe.
 
 **Una sola sentencia y una sola clase de condición**, desde el change `ingress-https-hardening` (2026-08-04). Los cuatro de medios entraron con `object-storage-provisioning` (2026-08-15) y el último, `demo-account-password`, con `demo-user` (2026-08-24), cada uno en el mismo `apply` que crea su secreto — que es la mitigación del punto 1 de abajo. Ese último lo lee el workflow `demo-reset` y no el deploy, y lo resuelve **por nombre** como el token del túnel, así que le vale igual esta condición por OCID. **Este bloque es el espejo de `oci_identity_policy.dev_runner_read_secrets` en `main.tf` y tiene que contarlos igual**: si al auditar ves una enumeración viva con más entradas que esta, lo primero que hay que descartar es que este documento se quedó atrás, no que alguien ensanchó el acceso.
 
