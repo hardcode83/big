@@ -1,0 +1,122 @@
+# Runner self-hosted en la VM dev (label `[self-hosted, dev]`) — mismo runner
+# que `infra-dev.yml` y `deploy-dev.yml` (change `ci-runner-oci`).
+# Solo validación con `terraform plan` — el `apply` se queda fuera: este workflow
+# es para "deploy from zero" verificable desde la pipeline (R7 del change
+# `infra-github-iac`). El bootstrap irreducible (crear la GitHub App, generar su
+# clave `.pem`) está documentado en `infra/github/RUNBOOK.md` §1 (sección 5 del
+# change). El apply real, cuando se decida, sigue el mismo patrón que
+# `infra-dev.yml` job `apply` (D7 del design).
+name: infra-github
+
+on:
+  pull_request:
+    paths:
+      - "infra/github/**"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: infra/github
+
+jobs:
+  # PR que toca infra/github/**: sin credenciales (init -backend=false). Mismo
+  # patrón que `infra-dev.yml` job `check` — barato, en cada PR.
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: [self-hosted, dev]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.15.8"
+      - name: terraform fmt
+        run: terraform fmt -check -diff
+      - name: terraform init (sin backend)
+        run: terraform init -backend=false -input=false
+      - name: terraform validate
+        run: terraform validate
+
+  # workflow_dispatch: plan real contra el state en `autohostai-tfstate-dev`
+  # (key = "github.tfstate" — compartido con el módulo dev). Gate `main` por el
+  # mismo motivo que `infra-dev.yml`: el job mintea installation tokens de la
+  # GitHub App y recibe secrets con control del repo (D7 del design). Solo desde
+  # `main` el plan ejecuta código revisado.
+  plan:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, dev]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.15.8"
+      - name: Escribir las private keys a ficheros
+        env:
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+        # umask 077 — el runner self-hosted persiste entre jobs/usuarios (panel de
+        # seguridad de `infra-dev`). Las dos claves acaban como `private_key_path`
+        # para los respectivos providers — Terraform lee la ruta, no el contenido.
+        run: |
+          umask 077
+          printf '%s\n' "$OCI_PRIVATE_KEY"  > "$RUNNER_TEMP/oci_private_key.pem"
+          printf '%s\n' "$GH_APP_PRIVATE_KEY" > "$RUNNER_TEMP/gh_app_private_key.pem"
+      - name: Escribir configuración del backend
+        env:
+          TFSTATE_BUCKET: ${{ secrets.TFSTATE_BUCKET }}
+          TFSTATE_NAMESPACE: ${{ secrets.TFSTATE_NAMESPACE }}
+          OCI_REGION: ${{ secrets.OCI_REGION }}
+          OCI_TENANCY_OCID: ${{ secrets.OCI_TENANCY_OCID }}
+          OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+        run: |
+          umask 077
+          cat > backend.hcl <<EOF
+          bucket           = "${TFSTATE_BUCKET}"
+          namespace        = "${TFSTATE_NAMESPACE}"
+          key              = "github.tfstate"
+          region           = "${OCI_REGION}"
+          tenancy_ocid     = "${OCI_TENANCY_OCID}"
+          user_ocid        = "${OCI_USER_OCID}"
+          fingerprint      = "${OCI_FINGERPRINT}"
+          private_key_path = "${RUNNER_TEMP}/oci_private_key.pem"
+          EOF
+      - name: terraform init
+        run: terraform init -input=false -backend-config=backend.hcl
+      - name: terraform validate
+        run: terraform validate
+      - name: terraform plan
+        env:
+          # Provider `oci` — mismas credenciales que `infra-dev` (mismo servicio
+          # `svc-terraform-dev`, mismo bucket compartido).
+          TF_VAR_oci_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+          TF_VAR_oci_user_ocid: ${{ secrets.OCI_USER_OCID }}
+          TF_VAR_oci_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+          TF_VAR_oci_private_key_path: ${{ runner.temp }}/oci_private_key.pem
+          TF_VAR_oci_region: ${{ secrets.OCI_REGION }}
+          TF_VAR_oci_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
+          # Backend — el bucket y namespace ya los pasamos al `init` por `backend.hcl`,
+          # pero las vars del módulo los replican como `sensitive` para validación.
+          TF_VAR_tfstate_namespace: ${{ secrets.TFSTATE_NAMESPACE }}
+          TF_VAR_tfstate_bucket: ${{ secrets.TFSTATE_BUCKET }}
+          # Provider `integrations/github` — la App existente (misma que runner).
+          TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}
+          TF_VAR_github_app_installation_id: ${{ vars.GH_APP_INSTALLATION_ID }}
+          TF_VAR_github_app_private_key_path: ${{ runner.temp }}/gh_app_private_key.pem
+          # SSH ingress — los secrets de Actions del repo hoy los define `infra-dev` y
+          # este módulo los reutiliza (mismo array JSON, mismas reglas).
+          TF_VAR_allowed_ssh_cidrs: ${{ secrets.ALLOWED_SSH_CIDRS || format('["{0}"]', secrets.ALLOWED_SSH_CIDR) }}
+          TF_VAR_allowed_ssh_cidrs_wide: ${{ secrets.ALLOWED_SSH_CIDRS_WIDE || '[]' }}
+          TF_VAR_ssh_public_keys: ${{ secrets.SSH_PUBLIC_KEYS || format('["{0}"]', secrets.SSH_PUBLIC_KEY) }}
+        # NO se usa `-out=tfplan` ni se sube el plan como artifact: el plan contendría
+        # secretos (clave de la App + las `oci_*` sensibles). Terraform redacta los
+        # valores sensibles en consola — el plan es para revisión por logs.
+        run: terraform plan -input=false
+
+      - name: Limpiar ficheros con estado/credenciales del workspace
+        # `errored.tfstate` (si el push del state falla) contiene el state en claro;
+        # `backend.hcl` referencia la private key por ruta; los `.pem` en
+        # `$RUNNER_TEMP` los escribió este job. Mismo cleanup que `infra-dev.yml`.
+        if: always()
+        run: rm -rf errored.tfstate backend.hcl .terraform "$RUNNER_TEMP/oci_private_key.pem" "$RUNNER_TEMP/gh_app_private_key.pem"
