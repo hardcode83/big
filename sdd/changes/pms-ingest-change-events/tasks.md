@@ -46,36 +46,36 @@
       defaulting to `None` (no behavior change for a caller that doesn't supply it) — fix any
       test helper whose constructor call uses positional args that this shifts.
 
-## 3. Wire the property-transition trigger at every composition root <!-- hard -->
+## 3. Wire the property-transition trigger at every composition root <!-- hard --> <!-- panel: PASS 2026-09-12 receipt:76a24d42 -->
 
-- [ ] 3.1 `backend/app/scheduler/tasks.py`, `_sync_pms_reservations` (~line 333, the periodic
+- [x] 3.1 `backend/app/scheduler/tasks.py`, `_sync_pms_reservations` (~line 333, the periodic
       `pms-sync-schedule` job): construct `AdvancePropertyStatesUseCase(properties=..., reservations=...,
       transitions=..., timeline=..., configs=..., uow=CallerOwnedUnitOfWork())` over the same
       `session`, and pass it as `advance=` to the `SyncReservationsFromPmsUseCase(...)` built
       there. Import `CallerOwnedUnitOfWork` from `app.core.unit_of_work`. [R3.3]
-- [ ] 3.2 `backend/app/scheduler/tasks.py`, `_webhook_tenant_use_case` (~line 485): build a
+- [x] 3.2 `backend/app/scheduler/tasks.py`, `_webhook_tenant_use_case` (~line 485): build a
       **second** `AdvancePropertyStatesUseCase(..., uow=CallerOwnedUnitOfWork())` over the same
       `session` and pass it as `advance=` to the nested `SyncReservationsFromPmsUseCase(...)`.
       Leave the existing `AdvancePropertyStatesUseCase(..., uow=SqlAlchemyUnitOfWork(session))`
       passed to `ProcessTenantWebhookEventsUseCase(advance=...)` exactly as it is today — do not
       touch that wiring. [R3.1, R3.2]
-- [ ] 3.3 `backend/app/integrations/cli/pms_sync.py`, `sync_with_session`: same wiring as 3.1 —
+- [x] 3.3 `backend/app/integrations/cli/pms_sync.py`, `sync_with_session`: same wiring as 3.1 —
       construct `AdvancePropertyStatesUseCase(..., uow=CallerOwnedUnitOfWork())` over the
       function's `session` and pass `advance=` to `SyncReservationsFromPmsUseCase(...)`. [R3.3]
-- [ ] 3.4 `backend/app/integrations/api/dependencies.py`, `get_import_csv_use_case`: add imports
+- [x] 3.4 `backend/app/integrations/api/dependencies.py`, `get_import_csv_use_case`: add imports
       for `SqlAlchemyPropertyStateTransitionRepository`, `SqlAlchemyTenantConfigRepository`,
       `AdvancePropertyStatesUseCase` (from `app.properties.application.use_cases`) and
       `CallerOwnedUnitOfWork` (from `app.core.unit_of_work`); construct
       `AdvancePropertyStatesUseCase(..., uow=CallerOwnedUnitOfWork())` over the endpoint's
       `session` and pass `advance=` to `ImportReservationsFromCsvUseCase(...)`. [R3.3, R4]
-- [ ] 3.5 Tests proving the sync and CSV routes now trigger the transition end-to-end (extend
+- [x] 3.5 Tests proving the sync and CSV routes now trigger the transition end-to-end (extend
       `backend/tests/integrations/test_sync.py`, `backend/tests/integrations/test_import_csv.py`,
       and `backend/tests/scheduler/test_sync_pms_reservations.py`): seed a property in
       `AWAITING_CHECKIN` for a reservation, ingest a row that cancels that same reservation via
       each route, and assert the property lands in `VACANT_READY` with one
       `PropertyStateTransition` row — the same shape `backend/tests/integrations/
       test_webhook_causality.py` already proves for the webhook route. [R3.1, R3.3]
-- [ ] 3.6 Regression test for R3.2: construct the webhook composition exactly as
+- [x] 3.6 Regression test for R3.2: construct the webhook composition exactly as
       `_webhook_tenant_use_case` now does (nested `SyncReservationsFromPmsUseCase` with its own
       `advance`, plus `ProcessTenantWebhookEventsUseCase`'s outer `advance`) against one session,
       run a cancellation through it, and assert exactly **one** `PropertyStateTransition` row for
@@ -122,3 +122,14 @@
 - Section 2: `PropertyStateAdvancer` was NOT yet imported in `use_cases.py`; added it to the existing `from app.integrations.domain.ports import (...)` block alongside `PMSAdapterFactory` and `ReservationCsvParser`.
 - Section 2: both `SyncReservationsFromPmsUseCase.__init__` and `ImportReservationsFromCsvUseCase.__init__` gained `advance: PropertyStateAdvancer | None = None` as the LAST keyword-only param (after `email_exclusion`/`max_rows`+`email_exclusion` respectively), forwarded verbatim as `advance=advance` into their internal `ReservationIngestor(...)` call. Section 3 can pass `advance=` by keyword at either composition root with no other signature changes.
 - Section 2: no test in `backend/tests/` constructs `ImportReservationsFromCsvUseCase(...)` directly (grep found zero hits) — nothing there could break. All `SyncReservationsFromPmsUseCase(...)` construction sites already use keyword args exclusively (the class is `*`-only), so the new trailing default param was a no-op for them; confirmed by running `tests/integrations` (976 passed, same as section 1's baseline, 0 failures).
+- Section 3: exact import paths the wiring needed — `SqlAlchemyPropertyStateTransitionRepository` lives in `app.properties.infrastructure.repositories` (beside `SqlAlchemyPropertyRepository`), and `SqlAlchemyTenantConfigRepository` in `app.tenants.infrastructure.repositories` (NOT under `properties/`). `AdvancePropertyStatesUseCase` from `app.properties.application.use_cases`, `CallerOwnedUnitOfWork` from `app.core.unit_of_work`.
+- Section 3: `scheduler/tasks.py` got one shared private helper, `_nested_advance(session)` (right after the existing `_advance`), used by BOTH 3.1 and 3.2 — same five repos as `_advance`, `uow=CallerOwnedUnitOfWork()`, no provisioner. The CLI and the API dependency construct theirs inline (different modules, one call site each).
+- Section 3: `_webhook_tenant_use_case` now holds two `AdvancePropertyStatesUseCase` instances; the pre-existing one (`ProcessTenantWebhookEventsUseCase(advance=...)`, real `SqlAlchemyUnitOfWork`) is untouched, the new one is `advance=_nested_advance(session)` on the nested `SyncReservationsFromPmsUseCase`.
+- Section 3: `app/integrations/api/dependencies.py` importing `app.properties.application.use_cases` is allowed — `tests/test_layering.py` (1521 checks) passes unchanged.
+- Section 3: the ingestor only fires `advance` on an UPDATE that newly cancels; a row that is CANCELLED on CREATION never sets the flag. Every new test therefore runs two passes (CONFIRMED, then CANCELLED) — section 4 should assume the same shape for R5's date-change tests.
+- Section 3: `test_webhook_causality.py`'s `_use_case` helper was updated to mirror `_webhook_tenant_use_case` (nested advancer included), so its five pre-existing tests now exercise the real composition; none of them changed behaviour, because they all take the creation path.
+- Section 3: the R3.2 test wraps BOTH advancers in a `_CountingAdvancer` spy and asserts `nested.calls == 1 and outer.calls == 1` before asserting one `PropertyStateTransition` row — without that premise "exactly one row" would also pass on a cycle where only one advancer ran.
+- Section 3: extra guard beyond the task list — `test_the_nested_advancer_does_not_commit_inside_the_syncs_transaction` (`tests/integrations/test_sync.py`) counts `session.commit()` calls during a cancelling sync and pins it at ONE. Verified it reports 2 if the nested advancer is given `SqlAlchemyUnitOfWork`, so D2's boundary is now machine-checked, not only wired.
+- Section 3: `tests/scheduler/test_sync_pms_reservations.py` drives its cancellation by monkeypatching `app.scheduler.tasks.SqlAlchemyPMSAdapterFactory` only — everything below it (repos, both uows, `_nested_advance`) stays real. `MockPMSAdapter`'s own seed rows cannot be used: neither stay falls inside `candidate_window` AND before check-in at once.
+- Section 3: task 3.5 named three test files and none of them covers `cli/pms_sync.py`, so 3.3's wiring is verified by reading plus `tests/integrations/test_pms_sync_cli.py` still passing — the CLI and the beat job compose the identical `SyncReservationsFromPmsUseCase(advance=...)`, which `tests/scheduler/test_sync_pms_reservations.py` does cover end to end. Section 4 may want one CLI-level cancellation test if it wants the route asserted rather than inferred.
+- Section 3 (review follow-up, sdd-qa finding on `pms_sync.py:159`): the gap above was real — no test asserted the manual CLI actually triggers `RESERVATION_CANCELLED_BEFORE_CHECKIN`. Closed by adding `test_a_cancellation_the_manual_sync_discovers_frees_the_property` to `backend/tests/integrations/test_pms_sync_cli.py`, same shape as the scheduler's cancellation test: monkeypatches only `pms_sync.SqlAlchemyPMSAdapterFactory`, drives `sync_with_session` twice (CONFIRMED then CANCELLED), asserts the property lands `VACANT_READY` with exactly one `PropertyStateTransition` row. `backend/tests/integrations/test_pms_sync_cli.py` is now implicitly one of task 3.5's satisfied files alongside the three it named. No production code changed — `sync_with_session`'s `advance=` wiring (line 159) was already correct.

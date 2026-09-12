@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.infrastructure.models import AuditLogModel
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
-from app.core.unit_of_work import SqlAlchemyUnitOfWork
+from app.core.unit_of_work import CallerOwnedUnitOfWork, SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.integrations.application.use_cases import (
@@ -44,6 +44,7 @@ from app.properties.infrastructure.repositories import (
     SqlAlchemyPropertyRepository,
     SqlAlchemyPropertyStateTransitionRepository,
 )
+from app.reservations.domain.enums import ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
 from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
@@ -158,6 +159,19 @@ def _use_case(
             uow=SqlAlchemyUnitOfWork(db_session),
             audit=SqlAlchemyAuditLogRepository(db_session),
             email_exclusion=PostgresGuestEmailExclusion(db_session),
+            # The NESTED advancer `pms-ingest-change-events` added, mirrored from
+            # `_webhook_tenant_use_case` exactly — including `CallerOwnedUnitOfWork`, which is
+            # what keeps the re-read one transaction with one commit (its D2). Two advancers
+            # now run per cycle, and `test_the_two_advancers_write_one_transition_not_two`
+            # below is the assertion that this costs no second row.
+            advance=AdvancePropertyStatesUseCase(
+                properties=SqlAlchemyPropertyRepository(db_session),
+                reservations=SqlAlchemyReservationRepository(db_session),
+                transitions=SqlAlchemyPropertyStateTransitionRepository(db_session),
+                timeline=SqlAlchemyTimelineEventRepository(db_session),
+                configs=SqlAlchemyTenantConfigRepository(db_session),
+                uow=CallerOwnedUnitOfWork(),
+            ),
         ),
         advance=AdvancePropertyStatesUseCase(
             properties=SqlAlchemyPropertyRepository(db_session),
@@ -350,3 +364,123 @@ async def test_two_notices_processed_in_reverse_order_reach_the_same_state(
         )
     ).scalars().all()
     assert len(transitions) == 1, "the second pass had nothing left to transition"
+
+
+# --- R3.2: two advancers, one transition (`pms-ingest-change-events` D2) ----------------------
+#
+# Since this change the webhook cycle calls `AdvancePropertyStatesUseCase` TWICE for one
+# notice: once from inside the re-read, because `ReservationIngestor` detected the row it just
+# updated is newly `CANCELLED`, and once afterwards from
+# `ProcessTenantWebhookEventsUseCase._reread`, which has called it unconditionally since
+# `reservations-webhooks`. D2 keeps both and argues the second is free — it re-queries its
+# candidates and finds the flat already moved. That argument is only worth what a test makes of
+# it, so this is the test.
+#
+# The scenario differs from every test above in one detail that decides everything: the
+# reservation must ALREADY EXIST as confirmed. A notice whose re-read *creates* a cancelled
+# booking never sets the ingestor's newly-cancelled flag (creation is not a transition), so only
+# the outer advancer runs and the double-call this asserts about would not even happen.
+
+
+class _CountingAdvancer:
+    """The real use case, wrapped so the test can prove BOTH callers actually ran.
+
+    Without this the assertion would be vacuous: one transition row is also what a cycle
+    where only one advancer fired produces, so "exactly one row" alone cannot tell the
+    redundant call apart from a call that never happened.
+    """
+
+    def __init__(self, inner: AdvancePropertyStatesUseCase) -> None:
+        self._inner = inner
+        self.calls = 0
+
+    async def execute(self, *, tenant_id, trigger, now):
+        self.calls += 1
+        return await self._inner.execute(tenant_id=tenant_id, trigger=trigger, now=now)
+
+
+def _advancer(db_session: AsyncSession, uow) -> AdvancePropertyStatesUseCase:
+    return AdvancePropertyStatesUseCase(
+        properties=SqlAlchemyPropertyRepository(db_session),
+        reservations=SqlAlchemyReservationRepository(db_session),
+        transitions=SqlAlchemyPropertyStateTransitionRepository(db_session),
+        timeline=SqlAlchemyTimelineEventRepository(db_session),
+        configs=SqlAlchemyTenantConfigRepository(db_session),
+        uow=uow,
+    )
+
+
+def _counted_use_case(
+    db_session: AsyncSession, adapter: _AdapterReturning
+) -> tuple[ProcessTenantWebhookEventsUseCase, _CountingAdvancer, _CountingAdvancer]:
+    """`_use_case` again, with both advancers counted — same two units of work as production."""
+    nested = _CountingAdvancer(_advancer(db_session, CallerOwnedUnitOfWork()))
+    outer = _CountingAdvancer(_advancer(db_session, SqlAlchemyUnitOfWork(db_session)))
+    use_case = ProcessTenantWebhookEventsUseCase(
+        queue=SqlAlchemyWebhookEventRepository(db_session),
+        sync=SyncReservationsFromPmsUseCase(
+            factory=_Factory(adapter),
+            reservations=SqlAlchemyReservationRepository(db_session),
+            properties=SqlAlchemyPropertyRepository(db_session),
+            guests=SqlAlchemyGuestRepository(db_session),
+            timeline=SqlAlchemyTimelineEventRepository(db_session),
+            uow=SqlAlchemyUnitOfWork(db_session),
+            audit=SqlAlchemyAuditLogRepository(db_session),
+            email_exclusion=PostgresGuestEmailExclusion(db_session),
+            advance=nested,
+        ),
+        advance=outer,
+        uow=SqlAlchemyUnitOfWork(db_session),
+    )
+    return use_case, nested, outer
+
+
+@pytest.mark.asyncio
+async def test_the_two_advancers_write_one_transition_not_two(
+    db_session: AsyncSession, tenant_a
+) -> None:
+    """R3.2: the pre-existing outer call and the new nested one must not both write a row."""
+    prop = await _awaiting_checkin_property(db_session, tenant_a.id)
+
+    # First cycle: the booking arrives confirmed. Nothing cancels, so the flat stays put.
+    first = await _notice(db_session, tenant_a.id)
+    await _use_case(db_session, _AdapterReturning(_row("CONFIRMED"))).execute(
+        tenant_id=tenant_a.id, events=[first], now=NOW
+    )
+    await db_session.refresh(prop)
+    assert prop.current_operational_state is PropertyOperationalState.AWAITING_CHECKIN
+
+    # Second cycle: the same booking, now cancelled. Both advancers fire.
+    second = await _notice(db_session, tenant_a.id)
+    use_case, nested, outer = _counted_use_case(
+        db_session, _AdapterReturning(_row("CANCELLED"))
+    )
+    await use_case.execute(tenant_id=tenant_a.id, events=[second], now=NOW)
+
+    # The premise of the assertion below: two independent callers really did run.
+    assert nested.calls == 1, "the ingest never detected the cancellation"
+    assert outer.calls == 1, "the webhook use case's own call disappeared"
+    await db_session.refresh(prop)
+    assert prop.current_operational_state is PropertyOperationalState.VACANT_READY
+    reservation = await db_session.scalar(
+        select(ReservationModel).where(ReservationModel.external_pms_id == EXTERNAL_ID)
+    )
+    assert reservation.status is ReservationStatus.CANCELLED
+    transitions = (
+        await db_session.execute(
+            select(PropertyStateTransitionModel).where(
+                PropertyStateTransitionModel.property_id == prop.id
+            )
+        )
+    ).scalars().all()
+    assert len(transitions) == 1, "the second advancer had no candidate left to move"
+    # And one `PROPERTY_STATE_CHANGED` event, for the same reason: the event is written by the
+    # same branch as the transition, so a duplicated row would duplicate the timeline too.
+    state_events = (
+        await db_session.execute(
+            select(TimelineEventModel).where(
+                TimelineEventModel.event_type == TimelineEventType.PROPERTY_STATE_CHANGED
+            )
+        )
+    ).scalars().all()
+    assert len(state_events) == 1

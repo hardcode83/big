@@ -25,7 +25,7 @@ invokes is tested directly against the real test-database session.
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 import pytest_asyncio
@@ -37,8 +37,12 @@ from app.core.config import settings
 from app.core.db import bind_session_to_tenant
 from app.integrations.application.use_cases import PMS_SOURCE, SCHEDULED_SOURCE
 from app.integrations.cli.pms_sync import DEFAULT_WINDOW_DAYS
+from app.integrations.domain.dtos import PmsFetchResult, ReservationDTO
+from app.integrations.domain.enums import PMSProvider
 from app.integrations.infrastructure.mock_pms import SEED_PROPERTY_CODE
-from app.properties.infrastructure.models import PropertyModel
+from app.properties.domain.enums import PropertyOperationalState
+from app.properties.infrastructure.models import PropertyModel, PropertyStateTransitionModel
+from app.reservations.domain.enums import ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 from app.scheduler import runner
 from app.scheduler.locks import lock_ttl_for, task_lock
@@ -145,6 +149,124 @@ async def test_the_resulting_timeline_events_are_tagged_scheduled_not_manual_or_
     assert len(events) == 2
     assert {event.metadata_["source"] for event in events} == {SCHEDULED_SOURCE}
     assert PMS_SOURCE not in {event.metadata_["source"] for event in events}
+
+
+# --- The property transition the sweep now triggers (`pms-ingest-change-events` R3.3) --
+#
+# Wiring again, and only wiring: whether a cancellation frees a flat is
+# `AdvancePropertyStatesUseCase`'s own subject and `tests/properties/` its home. What is only
+# true HERE is that `_sync_pms_reservations` supplies that collaborator at all — it did not
+# before this change, so the periodic sweep could learn a booking had been cancelled and leave
+# the flat waiting for a guest who was never coming.
+
+
+class _FeedAdapter:
+    """A provider answering the sweep with exactly the rows the test names."""
+
+    def __init__(self, *rows: ReservationDTO) -> None:
+        self._rows = list(rows)
+
+    async def list_reservations(self, since, property_external_id=None) -> PmsFetchResult:
+        return PmsFetchResult(reservations=list(self._rows), failures=[])
+
+    async def get_reservation(self, external_id):
+        return None
+
+
+class _FeedFactory:
+    """Stands in for `SqlAlchemyPMSAdapterFactory`, structurally (the port is a Protocol).
+
+    Only the factory is replaced. Everything the job wires below it — the repositories, the
+    two units of work, the advancer of `_nested_advance` — stays real, which is the point: a
+    stub of the sync use case would pass whether or not the collaborator was supplied.
+    """
+
+    def __init__(self, adapter: _FeedAdapter) -> None:
+        self._adapter = adapter
+
+    def supports_messaging(self, provider) -> bool:
+        return False
+
+    def provider_for(self, property):
+        return PMSProvider.MOCK
+
+    async def reservations_for(self, property, *, read_log=None):
+        return self._adapter
+
+    async def messaging_for(self, property):
+        raise AssertionError("the sync must never resolve messaging")
+
+
+CANCELLED_EXTERNAL_ID = "SCHED-CANCEL-1"
+
+
+def _stay(status: str) -> ReservationDTO:
+    """A stay checking in the day after `NOW`, so it is still *before* check-in."""
+    return ReservationDTO(
+        external_id=CANCELLED_EXTERNAL_ID,
+        channel="AIRBNB",
+        property_external_id=SEED_PROPERTY_CODE,
+        check_in_date=date(2026, 6, 11),
+        check_out_date=date(2026, 6, 14),
+        check_in_time=time(15, 0),
+        check_out_time=time(11, 0),
+        guest_name="Ada Lovelace",
+        adults=2,
+        status=status,
+    )
+
+
+def _feed(monkeypatch, status: str) -> None:
+    monkeypatch.setattr(
+        "app.scheduler.tasks.SqlAlchemyPMSAdapterFactory",
+        lambda **kwargs: _FeedFactory(_FeedAdapter(_stay(status))),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_cancellation_the_sweep_discovers_frees_the_property(
+    db_session, monkeypatch
+) -> None:
+    """R3.1/R3.3 through `_sync_pms_reservations`'s own composition root.
+
+    Two sweeps: the first creates the booking and must move nothing, the second reports it
+    CANCELLED. The flat lands in `VACANT_READY` with exactly one `PropertyStateTransition`
+    row — and it can only get there through the `advance=` this job now passes.
+    """
+    tenant = await insert_tenant(db_session, name="pms-cancel-tenant")
+    prop = _mock_property(tenant.id, code="PMSCANCEL-1")
+    prop.current_operational_state = PropertyOperationalState.AWAITING_CHECKIN
+    db_session.add(prop)
+    await db_session.commit()
+    bind_session_to_tenant(db_session, tenant.id)
+
+    _feed(monkeypatch, "CONFIRMED")
+    created = await _sync_pms_reservations(db_session, tenant.id, NOW)
+    assert created.created == 1
+    await db_session.refresh(prop)
+    assert prop.current_operational_state is PropertyOperationalState.AWAITING_CHECKIN
+
+    _feed(monkeypatch, "CANCELLED")
+    outcome = await _sync_pms_reservations(db_session, tenant.id, NOW)
+
+    assert outcome.updated == 1
+    await db_session.refresh(prop)
+    assert prop.current_operational_state is PropertyOperationalState.VACANT_READY
+    transitions = (
+        await db_session.execute(
+            select(PropertyStateTransitionModel).where(
+                PropertyStateTransitionModel.property_id == prop.id
+            )
+        )
+    ).scalars().all()
+    assert len(transitions) == 1
+    assert transitions[0].to_state is PropertyOperationalState.VACANT_READY
+    reservation = await db_session.scalar(
+        select(ReservationModel).where(
+            ReservationModel.external_pms_id == CANCELLED_EXTERNAL_ID
+        )
+    )
+    assert reservation.status is ReservationStatus.CANCELLED
 
 
 # --- Mitad 2: the lock and the per-tenant sweep, tenant list stubbed -------------------

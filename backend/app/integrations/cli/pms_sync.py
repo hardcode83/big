@@ -39,7 +39,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import async_session_factory, bind_session_to_tenant
-from app.core.unit_of_work import SqlAlchemyUnitOfWork
+from app.core.unit_of_work import CallerOwnedUnitOfWork, SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
@@ -49,8 +49,13 @@ from app.integrations.infrastructure.pms_factory import SqlAlchemyPMSAdapterFact
 from app.integrations.infrastructure.repositories import SqlAlchemyPmsCredentialRepository
 from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
 from app.integrations.domain.errors import PmsUnavailableError
-from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
+from app.properties.application.use_cases import AdvancePropertyStatesUseCase
+from app.properties.infrastructure.repositories import (
+    SqlAlchemyPropertyRepository,
+    SqlAlchemyPropertyStateTransitionRepository,
+)
 from app.tenants.infrastructure.models import TenantModel
+from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
 from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
 
@@ -145,6 +150,20 @@ async def sync_with_session(
         uow=SqlAlchemyUnitOfWork(session),
         audit=SqlAlchemyAuditLogRepository(session),
         email_exclusion=PostgresGuestEmailExclusion(session),
+        # A cancellation this sweep discovers must also free the flat that was waiting for
+        # that guest (`pms-ingest-change-events` R3.3) — the manual sweep never called the
+        # advancer before this line either. `CallerOwnedUnitOfWork` and NOT
+        # `SqlAlchemyUnitOfWork`, because this instance runs inside the sync's own
+        # transaction (design D2): the outer `uow.commit()` above is the one that ends it,
+        # so the reservation and the property transition land together or not at all.
+        advance=AdvancePropertyStatesUseCase(
+            properties=SqlAlchemyPropertyRepository(session),
+            reservations=SqlAlchemyReservationRepository(session),
+            transitions=SqlAlchemyPropertyStateTransitionRepository(session),
+            timeline=SqlAlchemyTimelineEventRepository(session),
+            configs=SqlAlchemyTenantConfigRepository(session),
+            uow=CallerOwnedUnitOfWork(),
+        ),
     )
     report = await use_case.execute(
         tenant_id=tenant_id,

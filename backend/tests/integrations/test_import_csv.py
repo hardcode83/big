@@ -4,12 +4,15 @@ The report is the contract here: which rows went in, which did not, and why — 
 numbers a person can act on.
 """
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select
 
 from app.auth.domain.enums import UserRole
+from app.properties.domain.enums import PropertyOperationalState
+from app.properties.infrastructure.models import PropertyStateTransitionModel
+from app.reservations.domain.enums import ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType
 from app.timeline.infrastructure.models import TimelineEventModel
@@ -228,3 +231,98 @@ class TestAuthorizationAndIsolation:
         assert body["skipped"] == 1
         assert "Unknown property" in body["errors"][0]["reason"]
         assert await db_session.scalar(select(func.count()).select_from(ReservationModel)) == 0
+
+
+class TestCancellationFreesTheProperty:
+    """R3.1/R3.3: a re-uploaded file that cancels a stay now moves the flat.
+
+    The CSV route never called `AdvancePropertyStatesUseCase` before
+    `pms-ingest-change-events` — same gap the periodic sync had. What is asserted here is the
+    chain `test_webhook_causality.py` proves for the webhook route, reached through the real
+    endpoint and therefore through `get_import_csv_use_case`'s own wiring: the transition is
+    only observable if that composition root supplies the collaborator.
+    """
+
+    HEADER_WITH_STATUS = (
+        "property_internal_code,channel,check_in_date,check_out_date,adults,"
+        "guest_name,guest_email,external_pms_id,status\n"
+    )
+
+    def _row(self, status: str) -> str:
+        """A stay checking in TOMORROW, so "before check-in" holds at `now_utc()`.
+
+        Dates are relative to today rather than fixed: the endpoint stamps `now_utc()`, and a
+        hard-coded date would make the machine's own precondition
+        (`utc_instant < effective check-in`) expire on a calendar day rather than on a bug.
+        """
+        today = datetime.now(UTC).date()
+        check_in = today + timedelta(days=1)
+        check_out = today + timedelta(days=3)
+        return (
+            f"REDES11,AIRBNB,{check_in.isoformat()},{check_out.isoformat()},2,"
+            f"Ada Lovelace,ada@example.com,CSV-CANCEL-1,{status}\n"
+        )
+
+    async def _awaiting_checkin(self, db_session, property_a) -> None:
+        property_a.current_operational_state = PropertyOperationalState.AWAITING_CHECKIN
+        await db_session.flush()
+
+    async def _transitions(self, db_session, property_a):
+        return (
+            await db_session.execute(
+                select(PropertyStateTransitionModel).where(
+                    PropertyStateTransitionModel.property_id == property_a.id
+                )
+            )
+        ).scalars().all()
+
+    @pytest.mark.asyncio
+    async def test_a_cancelling_row_moves_the_property_to_vacant_ready(
+        self, api, manager, property_a, db_session
+    ) -> None:
+        await self._awaiting_checkin(db_session, property_a)
+        first = await api.post(
+            ENDPOINT,
+            files=_upload(self.HEADER_WITH_STATUS + self._row("CONFIRMED")),
+            headers=auth_header(api, manager),
+        )
+        assert first.json()["created"] == 1
+        await db_session.refresh(property_a)
+        assert property_a.current_operational_state is (
+            PropertyOperationalState.AWAITING_CHECKIN
+        ), "the confirmed import must not move anything on its own"
+
+        second = await api.post(
+            ENDPOINT,
+            files=_upload(self.HEADER_WITH_STATUS + self._row("CANCELLED")),
+            headers=auth_header(api, manager),
+        )
+
+        assert second.json() == {"created": 0, "updated": 1, "skipped": 0, "errors": []}
+        await db_session.refresh(property_a)
+        assert property_a.current_operational_state is PropertyOperationalState.VACANT_READY
+        transitions = await self._transitions(db_session, property_a)
+        assert len(transitions) == 1
+        assert transitions[0].to_state is PropertyOperationalState.VACANT_READY
+        reservation = (await db_session.execute(select(ReservationModel))).scalar_one()
+        assert reservation.status is ReservationStatus.CANCELLED
+
+    @pytest.mark.asyncio
+    async def test_an_import_that_cancels_nothing_writes_no_transition(
+        self, api, manager, property_a, db_session
+    ) -> None:
+        """Once per batch and only on a NEW cancellation: re-uploading the same confirmed
+        file applies nothing, so the advancer is never reached."""
+        await self._awaiting_checkin(db_session, property_a)
+        for _ in range(2):
+            await api.post(
+                ENDPOINT,
+                files=_upload(self.HEADER_WITH_STATUS + self._row("CONFIRMED")),
+                headers=auth_header(api, manager),
+            )
+
+        await db_session.refresh(property_a)
+        assert property_a.current_operational_state is (
+            PropertyOperationalState.AWAITING_CHECKIN
+        )
+        assert await self._transitions(db_session, property_a) == []

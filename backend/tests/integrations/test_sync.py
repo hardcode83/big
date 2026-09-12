@@ -4,25 +4,32 @@ Integration, not fakes: idempotency rests on a unique constraint and on what the
 actually reads back, and a fake would let a broken `find_by_external_pms_id` pass.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 
 import pytest
 from sqlalchemy import func, select
 
 from app.core.db import bind_session_to_tenant
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
-from app.core.unit_of_work import SqlAlchemyUnitOfWork
+from app.core.unit_of_work import CallerOwnedUnitOfWork, SqlAlchemyUnitOfWork
 from app.guests.infrastructure.models import GuestModel
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
-from app.integrations.domain.dtos import PmsFetchResult, PmsRowFailure
+from app.integrations.domain.dtos import PmsFetchResult, PmsRowFailure, ReservationDTO
 from app.integrations.domain.enums import PMSProvider
 from app.integrations.infrastructure.mock_pms import SEED_PROPERTY_CODE, MockPMSAdapter
-from app.properties.infrastructure.models import PropertyModel
-from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
+from app.properties.application.use_cases import AdvancePropertyStatesUseCase
+from app.properties.domain.enums import PropertyOperationalState
+from app.properties.infrastructure.models import PropertyModel, PropertyStateTransitionModel
+from app.properties.infrastructure.repositories import (
+    SqlAlchemyPropertyRepository,
+    SqlAlchemyPropertyStateTransitionRepository,
+)
+from app.reservations.domain.enums import ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
+from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType
 from app.timeline.infrastructure.models import TimelineEventModel
 from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
@@ -590,3 +597,189 @@ async def test_a_reservation_cannot_attach_to_a_property_of_another_provider(
         )
     )
     assert int(attached.scalar() or 0) == 0
+
+
+# --- The property transition a cancelled stay now triggers (R3.1, R3.3, design D2) ---
+#
+# Until `pms-ingest-change-events` the sync route never called `AdvancePropertyStatesUseCase`
+# at all: a cancellation the PMS reported updated the `Reservation` and left the flat waiting
+# for a guest who was never coming. What is asserted below is the same chain
+# `test_webhook_causality.py` already proves for the webhook route — property in
+# `AWAITING_CHECKIN`, a cancellation arrives, the flat lands in `VACANT_READY` with exactly one
+# `PropertyStateTransition` row — reached through the sync's own composition instead.
+
+CANCELLABLE_EXTERNAL_ID = "PMS-SYNC-CANCEL-1"
+
+
+def _stay(status: str) -> ReservationDTO:
+    """One stay the provider reports, checking in TOMORROW relative to `NOW`.
+
+    "Before check-in" is then the machine's own precondition for
+    `RESERVATION_CANCELLED_BEFORE_CHECKIN` rather than something the test arranges around it.
+    """
+    return ReservationDTO(
+        external_id=CANCELLABLE_EXTERNAL_ID,
+        channel="AIRBNB",
+        property_external_id=SEED_PROPERTY_CODE,
+        check_in_date=date(2026, 8, 1),
+        check_out_date=date(2026, 8, 4),
+        check_in_time=time(15, 0),
+        check_out_time=time(11, 0),
+        guest_name="Ada Lovelace",
+        adults=2,
+        status=status,
+    )
+
+
+def _build_with_advance(db_session, adapter) -> SyncReservationsFromPmsUseCase:
+    """The composition `scheduler/tasks.py` and `cli/pms_sync.py` now build.
+
+    `CallerOwnedUnitOfWork` on the nested advancer, exactly as both composition roots do
+    (design D2): its `commit()` is a no-op, so the reservation's cancellation and the
+    property's transition are one commit performed by the sync itself.
+    """
+    return SyncReservationsFromPmsUseCase(
+        factory=_FactoryReturning(adapter),
+        reservations=SqlAlchemyReservationRepository(db_session),
+        properties=SqlAlchemyPropertyRepository(db_session),
+        guests=SqlAlchemyGuestRepository(db_session),
+        timeline=SqlAlchemyTimelineEventRepository(db_session),
+        uow=SqlAlchemyUnitOfWork(db_session),
+        audit=SqlAlchemyAuditLogRepository(db_session),
+        email_exclusion=PostgresGuestEmailExclusion(db_session),
+        advance=AdvancePropertyStatesUseCase(
+            properties=SqlAlchemyPropertyRepository(db_session),
+            reservations=SqlAlchemyReservationRepository(db_session),
+            transitions=SqlAlchemyPropertyStateTransitionRepository(db_session),
+            timeline=SqlAlchemyTimelineEventRepository(db_session),
+            configs=SqlAlchemyTenantConfigRepository(db_session),
+            uow=CallerOwnedUnitOfWork(),
+        ),
+    )
+
+
+async def _awaiting_checkin(db_session, property_a) -> None:
+    property_a.current_operational_state = PropertyOperationalState.AWAITING_CHECKIN
+    await db_session.flush()
+
+
+async def _transitions_of(db_session, property_a):
+    return (
+        await db_session.execute(
+            select(PropertyStateTransitionModel).where(
+                PropertyStateTransitionModel.property_id == property_a.id
+            )
+        )
+    ).scalars().all()
+
+
+@pytest.mark.asyncio
+async def test_a_sync_that_cancels_a_stay_frees_the_property(
+    db_session, tenant_a, property_a
+) -> None:
+    """R3.1/R3.3: the sync route reaches the advancer, which it never did before."""
+    await _awaiting_checkin(db_session, property_a)
+    await _build_with_advance(db_session, _AdapterWithFailures([], [_stay("CONFIRMED")])).execute(
+        tenant_id=tenant_a.id, since=SINCE, now=NOW
+    )
+    await db_session.refresh(property_a)
+    assert property_a.current_operational_state is PropertyOperationalState.AWAITING_CHECKIN
+
+    report = await _build_with_advance(
+        db_session, _AdapterWithFailures([], [_stay("CANCELLED")])
+    ).execute(tenant_id=tenant_a.id, since=SINCE, now=NOW)
+
+    assert report.created == 0
+    assert report.updated == 1
+    await db_session.refresh(property_a)
+    assert property_a.current_operational_state is PropertyOperationalState.VACANT_READY
+    transitions = await _transitions_of(db_session, property_a)
+    assert len(transitions) == 1
+    assert transitions[0].to_state is PropertyOperationalState.VACANT_READY
+    reservation = await db_session.scalar(
+        select(ReservationModel).where(
+            ReservationModel.external_pms_id == CANCELLABLE_EXTERNAL_ID
+        )
+    )
+    assert reservation.status is ReservationStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_a_sync_without_an_advancer_still_leaves_the_property_alone(
+    db_session, tenant_a, property_a
+) -> None:
+    """The collaborator is optional, and its absence must be inert rather than a crash.
+
+    This is today's behaviour for any caller that does not supply one — the demo seed, and
+    every test that builds the use case the short way — and the reason `advance` defaults to
+    `None` instead of being required.
+    """
+    await _awaiting_checkin(db_session, property_a)
+    await _use_case_with(db_session, _AdapterWithFailures([], [_stay("CONFIRMED")])).execute(
+        tenant_id=tenant_a.id, since=SINCE, now=NOW
+    )
+
+    await _use_case_with(db_session, _AdapterWithFailures([], [_stay("CANCELLED")])).execute(
+        tenant_id=tenant_a.id, since=SINCE, now=NOW
+    )
+
+    await db_session.refresh(property_a)
+    assert property_a.current_operational_state is PropertyOperationalState.AWAITING_CHECKIN
+    assert await _transitions_of(db_session, property_a) == []
+
+
+@pytest.mark.asyncio
+async def test_a_sync_that_cancels_nothing_writes_no_transition(
+    db_session, tenant_a, property_a
+) -> None:
+    """The advancer is called once per batch and ONLY when a row newly cancelled (D2).
+
+    A second identical sync applies no change, so nothing fires — which is what keeps the
+    sweep's cost the same for the 99% of runs that cancel nothing.
+    """
+    await _awaiting_checkin(db_session, property_a)
+    for _ in range(2):
+        await _build_with_advance(
+            db_session, _AdapterWithFailures([], [_stay("CONFIRMED")])
+        ).execute(tenant_id=tenant_a.id, since=SINCE, now=NOW)
+
+    await db_session.refresh(property_a)
+    assert property_a.current_operational_state is PropertyOperationalState.AWAITING_CHECKIN
+    assert await _transitions_of(db_session, property_a) == []
+
+
+@pytest.mark.asyncio
+async def test_the_nested_advancer_does_not_commit_inside_the_syncs_transaction(
+    db_session, tenant_a, property_a, monkeypatch
+) -> None:
+    """Design D2's transaction boundary, as something that can fail.
+
+    `AdvancePropertyStatesUseCase` commits on its own once it has candidates, and here it is
+    reached from inside `SyncReservationsFromPmsUseCase`'s still-open transaction — the
+    composition `CallerOwnedUnitOfWork`'s docstring records `guest-portal-api` getting wrong.
+    Every composition root of this change therefore hands it `CallerOwnedUnitOfWork`; swap in
+    a real `SqlAlchemyUnitOfWork` at any of them and this counts two commits where the run is
+    one business transaction.
+    """
+    await _awaiting_checkin(db_session, property_a)
+    await _build_with_advance(db_session, _AdapterWithFailures([], [_stay("CONFIRMED")])).execute(
+        tenant_id=tenant_a.id, since=SINCE, now=NOW
+    )
+
+    commits: list[int] = []
+    original_commit = db_session.commit
+
+    async def counting_commit() -> None:
+        commits.append(1)
+        await original_commit()
+
+    monkeypatch.setattr(db_session, "commit", counting_commit)
+    await _build_with_advance(db_session, _AdapterWithFailures([], [_stay("CANCELLED")])).execute(
+        tenant_id=tenant_a.id, since=SINCE, now=NOW
+    )
+
+    await db_session.refresh(property_a)
+    assert property_a.current_operational_state is PropertyOperationalState.VACANT_READY, (
+        "the transition must still happen — a boundary nobody crosses is not the point"
+    )
+    assert len(commits) == 1, commits

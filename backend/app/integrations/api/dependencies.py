@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.core.config import settings
 from app.core.db import get_db_session
-from app.core.unit_of_work import SqlAlchemyUnitOfWork
+from app.core.unit_of_work import CallerOwnedUnitOfWork, SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.core.redis import get_redis
@@ -32,14 +32,27 @@ from app.integrations.infrastructure.storage import (
     build_s3_client,
 )
 from app.integrations.infrastructure.throttle import RedisWebhookThrottle
-from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
+from app.properties.application.use_cases import AdvancePropertyStatesUseCase
+from app.properties.infrastructure.repositories import (
+    SqlAlchemyPropertyRepository,
+    SqlAlchemyPropertyStateTransitionRepository,
+)
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
+from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
 from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
 
 SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 def get_import_csv_use_case(session: SessionDep) -> ImportReservationsFromCsvUseCase:
+    """The CSV import, including the advancer a cancelled row now reaches.
+
+    A re-uploaded file that cancels a stay is the same fact as the PMS reporting it
+    (`pms-ingest-change-events` R3.3/R4), so this route gets the same collaborator the two
+    sync routes do — and with the same unit of work, `CallerOwnedUnitOfWork`: the import is
+    one transaction with one commit at the end, and this instance runs inside it (design D2).
+    A real `SqlAlchemyUnitOfWork` here would commit half an upload mid-file.
+    """
     return ImportReservationsFromCsvUseCase(
         parser=CsvReservationParser(),
         max_rows=settings.csv_import_max_rows,
@@ -49,6 +62,14 @@ def get_import_csv_use_case(session: SessionDep) -> ImportReservationsFromCsvUse
         timeline=SqlAlchemyTimelineEventRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
         email_exclusion=PostgresGuestEmailExclusion(session),
+        advance=AdvancePropertyStatesUseCase(
+            properties=SqlAlchemyPropertyRepository(session),
+            reservations=SqlAlchemyReservationRepository(session),
+            transitions=SqlAlchemyPropertyStateTransitionRepository(session),
+            timeline=SqlAlchemyTimelineEventRepository(session),
+            configs=SqlAlchemyTenantConfigRepository(session),
+            uow=CallerOwnedUnitOfWork(),
+        ),
     )
 
 

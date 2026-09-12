@@ -41,7 +41,7 @@ from app.cleaning.infrastructure.repositories import (
     SqlAlchemyCleaningTaskRepository,
 )
 from app.core.config import settings
-from app.core.unit_of_work import SqlAlchemyUnitOfWork
+from app.core.unit_of_work import CallerOwnedUnitOfWork, SqlAlchemyUnitOfWork
 from app.guests.infrastructure.legal import SqlAlchemyLegalRegistrationInitialiser
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
@@ -156,6 +156,31 @@ async def _advance(session: AsyncSession, tenant_id, now: datetime, *, trigger):
         ),
     )
     return await use_case.execute(tenant_id=tenant_id, trigger=trigger, now=now)
+
+
+def _nested_advance(session: AsyncSession) -> AdvancePropertyStatesUseCase:
+    """The advancer `ReservationIngestor` calls from INSIDE another use case's transaction.
+
+    Same five repositories over the same session as `_advance` above, and exactly one
+    difference that is the whole point (`pms-ingest-change-events` design D2):
+    `CallerOwnedUnitOfWork`, whose `commit()` does nothing.
+    `SyncReservationsFromPmsUseCase.execute` is one business transaction with one commit at
+    the end, and the ingest runs inside it — a real `SqlAlchemyUnitOfWork` here would fire a
+    mid-loop commit inside that still-open transaction, which is the composition bug
+    `CallerOwnedUnitOfWork`'s docstring records from `guest-portal-api`. Deferring instead
+    lands the cancellation and the property's transition in ONE commit, not two.
+
+    No provisioner: that collaborator belongs to the checkout trigger, and the only trigger
+    this instance is ever called with is `RESERVATION_CANCELLED_BEFORE_CHECKIN`.
+    """
+    return AdvancePropertyStatesUseCase(
+        properties=SqlAlchemyPropertyRepository(session),
+        reservations=SqlAlchemyReservationRepository(session),
+        transitions=SqlAlchemyPropertyStateTransitionRepository(session),
+        timeline=SqlAlchemyTimelineEventRepository(session),
+        configs=SqlAlchemyTenantConfigRepository(session),
+        uow=CallerOwnedUnitOfWork(),
+    )
 
 
 async def _escalate(session: AsyncSession, tenant_id, now: datetime):
@@ -341,6 +366,11 @@ async def _sync_pms_reservations(session: AsyncSession, tenant_id, now: datetime
         uow=SqlAlchemyUnitOfWork(session),
         audit=SqlAlchemyAuditLogRepository(session),
         email_exclusion=PostgresGuestEmailExclusion(session),
+        # `pms-ingest-change-events` R3.3: until this line the periodic sweep never called the
+        # advancer at all, so a cancellation the PMS reported left the flat sitting in
+        # `AWAITING_CHECKIN` until a person moved it. Composed with `CallerOwnedUnitOfWork`
+        # (see `_nested_advance`), so it rides this use case's single commit.
+        advance=_nested_advance(session),
     )
     return await use_case.execute(
         tenant_id=tenant_id,
@@ -495,6 +525,15 @@ def _webhook_tenant_use_case(
             uow=SqlAlchemyUnitOfWork(session),
             audit=SqlAlchemyAuditLogRepository(session),
             email_exclusion=PostgresGuestEmailExclusion(session),
+            # A SECOND advancer, and deliberately not the one below
+            # (`pms-ingest-change-events` D2). This one is nested inside the re-read's own
+            # transaction, so it defers the commit; the one below is a sequential step of
+            # `ProcessTenantWebhookEventsUseCase.execute`, run after the re-read has already
+            # committed, so it keeps its real unit of work. Both firing costs one extra
+            # indexed query and never a second `PropertyStateTransition` row (R3.2):
+            # `AdvancePropertyStatesUseCase.execute` re-queries its candidates and returns
+            # early, writing nothing, once the flat has left `AWAITING_CHECKIN`.
+            advance=_nested_advance(session),
         ),
         # `AdvancePropertyStatesUseCase` unmodified, satisfying `PropertyStateAdvancer`
         # structurally (D12). No provisioner: that collaborator belongs to the checkout
