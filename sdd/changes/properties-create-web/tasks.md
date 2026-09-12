@@ -186,14 +186,23 @@
       this worktree has no bootstrapped `.env` and the change touches no
       backend code, so running it would verify nothing this change could
       have broken.
-- [ ] 7.4 Manual end-to-end pass with the stack up (`make up`): as a
+- [x] 7.4 Manual end-to-end pass with the stack up (`make up`): as a
       `PROPERTY_MANAGER`, create a property with all fields including a wifi
       password and the three notes, confirm redirect to its detail page and
       the new values there; edit it — clear one nullable field, change the wifi
       password, verify the "clear password" checkbox path separately; retire
       it and confirm the button disappears afterward; repeat the visibility
       checks as `TENANT_OWNER` (no create/edit/retire affordance visible).
-      <!-- manual -->
+      <!-- manual --> Verified 2026-09-12 post-merge on `main` via browser
+      automation against `make up`: created `QAARCH01` as manager (redirect to
+      detail, all fields incl. wifi password and three notes persisted per
+      edit-form reopen); edited it (cleared city, changed wifi password);
+      verified "Borrar la contraseña guardada" checkbox path separately
+      (confirmed `wifi_password_encrypted IS NULL` in Postgres afterward);
+      retired it and confirmed "Retirar propiedad" disappears, leaving only
+      "Editar propiedad"; as `TENANT_OWNER`, confirmed no "Nueva propiedad",
+      "Editar propiedad" or "Retirar propiedad" affordance on either the list
+      or detail page.
 
 ## Implementation Notes
 
