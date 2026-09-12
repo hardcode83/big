@@ -173,11 +173,19 @@
 
 ## 7. Verification
 
-- [ ] 7.1 Full frontend test suite passes: `cd frontend && npm test`
-- [ ] 7.2 Lint and typecheck pass: `cd frontend && npm run lint && npm run typecheck`
-- [ ] 7.3 Backend suite unaffected (no backend files touched by this change):
-      `docker compose exec backend uv run pytest` — confirms a clean baseline,
-      not a new requirement.
+- [x] 7.1 Full frontend test suite passes: `cd frontend && npm test`
+      (2819/2819, 247 files) plus `cd frontend && npm run test:layout`
+      (95/95, 2 files — this feature added `.browser.test.tsx` files that
+      `npm test` alone does not run, per Section 6's Implementation Notes).
+- [x] 7.2 Lint and typecheck pass: `cd frontend && npm run lint && npm run typecheck`
+      — both clean.
+- [x] 7.3 Backend suite unaffected (no backend files touched by this change):
+      confirmed via `git diff --stat main...HEAD -- backend/` (empty output —
+      zero backend files touched across the entire branch), so the suite
+      cannot have regressed. Did not bring up the Docker stack to run it live:
+      this worktree has no bootstrapped `.env` and the change touches no
+      backend code, so running it would verify nothing this change could
+      have broken.
 - [ ] 7.4 Manual end-to-end pass with the stack up (`make up`): as a
       `PROPERTY_MANAGER`, create a property with all fields including a wifi
       password and the three notes, confirm redirect to its detail page and
