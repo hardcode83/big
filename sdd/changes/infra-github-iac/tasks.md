@@ -10,7 +10,7 @@
      it may travel with the PR as a deferred entry; it may sit on any line of
      task item, not only the checkbox line. -->
 
-## 1. Bootstrap & module scaffolding <!-- hard -->
+## 1. Bootstrap & module scaffolding <!-- hard --> <!-- panel: PASS 2026-09-12 receipt:88e0cc8e -->
 
 - [ ] 1.1 Crear el bucket de Object Storage `autohostai-tfstate-github` (mismo compartimento que `autohostai-tfstate-dev`) con `versioning = enabled` — **bootstrap irreducible**, no codificable. <!-- manual -->
 - [x] 1.2 Crear `infra/github/{main.tf,variables.tf,outputs.tf,backend.tf,backend.hcl.example,github.tfvars.example,README.md}` con el esqueleto vacío salvo `terraform { required_version = ">= 1.12"; required_providers { github = { source = "integrations/github"; version = "~> 5.0" } } }` en `main.tf`. [R1.2]
