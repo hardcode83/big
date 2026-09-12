@@ -10,12 +10,15 @@ const useReservationMock = vi.hoisted(() => vi.fn());
 const useHasPermissionMock = vi.hoisted(() => vi.fn(() => false));
 const cancelMutateMock = vi.hoisted(() => vi.fn());
 const updateMutateMock = vi.hoisted(() => vi.fn());
+const confirmMutateMock = vi.hoisted(() => vi.fn());
 const useCancelReservationMock = vi.hoisted(() => vi.fn(() => ({ isPending: false, isError: false, mutate: cancelMutateMock })));
 const useUpdateReservationMock = vi.hoisted(() => vi.fn(() => ({ isPending: false, isError: false, isSuccess: false, mutate: updateMutateMock })));
+const useConfirmReservationMock = vi.hoisted(() => vi.fn<() => { isPending: boolean; isError: boolean; error?: unknown; mutate: typeof confirmMutateMock }>(() => ({ isPending: false, isError: false, mutate: confirmMutateMock })));
 vi.mock("../../hooks/use-reservations", () => ({
   useReservation: useReservationMock,
   useCancelReservation: useCancelReservationMock,
   useUpdateReservation: useUpdateReservationMock,
+  useConfirmReservation: useConfirmReservationMock,
 }));
 
 // `GuestPortalLinkCard` (design D7) is rendered unconditionally by
@@ -103,6 +106,8 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
     useHasPermissionMock.mockReturnValue(false);
     cancelMutateMock.mockReset();
     updateMutateMock.mockReset();
+    confirmMutateMock.mockReset();
+    useConfirmReservationMock.mockReturnValue({ isPending: false, isError: false, mutate: confirmMutateMock });
   });
   it("renders the loading state when the query is pending", () => {
     useReservationMock.mockReturnValue({
@@ -453,4 +458,137 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
   });
+
+  // --- Confirm button (section 2, R1 / R3 / R4 / R5) ---
+  // The `confirm.*` i18n keys are introduced in section 4; until then react-i18next
+  // emits the dotted key as a fallback string (no test break). Tests below match
+  // against that fallback so they remain stable when section 4 lands.
+
+  it("renders the Confirm button when status is PENDING AND MANAGE_RESERVATIONS is granted (R1, R4)", () => {
+    useHasPermissionMock.mockReturnValue(true);
+    useReservationMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: { ...FULL_DETAIL, status: "PENDING" },
+      refetch: vi.fn(),
+    });
+    renderDetail();
+    const button = screen.getByRole("button", { name: /confirm\.label/ });
+    expect(button).toBeInTheDocument();
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "false");
+  });
+
+  it("hides the Confirm button when status is CONFIRMED even with MANAGE_RESERVATIONS (R1, R3)", () => {
+    useHasPermissionMock.mockReturnValue(true);
+    useReservationMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: FULL_DETAIL,
+      refetch: vi.fn(),
+    });
+    renderDetail();
+    expect(screen.queryByRole("button", { name: /confirm\.label/ })).not.toBeInTheDocument();
+  });
+
+  it("hides the Confirm button when status is CANCELLED (R1, R3)", () => {
+    useHasPermissionMock.mockReturnValue(true);
+    useReservationMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: { ...FULL_DETAIL, status: "CANCELLED" },
+      refetch: vi.fn(),
+    });
+    renderDetail();
+    expect(screen.queryByRole("button", { name: /confirm\.label/ })).not.toBeInTheDocument();
+  });
+
+  it("hides the Confirm button without MANAGE_RESERVATIONS even when status is PENDING (R1, R4)", () => {
+    useHasPermissionMock.mockReturnValue(false);
+    useReservationMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: { ...FULL_DETAIL, status: "PENDING" },
+      refetch: vi.fn(),
+    });
+    renderDetail();
+    expect(screen.queryByRole("button", { name: /confirm\.label/ })).not.toBeInTheDocument();
+  });
+
+  it("clicking the Confirm button fires the mutation with { reservationId } and announces the localised success (R1, R5)", async () => {
+    useHasPermissionMock.mockReturnValue(true);
+    useReservationMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: { ...FULL_DETAIL, status: "PENDING" },
+      refetch: vi.fn(),
+    });
+    renderDetail();
+    fireEvent.click(screen.getByRole("button", { name: /confirm\.label/ }));
+    expect(confirmMutateMock).toHaveBeenCalledWith(
+      { reservationId: FULL_DETAIL.id },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+    const [, options] = confirmMutateMock.mock.calls[0] as [
+      { reservationId: string },
+      { onSuccess: () => void },
+    ];
+    await act(async () => options.onSuccess());
+    await waitFor(() =>
+      expect(
+        screen.getByText(/confirm\.success/),
+      ).toBeInTheDocument(),
+    );
+    const announcement = screen.getByText(/confirm\.success/);
+    expect(announcement).toHaveAttribute("role", "status");
+    expect(announcement).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("switches the button to the submitting copy and reflects aria-busy while the mutation is pending (R1, R4)", () => {
+    useHasPermissionMock.mockReturnValue(true);
+    useReservationMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: { ...FULL_DETAIL, status: "PENDING" },
+      refetch: vi.fn(),
+    });
+    useConfirmReservationMock.mockReturnValue({
+      isPending: true,
+      isError: false,
+      mutate: confirmMutateMock,
+    });
+    renderDetail();
+    const button = screen.getByRole("button", { name: /confirm\.submitting/ });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+  });
+
+  it.each([404, 409, 422] as const)(
+    "renders the localised mutation.error.confirm message for HTTP %s (R4, R5)",
+    (status) => {
+      useHasPermissionMock.mockReturnValue(true);
+      useReservationMock.mockReturnValue({
+        isPending: false,
+        isError: false,
+        data: { ...FULL_DETAIL, status: "PENDING" },
+        refetch: vi.fn(),
+      });
+      useConfirmReservationMock.mockReturnValue({
+        isPending: false,
+        isError: true,
+        error: new ApiError({ code: "X", message: "should-not-leak", status }),
+        mutate: confirmMutateMock,
+      });
+      renderDetail();
+      const alert = screen.getByRole("alert");
+      const expected = status === 404
+        ? /mutation\.errors\.confirm\.notFound/
+        : status === 409
+        ? /mutation\.errors\.confirm\.conflict/
+        : /mutation\.errors\.confirm\.validation/;
+      expect(alert.textContent ?? "").toMatch(expected);
+      expect(alert.textContent ?? "").not.toContain("should-not-leak");
+      expect(alert.textContent ?? "").not.toContain("X");
+    },
+  );
 });

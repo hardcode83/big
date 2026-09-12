@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useHasPermission } from "@/lib/auth";
 
-import { useCancelReservation, useReservation } from "../../hooks/use-reservations";
+import { useCancelReservation, useConfirmReservation, useReservation } from "../../hooks/use-reservations";
 import { reservationMutationErrorKey } from "../../lib/mutation-error-mapping";
 import { EditReservationForm } from "../edit/edit-reservation-form";
 import { useState } from "react";
@@ -112,10 +112,31 @@ export function ReservationDetailView({
 function ReservationManageActions({ detail }: { detail: ReservationDetailDto }) {
   const { t } = useTranslation("reservations");
   const cancel = useCancelReservation();
+  const confirm = useConfirmReservation();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelAnnouncement, setCancelAnnouncement] = useState<string | null>(null);
+  const [confirmAnnouncement, setConfirmAnnouncement] = useState<string | null>(null);
   return <>
     <EditReservationForm detail={detail} />
+    {detail.status === "PENDING" ? (
+      <Button
+        variant="default"
+        type="button"
+        className="tap-target"
+        onClick={() => confirm.mutate(
+          { reservationId: detail.id },
+          { onSuccess: () => { setConfirmAnnouncement(t("confirm.success")); } },
+        )}
+        disabled={confirm.isPending}
+        aria-busy={confirm.isPending}
+      >
+        {confirm.isPending ? t("confirm.submitting") : t("confirm.label")}
+      </Button>
+    ) : null}
+    {confirm.isError ? (
+      <p role="alert">{t(reservationMutationErrorKey(confirm.error, "confirm"))}</p>
+    ) : null}
+    {confirmAnnouncement ? <p role="status" aria-live="polite">{confirmAnnouncement}</p> : null}
     <Button variant="destructive" type="button" className="tap-target" onClick={() => setCancelOpen(true)} disabled={cancel.isPending}>{t("cancel.open")}</Button>
     <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
       <AlertDialogContent>
