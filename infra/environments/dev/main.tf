@@ -255,8 +255,12 @@ resource "oci_identity_policy" "dev_runner_read_secrets" {
   #
   # Los seis `smtp_*` (change `smtp-delivery-adapter`) entran por lo mismo y en el mismo apply
   # que los crea — mirror en `iam-policy.md`'s bloque de la policy del runner.
+  #
+  # Los cuatro `whatsapp_*` (change `whatsapp-dev-credentials-render`) entran por lo mismo y en
+  # el mismo apply que los crea — el deploy los lee por nombre (`get-secret-bundle-by-name`,
+  # tasks.md 3.1), igual que el resto de esta lista.
   statements = [
-    "Allow dynamic-group ${oci_identity_dynamic_group.dev_runner.name} to read secret-bundles in compartment id ${var.compartment_ocid} where any {target.secret.id = '${oci_vault_secret.github_app_key.id}', target.secret.id = '${oci_vault_secret.postgres_password.id}', target.secret.id = '${oci_vault_secret.jwt_secret_key.id}', target.secret.id = '${oci_vault_secret.encryption_key.id}', target.secret.id = '${oci_vault_secret.cloudflare_tunnel_token.id}', target.secret.id = '${oci_vault_secret.media_access_key_id.id}', target.secret.id = '${oci_vault_secret.media_secret_access_key.id}', target.secret.id = '${oci_vault_secret.media_s3_endpoint.id}', target.secret.id = '${oci_vault_secret.media_region.id}', target.secret.id = '${oci_vault_secret.demo_account_password.id}', target.secret.id = '${oci_vault_secret.smtp_host.id}', target.secret.id = '${oci_vault_secret.smtp_port.id}', target.secret.id = '${oci_vault_secret.smtp_username.id}', target.secret.id = '${oci_vault_secret.smtp_password.id}', target.secret.id = '${oci_vault_secret.smtp_from_email.id}', target.secret.id = '${oci_vault_secret.smtp_use_tls.id}'}",
+    "Allow dynamic-group ${oci_identity_dynamic_group.dev_runner.name} to read secret-bundles in compartment id ${var.compartment_ocid} where any {target.secret.id = '${oci_vault_secret.github_app_key.id}', target.secret.id = '${oci_vault_secret.postgres_password.id}', target.secret.id = '${oci_vault_secret.jwt_secret_key.id}', target.secret.id = '${oci_vault_secret.encryption_key.id}', target.secret.id = '${oci_vault_secret.cloudflare_tunnel_token.id}', target.secret.id = '${oci_vault_secret.media_access_key_id.id}', target.secret.id = '${oci_vault_secret.media_secret_access_key.id}', target.secret.id = '${oci_vault_secret.media_s3_endpoint.id}', target.secret.id = '${oci_vault_secret.media_region.id}', target.secret.id = '${oci_vault_secret.demo_account_password.id}', target.secret.id = '${oci_vault_secret.smtp_host.id}', target.secret.id = '${oci_vault_secret.smtp_port.id}', target.secret.id = '${oci_vault_secret.smtp_username.id}', target.secret.id = '${oci_vault_secret.smtp_password.id}', target.secret.id = '${oci_vault_secret.smtp_from_email.id}', target.secret.id = '${oci_vault_secret.smtp_use_tls.id}', target.secret.id = '${oci_vault_secret.whatsapp_access_token.id}', target.secret.id = '${oci_vault_secret.whatsapp_phone_number_id.id}', target.secret.id = '${oci_vault_secret.whatsapp_app_secret.id}', target.secret.id = '${oci_vault_secret.whatsapp_webhook_verify_token.id}'}",
   ]
 }
 
@@ -877,5 +881,55 @@ resource "oci_vault_secret" "smtp_use_tls" {
   secret_content {
     content_type = "BASE64"
     content      = base64encode("true")
+  }
+}
+
+# --- WhatsApp Cloud API: cuatro credenciales de la App de Meta (change
+# whatsapp-dev-credentials-render) ---
+#
+# Externas, igual que `github_app_private_key`: Terraform SOLO las transporta al Vault desde un
+# GitHub Secret vía TF_VAR, nunca las genera. `WHATSAPP_PROVIDER` no tiene secreto/vault_secret
+# porque no es sensible: llega al runtime `.env` por repo variable (tasks.md 3.2).
+resource "oci_vault_secret" "whatsapp_access_token" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-whatsapp-access-token"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(var.whatsapp_access_token)
+  }
+}
+
+resource "oci_vault_secret" "whatsapp_phone_number_id" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-whatsapp-phone-number-id"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(var.whatsapp_phone_number_id)
+  }
+}
+
+resource "oci_vault_secret" "whatsapp_app_secret" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-whatsapp-app-secret"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(var.whatsapp_app_secret)
+  }
+}
+
+resource "oci_vault_secret" "whatsapp_webhook_verify_token" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-whatsapp-webhook-verify-token"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(var.whatsapp_webhook_verify_token)
   }
 }

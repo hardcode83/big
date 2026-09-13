@@ -103,6 +103,31 @@ Aprovisionado por `object-storage-provisioning`. Su comportamiento de aplicació
   son un resource-type propio, distinto del genérico `users` que ya cubría las Customer Secret
   Keys). Ambas documentadas en `iam-policy.md` con su justificación.
 
+### Credenciales de WhatsApp Cloud API (desde `whatsapp-dev-credentials-render`)
+
+- THE SYSTEM SHALL declarar cuatro variables Terraform sensibles (`sensitive = true`) en
+  `infra/environments/dev/variables.tf` — `whatsapp_access_token`, `whatsapp_phone_number_id`,
+  `whatsapp_app_secret`, `whatsapp_webhook_verify_token` — una por credencial de la App de Meta,
+  mismo patrón que `github_app_private_key`: son credenciales **externas** y Terraform solo las
+  transporta, nunca las genera con `random_*` ni similar.
+- THE SYSTEM SHALL escribir cada una a un `oci_vault_secret` propio (`oci_vault_secret.whatsapp_*`
+  en `main.tf`) con nombre determinista `autohostai-${var.env}-whatsapp-<credencial>` — mismo
+  mecanismo que el token del túnel, los cuatro secretos de medios y los seis `SMTP_*`.
+- THE SYSTEM SHALL conceder al dynamic group del runner (`dev_runner`) permiso de lectura sobre
+  los cuatro secretos nuevos, añadiendo sus cuatro OCID a la enumeración `target.secret.id` de
+  `oci_identity_policy.dev_runner_read_secrets` — **una cláusula más en el statement que ya
+  existe**, en el mismo `apply` que crea los secretos (`iam-policy.md`).
+- THE SYSTEM SHALL recibir las cuatro credenciales por cuatro GitHub Actions secrets nuevos
+  (`WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`,
+  `WHATSAPP_WEBHOOK_VERIFY_TOKEN`), mapeados a `TF_VAR_whatsapp_*` en los pasos `plan` y `apply`
+  de `infra-dev.yml` — mismo patrón que `TF_VAR_github_app_private_key`.
+- THE SYSTEM SHALL NOT registrar estos cuatro secretos con el provider `github` de Terraform: esa
+  gestión-como-código es alcance de `infra-github-iac` (roadmap), y este change usa el mecanismo
+  manual ya vigente para todos los demás Actions secrets del proyecto.
+- `WHATSAPP_PROVIDER` no es un secreto ni pasa por Terraform/Vault: sigue el patrón de
+  `PUBLIC_HOSTNAME` como variable de repo (`vars.WHATSAPP_PROVIDER`), leída directamente en
+  `deploy-dev.yml`. Ver `app-deploy-dev` para su comportamiento en el "Render .env".
+
 ### Build multi-arch (`.github/workflows/multiarch-build-check.yml`)
 
 - WHEN se modifica `backend/devops/Dockerfile`, `frontend/devops/Dockerfile` o sus lockfiles, THE SYSTEM SHALL construir ambas imágenes (`target: prod`) para `linux/amd64` y `linux/arm64` sin publicar a registry — verifica que corren en la arquitectura ARM64 de la instancia.
@@ -117,6 +142,6 @@ Aprovisionado por `object-storage-provisioning`. Su comportamiento de aplicació
 
 ## Estado y pendientes
 
-- Infra **desplegada y operativa** (aplicada por el pipeline como `svc-terraform-dev`): instancia 4 OCPU/24 GB/200 GB en AD-3 (PAYG, $0), Docker+Compose vía repo oficial, budget €1 con alertas ACTUAL+FORECAST, Vault + key + secret SSH recuperable, versioning del state activo. Añadido por `app-deploy-dev`: runner self-hosted (cloud-init) + instance principal + secrets de runtime y clave de la App en el Vault. Añadido por `ingress-https-dev`: provider `cloudflare` con el túnel/DNS/ajuste de zona, el secreto del túnel en el Vault, y el security list reducido a **solo el 22**. Añadido por `demo-user`: el secreto de la contraseña de demostración y su OCID en la enumeración de la policy del runner — **sin tocar red, security list ni cómputo**. Añadido por `smtp-delivery-adapter` (2026-09-03): OCI Email Delivery (dominio + DKIM + sender), usuario/credencial SMTP de servicio, SPF/DKIM en Cloudflare y seis secretos SMTP en el Vault con sus OCID en la policy del runner — también sin tocar red ni cómputo; el mismo día se fijó el pin del boot volume (`source_id`) tras el incidente que su apply destapó.
+- Infra **desplegada y operativa** (aplicada por el pipeline como `svc-terraform-dev`): instancia 4 OCPU/24 GB/200 GB en AD-3 (PAYG, $0), Docker+Compose vía repo oficial, budget €1 con alertas ACTUAL+FORECAST, Vault + key + secret SSH recuperable, versioning del state activo. Añadido por `app-deploy-dev`: runner self-hosted (cloud-init) + instance principal + secrets de runtime y clave de la App en el Vault. Añadido por `ingress-https-dev`: provider `cloudflare` con el túnel/DNS/ajuste de zona, el secreto del túnel en el Vault, y el security list reducido a **solo el 22**. Añadido por `demo-user`: el secreto de la contraseña de demostración y su OCID en la enumeración de la policy del runner — **sin tocar red, security list ni cómputo**. Añadido por `smtp-delivery-adapter` (2026-09-03): OCI Email Delivery (dominio + DKIM + sender), usuario/credencial SMTP de servicio, SPF/DKIM en Cloudflare y seis secretos SMTP en el Vault con sus OCID en la policy del runner — también sin tocar red ni cómputo; el mismo día se fijó el pin del boot volume (`source_id`) tras el incidente que su apply destapó. Añadido por `whatsapp-dev-credentials-render` (2026-09-12): las cuatro credenciales de la App de Meta como variables Terraform sensibles, sus cuatro `oci_vault_secret` y sus OCID en la policy del runner — también sin tocar red ni cómputo; verificado en producción con el primer `infra-dev` apply + `deploy-dev` run reales tras el merge.
 - El **despliegue de la aplicación** ya está resuelto por el change **`app-deploy-dev`** (build → GHCR → deploy local en el runner self-hosted) y su **acceso público** por **`ingress-https-dev`** (Cloudflare Tunnel); ver sus specs. El repo vive en la org **`autohostai-labs`**.
 - **Cerrado por `ingress-https-hardening`** (2026-08-04): la policy del runner queda con **un solo statement** (`read secret-bundles` condicionado por la enumeración de OCID). El `read secrets` sin condición no se acotó sino que se **eliminó**, porque nunca fue necesario: `GetSecretBundleByName` exige solo `SECRET_BUNDLE_READ`. Aplicado in situ (`0 added, 1 changed, 0 destroyed`) y verificado con un deploy real cuyo paso de lectura del Vault pasó.
