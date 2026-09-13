@@ -66,6 +66,7 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Mintear installation token de la GitHub App
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -121,17 +122,16 @@ jobs:
         if: always()
         run: docker logout ghcr.io || true
 
-  # workflow_dispatch action=plan: plan real contra el state en
-  # `autohostai-tfstate-dev` (key = "github.tfstate" — compartido con el
-  # módulo dev). Gate `main` por el mismo motivo que `infra-dev.yml`: el job
+  # workflow_dispatch: plan (siempre) contra el state en `autohostai-tfstate-dev`
+  # (key = "github.tfstate" — compartido con el módulo dev), para revisión por
+  # logs — igual que `infra-dev.yml`: corre en TODO dispatch desde `main`,
+  # sea cual sea la `action` elegida, así el apply siempre va precedido de un
+  # plan real. Gate `main` por el mismo motivo que `infra-dev.yml`: el job
   # mintea installation tokens de la GitHub App y recibe secrets con control
-  # del repo (D7 del design). Solo desde `main` el plan ejecuta código
-  # revisado. Gateado también por `action == 'plan'` (D7/tarea 6.1): un
-  # dispatch con `action: apply` no vuelve a correr este job por separado —
-  # el job `apply` re-planifica y aplica en el mismo job (igual que
-  # `infra-dev.yml`).
+  # del repo (D7 del design) — solo desde `main` el plan ejecuta código
+  # revisado.
   plan:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'plan' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, dev]
     timeout-minutes: 15
     steps:
@@ -216,16 +216,15 @@ jobs:
         if: always()
         run: rm -rf errored.tfstate backend.hcl .terraform "$RUNNER_TEMP/oci_private_key.pem" "$RUNNER_TEMP/gh_app_private_key.pem"
 
-  # workflow_dispatch action=apply: solo desde main. `needs: plan` + `always()`
-  # al frente del `if` (importante): como `plan` ahora está gateado por
-  # `action == 'plan'`, en un dispatch con `action: apply` el job `plan` se
-  # SALTA (skipped) — y sin `always()`, GitHub Actions propaga ese skip a todo
-  # job que declare `needs: plan`, dejando `apply` también skipped aunque su
-  # propio `if` sea cierto. `always()` desactiva ese comportamiento implícito
-  # y deja que la condición explícita decida. `concurrency` serializa applies
-  # sobre el mismo state (mismo patrón que `infra-dev.yml`). [R7.2, R7.4]
+  # workflow_dispatch action=apply: solo desde main y solo si action=apply.
+  # `needs: plan` — `plan` corre en todo dispatch desde `main` (ver job
+  # `plan`), así que para un dispatch `action: apply` ya se ha ejecutado (y
+  # tiene que haber tenido éxito) antes de que `apply` pueda arrancar; no hace
+  # falta un `always()` que desactive el skip-propagation porque `plan` nunca
+  # se salta en este flujo. `concurrency` serializa applies sobre el mismo
+  # state (mismo patrón que `infra-dev.yml`). [R7.2, R7.4]
   apply:
-    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply' && github.ref == 'refs/heads/main'
     needs: plan
     runs-on: [self-hosted, dev]
     timeout-minutes: 15
