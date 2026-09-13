@@ -16,10 +16,10 @@
 
 - [x] 2.1 `frontend/e2e/login.spec.ts`: login válido → redirect a `/dashboard`; login inválido → error visible sin redirect; una petición autenticada representativa con un usuario `must_change_password` confirma el bloqueo `403 PASSWORD_CHANGE_REQUIRED` salvo `me`/`logout`/`change-password` (ver `docs/auth-account-recovery.md`). [R2]
 
-## 3. E2E: ciclo de limpieza <!-- hard -->
+## 3. E2E: ciclo de limpieza <!-- hard --> <!-- panel: PASS 2026-09-13 receipt:3faa8c50 -->
 
-- [ ] 3.1 `frontend/e2e/cleaning.spec.ts`: con una `CleaningTask` sembrada (fixture 1.5), el `PROPERTY_MANAGER` la reasigna desde `/cleaning` y el nuevo asignado se refleja. [R3.2]
-- [ ] 3.2 Mismo spec: el rol `CLEANER` acepta la tarea desde `/cleaner`, abre `/cleaner/tasks/[id]`, completa el checklist y sube las fotos requeridas por categoría (ver `docs/cleaning.md`, `docs/cleaner-photo-requirements.md`); verificar que la tarea queda completada y que el estado operacional de la propiedad cambia según corresponda (`docs/dashboard.md`). [R3.1]
+- [x] 3.1 `frontend/e2e/cleaning.spec.ts`: con una `CleaningTask` sembrada (fixture 1.5), el `PROPERTY_MANAGER` la reasigna desde `/cleaning` y el nuevo asignado se refleja. [R3.2]
+- [x] 3.2 Mismo spec: el rol `CLEANER` acepta la tarea desde `/cleaner`, abre `/cleaner/tasks/[id]`, completa el checklist y sube las fotos requeridas por categoría (ver `docs/cleaning.md`, `docs/cleaner-photo-requirements.md`); verificar que la tarea queda completada y que el estado operacional de la propiedad cambia según corresponda (`docs/dashboard.md`). [R3.1]
 
 ## 4. E2E: ciclo de incidencia <!-- hard -->
 
@@ -220,3 +220,132 @@ section 2):
   BACKEND_URL=http://localhost:8077 npx playwright test e2e/login.spec.ts` (explicit override) —
   `3 passed`.
 - `npm run typecheck` — clean.
+
+### Section 3 (E2E: ciclo de limpieza)
+
+- **`docs/cleaner-photo-requirements.md` (citado en la tarea 3.2) NO EXISTE.** No existe ni ha
+  existido: el contrato real de las categorías de foto vive en `docs/cleaning.md` §«Las fotos de
+  la limpieza» (qué pide la plantilla, `GET /photo-requirements`, `POST /photos`, y el orden de
+  las tres cláusulas de `POST /complete`), y la vista de la limpiadora en `docs/cleaner.md`. Se
+  siguió `docs/cleaning.md`. No es un blocker —el contrato está documentado, solo que en otro
+  fichero— pero la referencia de tasks.md es falsa y no se corrige aquí porque tasks.md es el
+  registro de lo que se pidió.
+- **La precondición que manda sobre todo el ciclo: la vivienda tiene que estar en
+  `AWAITING_CLEANING`.** `(AWAITING_CLEANING, CLEANER_ASSIGNED)` es la **única** fila de
+  `PropertyStateMachine._POLICY` que admite ese disparador, así que sin ella la primera
+  asignación responde `409 PROPERTY_STATE_CONFLICT` y el ciclo entero (aceptar → iniciar →
+  cerrar) es inalcanzable. **Ninguna ruta HTTP escribe un estado operacional** — sólo los tres
+  jobs de reloj—, y el seed deja las dos viviendas del tenant en `VACANT_READY` (PAJARITOS8) y
+  `MAINTENANCE_REQUIRED` (REDES11, con estancia viva), ninguna en `AWAITING_CLEANING`.
+- **Cómo se resuelve: `make sim-advance`, que es lo que `design.md` §Riesgos prescribe**
+  («si un flujo depende de un job periódico, dispararlo a mano con los comandos ya existentes
+  (`make sim-advance`, `make pms-sync`) en vez de esperar al scheduler real»). `runSimAdvance()`
+  en `fixtures/seed-context.ts` lo ejecuta con `execFileSync`; es el único helper del fichero que
+  no es una llamada HTTP, y está ahí a propósito (1.5 dice extender ese fichero, no forkear otro).
+  `PORT_OFFSET` **se deriva del puerto del backend resuelto** (`8000+n` ⇒ offset `n`), no se lee
+  del entorno: así el mismo `BACKEND_HEALTH_URL` que ya hace falta apunta también al overlay de
+  compose correcto, sin una cuarta variable. Sin desplazamiento da `""`, que es lo que el Makefile
+  trata como «sin offset».
+- **Hacen falta DOS corridas del reloj, y las horas no son arbitrarias.** Los tres disparadores no
+  pueden estar vencidos en el mismo instante: `CHECKIN_TIME_REACHED` exige `checkin <= now <
+  checkout` y `CHECKOUT_TIME_REACHED` exige `now >= checkout`
+  (`PropertyStateMachine._validate_trigger_preconditions`), y `CHECKIN_WINDOW_OPENED` exige además
+  que la estancia **empiece el mismo día natural** que el instante, en la zona de la vivienda.
+  `ensurePropertyAwaitingCleaning()` monta por eso una reserva *ayer → hoy* con `check_in_time`
+  `02:00` y `check_out_time` `00:30` locales, y corre el reloj primero congelado en
+  `ayer T12:00Z` y después con el reloj vivo. El `00:30` local es lo que hace que el segundo pase
+  valga **a cualquier hora del día**: en una vivienda `UTC+n` ese instante cae el día anterior en
+  UTC, así que `now` siempre lo ha pasado.
+- **`cleaning_required: false` en esa reserva es un detalle que carga peso.** El checkout
+  transiciona igual y el job lo cuenta como `transitioned_without_task` (`docs/cleaning.md`
+  §Operar el job), así que `process_checkouts` **no** crea tarea: la crea el spec con
+  `createCleaningTask` (fixture 1.5), que es lo que pide 3.1. Además evita el acoplamiento con
+  `uq_cleaning_tasks_live_reservation` (una reserva no puede tener dos limpiezas vivas), que es lo
+  que dejaría a una corrida sin tarea por culpa de restos de la anterior.
+- **Y hace falta una SEGUNDA limpiadora**, porque `make seed-demo` sólo crea una y
+  `AssignCleanerControl` no confirma una elección igual al asignado actual. `ensureUser()`
+  (nuevo, idempotente, email fijo `e2e-cleaner-relief@hardening-e2e.local`) la crea una sola vez
+  por tenant. **El email fijo no es cosmético**: el roster no es inerte — `process_checkouts` sólo
+  auto-asigna cuando el tenant tiene *exactamente una* limpiadora activa (`docs/cleaning.md`
+  §El ciclo) —, así que un email aleatorio por corrida iría cambiando en silencio cómo arranca
+  cada corrida posterior. La seed es la **destinataria** de la reasignación, no el origen: es la
+  única cuya contraseña conoce la suite (`SEED_CLEANER_*`), o sea la única que luego puede entrar
+  y hacer 3.2.
+- **Transición operacional real observada** (medida, no deducida):
+  `VACANT_READY` →(reloj: checkin window / checkin / checkout)→ `AWAITING_CLEANING`
+  →(`PATCH /cleaning-tasks/{id}` primera asignación)→ `CLEANING_SCHEDULED`
+  →(`POST /start`)→ `CLEANING_IN_PROGRESS` →(`POST /complete`)→ **`VACANT_READY`**.
+  El último salto es contextual: `_POLICY` admite `{READY_FOR_NEXT_GUEST, AWAITING_CHECKIN,
+  VACANT_READY}` y lo resuelve `ContextualStateResolver` con las reservas que haya, así que el
+  spec asserta **pertenencia al conjunto** y no un literal — que además son exactamente los tres
+  estados 🟢 verdes de `docs/dashboard.md` §Colores de estado. Reapuntar una tarea ya `ASSIGNED`
+  (la reasignación de 3.1) **no mueve la vivienda**, y el spec lo asserta.
+- **Conjunto exacto de categorías de foto** (plantilla del seed, `_CHECKLIST_PHOTOS` en
+  `backend/app/cli/seed_demo.py`), las **seis** `required: true`: `living_room`, `bedroom`,
+  `bathroom`, `kitchen`, `entrance`, `damage_if_found`. El checklist son **18** ítems, todos
+  `required: true` (`_CHECKLIST_ITEMS`). El spec no fija ninguno de los dos números: cuenta los
+  `<li>` que la pantalla pinta y los recorre, así que una plantilla distinta no lo rompe.
+- **Cómo se dan los bytes de la foto**: `setInputFiles({ name, mimeType, buffer })` con un PNG
+  1×1 real de 70 bytes en base64 inline en el spec (`PIXEL_PNG`). Sin fichero binario en el repo
+  —no había ninguno reutilizable— y sin ruta que el test pueda equivocar. Tiene que ser un PNG de
+  verdad por dos razones: el backend decide el formato **por los bytes** y no por el
+  `Content-Type` (`docs/cleaning.md` §Subir), y la galería lo pinta en un `<img>` cuyo
+  `naturalWidth > 0` es la aserción que cierra el viaje completo (bytes guardados, firma válida,
+  ruta sirviendo). El `<input type="file">` es `sr-only`/`aria-hidden` y `setInputFiles` lo
+  maneja igual, que es justo para lo que existe.
+- **Forma del ítem de checklist** (`GET /cleaning-tasks/{id}/checklist` → `{data: [...]}`):
+  `{item_id, label, required, completed, completed_at, completed_by}`. Se marca con
+  `POST /checklist/{item_id}/complete` (204, idempotente).
+- **Selectores descubiertos — ninguno depende del idioma**, que es deliberado: `devices["Desktop
+  Chrome"]` no fija locale y el idioma sale de i18next, así que atarse a un literal ES/EN sería
+  frágil.
+  - `/cleaning`: la fila es `li:has(h3#cleaning-task-<taskId>)`; el desplegable
+    `select#assign-cleaner-<taskId>`; el botón de confirmar, su hermano adyacente
+    (`#assign-cleaner-<taskId> + button`).
+  - **Quién está asignado NO se puede leer con `toContainText`**: `CleaningTaskRow` pinta el
+    nombre resuelto como un **nodo de texto pelado** dentro del `<span>` de valor del `Field`, y
+    justo detrás `AssignCleanerControl` lista a **todas** las limpiadoras activas como `<option>`
+    — así que el texto del `<span>` contiene los dos nombres esté asignado quien esté. El helper
+    `assignedCleanerName()` lee sólo los nodos de texto directos. (Verificado con una mutación:
+    quitando el clic de confirmar, la aserción falla con `Expected "E2E Cleaner" / Received
+    "Relevo E2E"` — no es una aserción vacía.)
+  - `/cleaner/tasks/[id]`: cada bloque por el id que declara su `aria-labelledby` —
+    `section[aria-labelledby="cleaner-checklist-heading"]`, `...="cleaner-photo-reqs-heading"`,
+    `...="cleaner-gallery-heading"`, `...="cleaner-action-bar-heading"` y, tras cerrar,
+    `...="cleaner-completion-heading"` (el panel reversible, que es la forma que tiene la pantalla
+    de decir que el cierre salió).
+  - **La barra de acciones se navega por posición, no por etiqueta**: `CLEANER_ACTIONS`
+    (`features/cleaner/lib/cleaner-actions.ts`) fija el orden en el DOM — `ASSIGNED` →
+    [aceptar, rechazar], `ACCEPTED` → [iniciar], `IN_PROGRESS` → [cerrar] (+ el panel de
+    incidencia, que se pinta *después* de la fila de botones). El primer botón es siempre el que
+    avanza el ciclo, y el `toHaveCount` es lo que prueba en qué estado está la pantalla.
+- **En qué estado queda todo al terminar el spec** (importante para la sección 4, que comparte
+  stack y tenant): la vivienda elegida vuelve a **`VACANT_READY`**, su tarea queda `COMPLETED` con
+  `validation_status: PASSED` (cerrar ya deja `PASSED` por sí solo), y la reserva marcada
+  `external_channel_id = "e2e-cleaning-cycle"` se queda `CONFIRMED` con fechas ayer→hoy y
+  `cleaning_required: false`. Cada corrida **reutiliza** esa reserva (no crea una nueva), que es
+  lo que evita el fallo real medido aquí: dos estancias vivas solapadas en la misma vivienda hacen
+  que los jobs de reloj respondan `ambiguous`, no escriban nada, y la cadena deje la vivienda donde
+  estaba. `ensurePropertyAwaitingCleaning()` lo comprueba **antes** de correr el reloj y falla
+  nombrando las reservas culpables, en vez de dejar un no-op silencioso — y nunca borra una reserva
+  que no creó.
+- **El spec elige vivienda por estado, no `firstProperty()`**: la primera cuyo
+  `current_operational_state` esté en `AWAITING_CLEANING`/`VACANT_READY`/`READY_FOR_NEXT_GUEST`.
+  Con el seed actual eso es siempre PAJARITOS8 (REDES11 está en `MAINTENANCE_REQUIRED` con
+  estancia viva), pero la selección es por la precondición real y no por el orden del listado.
+  Si la sección 4 deja una vivienda en `CRITICAL_INCIDENT`, este spec la salta sola.
+- **Residuo conocido en el stack de este worktree**, de la exploración manual previa al spec, no
+  del spec: una tarea `CREATED` sin asignar (`e9559b20…`, el reemplazo que crea todo `POST
+  /cancel`), un usuario `CLEANER` `INACTIVE` (`e2e-cleaner-b@…`) y una reserva `CANCELLED`. Las
+  tres son inertes para los specs (los localizadores van por `taskId`; una limpiadora inactiva no
+  se ofrece como candidata; una reserva cancelada no cuenta para el reloj) y no se limpian porque
+  cancelar una tarea `CREATED` sobre una vivienda ya en `AWAITING_CLEANING` sólo genera otro
+  reemplazo — el bucle no converge.
+- **Verificación (este worktree, stack `PORT_OFFSET=77` de la sección 2, sin `make up`/
+  `bootstrap`/`seed-demo` de nuevo):** `npm run typecheck` y `npm run lint` limpios.
+  `BASE_URL=http://localhost:3077 BACKEND_HEALTH_URL=http://localhost:8077/health npx playwright
+  test e2e/cleaning.spec.ts` → **`2 passed`** tres veces seguidas (10.6 s / 9.7 s / 9.1 s),
+  incluyendo una corrida que arrancó desde `VACANT_READY` y ejecutó la cadena completa de reloj y
+  otra que arrancó ya en `AWAITING_CLEANING`. Suite E2E entera (`npx playwright test`, specs 2.1 +
+  3.1-3.2) → **`5 passed`**, o sea que la sección 2 sigue verde. Comprobado además contra la API
+  que la tarea del spec queda `COMPLETED`/`PASSED` y la vivienda en `VACANT_READY`.
