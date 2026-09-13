@@ -843,3 +843,87 @@ review-fix round, not new task work.
   **Verified**: re-read `docs/dod-audit.md`'s own "Corrección de la cifra de dominios" section — the
   new note (18 real, 17 stale, full fix deferred to the change that regenerates the diagram) matches
   it and adds nothing it doesn't already say.
+
+### Review fix round 2
+
+Four findings from `/sdd:review`'s panel, round 2 (re-review after round 1's fixes landed in
+`aa6bbfe3`). No `tasks.md` checkboxes touched — this is a review-fix round, not new task work.
+
+- **[sdd-security/medium] `.github/workflows/e2e-tests.yml` leaked a full set of named volumes on
+  every CI run — a REGRESSION introduced by round 1's own fix.** Round 1 added
+  `COMPOSE_PROJECT_NAME: e2e-${{ github.run_id }}` to close a real volume-collision between
+  concurrent PRs, and that part stands. What it did not account for: with a project name that is
+  *unique per run*, the opening "start clean" step (`docker compose down --volumes
+  --remove-orphans`) now addresses a project that has never existed, and the closing teardown was
+  `make down` — whose `Makefile` target deliberately does **not** pass `--volumes`, because in
+  local dev those volumes are the developer's database (`sdd/project.md` says as much where it
+  declares the worktree `teardown:`, which *does* pass `--volumes` precisely because a worktree
+  stack is disposable). Net effect: each run created ~8 named volumes under `e2e-<run_id>`
+  (`postgres_data`, `backend_media`, the four venvs, `frontend_node_modules`, `frontend_next`) and
+  nothing ever reclaimed them — not the run itself, which had ended, and not the next run, which
+  gets a brand-new project name. Unbounded disk growth on the persistent self-hosted runner, one
+  set per PR push. **Fixed**: (a) replaced the final `make down` with
+  `docker compose down --volumes --remove-orphans`, still `if: always()`, scoped by the job-level
+  `COMPOSE_PROJECT_NAME` so it removes **this** run's volumes and only this run's (a concurrent
+  `e2e-<other_run_id>` is a different project and is untouched); bare `docker compose` is exactly
+  what `make down` invoked here anyway — the runner is not a linked worktree and there is no
+  `PORT_OFFSET`, so the `Makefile`'s `COMPOSE_ARGS` is empty — the only difference is the flag.
+  (b) Rewrote the stale comment above the opening step: it claimed a second run would inherit the
+  previous Postgres, which per-run-unique project names made false. The rewritten comment states
+  the residual the step actually covers, which is real and was worth keeping the step for:
+  `github.run_id` does **not** change when a job is re-run from GitHub's UI (only `run_attempt`
+  does), so a re-run reuses the same project name and can inherit volumes from an attempt whose
+  `if: always()` teardown was itself killed (cancellation, runner restart) — and that matters
+  because `make seed-demo` explicitly does not promise idempotence for its business dataset.
+  (c) Updated `scripts/check-detect-surface.py`'s `e2e_surface()` docstring, which listed
+  `make down` among the job's Make targets. **Verified**: `python3 -c "import yaml;
+  yaml.safe_load(open('.github/workflows/e2e-tests.yml'))"` → no error; re-read the parsed step
+  list — the last two steps are `Bajar el stack y borrar sus volúmenes` (`if: always()`,
+  `docker compose down --volumes --remove-orphans`) and `Borrar el .env con las credenciales
+  efímeras` (`if: always()`), with `env.COMPOSE_PROJECT_NAME = e2e-${{ github.run_id }}` still on
+  the job; `python3 scripts/check-detect-surface.py e2e` → `OK: detect-surface covers the whole
+  suite input surface.` (`Makefile` is still anchored by `make up`/`bootstrap`/`seed-demo`).
+  Also corrected the now-stale "Teardown con `make down`" sentence in `design.md` D2.
+
+- **[sdd-security/medium] the `.env` with five live login passwords outlived the job.** The
+  "Preparar .env con credenciales efímeras" step writes the bootstrap owner/manager/super-admin and
+  the seed cleaner/technician passwords into the checked-out workspace, and nothing removed the
+  file afterwards — the job relied on the *next* job's `actions/checkout` (`git clean -ffdx`) to
+  wipe it. On a persistent self-hosted runner the workspace is reused between jobs, not recreated
+  per job, so that window is of indeterminate length. **Fixed**: added a final
+  `if: always()` step `rm -f .env`. Placed **after** the teardown on purpose, not before:
+  `docker compose down` interpolates the compose file, which has required `${POSTGRES_DB:?…}`-style
+  variables, so removing `.env` first would make the teardown fail instead of bringing the stack
+  down. **Verified**: parsed the YAML and confirmed the step carries `if: always()` and is last.
+
+- **[sdd-security/low] `design.md` never reasoned about the CI stack's network interface.** D2
+  argued only about port *collision*; it never said that `make up` publishes `backend` on
+  `0.0.0.0:8000` and `frontend` on `0.0.0.0:3000` on a VM with a public IP, exposing a
+  bootstrapped and seeded stack with valid (if ephemeral) login accounts for the job's duration.
+  **Checked before deciding** whether to rebind rather than document, as instructed: there is **no
+  bind-address override mechanism in this repo**. `docker-compose.yml` hardcodes `"8000:8000"` /
+  `"3000:3000"` (with a long comment saying the all-interfaces bind is deliberate — it is what lets
+  a real phone on the LAN open the mobile-first UI); `PORT_OFFSET` shifts the port *number* and
+  explicitly **preserves each service's interface** (`sdd/project.md`); and
+  `docker-compose.worktree.yml` removes the mappings entirely (`ports: !reset []`), which would
+  leave Playwright — which runs on the runner **host**, not inside the compose network — with
+  nothing to connect to, besides only being loaded by the `Makefile` for a linked worktree.
+  Inventing an override was ruled out by the finding itself. **Fixed as a documentation gap**:
+  added a "Risks & mitigations" bullet in `design.md` recording the exposure, why it is accepted
+  (the OCI security list allows **only port 22 inbound** — app ingress is an *outbound* Cloudflare
+  tunnel, `infra/environments/dev/RUNBOOK.md` and ADR `0003-https-ingress-dev.md` — so 8000/3000 are
+  unreachable from outside the VM), why rebinding is not cheap today, and the conditions that
+  reopen the decision (another inbound port opened, or the runner moved to a shared network); plus
+  a pointer sentence in D2 so the collision/interface distinction is visible where D2 is read.
+  **Verified**: re-read `infra/environments/dev/RUNBOOK.md` (§ingress: "No hay ningún puerto
+  entrante abierto — el security list solo permite el 22") and `docker-compose.yml`'s port blocks —
+  the risk bullet's claims match both.
+
+- **[sdd-review-documentation/low] `.env.example` mentioned `BASE_URL` only in prose.** Round 1's
+  E2E-overrides block explained `BASE_URL` in its comment but, unlike `BACKEND_HEALTH_URL` and
+  `BACKEND_URL`, gave it no commented entry line, so `grep BASE_URL= .env.example` missed it.
+  **Fixed**: added `# BASE_URL=http://localhost:3000` next to its two siblings, and adjusted the
+  block's opening sentence ("Both have working defaults" → "The three"), which the added entry
+  made stale. **Verified**: `grep -n "BASE_URL=" .env.example` → line 474
+  `# BASE_URL=http://localhost:3000` (alongside the pre-existing `FRONTEND_BASE_URL`/
+  `CHANNEX_BASE_URL`/`BEDS24_BASE_URL` hits, which are unrelated variables).

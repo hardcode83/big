@@ -233,16 +233,18 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       # El stack de `make up` vive en volúmenes con nombre (postgres_data, entre otros) que
-      # persisten en este runner persistente entre ejecuciones de este mismo workflow — a
-      # diferencia de los `services:` efímeros de `backend-tests.yml`. `make down` (más abajo, en
-      # el paso `if: always()`) para y borra los contenedores pero NO los volúmenes, así que sin
-      # este paso una segunda ejecución heredaría el Postgres de la anterior. `make bootstrap` es
-      # convergente (backend/app/cli/bootstrap.py) y no le importaría, pero `make seed-demo`
-      # documenta explícitamente que su dataset de negocio (reservas, tarea de limpieza) NO tiene
-      # esa garantía — así que se parte de volúmenes limpios en cada corrida en vez de confiar en
-      # idempotencia que el propio comando no promete. `|| true`: no hay stack previo en la
-      # primera ejecución de este runner, y eso no es un fallo.
-      - name: Empezar de un stack limpio (sin volúmenes de una corrida anterior)
+      # sobreviven al borrado de los contenedores — a diferencia de los `services:` efímeros de
+      # `backend-tests.yml`. Con el `COMPOSE_PROJECT_NAME` único por corrida de arriba, el caso
+      # normal es que aquí NO haya nada que heredar: el proyecto `e2e-<run_id>` no ha existido
+      # nunca antes. Lo que este paso cubre es el residual, que es real: `github.run_id` NO cambia
+      # al re-ejecutar un job desde la UI de GitHub (solo cambia `run_attempt`), así que un
+      # re-intento reutiliza exactamente este nombre de proyecto — y si el teardown del intento
+      # anterior se quedó a medias (job cancelado, runner reiniciado), sus volúmenes siguen ahí.
+      # Heredarlos importa porque `make bootstrap` es convergente
+      # (backend/app/cli/bootstrap.py) pero `make seed-demo` documenta explícitamente que su
+      # dataset de negocio (reservas, tarea de limpieza) NO tiene esa garantía. `|| true`: el caso
+      # normal es justamente que el proyecto no exista, y eso no es un fallo.
+      - name: Empezar de un stack limpio (sin volúmenes de un intento anterior)
         run: docker compose down --volumes --remove-orphans || true
 
       # `make bootstrap`/`make seed-demo` leen BOOTSTRAP_*/SEED_* del `.env` vía `env_file`
@@ -374,9 +376,40 @@ jobs:
       # `if: always()`: el stack debe bajar tanto si la suite pasó como si falló o el job se
       # canceló, para no dejar contenedores huérfanos consumiendo puertos/memoria en el runner
       # persistente hasta la siguiente ejecución.
-      - name: make down
+      #
+      # `docker compose down --volumes` y NO `make down`, que es lo que había aquí antes: el
+      # target `down` del `Makefile` baja los contenedores pero CONSERVA los volúmenes a
+      # propósito, porque en dev local esos volúmenes son la base de datos de quien trabaja
+      # (`sdd/project.md` lo dice explícitamente al declarar el `teardown:` del worktree, que sí
+      # pasa `--volumes` por ser un stack desechable). En este job la conservación no tiene
+      # dueño: con `COMPOSE_PROJECT_NAME` único por corrida, los ~8 volúmenes de `e2e-<run_id>`
+      # (postgres_data, backend_media, los cuatro venvs, node_modules, la caché de next) no los
+      # va a reclamar NADIE — ni esta corrida, que ya terminó, ni la siguiente, que estrena
+      # nombre de proyecto. Sin esta bandera cada PR dejaría un juego completo en el disco del
+      # runner self-hosted, para siempre.
+      #
+      # Lo direcciona el `COMPOSE_PROJECT_NAME` del `env:` del job, así que borra los volúmenes
+      # de ESTA corrida y solo los de esta: los de un `e2e-<otro_run_id>` concurrente son otro
+      # proyecto y no se tocan. `docker compose` desnudo es exactamente lo que `make down`
+      # invoca aquí (el runner no es un worktree enlazado y no hay `PORT_OFFSET`, así que
+      # `COMPOSE_ARGS` del `Makefile` queda vacío) — lo único que cambia es la bandera.
+      - name: Bajar el stack y borrar sus volúmenes
         if: always()
-        run: make down
+        run: docker compose down --volumes --remove-orphans
+
+      # El `.env` de arriba lleva cinco contraseñas de login vivas (owner/manager/super-admin de
+      # bootstrap, cleaner/technician del seed). Son efímeras —solo valen contra el stack que
+      # este job acaba de borrar—, pero el runner es SELF-HOSTED y persistente: el workspace se
+      # reutiliza entre jobs, así que sin este paso el fichero se queda en disco hasta que al
+      # próximo job le toque hacer `actions/checkout` (que limpia con `git clean -ffdx`) — una
+      # ventana de duración indeterminada. Se borra aquí, en cuanto deja de hacer falta.
+      #
+      # DESPUÉS del teardown y no antes: `docker compose down` interpola el fichero de compose,
+      # que tiene variables `${POSTGRES_DB:?…}` obligatorias, así que sin `.env` el paso de
+      # arriba fallaría en vez de bajar el stack.
+      - name: Borrar el .env con las credenciales efímeras
+        if: always()
+        run: rm -f .env
 
   # --- El check que se reporta. SIEMPRE se ejecuta: es el invariante del gate. ------
   # Este nombre de job es el contexto que ve GitHub, así que no se renombra sin romper cualquier

@@ -336,7 +336,8 @@ def e2e_surface(root: Path = REPO_ROOT) -> list[str]:
 
     Same mechanism as `frontend_surface()`, pointed at `e2e-tests-suite` instead: every
     `scripts/…` reference resolved to its true repo-relative path, plus `Makefile` for each
-    `make <target>` (`make up`, `make bootstrap`, `make seed-demo`, `make down`). The `npm ci`/
+    `make <target>` (today `make up`, `make bootstrap`, `make seed-demo` — the teardown is a bare
+    `docker compose down --volumes`, not a Make target, see the workflow). The `npm ci`/
     `playwright install`/`npm run test:e2e` steps run under `working-directory: frontend`, so
     they are `frontend/**` inputs already anchored by `frontend/*` and are not part of this
     cross-area surface — same reasoning `frontend_surface()` gives for its own npm steps.
