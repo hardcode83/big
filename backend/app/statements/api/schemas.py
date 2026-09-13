@@ -32,6 +32,7 @@ from typing import Annotated, Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.reservations.domain.entities import Reservation
 from app.statements.domain.entities import Expense, OwnerStatement
 from app.statements.domain.enums import ExpenseCategory, OwnerStatementStatus
 
@@ -109,6 +110,83 @@ class OwnerStatementResponse(BaseModel):
             net_owner_result=statement.net_owner_result,
             created_at=statement.created_at,
             updated_at=statement.updated_at,
+        )
+
+
+class OwnerStatementReservationBreakdownResponse(BaseModel):
+    """Minimal read-only reservation projection for statement financial detail."""
+
+    id: uuid.UUID
+    check_in_date: date
+    nights: int
+    gross_amount: Decimal | None
+    ota_commission: Decimal | None
+    net_amount: Decimal | None
+    currency: str
+
+    @classmethod
+    def from_domain(
+        cls, reservation: Reservation
+    ) -> OwnerStatementReservationBreakdownResponse:
+        return cls(
+            id=reservation.id,
+            check_in_date=reservation.check_in_date,
+            nights=reservation.nights,
+            gross_amount=reservation.gross_amount,
+            ota_commission=reservation.ota_commission,
+            net_amount=reservation.net_amount,
+            currency=reservation.currency,
+        )
+
+
+class OwnerStatementExpenseBreakdownResponse(BaseModel):
+    """Minimal read-only expense projection for statement financial detail."""
+
+    id: uuid.UUID
+    category: ExpenseCategory
+    description: str
+    amount: Decimal
+    currency: str
+    date: date
+
+    @classmethod
+    def from_domain(
+        cls, expense: Expense
+    ) -> OwnerStatementExpenseBreakdownResponse:
+        return cls(
+            id=expense.id,
+            category=expense.category,
+            description=expense.description,
+            amount=expense.amount,
+            currency=expense.currency,
+            date=expense.date,
+        )
+
+
+class OwnerStatementDetailResponse(OwnerStatementResponse):
+    """Flat additive detail response; the summary fields remain top-level."""
+
+    expenses: list[OwnerStatementExpenseBreakdownResponse]
+    reservations: list[OwnerStatementReservationBreakdownResponse]
+
+    @classmethod
+    def from_detail_domain(
+        cls,
+        statement: OwnerStatement,
+        *,
+        expenses: Sequence[Expense],
+        reservations: Sequence[Reservation],
+    ) -> OwnerStatementDetailResponse:
+        return cls(
+            **OwnerStatementResponse.from_domain(statement).model_dump(),
+            expenses=[
+                OwnerStatementExpenseBreakdownResponse.from_domain(expense)
+                for expense in expenses
+            ],
+            reservations=[
+                OwnerStatementReservationBreakdownResponse.from_domain(reservation)
+                for reservation in reservations
+            ],
         )
 
 
