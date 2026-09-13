@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { expect, test } from "@playwright/test";
 
 import { credentialsFor, loginAs } from "./fixtures/auth";
@@ -57,6 +59,14 @@ test.describe("login", () => {
       "PROPERTY_MANAGER",
     );
 
+    // Generated fresh per run rather than a fixed literal: this account is
+    // never deleted afterward (see seed-context.ts's other callers — none of
+    // them delete their generated users either, the established convention
+    // here is randomise-to-avoid-collision, not clean up), so a fixed password
+    // would leave a real, permission-bearing account with a publicly known,
+    // repo-committed password sitting in the tenant indefinitely.
+    const newPassword = randomUUID();
+
     // The gate lets login and refresh through (docs/auth-account-recovery.md:
     // "puede hacer login y obtener el par de tokens").
     const loginResponse = await request.post(`${BACKEND_URL}/api/v1/auth/login`, {
@@ -95,7 +105,7 @@ test.describe("login", () => {
         headers: authHeader,
         data: {
           current_password: temporaryPassword,
-          new_password: "a-brand-new-e2e-password-123",
+          new_password: newPassword,
         },
       },
     );
@@ -105,7 +115,7 @@ test.describe("login", () => {
     // the call (docs/auth-account-recovery.md) — so a fresh login is needed for
     // `logout`, and the flag is now cleared.
     const secondLoginResponse = await request.post(`${BACKEND_URL}/api/v1/auth/login`, {
-      data: { email, password: "a-brand-new-e2e-password-123" },
+      data: { email, password: newPassword },
     });
     expect(secondLoginResponse.status()).toBe(200);
     const { access_token: secondAccessToken } = (await secondLoginResponse.json()) as {

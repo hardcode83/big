@@ -927,3 +927,39 @@ Four findings from `/sdd:review`'s panel, round 2 (re-review after round 1's fix
   made stale. **Verified**: `grep -n "BASE_URL=" .env.example` → line 474
   `# BASE_URL=http://localhost:3000` (alongside the pre-existing `FRONTEND_BASE_URL`/
   `CHANNEX_BASE_URL`/`BEDS24_BASE_URL` hits, which are unrelated variables).
+
+### Review fix round 3
+
+One finding from `/sdd:review`'s panel, round 3 (beyond the nominal 2-round cap, flagged as a
+small, concrete, non-disputed fix). No `tasks.md` checkboxes touched — this is a review-fix round,
+not new task work.
+
+- **[sdd-security/medium] `frontend/e2e/login.spec.ts` set a fresh, real `PROPERTY_MANAGER`
+  account's password to a fixed, repo-committed literal (`"a-brand-new-e2e-password-123"`, at what
+  were lines 98 and 108), and the account was never deleted afterward.**
+  `createUserWithTemporaryPassword` (`fixtures/seed-context.ts`) already randomises the *email* per
+  run precisely to avoid collisions across runs, but the password chosen by the
+  `must_change_password` test itself was a literal, so every local `make up` run left a new,
+  full-permission manager account whose password anyone with read access to the repo already knew
+  — and `backend`/`frontend` publish on `0.0.0.0` in local dev by design (mobile-LAN testing, see
+  round 2's `docker-compose.yml` note), so anyone on the same LAN could log in as that manager.
+  **Fixed**: replaced the literal with `randomUUID()` (`node:crypto`, no new dependency), computed
+  once at the top of the test and reused for both the `POST /api/v1/auth/change-password` call and
+  the subsequent second login. **Cleanup vs. randomise-only**: checked whether the codebase already
+  has a convention for disposing of E2E-generated users before inventing one —
+  `createUserWithTemporaryPassword` has exactly one caller (this test; confirmed by grep), there is
+  no `DELETE`/deactivate-user helper anywhere in `fixtures/seed-context.ts`, and no endpoint for it
+  is called from any spec. The established pattern for repeatable E2E data in this file is instead
+  "make it safe to re-run" (`ensureUser`'s idempotent lookup-or-create, `cancelLingeringIncidents`'s
+  cleanup-by-marker) — not delete-after-use; nothing in the suite deletes the users it creates.
+  Given that, and that randomising the password alone removes the finding's entire complaint (a
+  real account with a *publicly known* password), adding new deletion machinery for this one test
+  would be over-engineering relative to the rest of the suite's convention. Left as a leftover,
+  randomly-keyed account per run, same as before — only the password is no longer public.
+  **Verified**: `cd frontend && npm run typecheck` → clean; `npx playwright test --list
+  e2e/login.spec.ts` → resolves, 3 tests, no syntax errors; `grep -n
+  "a-brand-new-e2e-password-123" frontend/e2e/login.spec.ts` → no match; brought up this worktree's
+  stack (`make up PORT_OFFSET=77`) and ran `BASE_URL=http://localhost:3077
+  BACKEND_HEALTH_URL=http://localhost:8077/health npx playwright test e2e/login.spec.ts` live → all
+  3 tests passed, including the `must_change_password` case exercising the new random password end
+  to end; brought the stack back down (`make down PORT_OFFSET=77`) afterward.
