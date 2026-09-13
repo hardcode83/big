@@ -33,11 +33,11 @@
 - [x] 5.2 El job `e2e-tests-suite` hace `make up`, espera salud (reutilizar o adaptar el healthcheck de 1.3), `make bootstrap` + `make seed-demo`, corre `npm run test:e2e` desde `frontend/`, y `make down` en un paso `if: always()`. [R1.3]
 - [x] 5.3 Añadir un detector `e2e` a `scripts/check-detect-surface.py` (mismo mecanismo que `frontend_surface()`) que lea la superficie del `case` de `e2e-tests-detect` contra lo que `e2e-tests-suite` ejecuta; extender `scripts/test_detect_surface.py` con su caso. Correr `python3 scripts/check-detect-surface.py e2e` y confirmar que pasa. [R1.3]
 
-## 6. Auditoría del DoD §28 <!-- hard -->
+## 6. Auditoría del DoD §28 <!-- hard --> <!-- panel: PASS 2026-09-13 receipt:9c1cfff4 -->
 
-- [ ] 6.1 Enumerar los directorios de dominio de negocio bajo `backend/app/` (excluir `cli`, `core`, `provenance`, `scheduler`) y, para cada uno con estado propio scopado por tenant, confirmar en `backend/tests/<dominio>/` que existe un test de aislamiento tenant A / tenant B. Añadir el test que falte donde el hueco sea real. [R5.1]
-- [ ] 6.2 Enumerar las transiciones (válidas e inválidas) de `PropertyStateMachine` (`backend/app/properties/domain/state_machine.py`) contra `backend/tests/properties/test_state_machine.py`; añadir el caso que falte. [R5.2]
-- [ ] 6.3 `docs/dod-audit.md`: tabla de los 20 ítems de PRD §28 con su evidencia (test/archivo/comando); detalle de las tablas de 6.1 y 6.2. `#28.20` (un solo `make up` levanta todo) se documenta con la corrida de 7.3 como evidencia — ya construido por `local-environment`/`infra-scaffold`, no se reconstruye aquí. Corregir la cifra de dominios desactualizada en `README.md:311` (dice 19, con un roster que ya no incluye `statements` ni `audit`) contra el recuento real de 6.1. Enlazar `docs/dod-audit.md` desde `README.md`. [R5.3]
+- [x] 6.1 Enumerar los directorios de dominio de negocio bajo `backend/app/` (excluir `cli`, `core`, `provenance`, `scheduler`) y, para cada uno con estado propio scopado por tenant, confirmar en `backend/tests/<dominio>/` que existe un test de aislamiento tenant A / tenant B. Añadir el test que falte donde el hueco sea real. [R5.1]
+- [x] 6.2 Enumerar las transiciones (válidas e inválidas) de `PropertyStateMachine` (`backend/app/properties/domain/state_machine.py`) contra `backend/tests/properties/test_state_machine.py`; añadir el caso que falte. [R5.2]
+- [x] 6.3 `docs/dod-audit.md`: tabla de los 20 ítems de PRD §28 con su evidencia (test/archivo/comando); detalle de las tablas de 6.1 y 6.2. `#28.20` (un solo `make up` levanta todo) se documenta con la corrida de 7.3 como evidencia — ya construido por `local-environment`/`infra-scaffold`, no se reconstruye aquí. Corregir la cifra de dominios desactualizada en `README.md:311` (dice 19, con un roster que ya no incluye `statements` ni `audit`) contra el recuento real de 6.1. Enlazar `docs/dod-audit.md` desde `README.md`. [R5.3]
 
 ## 7. Verificación
 
@@ -614,3 +614,111 @@ section 2):
   (`CiE2eOwnerPassw0rd!`, `CiE2eManagerPassw0rd!`, `CiE2eSuperAdminPassw0rd!`,
   `CiE2eCleanerPassw0rd!`, `CiE2eTechnicianPassw0rd!`) contra el fichero final → ninguna
   coincidencia.
+
+### Section 6 (Auditoría del DoD §28)
+
+**Resultado de cabecera: no hubo ningún test que escribir.** Ni en 6.1 ni en 6.2. La sección
+resultó ser de medición pura, y ése es el hallazgo — no un atajo. Lo que sí produjo fueron **tres
+huecos reales de producto** que nadie había declarado, documentados en `docs/dod-audit.md` y
+listados abajo.
+
+**6.1 — Los 18 dominios de negocio.** El recuento del orchestrator (18) se verificó contra el árbol
+y es correcto: los directorios de `backend/app/` menos `cli`, `core`, `provenance` y `scheduler`.
+Roster final:
+
+`access`, `audit`, `auth`, `cleaning`, `dashboard`, `guests`, `integrations`, `maintenance`,
+`messaging`, `notifications`, `platform`, `pricing`, `properties`, `reservations`, `reviews`,
+`statements`, `tenants`, `timeline`.
+
+**Cobertura: 18 de 18. Cero tests nuevos, cero «no aplica».** La expectativa de partida decía que
+8 dominios (`access`, `audit`, `cleaning`, `guests`, `integrations`, `pricing`, `statements`,
+`timeline`) estaban sin cubrir. **Los ocho están cubiertos**; lo que fallaba era el método de
+búsqueda. Cifras exactas: **7** dominios tienen un fichero con uno de los dos nombres canónicos
+(`auth`, `dashboard`, `messaging`, `platform`, `reservations`, `reviews`, `tenants`); **10** tienen
+algún fichero con `isolation` en el nombre (los 7 más `maintenance`, `notifications`, `properties`);
+y los **8** restantes no tienen ninguno **y están cubiertos igual**, en el fichero del repositorio,
+del caso de uso o de la API, con nombres del tipo `test_get_does_not_cross_tenants`. **Si buscas por
+nombre de fichero, inventas 8 huecos que no existen.** Búsqueda correcta: grep de nombres de función
+por
+`isolat|other_tenant|cross_tenant|another_tenant|tenant_boundary` dentro de `backend/tests/<dominio>/`.
+
+Dos dominios tienen un test con **forma distinta**, y ninguno de los dos es un hueco:
+- **`audit` es de sólo escritura** — `SqlAlchemyAuditLogRepository` tiene un único método, `add()`.
+  No hay lectura ni API. Su único test de aislamiento (`test_it_refuses_an_entry_of_another_tenant`)
+  cubre la superficie **entera**.
+- **`platform` es la excepción nombrada de `steering/security.md` regla 1** — actor `SUPER_ADMIN`
+  con sesión sin marcar, filtro global inaplicable, alcance cross-tenant por diseño. Su test fija
+  los tres estados (tenant correcto / equivocado / `NULL`). Un test «A no ve a B» sería **vacuo**
+  aquí, porque no hay filtro que probar.
+
+**6.2 — `PropertyStateMachine`.** Cobertura exhaustiva, **ningún caso que añadir**. Y lo es por
+construcción: `test_state_machine.py` no mantiene lista a mano — declara `EXPECTED_POLICY`, lo
+asevera igual a `_POLICY` y **deriva** de él sus parametrizaciones. Medido: 39 pares declarados,
+75 relaciones válidas, 137 pares no declarados rechazados, 354 destinos inválidos rechazados, 8
+relaciones retiradas a propósito. Aritmética: 75+176+354+8 = 613 casos de matriz + ~71 de
+precondiciones = **684 recolectados**; de los 176, **39 saltan** (los declarados), que es el número
+exacto de skips de la corrida. `pytest tests/properties/test_state_machine.py` → **643 passed, 41
+skipped**.
+
+**6.3 — `docs/dod-audit.md` (nuevo) + correcciones.** Tabla de los 20 ítems con evidencia, más las
+dos tablas de detalle. Veredicto: **17 CUMPLE, 3 PARCIAL, 0 incumple**.
+
+`README.md`: «Son 19 dominios» → **18**, con los cuatro directorios excluidos nombrados, `statements`
+devuelto al roster de cuatro capas (lo ganó con `revenue-statements` y nadie actualizó la frase) y
+`audit` nombrado como el único que sigue siendo sólo `domain/` + `infrastructure/`. Se añadió además
+una subsección `### Definition of Done del MVP` bajo `## Tests` que enlaza el documento, y una
+entrada en `docs/README.md`.
+
+**LOS TRES PARCIALES — huecos de producto, no de test. Ninguno se cierra escribiendo un test y
+ninguno estaba en alcance:**
+
+1. **#28.8 — la propietaria NO puede crear una incidencia.** Huésped y limpiadora sí; la
+   propietaria no tiene ni ruta ni pantalla. `POST /api/v1/incidents` **no existe** y su ausencia
+   está **asertada** (`test_there_is_no_post_incidents` espera `405`, diseño D14). PRD §12 «Fuentes
+   de creación de incidencias» nombra explícitamente «reporte del propietario desde dashboard», así
+   que es hueco real y no cuestión de redacción. Reabrirlo contradice D14 a conciencia → change
+   propio.
+2. **#28.17 — «todas las acciones relevantes generan TimelineEvents» no es literal.** Medido contra
+   el árbol: **16 de los 53 miembros de `TimelineEventType` no tienen escritor de producción**
+   (medición bruta 17; `PROPERTY_STATE_CHANGED` no cuenta, se escribe por el método con nombre).
+   **La familia de limpieza entera está sin escribir** — los ítems #5/#6/#7 de este mismo DoD
+   aparecen en el timeline sólo como `PROPERTY_STATE_CHANGED` genéricos. Ya lo rastrea
+   `sdd/specs/timeline-state-machine.md`, pero **no existe censo de escritores**: el proyecto tiene
+   esa guarda AST para otro enum (`tests/notifications/test_writer_census.py`) y **nada equivalente
+   para `TimelineEventType`**. Hoy nada se pondría rojo si se declarase un tipo sin escritor.
+3. **#28.2 — el dashboard no se refresca solo.** Color y estado, cumplidos y bien testeados.
+   «En tiempo real», no: `staleTime: 60_000`, `refetchOnWindowFocus: false`, **ningún
+   `refetchInterval` en `useDashboardCards`**, ni SSE ni WebSocket en todo el frontend. Y el
+   proyecto **sí tiene el idioma** (`use-unread-count.ts`, `use-conversation.ts` lo usan), lo que lo
+   convierte en omisión y no en limitación.
+
+**Además, dos divergencias declaradas (no son incumplimientos):**
+- **#28.9 nombra `MockAIAdapter`, pero quien clasifica incidencias es `RuleBasedIncidentClassifier`.**
+  `MockAIAdapter` vive en `messaging` y sólo clasifica *intent* de mensaje; no toca `maintenance`.
+  La capacidad está entera y testeada (13 categorías, `category` y `severity`). Divergencia de
+  **nombre** en el PRD.
+- **#28.14 — la sospecha de que la respuesta humana no sale está SUPERADA.** Era cierta hasta el
+  2026-09-11; `human-reply-outbound-delivery` la cerró (`RecordHumanReplyUseCase` llama
+  `await adapter.send(...)` antes de construir el `Message`). Quedan cuatro matices acotados
+  (`MANUAL`/`PORTAL` entregan por la fila; `PHONE_TRANSCRIPT` es sólo de entrada;
+  `AIRBNB_MSG`/`BOOKING_MSG` persisten con `ADAPTER_UNAVAILABLE` a propósito).
+
+**Para el que venga — tres avisos:**
+- **`sdd/steering/architecture.md` sigue diciendo «diecisiete dominios»** (línea 40) y su lista de
+  la 46 nombra catorce, sin `audit`, `dashboard`, `platform` ni `reviews`. **No se corrigió aquí a
+  propósito**: el párrafo razona sobre un diagrama de dieciséis cajas y reescribirlo sin volver a
+  medir el diagrama sería cambiar prosa por prosa. Queda declarado en `docs/dod-audit.md`.
+- **`docs/diagrams/2026-07-13_autohost-maquina-estados.png` va por detrás de `_POLICY`**: no lleva
+  las cinco filas que añadieron `maintenance` (D8) y `cleaning-stall-blocks-next-stay` (D7).
+- **`importorskip` obsoleto** en `tests/statements/test_api.py::TestExportEndpoints::test_export_csv_route_returns_csv_content_type`:
+  dice que `csv_export` «todavía no existe» y sí existe, así que el skip nunca dispara. Engaña a
+  quien cite ese test solo para el CSV — la cita buena es la de caso de uso.
+
+**Verificación.** Suite backend completa, con el stack de este worktree:
+`docker compose exec backend uv run pytest` → **11076 passed, 44 skipped in 649.42s (0:10:49)**,
+exit 0. Sin tests nuevos que añadir, así que la cifra es la misma línea base que dejó la sección 5.
+
+**Nota de método**: el contenedor `frontend` se paró antes de correr la suite backend (baja el
+tiempo de forma sustancial y elimina rojos fantasma por contención) y **se volvió a levantar al
+terminar** (`docker compose start frontend`; verificado `Up` en `docker compose ps`), porque 7.3 sí
+lo necesita. El stack queda con los seis servicios arriba.
