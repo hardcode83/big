@@ -35,7 +35,9 @@ Rejected: cambiar las entidades de dominio para crear objetos de breakdown — e
 
 ### D3 — Reutilizar la composición existente sin nuevas queries
 
-**Chosen:** mantener `GetOwnerStatementUseCase` como único compositor del detalle. El router pasará sus tres resultados al mapper del response específico: `statement`, `expenses` y `reservations`. No se añadirá otra lectura a repositories ni se reconstruirá el período en la API.
+**Chosen:** mantener `GetOwnerStatementUseCase` como compositor compartido únicamente del GET detail cubierto por este change. El router pasará sus tres resultados al mapper del response específico: `statement`, `expenses` y `reservations`. No se añadirá otra lectura a repositories ni se reconstruirá el período en la API.
+
+`ExportOwnerStatementPdfUseCase` permanece fuera de scope: no se refactoriza el export PDF ahora ni se afirma que el GET detail y el PDF compartan actualmente la misma composición. Una eventual unificación futura de ambos flujos requerirá un change separado.
 
 La colección de gastos conservará exactamente el filtro existente: tenant explícito, propiedad y período del statement, seguida de `statement_id == statement.id`. La colección de reservas conservará `list_for_properties` y el filtro EUR ya implementados. El desglose por reserva representa las reservas cuyo stay solapa el período según ese port del repositorio; no se inventa una relación `reservation.statement_id` que el modelo no tiene.
 
