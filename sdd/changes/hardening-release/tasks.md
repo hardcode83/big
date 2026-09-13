@@ -27,11 +27,11 @@
 - [x] 4.2 Mismo spec: el técnico acepta y resuelve desde `/tech/incidents/[id]` con coste y materiales; verificar el cierre. Con severidad `CRITICAL`, verificar que la propiedad aparece en rojo en el dashboard mientras esté abierta. [R4.1, R4.2]
 - [x] 4.3 Mismo spec, variante con coste sobre el umbral del tenant: verificar que se genera un `OwnerApproval` visible en `/approvals` para su respuesta (`docs/maintenance.md`). [R4.3]
 
-## 5. CI: workflow `e2e-tests` y detector
+## 5. CI: workflow `e2e-tests` y detector <!-- panel: PASS 2026-09-13 receipt:7768f749 -->
 
-- [ ] 5.1 `.github/workflows/e2e-tests.yml`: patrón de 3 jobs (`e2e-tests-detect` / `e2e-tests-suite` / `e2e-tests` consolidador), copiando el fail-open/fail-closed y la superficie de detección de `frontend-tests.yml` (`backend/**`, `frontend/**`, `docker-compose.yml`, `Makefile`, `frontend/e2e/**`, este propio workflow). Runner `[self-hosted, dev]`, mismos SHA pineados que los otros workflows (`actions/checkout@11d5960a326750d5838078e36cf38b85af677262`, `actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020`, `astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9` si hace falta `uv` para el bootstrap del backend). [R1.3]
-- [ ] 5.2 El job `e2e-tests-suite` hace `make up`, espera salud (reutilizar o adaptar el healthcheck de 1.3), `make bootstrap` + `make seed-demo`, corre `npm run test:e2e` desde `frontend/`, y `make down` en un paso `if: always()`. [R1.3]
-- [ ] 5.3 Añadir un detector `e2e` a `scripts/check-detect-surface.py` (mismo mecanismo que `frontend_surface()`) que lea la superficie del `case` de `e2e-tests-detect` contra lo que `e2e-tests-suite` ejecuta; extender `scripts/test_detect_surface.py` con su caso. Correr `python3 scripts/check-detect-surface.py e2e` y confirmar que pasa. [R1.3]
+- [x] 5.1 `.github/workflows/e2e-tests.yml`: patrón de 3 jobs (`e2e-tests-detect` / `e2e-tests-suite` / `e2e-tests` consolidador), copiando el fail-open/fail-closed y la superficie de detección de `frontend-tests.yml` (`backend/**`, `frontend/**`, `docker-compose.yml`, `Makefile`, `frontend/e2e/**`, este propio workflow). Runner `[self-hosted, dev]`, mismos SHA pineados que los otros workflows (`actions/checkout@11d5960a326750d5838078e36cf38b85af677262`, `actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020`, `astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9` si hace falta `uv` para el bootstrap del backend). [R1.3]
+- [x] 5.2 El job `e2e-tests-suite` hace `make up`, espera salud (reutilizar o adaptar el healthcheck de 1.3), `make bootstrap` + `make seed-demo`, corre `npm run test:e2e` desde `frontend/`, y `make down` en un paso `if: always()`. [R1.3]
+- [x] 5.3 Añadir un detector `e2e` a `scripts/check-detect-surface.py` (mismo mecanismo que `frontend_surface()`) que lea la superficie del `case` de `e2e-tests-detect` contra lo que `e2e-tests-suite` ejecuta; extender `scripts/test_detect_surface.py` con su caso. Correr `python3 scripts/check-detect-surface.py e2e` y confirmar que pasa. [R1.3]
 
 ## 6. Auditoría del DoD §28 <!-- hard -->
 
@@ -518,3 +518,99 @@ section 2):
   corridas sirvieron de mutación natural para otras dos: el badge rojo resolvió al `<span>` real con
   su clase `bg-state-error/…`, y `toHaveCount(3)` de la barra del manager dio 0 cuando la página no
   era la esperada.)
+
+### Section 5 (CI: workflow `e2e-tests` y detector)
+
+- **`setup-uv`/`setup-python` NO hacían falta, y no se añadieron.** Confirmado leyendo
+  `backend-tests.yml` y el Makefile: `make up` levanta postgres/redis/backend/worker/beat/frontend
+  enteros dentro de Docker (`docker compose up -d --build`), y `make bootstrap`/`make seed-demo`
+  son `docker compose exec backend python -m app.cli.*` — todo el lado backend vive en el
+  contenedor, con su propio `uv`/Python ya resuelto por `backend/devops/Dockerfile`. El único
+  proceso que corre en el runner (fuera de Docker) es Playwright (design D1/D2), que solo necesita
+  Node — de ahí que `e2e-tests-suite` solo traiga `actions/setup-node` (mismo SHA/versión que
+  `frontend-tests.yml`) y `python3` del propio runner para `check-detect-surface.py` en el job
+  `-detect` (stdlib, sin `uv`, como los otros tres detectores).
+
+- **`timeout-minutes: 25` en `e2e-tests-suite`**, no los 15 de `frontend-tests.yml` (que no arranca
+  ningún stack) ni un valor menor: el suelo real es `make up` (build + migraciones + arranque de
+  los 6 servicios, ~1-2 min en frío), más `npm ci`/instalación de Chromium en el host, más la suite
+  misma (medida en 7.3: ~2.3-3 min, hasta ~2 min más si el limitador de login 10/min/IP —contador
+  COMPARTIDO por todo el run, steering/security.md #7— fuerza una recuperación dentro de un spec,
+  ya manejada por los specs). 25 min deja margen holgado sobre ese peor caso sin ser tan generoso
+  como para ocultar un cuelgue real.
+
+- **Credenciales de bootstrap/seed: generadas en el propio job, nunca en `.env.example`.**
+  `make bootstrap`/`make seed-demo` exigen `BOOTSTRAP_*`/`SEED_*` (nueve + seis variables,
+  `backend/app/cli/bootstrap.py`/`seed_demo.py`) y `.env.example` las deja vacías a propósito
+  (steering/security.md #8) — `make up` solo genera `JWT_SECRET_KEY`/`ENCRYPTION_KEY`, nunca estas.
+  Un nuevo paso (`Preparar .env con credenciales efímeras de bootstrap/seed`) las escribe en el
+  `.env` del runner ANTES de `make up` (tienen que existir cuando el contenedor `backend` se crea,
+  porque las recibe vía `env_file` una sola vez al arrancar), con valores desechables que solo
+  viven durante esta ejecución — ninguno es un secreto real, mismo criterio que el
+  `openssl rand -hex 32` que `backend-tests.yml` genera para su propio JWT. `frontend/e2e/fixtures/
+  load-env.ts` (task 1.1) lee ese mismo `.env` para que Playwright, en el host, inicie sesión con
+  las mismas cuentas — no hace falta exportarlas aparte como variables de entorno del job.
+
+- **Desviación estructural: un paso `docker compose down --volumes --remove-orphans || true` ANTES
+  de `make up`**, que ni el proposal ni el design piden explícitamente. Motivo: los volúmenes con
+  nombre de `make up` (`postgres_data`, entre otros) persisten en este runner *persistente* entre
+  ejecuciones del mismo workflow — a diferencia de los `services:` efímeros de
+  `backend-tests.yml` — y `make down` (el paso `if: always()` que el task 5.2 sí pide, sin tocar el
+  Makefile) para y borra contenedores pero NUNCA volúmenes. `make bootstrap` es convergente
+  (`apply_plan`, docstring de `bootstrap.py`: "a second run leaves the state the configuration
+  declares"), pero `seed_demo.py` documenta que su dataset de negocio (reservas, `CleaningTask`) NO
+  tiene esa garantía — así que cada corrida parte de volúmenes limpios en vez de confiar en una
+  idempotencia que el propio comando no promete. No se tocó el Makefile (fuera del área de
+  cambios de esta sección): la limpieza vive solo en el workflow nuevo, con `docker compose`
+  invocado directamente (equivalente a `$(COMPOSE)` sin overlay, porque el runner no es un
+  worktree enlazado — design D2).
+
+- **`e2e_surface()` en `scripts/check-detect-surface.py`**: mismo mecanismo que `frontend_surface()`
+  (mismos helpers `_job_lines`/`_run_texts`/`_root_script_refs`/`_MAKE_TARGET`), apuntado al job
+  `e2e-tests-suite` de `e2e-tests.yml` en vez de `frontend-tests-suite`. La superficie real de hoy
+  es exactamente `{"Makefile"}` (los cuatro `make <target>` de la suite; los pasos `npm`/
+  `playwright install` corren bajo `working-directory: frontend`, ya anclados por `frontend/*`,
+  igual que los pasos npm de `frontend_surface()`). Añadido a `WORKFLOWS` en el CLI y a `DETECTORS`
+  en `scripts/test_detect_surface.py`, con dos pruebas nuevas paralelas a las de frontend
+  (`test_e2e_surface_end_to_end_resolves_makefile_and_fails_closed` sintetiza un workflow con un
+  guard `scripts/` sin anclar para probar el fail-closed; `test_e2e_surface_matches_todays_real_workflow`
+  fija la superficie real de hoy) y extensión de `test_gate_altering_inputs_do_not_skip` con las
+  anclas de `e2e` (backend/**, frontend/**, docker-compose.yml, Makefile disparan; README.md no
+  sobre-dispara).
+
+- **Verificación**: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/e2e-tests.yml'))"`
+  → válido (PyYAML 6.0.3 disponible en este host). `python3 scripts/check-detect-surface.py e2e` →
+  `OK`. Los otros tres detectores (`rule11`, `compose`, `frontend`) siguen en `OK` sin cambios de
+  comportamiento. `pytest scripts/test_detect_surface.py -q` (comando real del repo para este
+  fichero — no hay `pytest.ini`/`pyproject.toml` en la raíz, así que es el `pytest` del PATH del
+  host, 7.3.1) → **23 passed** (18 preexistentes + 5 nuevas), ninguna marcada `xfail`/`skip`.
+  No se ejecutó el workflow en GitHub Actions real (no se puede desde este worktree); la
+  verificación de que la suite E2E en sí pasa contra un stack real es la de 7.3 (sección 1-4, ya
+  verde), no de esta sección — 5.1-5.3 son la superficie de CI, no una corrida nueva del stack.
+
+### Section 5 — fix round 1
+
+- **Hallazgo (revisión de seguridad, MEDIUM):** el paso "Preparar .env con credenciales
+  efímeras de bootstrap/seed" de `.github/workflows/e2e-tests.yml` escribía las cinco
+  contraseñas `BOOTSTRAP_*_PASSWORD`/`SEED_*_PASSWORD` como literales fijos en el YAML
+  (`CiE2eOwnerPassw0rd!`, etc.) — el mismo valor en cada ejecución de CI, a diferencia de
+  `JWT_SECRET_KEY`/`ENCRYPTION_KEY` (mismo fichero y `backend-tests.yml`), generados por
+  `openssl rand` en cada corrida. Incumplía steering/security.md regla 8 (cero secretos reales
+  en repo) porque, aunque el `.env` en sí es efímero, el valor commiteado en el workflow es
+  permanente y público en el historial: cualquiera con acceso de lectura conoce de antemano la
+  contraseña real de las cuentas OWNER/MANAGER/SUPER_ADMIN/CLEANER/TECHNICIAN del stack
+  efímero mientras esté vivo.
+- **Cambio:** cada uno de los cinco `set_var *_PASSWORD` ahora pasa `"$(openssl rand -hex 16)"`
+  en vez del literal — 32 caracteres hexadecimales generados en el momento, uno distinto por
+  variable y por corrida, mismo patrón que `JWT_SECRET_KEY=$(openssl rand -hex 32)` de
+  `backend-tests.yml`. Los emails/nombres (`owner@ci-e2e.test`, "CI E2E Owner", etc.) se dejan
+  como literales fijos: no son secretos y ayudan a depurar una corrida fallida.
+  Verificado contra `backend/app/auth/domain/password_policy.py`: la política real exige
+  `PASSWORD_MIN_LENGTH = 12` y `PASSWORD_MAX_BYTES = 72`, sin regla de clase de carácter — 32
+  hex chars (32 bytes) cumple ambos límites con margen.
+- **Verificación:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/e2e-tests.yml'))"`
+  → válido. `python3 scripts/check-detect-surface.py e2e` → `OK` (sin cambios, esta sección no
+  toca el detector). Grep de las cinco cadenas literales originales
+  (`CiE2eOwnerPassw0rd!`, `CiE2eManagerPassw0rd!`, `CiE2eSuperAdminPassw0rd!`,
+  `CiE2eCleanerPassw0rd!`, `CiE2eTechnicianPassw0rd!`) contra el fichero final → ninguna
+  coincidencia.
