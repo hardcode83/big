@@ -14,6 +14,7 @@ are exactly what the API would wire.
 import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -494,6 +495,23 @@ class TestOwnerStatementReads:
                 statement_id=stmt.id,
             )
 
+    async def test_get_does_not_read_collections_when_statement_is_missing(self) -> None:
+        statements = AsyncMock()
+        expenses = AsyncMock()
+        reservations = AsyncMock()
+        statements.get.return_value = None
+        use_case = GetOwnerStatementUseCase(
+            statements=statements,
+            expenses=expenses,
+            reservations=reservations,
+        )
+
+        with pytest.raises(OwnerStatementNotFoundError):
+            await use_case.execute(tenant_id=uuid.uuid4(), statement_id=uuid.uuid4())
+
+        expenses.list_for_period.assert_not_awaited()
+        reservations.list_for_properties.assert_not_awaited()
+
     async def test_list_filters_by_property(self, flow: Flow, world: World) -> None:
         # Add a second property; only one row should match.
         other = PropertyModel(
@@ -777,22 +795,21 @@ class TestExports:
 
 async def _seed_reservation(flow: Flow, world: World) -> ReservationModel:
     """A single EUR reservation that overlaps the period, plus two EUR expenses."""
-    flow.session.add(
-        ReservationModel(
-            id=uuid.uuid4(),
-            tenant_id=world.tenant.id,
-            property_id=world.property.id,
-            channel="DIRECT",
-            status="CONFIRMED",
-            check_in_date=date(2026, 7, 5),
-            check_out_date=date(2026, 7, 10),
-            nights=5,
-            gross_amount=Decimal("300.00"),
-            ota_commission=Decimal("30.00"),
-            net_amount=Decimal("270.00"),
-            currency="EUR",
-        )
+    reservation = ReservationModel(
+        id=uuid.uuid4(),
+        tenant_id=world.tenant.id,
+        property_id=world.property.id,
+        channel="DIRECT",
+        status="CONFIRMED",
+        check_in_date=date(2026, 7, 5),
+        check_out_date=date(2026, 7, 10),
+        nights=5,
+        gross_amount=Decimal("300.00"),
+        ota_commission=Decimal("30.00"),
+        net_amount=Decimal("270.00"),
+        currency="EUR",
     )
+    flow.session.add(reservation)
     flow.session.add(
         ExpenseModel(
             id=uuid.uuid4(),
@@ -806,4 +823,4 @@ async def _seed_reservation(flow: Flow, world: World) -> ReservationModel:
         )
     )
     await flow.session.flush()
-    return None
+    return reservation

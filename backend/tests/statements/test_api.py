@@ -31,6 +31,8 @@ from app.maintenance.domain.enums import (
 from app.maintenance.infrastructure.models import OwnerApprovalModel
 from app.properties.domain.enums import PropertyStatus
 from app.properties.infrastructure.models import PropertyModel
+from app.reservations.domain.enums import ReservationChannel, ReservationStatus
+from app.reservations.infrastructure.models import ReservationModel
 from app.statements.domain.enums import ExpenseCategory, OwnerStatementStatus
 from app.statements.infrastructure.models import ExpenseModel, OwnerStatementModel
 from tests.auth.conftest import (  # noqa: F401 — shared integration fixtures (see below)
@@ -299,9 +301,138 @@ class TestListOwnerStatements:
 
 
 class TestGetOwnerStatement:
-    async def test_returns_the_statement(self, api, world, db_session) -> None:
+    async def test_returns_the_statement_with_detail_breakdown(
+        self, api, world, db_session
+    ) -> None:
         statement = await _make_statement(db_session, world, notes="Post-stay review")
+        statement.gross_revenue = Decimal("300.00")
+        statement.ota_commissions = Decimal("45.00")
+        statement.net_revenue = Decimal("255.00")
+        statement.cleaning_costs = Decimal("50.00")
+        statement.laundry_costs = Decimal("10.00")
+        statement.amenities_costs = Decimal("5.00")
+        statement.maintenance_costs = Decimal("15.00")
+        statement.specialist_costs = Decimal("20.00")
+        statement.platform_fee = Decimal("3.00")
+        statement.other_costs = Decimal("2.00")
+        statement.net_owner_result = Decimal("150.00")
         db_session.add(statement)
+        await db_session.flush()
+        other_property = PropertyModel(
+            id=uuid.uuid4(),
+            tenant_id=world.tenant_a.id,
+            name="Other property",
+            internal_code="OTHER",
+            status=PropertyStatus.ACTIVE,
+        )
+        db_session.add(other_property)
+        await db_session.flush()
+        expense = await _make_expense(
+            db_session, world, description="Linen service", statement_id=statement.id
+        )
+        await _make_expense(db_session, world, description="Unassociated")
+        await _make_expense(
+            db_session, world, description="Outside period", date_=date(2026, 6, 30), statement_id=statement.id
+        )
+        same_tenant_other_property_expense = ExpenseModel(
+            id=uuid.uuid4(),
+            tenant_id=world.tenant_a.id,
+            property_id=other_property.id,
+            category=ExpenseCategory.CLEANING,
+            description="Other property expense",
+            amount=Decimal("888.00"),
+            date=date(2026, 7, 12),
+            currency="EUR",
+            statement_id=statement.id,
+        )
+        db_session.add(same_tenant_other_property_expense)
+        foreign_expense = ExpenseModel(
+            id=uuid.uuid4(),
+            tenant_id=world.tenant_b.id,
+            property_id=world.prop_b.id,
+            category=ExpenseCategory.CLEANING,
+            description="Foreign expense",
+            amount=Decimal("999.00"),
+            date=date(2026, 7, 12),
+            currency="EUR",
+            statement_id=statement.id,
+        )
+        db_session.add(foreign_expense)
+        reservation = ReservationModel(
+            id=uuid.uuid4(),
+            tenant_id=world.tenant_a.id,
+            property_id=world.prop_a.id,
+            channel=ReservationChannel.BOOKING,
+            status=ReservationStatus.CONFIRMED,
+            check_in_date=date(2026, 7, 10),
+            check_out_date=date(2026, 7, 13),
+            nights=3,
+            gross_amount=Decimal("300.00"),
+            ota_commission=Decimal("45.00"),
+            net_amount=Decimal("255.00"),
+            currency="EUR",
+        )
+        db_session.add(reservation)
+        non_eur_reservation = ReservationModel(
+            id=uuid.uuid4(),
+            tenant_id=world.tenant_a.id,
+            property_id=world.prop_a.id,
+            channel=ReservationChannel.BOOKING,
+            status=ReservationStatus.CONFIRMED,
+            check_in_date=date(2026, 7, 15),
+            check_out_date=date(2026, 7, 16),
+            nights=1,
+            gross_amount=Decimal("999.00"),
+            ota_commission=Decimal("1.00"),
+            net_amount=Decimal("998.00"),
+            currency="USD",
+        )
+        db_session.add(non_eur_reservation)
+        out_of_period_reservation = ReservationModel(
+            id=uuid.uuid4(),
+            tenant_id=world.tenant_a.id,
+            property_id=world.prop_a.id,
+            channel=ReservationChannel.BOOKING,
+            status=ReservationStatus.CONFIRMED,
+            check_in_date=date(2026, 6, 15),
+            check_out_date=date(2026, 6, 16),
+            nights=1,
+            gross_amount=Decimal("777.00"),
+            ota_commission=Decimal("1.00"),
+            net_amount=Decimal("776.00"),
+            currency="EUR",
+        )
+        db_session.add(out_of_period_reservation)
+        same_tenant_other_property_reservation = ReservationModel(
+            id=uuid.uuid4(),
+            tenant_id=world.tenant_a.id,
+            property_id=other_property.id,
+            channel=ReservationChannel.BOOKING,
+            status=ReservationStatus.CONFIRMED,
+            check_in_date=date(2026, 7, 15),
+            check_out_date=date(2026, 7, 16),
+            nights=1,
+            gross_amount=Decimal("666.00"),
+            ota_commission=Decimal("1.00"),
+            net_amount=Decimal("665.00"),
+            currency="EUR",
+        )
+        db_session.add(same_tenant_other_property_reservation)
+        foreign_reservation = ReservationModel(
+            id=uuid.uuid4(),
+            tenant_id=world.tenant_b.id,
+            property_id=world.prop_b.id,
+            channel=ReservationChannel.BOOKING,
+            status=ReservationStatus.CONFIRMED,
+            check_in_date=date(2026, 7, 15),
+            check_out_date=date(2026, 7, 16),
+            nights=1,
+            gross_amount=Decimal("999.00"),
+            ota_commission=Decimal("1.00"),
+            net_amount=Decimal("998.00"),
+            currency="EUR",
+        )
+        db_session.add(foreign_reservation)
         await db_session.flush()
 
         response = await api.get(
@@ -311,9 +442,50 @@ class TestGetOwnerStatement:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["id"] == str(statement.id)
-        assert body["notes"] == "Post-stay review"
-        assert body["status"] == "DRAFT"
+        expected_summary = {
+            "id": str(statement.id),
+            "property_id": str(statement.property_id),
+            "period_start": "2026-07-01",
+            "period_end": "2026-07-31",
+            "status": "DRAFT",
+            "notes": "Post-stay review",
+            "gross_revenue": "300.00",
+            "ota_commissions": "45.00",
+            "net_revenue": "255.00",
+            "cleaning_costs": "50.00",
+            "laundry_costs": "10.00",
+            "amenities_costs": "5.00",
+            "maintenance_costs": "15.00",
+            "specialist_costs": "20.00",
+            "platform_fee": "3.00",
+            "other_costs": "2.00",
+            "net_owner_result": "150.00",
+            "created_at": body["created_at"],
+            "updated_at": body["updated_at"],
+        }
+        assert {key: body[key] for key in expected_summary} == expected_summary
+        assert set(body) == set(expected_summary) | {"expenses", "reservations"}
+        assert body["expenses"] == [
+            {
+                "id": str(expense.id),
+                "category": "CLEANING",
+                "description": "Linen service",
+                "amount": "50.00",
+                "currency": "EUR",
+                "date": "2026-07-12",
+            }
+        ]
+        assert body["reservations"] == [
+            {
+                "id": str(reservation.id),
+                "check_in_date": "2026-07-10",
+                "nights": 3,
+                "gross_amount": "300.00",
+                "ota_commission": "45.00",
+                "net_amount": "255.00",
+                "currency": "EUR",
+            }
+        ]
 
     async def test_cross_tenant_id_returns_404(
         self, api, world, db_session
@@ -338,6 +510,33 @@ class TestGetOwnerStatement:
         # R3.4: same body whether the id is unknown or belongs to another tenant.
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "NOT_FOUND"
+
+    async def test_unknown_id_has_the_same_404_body_as_cross_tenant(
+        self, api, world, db_session
+    ) -> None:
+        foreign_statement = OwnerStatementModel(
+            id=uuid.uuid4(),
+            tenant_id=world.tenant_b.id,
+            property_id=world.prop_b.id,
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+            status=OwnerStatementStatus.DRAFT,
+        )
+        db_session.add(foreign_statement)
+        await db_session.flush()
+
+        foreign_response = await api.get(
+            f"/api/v1/owner-statements/{foreign_statement.id}",
+            headers=_auth(api, world.owner_a),
+        )
+        unknown_response = await api.get(
+            f"/api/v1/owner-statements/{uuid.uuid4()}",
+            headers=_auth(api, world.owner_a),
+        )
+
+        assert foreign_response.status_code == 404
+        assert unknown_response.status_code == 404
+        assert unknown_response.json() == foreign_response.json()
 
 
 # ---- /api/v1/owner-statements/generate POST (R2.1, R2.3) -----------------------------
