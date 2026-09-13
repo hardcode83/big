@@ -404,3 +404,113 @@ async def test_the_stored_row_never_holds_a_plaintext_code(
     assert "code" not in columns
     assert "code_plain" not in columns
     assert "code_masked" in columns
+
+
+# --- `list_awaiting_instructions` (`guest-scheduled-comms` R3, design D6/D9) ------------------
+
+
+@pytest.mark.asyncio
+async def test_manual_added_and_created_external_with_a_mask_are_both_candidates(
+    db_session, tenant_a, property_a
+) -> None:
+    reservation = await insert_reservation(db_session, tenant_a, property_a)
+    manual = await insert_access_record(
+        db_session,
+        tenant_a,
+        property_a,
+        reservation=reservation,
+        status=AccessRecordStatus.MANUAL_ADDED,
+        code_masked="****11",
+    )
+    external = await insert_access_record(
+        db_session,
+        tenant_a,
+        property_a,
+        status=AccessRecordStatus.CREATED_EXTERNAL,
+        code_masked="****22",
+    )
+
+    found = await SqlAlchemyAccessRecordRepository(db_session).list_awaiting_instructions(
+        tenant_a.id, limit=50
+    )
+
+    assert {record.id for record in found} == {manual.id, external.id}
+
+
+@pytest.mark.asyncio
+async def test_a_record_with_no_mask_is_not_a_candidate(
+    db_session, tenant_a, property_a
+) -> None:
+    await insert_access_record(
+        db_session,
+        tenant_a,
+        property_a,
+        status=AccessRecordStatus.MANUAL_ADDED,
+        code_masked=None,
+    )
+
+    found = await SqlAlchemyAccessRecordRepository(db_session).list_awaiting_instructions(
+        tenant_a.id, limit=50
+    )
+
+    assert found == []
+
+
+@pytest.mark.asyncio
+async def test_pending_delivered_revoked_and_expired_are_not_candidates(
+    db_session, tenant_a, property_a
+) -> None:
+    for status in (
+        AccessRecordStatus.PENDING,
+        AccessRecordStatus.DELIVERED,
+        AccessRecordStatus.REVOKED,
+        AccessRecordStatus.EXPIRED,
+    ):
+        await insert_access_record(
+            db_session, tenant_a, property_a, status=status, code_masked="****33"
+        )
+
+    found = await SqlAlchemyAccessRecordRepository(db_session).list_awaiting_instructions(
+        tenant_a.id, limit=50
+    )
+
+    assert found == []
+
+
+@pytest.mark.asyncio
+async def test_a_neighbour_tenants_candidate_is_never_returned(
+    db_session, tenant_a, tenant_b, property_a, property_b
+) -> None:
+    await insert_access_record(
+        db_session,
+        tenant_b,
+        property_b,
+        status=AccessRecordStatus.MANUAL_ADDED,
+        code_masked="****44",
+    )
+
+    found = await SqlAlchemyAccessRecordRepository(db_session).list_awaiting_instructions(
+        tenant_a.id, limit=50
+    )
+
+    assert found == []
+
+
+@pytest.mark.asyncio
+async def test_the_limit_bounds_the_candidate_query(
+    db_session, tenant_a, property_a
+) -> None:
+    for _ in range(3):
+        await insert_access_record(
+            db_session,
+            tenant_a,
+            property_a,
+            status=AccessRecordStatus.MANUAL_ADDED,
+            code_masked="****55",
+        )
+
+    found = await SqlAlchemyAccessRecordRepository(db_session).list_awaiting_instructions(
+        tenant_a.id, limit=2
+    )
+
+    assert len(found) == 2

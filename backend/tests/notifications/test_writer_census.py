@@ -120,6 +120,10 @@ WITH_WRITER = frozenset(
         # reservation, via `render_checkout_reminder_email` in
         # `reservations/domain/notifications.py`.
         "CHECKOUT_REMINDER",
+        # `guest-scheduled-comms` R3 (section 3) — `DeliverAccessInstructionsUseCase`
+        # (`access/application/use_cases.py`) writes one row per qualifying `AccessRecord`, via
+        # `render_access_instructions_email` in `access/domain/notifications.py`.
+        "ACCESS_INSTRUCTIONS_SENT",
     }
 )
 
@@ -195,15 +199,16 @@ def test_the_two_lists_partition_the_enum() -> None:
     assert not (WITH_WRITER & WITHOUT_WRITER)
 
 
-def test_exactly_four_types_have_no_writer() -> None:
+def test_exactly_one_type_has_no_writer() -> None:
     """R6.2 — the list is literal, so shrinking it requires saying which type gained a writer.
 
     Down to one as of `guest-scheduled-comms` section 2: `CHECKIN_REMINDER_24H`,
-    `CHECKIN_REMINDER_2H` (section 1) and now `CHECKOUT_REMINDER` (section 2,
-    `SendCheckoutRemindersUseCase`) all have their writer, leaving only `LOCK_ALERT`. The
-    function name is stale — kept until section 3 retitles it alongside
-    `ACCESS_INSTRUCTIONS_SENT`'s own writer, per this change's `tasks.md` §1.5/§3.6 — but the
-    assertion itself is measured, not carried forward.
+    `CHECKIN_REMINDER_2H` (section 1) and `CHECKOUT_REMINDER` (section 2,
+    `SendCheckoutRemindersUseCase`) all have their writer, leaving only `LOCK_ALERT`. Section 3
+    adds `ACCESS_INSTRUCTIONS_SENT` (`DeliverAccessInstructionsUseCase`), which does not change
+    this count — it was never in `WITHOUT_WRITER` to begin with, it simply had no writer until
+    now. Retitled from `test_exactly_four_types_have_no_writer`, which had gone stale two
+    sections ago; the assertion itself is measured, not carried forward.
     """
     assert WITHOUT_WRITER == {
         "LOCK_ALERT",
@@ -336,6 +341,12 @@ CONSTRUCTION_SITES = {
     # email rather than a `User` the channel resolver knows how to fan out to — design D12).
     "reservations/domain/notifications.py",
     "reservations/application/use_cases.py",
+    # `guest-scheduled-comms` R3 (section 3) — `render_access_instructions_email`'s home, and
+    # `DeliverAccessInstructionsUseCase`'s own construction site below. Same reasoning as the
+    # two `reservations` entries above: the recipient is a guest's email, not a `User` the
+    # channel resolver knows how to fan out to (design D12), so the row is composed inline.
+    "access/domain/notifications.py",
+    "access/application/use_cases.py",
     # Two writers that predate the builder convention and compose their row inline.
     "auth/application/recovery.py",
     "guests/application/use_cases.py",

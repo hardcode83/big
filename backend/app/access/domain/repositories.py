@@ -125,3 +125,25 @@ class AccessRecordRepository(Protocol):
     ) -> Sequence[AccessRecord]:
         """Live records whose reservation is cancelled (R1.4)."""
         ...
+
+    async def list_awaiting_instructions(
+        self, tenant_id: uuid.UUID, *, limit: int
+    ) -> Sequence[AccessRecord]:
+        """The candidate query of `DeliverAccessInstructionsUseCase` (`guest-scheduled-comms`
+        R3, design D6/D9).
+
+        A record with a code to send: `status` in `{MANUAL_ADDED, CREATED_EXTERNAL}` — the two
+        states `code_masked` is guaranteed set for — **and** `code_masked` itself non-null,
+        checked explicitly rather than assumed from the status alone. `DELIVERED` is
+        deliberately excluded even though it also carries a `code_masked`: an operator has
+        already confirmed the guest has it, through their own independent channel (R3.4), and
+        this sweep has nothing left to do for that record.
+
+        Deliberately approximate the same way `list_reservations_missing_records` is (design
+        D4 of the reminder use cases): a record already notified is still returned here, and
+        `exists_for` in the use case is what actually stops a second send. No `WHERE NOT
+        EXISTS (... notification_logs ...)` here — keeping the two concerns apart is what
+        `SendCheckinRemindersUseCase` already does, and repeating that join per repository
+        would duplicate the one thing `exists_for` exists to answer once.
+        """
+        ...

@@ -22,6 +22,7 @@ from datetime import datetime
 from app.access.domain.entities import AccessRecord
 from app.access.domain.enums import AccessRecordStatus
 from app.access.domain.exceptions import AccessRecordNotFoundError
+from app.access.domain.notifications import render_access_instructions_email
 from app.access.domain.ports import AccessProviderAdapter, LegalRegistrationInitialiser
 from app.access.domain.repositories import (
     AccessRecordFilters,
@@ -33,6 +34,15 @@ from app.audit.domain.repositories import AuditLogRepository
 from app.audit.domain.services import AuditLogFactory
 from app.audit.domain.value_objects import ChangeSet
 from app.core.unit_of_work import UnitOfWork
+from app.guests.domain.repositories import GuestRepository
+from app.notifications.domain.entities import NotificationLog
+from app.notifications.domain.enums import (
+    NotificationChannel,
+    NotificationStatus,
+    NotificationType,
+)
+from app.notifications.domain.repositories import NotificationLogRepository
+from app.reservations.domain.repositories import ReservationRepository
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType
 from app.timeline.domain.repositories import TimelineEventRepository
 from app.timeline.domain.services import TimelineEventFactory
@@ -470,3 +480,167 @@ class ProvisionAccessRecordsUseCase(_AccessOperationBase):
                 now=now,
             )
             report.expired += 1
+
+
+# --- `guest-scheduled-comms` R3: automatic access-instructions delivery (design D6, D8, D9, D12)
+
+#: `related_type` this use case's rows are dedup-keyed on (design D8) — an access record, never
+#: the reservation it is linked to, so a stay's check-in/checkout reminders and its access
+#: instructions are independent dedup keys even though they may share a `reservation_id`.
+RELATED_TYPE_ACCESS_RECORD = "access_record"
+
+
+@dataclass
+class DeliverAccessInstructionsReport:
+    """What one tenant's sweep did (R3, R4).
+
+    `candidates` counts every `AccessRecord` `list_awaiting_instructions` returned —
+    `MANUAL_ADDED`/`CREATED_EXTERNAL` with a masked code — whether or not it already had a
+    notification from a previous run. `skipped_missing_email` is R3.3's "skip and count" case.
+    Neither a dedup hit nor a missing-email skip aborts the tenant's sweep (R4).
+    """
+
+    candidates: int = 0
+    written: int = 0
+    skipped_missing_email: int = 0
+
+
+class DeliverAccessInstructionsUseCase:
+    """`deliver_access_instructions` (`guest-scheduled-comms` R3; design D6, D8, D9, D12).
+
+    **Reads and writes `NotificationLog` only.** It does not extend `_AccessOperationBase`:
+    that base class exists to move an `AccessRecord` through its own state machine and persist
+    the transition, timeline event and audit row that go with it, and this use case does none
+    of that — design D9 and proposal R3.4 are explicit that `AccessRecord.status` (and
+    `mark_delivered`, `POST /access-records/{id}/delivered`) stay entirely the operator's own,
+    independent confirmation, untouched by this automatic send.
+
+    Same shape as `SendCheckinRemindersUseCase`/`SendCheckoutRemindersUseCase`
+    (`reservations/application/use_cases.py`): a per-tenant candidate query
+    (`list_awaiting_instructions`), a recipient resolved through the linked reservation's guest
+    (skip-and-count on a missing email, design D5), `exists_for` dedup (design D8) before one
+    `PENDING` row per candidate, `channel=EMAIL` unconditionally (design D12 — a guest has no
+    `User` row and no authenticated inbox, so the channel resolver's fan-out does not apply),
+    and no `sla_deadline_at` (design D11 — nobody is escalated to over a guest reminder).
+
+    Only the masked form of the code ever reaches the rendered body (rule 11 of
+    `sdd/steering/security.md`, exception 1): `render_access_instructions_email` takes
+    `record.code_masked` and the recipient's language, nothing else from `AccessRecord` — never
+    `notes`.
+    """
+
+    def __init__(
+        self,
+        *,
+        records: AccessRecordRepository,
+        reservations: ReservationRepository,
+        guests: GuestRepository,
+        notifications: NotificationLogRepository,
+        uow: UnitOfWork,
+        batch_size: int,
+    ) -> None:
+        self._records = records
+        self._reservations = reservations
+        self._guests = guests
+        self._notifications = notifications
+        self._uow = uow
+        self._batch_size = batch_size
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, now: datetime
+    ) -> DeliverAccessInstructionsReport:
+        report = DeliverAccessInstructionsReport()
+
+        candidates = await self._records.list_awaiting_instructions(
+            tenant_id, limit=self._batch_size
+        )
+        for record in candidates:
+            report.candidates += 1
+            if record.code_masked is None:
+                # Unreachable: `list_awaiting_instructions` itself filters on `code_masked IS
+                # NOT NULL`. Defensive only, so a future change to that query cannot silently
+                # start rendering a mask that does not exist.
+                continue
+
+            recipient = await self._recipient(tenant_id, record.reservation_id)
+            if recipient is None:
+                report.skipped_missing_email += 1
+                continue
+            email, language = recipient
+
+            subject, body = render_access_instructions_email(language, record.code_masked)
+
+            if await self._write_if_new(tenant_id, record.id, email, subject, body, now):
+                report.written += 1
+
+        await self._uow.commit()
+        return report
+
+    async def _write_if_new(
+        self,
+        tenant_id: uuid.UUID,
+        record_id: uuid.UUID,
+        email: str,
+        subject: str,
+        body: str,
+        now: datetime,
+    ) -> bool:
+        """`exists_for` dedup (design D8), then one literal `NotificationLog(...)` construction
+        with `notification_type=NotificationType.ACCESS_INSTRUCTIONS_SENT.value` at the call
+        site itself — the AST shape `tests/notifications/test_writer_census.py` requires (see
+        `SendCheckinRemindersUseCase._write_if_new`'s docstring for why a variable holding the
+        member would be invisible to it).
+        """
+        if await self._notifications.exists_for(
+            tenant_id,
+            related_type=RELATED_TYPE_ACCESS_RECORD,
+            related_id=record_id,
+            notification_type=NotificationType.ACCESS_INSTRUCTIONS_SENT.value,
+        ):
+            return False
+
+        await self._notifications.add(
+            tenant_id,
+            NotificationLog(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                recipient_contact=email,
+                channel=NotificationChannel.EMAIL,
+                notification_type=NotificationType.ACCESS_INSTRUCTIONS_SENT.value,
+                created_at=now,
+                updated_at=now,
+                subject=subject,
+                body=body,
+                status=NotificationStatus.PENDING,
+                related_type=RELATED_TYPE_ACCESS_RECORD,
+                related_id=record_id,
+                # D11: no SLA deadline — same reasoning as the check-in/checkout writers.
+                sla_deadline_at=None,
+            ),
+        )
+        return True
+
+    async def _recipient(
+        self, tenant_id: uuid.UUID, reservation_id: uuid.UUID | None
+    ) -> tuple[str, str] | None:
+        """The linked reservation's guest email and preferred language, or `None` to
+        skip-and-count (R3.3, design D5).
+
+        Two hops rather than one: `AccessRecord` names a `reservation_id`, not a guest, so the
+        reservation is loaded first to find the `guest_id` the check-in/checkout use cases
+        already have directly.
+        """
+        if reservation_id is None:
+            return None
+        reservation = await self._reservations.get(tenant_id, reservation_id)
+        if reservation is None:
+            return None
+        if reservation.guest_id is None:
+            return None
+        guest = await self._guests.get(tenant_id, reservation.guest_id)
+        if guest is None:
+            return None
+        email = (guest.email or "").strip()
+        if not email:
+            return None
+        return email, guest.preferred_language

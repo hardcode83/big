@@ -103,6 +103,11 @@ CHANNEL_LITERAL_WHITELIST = frozenset(
         # authenticated inbox and no `User` row. Same shape and same reason as
         # `app/guests/application/portal.py`'s entry above.
         "app/reservations/application/use_cases.py",
+        # `guest-scheduled-comms` design D12 — `DeliverAccessInstructionsUseCase` targets
+        # `NotificationChannel.EMAIL` directly, for the same reason as the entry above: the
+        # recipient is a guest's email, not a `User` the resolver/dispatcher know how to fan
+        # out to.
+        "app/access/application/use_cases.py",
         # The guard itself — its own scan and the literal it builds to compare
         # against the set it just collected.
         "tests/notifications/test_channel_literals.py",
@@ -193,6 +198,7 @@ class TestChannelLiterals:
                 "app/notifications/infrastructure/repositories.py",
                 "app/notifications/domain/repositories.py",
                 "app/reservations/application/use_cases.py",
+                "app/access/application/use_cases.py",
                 "tests/notifications/test_channel_literals.py",
             }
         )

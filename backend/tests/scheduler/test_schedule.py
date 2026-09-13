@@ -77,6 +77,15 @@ PRD_8_3 = {
 #:                                                            reminder job at all. Same
 #:                                                            cadence and reasoning as
 #:                                                            `send_checkin_reminders`.
+#:   deliver_access_instructions                  | 15 min | `guest-scheduled-comms` R3, D9 —
+#:                                                            its own task, deliberately not
+#:                                                            folded into
+#:                                                            `provision_access_records` (that
+#:                                                            reconciler stays scoped to
+#:                                                            create/revoke/expire). Same
+#:                                                            fifteen-minute cadence as the
+#:                                                            other two `guest-scheduled-comms`
+#:                                                            jobs.
 BEYOND_PRD_8_3 = {
     "dispatch_notifications": timedelta(minutes=1),
     "provision_access_records": timedelta(minutes=5),
@@ -90,6 +99,8 @@ BEYOND_PRD_8_3 = {
     "send_checkin_reminders": timedelta(minutes=15),
     # `guest-scheduled-comms` R2, D1/D2 — see the note above this table.
     "send_checkout_reminders": timedelta(minutes=15),
+    # `guest-scheduled-comms` R3, D9 — see the note above this table.
+    "deliver_access_instructions": timedelta(minutes=15),
 }
 
 ALL_CADENCES = PRD_8_3 | BEYOND_PRD_8_3
