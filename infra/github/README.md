@@ -2,7 +2,7 @@
 
 **Propósito:** declarar la parte de la organización `autohostai-labs/AutoHostAI` que hoy se gestiona a mano desde la consola de GitHub — settings del repo, secrets y variables de Actions, instalación de la GitHub App, branch protection — como código Terraform ejecutable por el pipeline. Es un **tercer patrón** del layout `infra/` (junto a `environments/<env>/` y `modules/`): superficies **por-organización** que no son por entorno. Ver `sdd/steering/infra.md` §Convención de layout.
 
-**Estado:** sección 1 — bootstrap del módulo (estructura, backend, variables). Los recursos del provider `integrations/github` se añaden en secciones 2+ (ver `sdd/changes/infra-github-iac/tasks.md`).
+**Estado:** secciones 1-7 implementadas y certificadas por el panel de `/sdd:run` — módulo completo (settings del repo, secrets/variables de Actions, verificación de packages/GHCR, workflow `infra-github` con `check`/`verify-ghcr`/`plan`/`apply`, RUNBOOK). Solo queda pendiente la sección 8 (verificación "deploy from zero" en vivo), diferida a post-merge — ver `sdd/changes/infra-github-iac/BLOCKED.md`.
 
 ## Por qué módulo aparte (no dentro de `infra/environments/dev/`)
 
@@ -27,7 +27,7 @@ Las variables **sensibles** no van en ningún `.tfvars`: se inyectan por `TF_VAR
 
 ## Secrets de GitHub Actions esperados
 
-El workflow `infra-github` (job `plan`/`apply`, disparo `workflow_dispatch`, aún no creado — sección 6) consume los mismos secrets de OCI que `infra-dev`, más los específicos del provider `github`. Mismas reglas que `infra/environments/dev/README.md` §"Secrets de GitHub Actions esperados":
+El workflow `infra-github` (jobs `check`, `verify-ghcr`, `plan`/`apply` — disparo `workflow_dispatch` para `plan`/`apply`, `pull_request` para `check`/`verify-ghcr` — implementado en `.github/workflows/infra-github.yml`) consume los mismos secrets de OCI que `infra-dev`, más los específicos del provider `github`. Mismas reglas que `infra/environments/dev/README.md` §"Secrets de GitHub Actions esperados":
 
 | Secret | Para qué |
 |---|---|

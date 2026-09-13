@@ -186,10 +186,20 @@ resource "github_actions_secret" "oci_fingerprint" {
 # `oci`. El workflow escribe el secret a un fichero temporal y pasa la ruta;
 # aquí se lee con `file()` para evitar embeber un PEM multilínea en un string
 # HCL (mismo motivo que `infra-dev.yml`).
+#
+# `trimspace()` — el workflow escribe el fichero con `printf '%s\n' ...`
+# (trailing newline añadido a propósito). Sin `trimspace()`, este recurso
+# escribiría de vuelta el secreto `OCI_PRIVATE_KEY` CON esa newline añadida;
+# como es el MISMO secreto que autentica el provider/backend `oci` (aquí y en
+# `infra-dev.yml`), cada `apply` volvería a leer un valor ya-con-newline y le
+# añadiría otra encima — corrupción autoperpetuada de la credencial viva.
+# `trimspace()` hace el write idempotente sin tocar el `printf` del workflow
+# (que se deja tal cual — es más barato neutralizarlo aquí, un único punto,
+# que en los dos jobs `plan`/`apply`).
 resource "github_actions_secret" "oci_private_key" {
   repository      = var.github_repository_name
   secret_name     = "OCI_PRIVATE_KEY"
-  plaintext_value = file(var.oci_private_key_path)
+  plaintext_value = trimspace(file(var.oci_private_key_path))
 }
 
 # 6. OCI_REGION — identificador técnico de la región (p. ej. `eu-frankfurt-1`).
