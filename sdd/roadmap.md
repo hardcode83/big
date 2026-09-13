@@ -243,6 +243,8 @@ Categorías:
   size: S · kind: tech
 - [x] revenue-statements — [BE] **liquidaciones al propietario**: `OwnerStatement` + `Expense`, statement mensual por propiedad, export CSV de gastos, desglose financiero por reserva y PDF exportable (PRD §26.24, §20, §7.22-7.23). Sin facturación fiscal (no está en el plan original, separada de `revenue` el 2026-08-16) → changes/archive/2026-09-02-revenue-statements/
   size: M · kind: feature
+- [ ] revenue-statements-detail-breakdown — [BE] **el GET de detalle de liquidación publica el resumen junto con las proyecciones financieras mínimas de reservas y gastos**, manteniendo separado el contrato del listado y de las mutaciones
+  needs: revenue-statements · size: S · kind: feature
 - [ ] expense-approval-response — [BE] **`OwnerApproval(related_type=OTHER)` no tiene ninguna ruta por la que la propietaria pueda responderla** …
   needs: revenue-statements · size: S · kind: feature
 - [ ] statements-web — [FE] **`/statements`, hoy `RoutePlaceholder` sobre un backend entregado** …
