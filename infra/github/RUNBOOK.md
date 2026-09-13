@@ -2,7 +2,7 @@
 
 Procedimientos de operación/rotación de la superficie **GitHub-side** de `autohostai-labs/AutoHostAI`. Complementa al [`README.md`](./README.md) (uso del módulo) y al [`docs/adr/0002-github-org-hosting.md`](../../docs/adr/0002-github-org-hosting.md) (decisión de la org). Los cambios de este módulo se aplican **por el pipeline** (`workflow_dispatch` de `.github/workflows/infra-github.yml`), no con `terraform apply` local — mismo modelo de aprobación que describe [`infra/environments/dev/RUNBOOK.md` §0](../environments/dev/RUNBOOK.md).
 
-Referencias rápidas: org `autohostai-labs` (plan **Free**) · repo `autohostai-labs/AutoHostAI` (**privado**) · provider `integrations/github` pinado a `~> 5.0` (resuelve a **v5.45.0**) · state en el bucket `autohostai-tfstate-dev`, key `github.tfstate` · **adopción de los recursos que ya existen en GitHub: [`import.sh`](./import.sh)** — imprime los `terraform import` del primer `apply` (once secrets + cuatro variables); se ejecuta **una sola vez**, procedimiento en [§2.4](#24-adopción-de-los-recursos-existentes-importsh).
+Referencias rápidas: org `autohostai-labs` (plan **Free**) · repo `autohostai-labs/AutoHostAI` (**privado**) · provider `integrations/github` pinado a `~> 5.0` (resuelve a **v5.45.0**) · state en el bucket `autohostai-tfstate-dev`, key `github.tfstate` · **adopción de los recursos que ya existen en GitHub: [`import.sh`](./import.sh)** — imprime los `terraform import` del primer `apply` (el repo + once secrets + cuatro variables, dieciséis recursos); se ejecuta **una sola vez**, procedimiento en [§2.4](#24-adopción-de-los-recursos-existentes-importsh).
 
 > ⚠️ Este documento **no contiene ningún valor real** de credencial, OCID, fingerprint ni clave privada: todo va como placeholder `<...>`. Los valores viven en los GitHub Secrets/Variables del repo y en el OCI Vault del entorno.
 
@@ -112,16 +112,11 @@ bash infra/github/import.sh | bash     # los ejecuta (solo en el runner de CI, t
 
 Formatos de ID (distintos por tipo de recurso en el provider v5.45.0 — confundirlos produce un `Error: parse ID`):
 
+- `github_repository` → nombre del repo a secas (**sin owner, sin dos puntos, sin barra**) — convención estable del provider para este recurso; no está en el CHANGELOG vendorizado localmente, así que se trata como plausible-no-confirmado-localmente hasta el primer `import` real.
 - `github_actions_secret.<n>` → `<repository>/<SECRET_NAME>` (**barra**)
 - `github_actions_variable.<n>` → `<repository>:<VARIABLE_NAME>` (**dos puntos**)
 
-El script cubre hoy esos **quince** recursos. El repo en sí (`github_repository.this`, [§2.1](#21-settings-del-repo-r2--github_repositorythis)) se adopta con un import adicional que **aún no está en el script** y se ejecuta a mano antes que el resto:
-
-```bash
-terraform -chdir=infra/github import github_repository.this AutoHostAI
-```
-
-Se ejecuta **una sola vez**. Tras el import, `terraform plan` debe quedar **vacío** sobre estos recursos; cualquier diff es un bug del script o un cambio a mano en la consola.
+El script cubre hoy los **dieciséis** recursos: `github_repository.this` ([§2.1](#21-settings-del-repo-r2--github_repositorythis)), los once secrets y las cuatro variables. Se ejecuta **una sola vez**. Tras el import, `terraform plan` debe quedar **vacío** sobre estos recursos; cualquier diff es un bug del script o un cambio a mano en la consola.
 
 ### 2.5 Lo que NO es un recurso de este módulo
 

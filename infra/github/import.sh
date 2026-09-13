@@ -7,19 +7,27 @@
 # (R3 + R5 + D6): after the import the resources live in Terraform and every
 # subsequent `apply` reconciles them.
 #
-# SECTIONS (sección 3 añadió los once secrets; sección 4 añade las cuatro
-# variables — el branch protection de la tarea 4.3 original NO se declara:
-# D5 se enmendó en la propia sección 4 tras confirmar en vivo que la API la
-# rechaza por completo en el plan Free, no solo el sub-bloque de reviewers;
-# ver `sdd/changes/infra-github-iac/design.md` §D5 y `main.tf`):
-#   3.1 — eleven github_actions_secret.*            (sección 3, importado en commit 74d96322)
-#   4.1 — four  github_actions_variable.*           (sección 4, tarea 4.2)
+# SECTIONS (sección 2 declaró github_repository.this; sección 3 añadió los
+# once secrets; sección 4 añade las cuatro variables — el branch protection
+# de la tarea 4.3 original NO se declara: D5 se enmendó en la propia sección 4
+# tras confirmar en vivo que la API la rechaza por completo en el plan Free,
+# no solo el sub-bloque de reviewers; ver `sdd/changes/infra-github-iac/
+# design.md` §D5 y `main.tf`):
+#   2.2 — one    github_repository.this                (sección 2; import añadido en sección 5 — gap detectado por el implementer de esa sección, ver tasks.md Implementation Notes)
+#   3.1 — eleven github_actions_secret.*                (sección 3, importado en commit 74d96322)
+#   4.1 — four   github_actions_variable.*              (sección 4, tarea 4.2)
 #
 # FORMAT (correction vs. some task text):
 # The provider `integrations/github` v5.45.0 accepts DIFFERENT import ID formats
 # per resource kind (verified against the upstream import functions at tag
-# v5.45.0 and the `terraform-provider-github` v5.45.0 README/CHANGELOG):
+# v5.45.0 and the `terraform-provider-github` v5.45.0 README/CHANGELOG, except
+# `github_repository` — the bare repo name is the provider's long-standing
+# documented convention for that resource across major versions; not found in
+# the locally vendored CHANGELOG, so treat as plausible-not-locally-confirmed
+# and verify against the live `terraform import` error message if it rejects
+# the ID):
 #
+#   github_repository                 <repository name>                   (bare name, no owner/colon/slash)
 #   github_actions_secret.<name>      <repository>/<secret_name>          (slash)
 #   github_actions_variable.<name>    <repository>:<variable_name>        (colon)
 #
@@ -58,6 +66,12 @@ cat <<EOF
 # Each line is idempotent against the resource in GitHub; running twice is safe
 # only if the resource hasn't been re-created in the meantime.
 # ============================================================================
+
+# --- Sección 2 — one github_repository.this (R2.3 — adopts the existing repo,
+# never creates it) ---
+# Format: bare repository name (no owner, no colon, no slash).
+
+terraform import github_repository.this                      ${REPO}
 
 # --- Sección 3 — eleven github_actions_secret.* (R3.1) ---
 # Format: <repository>/<secret_name>
