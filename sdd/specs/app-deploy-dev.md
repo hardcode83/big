@@ -128,4 +128,4 @@ Desplegado y verificado end-to-end (deploy verde, todos los servicios `healthy`,
 
 El **TLS/HTTPS ya está resuelto** por el change `ingress-https-dev`: la app se sirve en `https://autohostai.digitalsec.work` a través de un Cloudflare Tunnel y los puertos 8000/3000 dejaron de estar expuestos. Ver su spec.
 
-Pendiente/futuro: adoptar el provider `github` de Terraform para gestionar la parte GitHub-side como código (ver `steering/infra.md`).
+Desde `infra-github-iac`, la **declaración** de las variables de Actions que este CD consume (`GH_APP_ID`, `GH_APP_INSTALLATION_ID`, `NEXT_PUBLIC_APP_ENV`, `PUBLIC_HOSTNAME`) se gestiona como código en `infra/github/` (provider `integrations/github`), ya no a mano con `gh variable set`. Este spec mantiene el comportamiento de **cómo se consumen en runtime** (Vault, instance principal, GitHub App en el cloud-init) — solo se desplaza la fuente de verdad del inventario, no su consumo. Esto resuelve la nota "adoptar el provider `github`" que este spec dejaba pendiente/futuro (ver `steering/infra.md`).

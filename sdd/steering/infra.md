@@ -29,13 +29,15 @@ No es un hallazgo pendiente: **su ausencia es deliberada**, y no debe reabrirse 
 
 **Todo lo demás es código**, incluido lo GitHub-side: secrets y variables de Actions (`github_actions_secret`/`github_actions_variable`), instalación de la App, ajustes de repo, acceso a packages, policies. La clave privada de la App / secrets se **inyectan** por variable y se escriben al Vault/secret-store desde Terraform (ver `security.md` §8, excepción dev/test).
 
-**Lección de `app-deploy-dev` (2026-07-29):** se hicieron varios pasos a mano en GitHub (crear/instalar la App, poner variables/secrets con `gh`, transferir el repo, tocar acceso de packages) que en su mayoría **eran codificables** con el provider `github`. De aquí en adelante, gestionar la parte GitHub con Terraform (`github` provider) igual que la de OCI; dejar a mano solo el bootstrap irreducible. Adoptar el provider `github` es un change futuro pendiente (ver roadmap).
+**Lección de `app-deploy-dev` (2026-07-29):** se hicieron varios pasos a mano en GitHub (crear/instalar la App, poner variables/secrets con `gh`, transferir el repo, tocar acceso de packages) que en su mayoría **eran codificables** con el provider `github`. De aquí en adelante, gestionar la parte GitHub con Terraform (`github` provider) igual que la de OCI; dejar a mano solo el bootstrap irreducible. **Adoptado por `infra-github-iac`**: el provider `github` ya gestiona como código, desde `infra/github/`, los settings del repo, los secrets/variables de Actions y el acceso a packages (GHCR) — la nota de "change futuro pendiente" queda obsoleta. Queda **fuera** de lo adoptado, y sigue siendo convención no forzada (no recurso Terraform): branch protection, porque la API de GitHub la rechaza por completo (`403`) mientras el repo siga privado en el plan Free (`ADR 0002`; ver `infra/github/RUNBOOK.md`). El bootstrap irreducible (crear la organización, crear la GitHub App y su clave privada, instalar la App sobre el repo) sigue a mano, documentado en `infra/github/RUNBOOK.md` §1.
 
 ## Convención de layout
 
 `infra/environments/<entorno>/` — un root module de Terraform por entorno (`dev`, `staging`, `prod`), cada uno con su propio state. Esto es ortogonal al layout de código por dominio de `backend`/`frontend` (ver `architecture.md`): la infra no se organiza por dominio de negocio (`auth`, `cleaning`, `reservations`, ...), sino por entorno y tipo de recurso.
 
 Cuando exista código compartido entre entornos (red, base de datos, DNS...), irá en `infra/modules/` (módulos Terraform reutilizables) — **no creado todavía**, se añade cuando haya un primer módulo real que compartir.
+
+`infra/<superficie-cross-env>/` — un tercer patrón, para una superficie **por-organización**, no por-entorno y no compartida entre entornos: un root module propio, paralelo a `environments/<env>/`, que no se duplica por entorno ni se acopla al ciclo de vida de ninguno de ellos. Su primer caso real es `infra/github/` (`infra-github-iac`), que gestiona la parte GitHub-side del repo como código; candidatas futuras del mismo patrón son DNS/org/policies.
 
 ## Criterio de decisión de proveedor cloud
 

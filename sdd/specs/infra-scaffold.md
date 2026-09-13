@@ -11,6 +11,7 @@ Convención de despliegue remoto para AutoHostAI: dónde vive el código de IaC,
 - `infra/` contiene `environments/dev/`, `environments/staging/` y `environments/prod/`, cada uno con un `README.md`.
 - Ningún directorio de `infra/` se organiza por dominio de negocio (`auth`, `cleaning`, `reservations`, ...) — es ortogonal al layout hexagonal de `backend`/`frontend` documentado en `architecture.md`.
 - WHEN exista código Terraform compartido entre entornos (red, base de datos, DNS...), THE SYSTEM SHALL alojarlo en `infra/modules/` — no existe todavía, se crea con el primer módulo real.
+- Desde `infra-github-iac`, `infra/` documenta un **tercer patrón** de layout junto a `environments/<env>/` y `modules/`: `infra/<superficie-cross-env>/`, un root module independiente para una superficie por-organización (no por-entorno, no compartida entre entornos). Su primer caso real es `infra/github/` (gestión como código de la parte GitHub-side del repo); futuras superficies cross-env candidatas son DNS/org/policies. Ver `sdd/steering/infra.md` §"Convención de layout".
 
 ### Herramientas confirmadas, proveedor decidido para dev
 
