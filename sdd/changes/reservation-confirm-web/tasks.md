@@ -22,9 +22,9 @@
 
 ## 4. Localisation (ES/EN) <!-- panel: PASS 2026-09-12 receipt:c5b13975 -->
 
-- [ ] 4.1 Add `confirm.label`, `confirm.submitting`, `confirm.success` en `frontend/locales/es/reservations.json` y `frontend/locales/en/reservations.json` [R1, R5]
-- [ ] 4.2 Add `edit.fields.paymentStatus` en ambos locales (las etiquetas `paymentStatuses.*` ya existen) [R2, R5]
-- [ ] 4.3 Add the seven keys `mutation.errors.confirm.{session,forbidden,notFound,conflict,validation,server,network}` en ambos locales, reflejando la semántica de la operación (`«No tienes permiso para confirmar esta reserva»`, etc.) [R4, R5]
+- [x] 4.1 Add `confirm.label`, `confirm.submitting`, `confirm.success` en `frontend/locales/es/reservations.json` y `frontend/locales/en/reservations.json` [R1, R5]
+- [x] 4.2 Add `edit.fields.paymentStatus` en ambos locales (las etiquetas `paymentStatuses.*` ya existen) [R2, R5]
+- [x] 4.3 Add the seven keys `mutation.errors.confirm.{session,forbidden,notFound,conflict,validation,server,network}` en ambos locales, reflejando la semántica de la operación (`«No tienes permiso para confirmar esta reserva»`, etc.) [R4, R5]
 
 ## 5. Verification
 
