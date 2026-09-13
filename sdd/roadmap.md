@@ -104,7 +104,7 @@ Categorías:
   needs: pms-beds24-adapter · deferred-until: los canales OTA reales se conecten a la cuenta de Beds24 (misma ventana de corte que `beds24-webhook-cutover-measurement`, sin fecha), porque sin canal no hay conversación que leer ni reserva de OTA a la que responder. **Ese «ni» está sin comprobar y hay sonda para ello**: lo medido fue un GET vacío, que solo prueba que no hay nada que *leer*; si `POST /bookings/messages` acepta `source: guest`, el camino de entrada de `messaging-ai` tiene fuente hoy y el aplazamiento se reduce a la mitad de lectura. El subcomando `beds24_probe.py messages` está construido, probado y mergeado (PR #93), y espera a que la cuenta de medición vuelva a estar viva — la condición (1) de `beds24-webhook-cutover-measurement` · size: M · kind: feature
 - [x] pms-sync-schedule — [BE] **el sync periódico del PMS que hoy no existe** … → changes/archive/2026-09-12-pms-sync-schedule/
   needs: celery-jobs, pms-provider-resolution, pms-beds24-adapter · size: S · kind: feature
-- [ ] pms-ingest-change-events — [BE] **una modificación o cancelación que llega del PMS actualiza la fila en silencio** …
+- [x] pms-ingest-change-events — [BE] **una modificación o cancelación que llega del PMS actualiza la fila en silencio** … → changes/archive/2026-09-13-pms-ingest-change-events/
   needs: reservations, reservations-webhooks, pms-sync-schedule · size: S · kind: feature
 - [x] channex-validation-limits — [TECH] **corregir en las specs lo que la validación con Channex puede y no puede hacer**. → changes/archive/2026-08-17-channex-validation-limits/
   completes: channex-staging-adapter · size: S · kind: tech

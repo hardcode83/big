@@ -207,6 +207,9 @@ no las dispara; aporta el dato del que cuelgan.
 - IF la reserva ya está en `CANCELLED`, THEN THE SYSTEM SHALL responder `204` sin registrar
   un segundo evento de cancelación.
 - THE SYSTEM SHALL permitir editar una reserva cancelada, registrando la edición como tal.
+- La misma garantía de evidencia — ningún cambio de campos ni ninguna cancelación queda sin su
+  `TimelineEvent` — se extiende a los tres caminos de ingest (sync PMS, re-read de webhook, CSV
+  reimportado): ver "Timeline: evidencia de cada mutación" más abajo.
 
 ### Superficie web del ciclo manual
 
@@ -282,6 +285,17 @@ definitiva. Abrir esas dos operaciones es trabajo de esta capacidad y está pend
   `source = "seed"` — la tercera procedencia de ese evento, y la única en la que nadie subió
   ningún fichero. Ni `"csv"` ni `"pms"`: las dos serían falsas, y el evento es lo que lee una
   persona cuando pregunta de dónde salió una reserva (spec `seed-data-demo`).
+- WHEN una reserva existente se modifica por sincronización PMS (periódica o CLI manual),
+  re-read de webhook o reimportación CSV, THE SYSTEM SHALL persistir la misma pareja de eventos
+  que la edición/cancelación manual — `RESERVATION_CANCELLED` si el cambio deja la reserva en
+  `CANCELLED` sin estarlo antes, `RESERVATION_UPDATED` en cualquier otro caso — con `actor_type`
+  `SYSTEM` para sync y webhook, `USER` para CSV, y `metadata` con los campos cambiados. Detalle
+  de la regla de selección y de la serialización de escrituras concurrentes en
+  [`ingest.md`](ingest.md).
+- WHEN esa cancelación por ingest libera una vivienda que estaba en `AWAITING_CHECKIN` para esa
+  estancia, THE SYSTEM SHALL disparar `RESERVATION_CANCELLED_BEFORE_CHECKIN` una sola vez para
+  esa cancelación, igual que ya ocurre con la cancelación manual — nunca dos transiciones
+  independientes para el mismo hecho.
 - WHILE se escribe una mutación, THE SYSTEM SHALL persistir la reserva y su evento en una
   única transacción, de modo que un fallo al escribir el evento deje la reserva sin cambiar.
 - WHEN una edición no cambia nada —cuerpo vacío o campos con el valor que ya tenían— THE
