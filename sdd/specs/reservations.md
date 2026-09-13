@@ -230,6 +230,24 @@ no las dispara; aporta el dato del que cuelgan.
 - THE SYSTEM SHALL proporcionar las etiquetas, ayudas, confirmaciones y errores de esta
   superficie en español e inglés, mostrar la zona horaria y horas por defecto de la propiedad,
   y no SHALL exponer ni generar `guest_id` desde el flujo web.
+- WHEN un `PROPERTY_MANAGER` abre `/reservations/{id}` sobre una reserva con `status ===
+  "PENDING"`, THE SYSTEM SHALL ofrecer un botón «Confirmar reserva» de un solo clic,
+  diferenciado visualmente del botón de cancelar, que envíe `PATCH {"status": "CONFIRMED"}`
+  e invalide el detalle y el listado afectados. WHEN la reserva no está `PENDING`, o el
+  usuario no tiene `MANAGE_RESERVATIONS`, THE SYSTEM SHALL NOT mostrar ese botón.
+- THE SYSTEM SHALL NOT ofrecer un selector genérico con los siete valores de
+  `ReservationStatus` desde esta superficie: sólo las dos acciones con nombre (confirmar,
+  cancelar) mutan `status`; `CHECKED_IN_ESTIMATED`, `CHECKED_OUT_ESTIMATED`, `COMPLETED` y
+  `NO_SHOW` los alcanza únicamente la máquina de estados/reloj (`sim-advance`/`beat`), nunca
+  un formulario.
+- THE SYSTEM SHALL exponer `payment_status` como campo editable en el formulario de edición,
+  con los cuatro valores de `PaymentStatus`, independiente de `status`: cambiarlo no exige
+  que la reserva esté `CONFIRMED` ni dispara ningún cambio de `status`, y no está entre los
+  campos que el canal `INGEST_OWNED_FIELDS` deshabilita para canales no manuales —queda
+  editable para cualquier canal, decisión tomada en `reservation-confirm-web` (D4) para poder
+  anotar la señal cobrada también en reservas de origen OTA, sin gate de pago propio.
+- Rechazar una reserva `PENDING` reutiliza la acción de cancelar (`DELETE`) ya existente; no
+  hay un botón ni un estado distintos para el rechazo.
 
 **Confirmar y cancelar tienen consecuencias fuera de esta capacidad, y no son hooks.** Desde
 `access-notifications`, el barrido `provision_access_records` recorre cada cinco minutos las
@@ -248,9 +266,18 @@ está permitido, una reserva re-confirmada acaba con un `AccessRecord` nuevo jun
 algo que crear en un paso— mientras que las cuatro precondiciones de reloj de
 [`timeline-state-machine.md`](timeline-state-machine.md) exigen `CONFIRMED` o
 `CHECKED_IN_ESTIMATED`. Las dos decisiones son correctas por separado y su composición deja un
-hueco: una reserva creada por `POST /reservations` y nunca confirmada por `PATCH` es invisible para
-la máquina de estados, sin que nada falle ni avise. Se descubrió al sembrar el dataset de demo
-(2026-08-17), que por eso confirma explícitamente su estancia manual antes de avanzarla.
+hueco a nivel de dominio: una reserva creada por `POST /reservations` y nunca confirmada por
+`PATCH` es invisible para la máquina de estados, sin que nada falle ni avise. Se descubrió al
+sembrar el dataset de demo (2026-08-17), que por eso confirma explícitamente su estancia manual
+antes de avanzarla. **`reservation-confirm-web` cierra el hueco práctico para el canal
+web** —el botón «Confirmar reserva» de arriba es la vía para que un manager saque una reserva
+directa de `PENDING` sin un `PATCH` manual por API—, pero deja intacta la decisión de dominio: el
+backend sigue sin validar transiciones de `status` (cualquier valor pasa por `PATCH`, salvo el caso
+especial de `CANCELLED`), y `RESERVATION_UPDATED` genérico —no un `RESERVATION_CONFIRMED`
+propio— es el evento de timeline que deja la confirmación (D6 de ese change). Verificado
+end-to-end el 2026-09-13: crear → confirmar con un clic → `sim-advance` mueve el
+`current_operational_state` de la propiedad a `OCCUPIED_ESTIMATED` sin ningún `curl` de por
+medio.
 
 **`CHECKED_IN_ESTIMATED` y `COMPLETED` no tienen escritor propio en esta capacidad, y eso es un
 hueco declarado.** La máquina de estados los **lee** como precondición y nunca los escribe, y no
