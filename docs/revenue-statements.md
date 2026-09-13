@@ -50,9 +50,10 @@ operativa sin alterar el snapshot.
 ## Revisión y estados
 
 Consulta `GET /api/v1/owner-statements` con filtros de vivienda, período y estado. El detalle
-JSON devuelve los once importes, `status` y `notes`; el desglose por reserva y la lista de
-gastos consolidados se obtienen con las exportaciones (PDF y CSV) o filtrando
-`GET /api/v1/expenses` por vivienda y período. El flujo legal es `DRAFT → READY → SENT`;
+JSON devuelve los once importes, `status`, `notes`, y las colecciones `reservations` y
+`expenses`. Cada reserva contiene sólo sus campos financieros/temporales (`id`, fechas,
+noches, importes y moneda); cada gasto contiene `id`, categoría, descripción, importe,
+moneda y fecha. El flujo legal es `DRAFT → READY → SENT`;
 `SENT` es terminal. El manager puede editar notas, pero los importes y períodos solo proceden de la
 generación.
 
