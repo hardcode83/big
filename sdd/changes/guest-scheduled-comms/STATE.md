@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/guest-scheduled-comms
 implementation_sha: 23e697353991f551e1df6ed55e5bd3d6769165be
 pr_number:
 pr_url:
