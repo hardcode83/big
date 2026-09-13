@@ -156,3 +156,7 @@ Todo lo demás en esta entrada es reversible con un revert. El `noindex` no del 
 cuanto la página se indexa, existe fuera y puede quedar en caché o en resultados aunque
 después se retire. Es la única parte de la entrada que hay que tratar como publicación y
 no como despliegue, y el momento de decidirla es antes de mergear, no después.
+
+---
+
+Entra ya por decisión de Jose (2026-08-23). Enmienda el `SHALL` de `specs/frontend-foundation.md:60` (*«Every surface is `noindex, nofollow`»*) y cambia el punto de entrada de la app …

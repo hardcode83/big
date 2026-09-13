@@ -73,6 +73,13 @@ CADENCES: dict[str, timedelta] = {
     # lock that prevents two workers from classifying the same row is the same one
     # `run_for_every_tenant` already holds (D16).
     "classify_reviews": timedelta(minutes=5),
+    # `pms-sync-schedule` (R1). Six hours because that is the cadence Beds24 recommends for a
+    # full reservations re-sync — a literal `timedelta` here, same as every other row, and NOT
+    # derived from `Settings.pms_sync_window_days`, which only bounds how far back `since`
+    # reaches and has nothing to do with how often the job fires. This is the sweep
+    # `celery-jobs` design D16 declared absent on purpose, deferring the cadence decision to
+    # whoever scheduled it on its own merits — this entry is that decision.
+    "sync_pms_reservations": timedelta(hours=6),
 }
 
 

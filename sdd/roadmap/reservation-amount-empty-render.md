@@ -71,3 +71,7 @@ patrón `?? ""` es el que hay que erradicar, no sus instancias conocidas.
   el código de divisa, sin `Intl.NumberFormat` ni separadores por locale. Es una decisión
   de producto más grande —y afecta a `pricing` y a `statements` igual— así que no se
   resuelve de rebote aquí. Si se quiere, es su propia entrada.
+
+---
+
+`{row.grossAmount ?? ""} {row.currency}` sale como « EUR». Replicado en cuatro sitios, y el propio fichero ya usa el idioma correcto (`?? "—"`) diez líneas antes. Se entregó así porque ningún test renderiza el caso nulo. Descubierto analizando el export de Stitch …

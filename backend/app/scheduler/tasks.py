@@ -45,7 +45,7 @@ from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.legal import SqlAlchemyLegalRegistrationInitialiser
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
-from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
+from app.integrations.application.use_cases import SCHEDULED_SOURCE, SyncReservationsFromPmsUseCase
 from app.integrations.application.webhooks import (
     ProcessTenantWebhookEventsUseCase,
     ProcessWebhookEventsUseCase,
@@ -316,6 +316,38 @@ async def _reconcile_owner_approvals_for_expenses(
         store=SqlAlchemyReconciliationStore(session),
         commit=_commit,
     ).execute(now=now)
+
+
+async def _sync_pms_reservations(session: AsyncSession, tenant_id, now: datetime):
+    """`pms-sync-schedule` R1/R2/R3: the periodic sweep, every 6 hours, of the whole portfolio.
+
+    Same dependency set `pms_sync.py`'s `sync_with_session` wires, with no `forced_provider` —
+    the scheduled job never overrides what each property stores, unlike the CLI's `--provider`
+    flag. `since` comes from `settings.pms_sync_window_days` (2 days), not the CLI's 30-day
+    default: a job that runs every 6 hours only has to re-cover the gap since its last tick
+    plus slack for one missed cycle. `source=SCHEDULED_SOURCE` is what marks the resulting
+    `TimelineEvent`s as "the schedule came round" rather than an operator's CLI run (R3) —
+    `providers` is left at its default of every provider the portfolio resolves to, and
+    `actor_type` at `execute()`'s own default, `SYSTEM` (design D4): neither is passed here.
+    """
+    use_case = SyncReservationsFromPmsUseCase(
+        factory=SqlAlchemyPMSAdapterFactory(
+            credentials=SqlAlchemyPmsCredentialRepository(session)
+        ),
+        reservations=SqlAlchemyReservationRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
+        guests=SqlAlchemyGuestRepository(session),
+        timeline=SqlAlchemyTimelineEventRepository(session),
+        uow=SqlAlchemyUnitOfWork(session),
+        audit=SqlAlchemyAuditLogRepository(session),
+        email_exclusion=PostgresGuestEmailExclusion(session),
+    )
+    return await use_case.execute(
+        tenant_id=tenant_id,
+        since=now - timedelta(days=settings.pms_sync_window_days),
+        now=now,
+        source=SCHEDULED_SOURCE,
+    )
 
 
 async def _locked(name: str, ttl: timedelta, run, *, skipped) -> dict:
@@ -675,4 +707,22 @@ def reconcile_owner_approvals_for_expenses() -> dict:
             CADENCES[STATEMENTS_RECONCILE_TASK],
             _reconcile_owner_approvals_for_expenses,
         )
+    )
+
+
+@celery_app.task(name="sync_pms_reservations")
+def sync_pms_reservations() -> dict:
+    """`pms-sync-schedule` R1: every 6 hours, the whole portfolio's reservations re-sync.
+
+    Same per-tenant shape as `check_checkin_windows` and the rest — `_guarded` takes the
+    mutex lock (TTL = cadence x 3 via `lock_ttl_for`, 18 h) and walks every `ACTIVE` tenant
+    through `run_for_every_tenant`, marking one session per tenant and never re-marking it
+    (R1.2). A tenant whose provider is down, or whose credential is broken, does not stop the
+    rest — the same per-tenant isolation `run_for_every_tenant` already gives every other job,
+    and the same per-provider isolation `_sync_one_provider` already gives within one tenant
+    (R1.4). Losing the lock to a concurrent beat process during a redeploy reports
+    `skipped_locked` instead of failing (R1.3).
+    """
+    return run_sync(
+        _guarded("sync_pms_reservations", CADENCES["sync_pms_reservations"], _sync_pms_reservations)
     )

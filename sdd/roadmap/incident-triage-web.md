@@ -63,3 +63,7 @@ limpiadora / propietario»; si se quiere, es entrada `[BE]` aparte—; responder
 ciclo entero *huésped reporta desde el portal → manager asigna desde `/incidents/[id]` →
 técnico acepta y resuelve desde `/tech`*, con `PORT_OFFSET` si va en worktree (ver
 `sdd/project.md` §Worktree bootstrap). Es la primera vez que ese ciclo será posible sin CLI.
+
+---
+
+asignar, clasificar a mano, editar (triage) y cancelar desde `/incidents/[id]`. Las diez rutas existen en `maintenance/api/incidents_router.py` (`assign` :294, `classify` :240, `PATCH` :265, `cancel` :493) y el único llamante de `assign` fuera de los tests es `cli/seed_demo.py`, así que **la app del técnico entera (`/tech`) es inalcanzable desde el navegador**: no hay autoasignación de incidencias como sí la hay de limpiezas. `incidents-web` dejó las mutaciones fuera de alcance por escrito y no registró el seguimiento (no está en el plan original, añadida el 2026-09-04 al auditar los flujos por rol de extremo a extremo; hito «MVP operable» 1) …

@@ -1,0 +1,214 @@
+{
+  "title": "Reseñas",
+  "tabs": {
+    "label": "Secciones de reseñas",
+    "drafts": "Borradores",
+    "reviews": "Reseñas"
+  },
+  "list": {
+    "label": "Listado de reseñas",
+    "title": "Listado de reseñas",
+    "loading": "Cargando…",
+    "empty": {
+      "title": "Sin reseñas",
+      "description": "No hay reseñas que coincidan con los filtros seleccionados."
+    },
+    "draftsEmpty": {
+      "title": "Sin borradores pendientes",
+      "description": "No hay borradores pendientes."
+    },
+    "error": {
+      "title": "No se pudieron cargar las reseñas",
+      "description": "Vuelve a intentarlo en unos segundos."
+    },
+    "draftsError": {
+      "title": "No se pudieron cargar los borradores",
+      "description": "Vuelve a intentarlo en unos segundos."
+    }
+  },
+  "separator": "·",
+  "columns": {
+    "property": "Vivienda",
+    "channel": "Canal",
+    "rating": "Valoración",
+    "sentiment": "Sentimiento",
+    "status": "Estado",
+    "publishedAt": "Fecha"
+  },
+  "status": {
+    "NEW": "Nueva",
+    "DRAFTED": "Borrador",
+    "APPROVED": "Aprobada",
+    "POSTED_MANUALLY": "Publicada manualmente",
+    "IGNORED": "Ignorada"
+  },
+  "sentiment": {
+    "POSITIVE": "Positivo",
+    "NEUTRAL": "Neutro",
+    "NEGATIVE": "Negativo"
+  },
+  "channel": {
+    "AIRBNB": "Airbnb",
+    "BOOKING": "Booking",
+    "GOOGLE": "Google",
+    "MANUAL": "Manual",
+    "OTHER": "Otro"
+  },
+  "recurringIssue": {
+    "WIFI": "Wifi",
+    "NOISE": "Ruido",
+    "CLEANLINESS": "Limpieza",
+    "ACCESS": "Acceso",
+    "COMMUNICATION": "Comunicación",
+    "LOCATION": "Ubicación",
+    "VALUE": "Relación calidad-precio",
+    "AMENITIES": "Equipamiento",
+    "OTHER": "Otro"
+  },
+  "identity": {
+    "unavailable": "Vivienda no disponible",
+    "loading": "Cargando catálogo…",
+    "pending": "Cargando catálogo…",
+    "portfolio": "Toda la cartera"
+  },
+  "filters": {
+    "property": {
+      "label": "Vivienda",
+      "all": "Todas las viviendas"
+    },
+    "channel": {
+      "label": "Canal",
+      "all": "Todos los canales"
+    },
+    "sentiment": {
+      "label": "Sentimiento",
+      "all": "Todos los sentimientos"
+    },
+    "status": {
+      "label": "Estado",
+      "all": "Todos los estados"
+    },
+    "rating": {
+      "label": "Valoración (/5)",
+      "min": "Mínimo",
+      "max": "Máximo"
+    },
+    "dateFrom": { "label": "Desde" },
+    "dateTo": { "label": "Hasta" },
+    "all": "Todos"
+  },
+  "pagination": {
+    "label": "Paginación de reseñas",
+    "drafts": "Paginación de borradores",
+    "reviews": "Paginación de reseñas",
+    "previous": "Página anterior",
+    "next": "Página siguiente",
+    "pageOfTotal": "Página {{page}} de {{totalPages}}",
+    "totalItems": "{{total}} en total"
+  },
+  "respond": {
+    "approve": "Aprobar",
+    "ignore": "Ignorar",
+    "markPosted": "Marcar como publicada",
+    "editDraft": "Editar borrador",
+    "edit": "Editar borrador",
+    "confirm": "Confirmar",
+    "cancel": "Cancelar",
+    "editSave": "Guardar cambios",
+    "editCancel": "Cancelar edición",
+    "sending": "Enviando…",
+    "success": "Reseña actualizada.",
+    "confirmQuestion": {
+      "APPROVE": "¿Aprobar esta reseña?",
+      "IGNORE": "¿Ignorar esta reseña?",
+      "MARK_POSTED": "¿Marcar esta reseña como publicada?",
+      "EDIT": "¿Guardar los cambios del borrador?"
+    },
+    "error": {
+      "forbidden": "No tienes permiso para decidir sobre esta reseña.",
+      "notFound": "Esa reseña ya no existe.",
+      "conflict": "Esa reseña ya no está en el estado que creías. Vuelve a cargar la lista.",
+      "invalid": "Ese movimiento no es válido para esta reseña.",
+      "generic": "No se pudo guardar la decisión. Vuelve a intentarlo."
+    }
+  },
+  "create": {
+    "title": "Añadir reseña",
+    "body": "Registra una reseña a mano. La reseña aparecerá como Pendiente de clasificar y la pipeline la analizará en los siguientes minutos.",
+    "button": "Añadir reseña",
+    "trigger": "Añadir reseña",
+    "selectProperty": "Selecciona una vivienda",
+    "sending": "Enviando…",
+    "success": "Reseña creada.",
+    "propertyLabel": "Vivienda",
+    "channelLabel": "Canal",
+    "reviewerNameLabel": "Nombre del huésped (opcional)",
+    "ratingLabel": "Valoración (/5)",
+    "contentLabel": "Texto de la reseña (opcional)",
+    "languageLabel": "Idioma (opcional)",
+    "fields": {
+      "property": "Vivienda",
+      "channel": "Canal",
+      "reviewerName": "Nombre del huésped (opcional)",
+      "rating": "Valoración (/5)",
+      "content": "Texto de la reseña (opcional)",
+      "language": "Idioma (opcional)"
+    },
+    "placeholders": {
+      "reviewerName": "Nombre del huésped",
+      "content": "Escribe el texto de la reseña…",
+      "language": "es, en, …"
+    },
+    "submit": "Crear reseña",
+    "cancel": "Cancelar",
+    "error": {
+      "forbidden": "No tienes permiso para crear reseñas.",
+      "invalid": "Los datos enviados no son válidos.",
+      "generic": "No se pudo crear la reseña. Vuelve a intentarlo."
+    }
+  },
+  "read": {
+    "error": {
+      "forbidden": "No tienes permiso para ver estas reseñas.",
+      "notFound": "La reseña ya no existe.",
+      "generic": "No se pudo cargar la reseña. Vuelve a intentarlo."
+    }
+  },
+  "preview": {
+    "guestText": "Texto del huésped",
+    "guestContent": "Texto del huésped",
+    "reviewerName": "Huésped",
+    "rating": "Valoración",
+    "channel": "Canal",
+    "publishedAt": "Publicada",
+    "sentiment": "Sentimiento",
+    "aiSummary": "Resumen automático",
+    "recurringIssues": "Problemas recurrentes",
+    "draftContent": "Borrador propuesto",
+    "noDraft": "Sin borrador.",
+    "empty": "—"
+  },
+  "markPosted": {
+    "dialog": {
+      "title": "Marcar como publicada",
+      "body": "Vas a registrar que ya publicaste esta respuesta en el canal correspondiente. Esta acción no se puede deshacer desde esta pantalla.",
+      "guestPreview": "Texto del huésped",
+      "draftPreview": "Borrador aprobado",
+      "confirm": "Confirmar",
+      "confirmAria": "Confirmar que ya publicaste esta respuesta en el canal correspondiente.",
+      "cancel": "Cancelar"
+    }
+  },
+  "detail": {
+    "title": "Detalle de la reseña",
+    "close": "Cerrar",
+    "loading": "Cargando detalle…",
+    "error": "No se pudo cargar el detalle.",
+    "guestContent": "Texto del huésped",
+    "rating": "Valoración",
+    "reviewer": "Huésped",
+    "sentiment": "Sentimiento",
+    "aiSummary": "Resumen automático",
+    "draft": "Borrador propuesto"
+  }
+}

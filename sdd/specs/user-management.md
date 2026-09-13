@@ -15,10 +15,12 @@ ella—, y la primera que demuestra sobre
 sus propios endpoints los dos criterios que `auth-tenancy` declaró fuera de su alcance por
 tener endpoints autorreferenciales: el `404` cross-tenant y la matriz de autorización completa.
 
-No incluye frontend (`dashboard-web`, `hardening-release`), ni el autoservicio de contraseña
-—el cambio por el propio usuario, la recuperación anónima y el gate que obliga a rotar la
-temporal son `auth-account-recovery` (`specs/auth-account-recovery.md`)—, ni alta o baja de
-tenants, ni salida de la API a internet (`api-ingress-routing`).
+El frontend que consume estos ocho endpoints para el `TENANT_OWNER`/`PROPERTY_MANAGER` es
+`tenant-settings-web` (`specs/tenant-settings-web.md`, pantalla `/settings`); esta capacidad no
+incluye el autoservicio de contraseña —el cambio por el propio usuario, la recuperación anónima y
+el gate que obliga a rotar la temporal son `auth-account-recovery`
+(`specs/auth-account-recovery.md`)—, ni alta o baja de tenants, ni salida de la API a internet
+(`api-ingress-routing`).
 
 ## Requirements
 
@@ -284,7 +286,9 @@ tenants, ni salida de la API a internet (`api-ingress-routing`).
 - **La API no tiene salida a internet**: estos endpoints se verifican con tests y, en dev, por
   túnel SSH (`RUNBOOK.md` §7.4). Lo cambia `api-ingress-routing`, que es también donde se cierra
   la comprobación del peer de confianza para `actor_ip`.
-- **Sin frontend**: llega con `dashboard-web` y `hardening-release`.
+- ~~**Sin frontend**~~ — **cerrado por `tenant-settings-web`**: la pantalla `/settings` consume
+  los ocho endpoints de esta capacidad para `TENANT_OWNER` (operación completa) y
+  `PROPERTY_MANAGER` (solo lectura); `CLEANER`/`TECHNICIAN`/`SUPER_ADMIN` no llegan a la ruta.
 - El paquete `tzdata` se declara explícitamente en `backend/pyproject.toml` aunque hoy la base
   IANA la aporte el `tzdata` del sistema operativo de la imagen (`/usr/share/zoneinfo`), que
   `zoneinfo` consulta antes del paquete PyPI. La declaración es el seguro para una imagen que no

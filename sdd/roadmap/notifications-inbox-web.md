@@ -54,3 +54,7 @@ proveedor externo ni una decisión de dominio — y sin ella no hay forma de **o
 las otras ocho funciona. Migración sí lleva, desde que el párrafo anterior resolvió el punto (1) a
 favor de `read_at` en Postgres: una columna aditiva y sus dos índices. Esta frase decía «ni una
 migración» y era de antes de esa resolución.
+
+---
+
+`GET /api/v1/notifications` existe desde `access-notifications` y **cero ficheros del frontend la llaman**, así que toda la comunicación interna (limpieza asignada, técnico asignado, aprobación del propietario, SLA incumplido) termina en filas que solo se leen con SQL. Campana + listado en las tres shells (no está en el plan original, añadida el 2026-08-28 al auditar la comunicación de extremo a extremo entre huésped, limpiadora, técnico y manager) …

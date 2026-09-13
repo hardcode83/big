@@ -2,7 +2,7 @@
 
 Capability del change `revenue-reviews` (PRD §18, §26.24). Esta página cuenta **qué
 hace** el sistema, en presente, con criterios EARS. El *cómo se opera* está en
-[`docs/reviews.md`](../docs/reviews.md); el contrato HTTP en `backend/openapi.json`.
+[`docs/reviews.md`](../../docs/reviews.md); el contrato HTTP en `backend/openapi.json`.
 
 ## Purpose
 
@@ -11,9 +11,17 @@ analiza sentimiento/resumen/problemas recurrentes, propone un borrador de respue
 desde un catálogo cerrado de plantillas, y deja la aprobación final al manager
 u owner. La transición a `POSTED_MANUALLY` la ejecuta una persona fuera del
 sistema; ninguna ruta invoca un PMS sobre reseñas (`beds24-messaging-adapter` y un
-futuro `pms-review-adapter` son cambios aparte). **No incluye UI** — la pantalla
-del manager es otro change (mismo criterio que `messaging-ai` BE y
-`conversations-inbox` FE).
+futuro `pms-review-adapter` son cambios aparte).
+
+Desde `reviews-web` tiene además **pantalla propia**: `/reviews`, dos pestañas —
+**Borradores**, la cola de decisión sobre las reseñas que la IA ya clasificó y
+redactó (filtros por vivienda, canal, sentimiento, rango de rating y rango de
+fechas; aprobar, ignorar y editar el borrador para el `TENANT_OWNER`, solo editar
+para el `PROPERTY_MANAGER`), y **Reseñas**, el listado completo con los mismos
+filtros más `status`, el detalle con el texto del huésped y el resumen de IA, y
+**Marcar como publicada** tras aprobar, con vista previa en diálogo antes de
+confirmar—. El alta manual de una reseña (canal, valoración, texto e idioma
+opcionales) está reservada al `PROPERTY_MANAGER`.
 
 ## Requirements
 

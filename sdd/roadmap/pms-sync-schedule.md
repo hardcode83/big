@@ -61,3 +61,7 @@ puerto); mensajería OTA (`beds24-messaging-adapter`); ruta HTTP de sync (PRD §
 worker con `skipped = 2` para el mock (las dos reservas del seed ya existen), y `make pms-sync`
 produce el mismo informe a mano. Y la guardia de aislamiento: dos tenants con `MOCK`, cada uno
 ve sólo sus filas.
+
+---
+
+`python -m app.integrations.cli.pms_sync` es «the only way to run a sync, and that is deliberate» (`pms_sync.py:7-19`), porque la cadencia es función del presupuesto de créditos de Beds24, que no está medido (design D16 de `celery-jobs`, `docs/beds24-adapter.md:113-135`). Ese argumento no aplica a `mock` ni a Channex, y el propio router de webhooks nombra el poll como camino de recuperación (`integrations/api/router.py:153-156`) sin que nada lo programe. Entrega: entrada de beat por tenant, sesión marcada por tenant (obligación 5 de ADR 0006), candado de `scheduler/locks.py`, cadencia como setting con default 6 h —la que Beds24 recomienda— y `make pms-sync` para el disparo a mano (no está en el plan original, añadida el 2026-09-04; hito «MVP operable» 3) …

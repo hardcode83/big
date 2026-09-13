@@ -38,3 +38,7 @@ comodidad—; (2) si genera notificación al otro extremo, que es lo que lo hace
 
 **Fuera de alcance a propósito**: huésped↔limpiadora y huésped↔técnico. Nadie lo ha pedido, PRD §11 y §12 no
 lo contemplan, y abriría la identidad del personal a un portador anónimo.
+
+---
+
+limpiadora↔manager y técnico↔manager**. `MessageSenderType` no tiene rol de campo y las siete rutas de `/conversations` les contestan 403, así que su comunicación es hoy estrictamente unidireccional. La decisión de entrada —ensanchar `Conversation`, que es del huésped por contrato, o hilo acotado a la tarea/incidencia— pide design propio (no está en el plan original, añadida el 2026-08-28) …

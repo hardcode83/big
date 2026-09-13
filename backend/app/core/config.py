@@ -403,6 +403,15 @@ class Settings(BaseSettings):
     beds24_page_limit: int = 100
     beds24_timeout_seconds: float = 30.0
 
+    # How far back the periodic beat job looks (change `pms-sync-schedule`, design D2, R2).
+    # Deliberately its own setting rather than a reuse of `DEFAULT_WINDOW_DAYS = 30` in
+    # `app/integrations/cli/pms_sync.py`, which stays unchanged for the on-demand manual
+    # sweep: a job that runs every 6 hours only needs to re-cover the gap since its last run
+    # plus slack for a missed tick, not a month. Not part of `beat_schedule()`'s own
+    # structure (unlike the cadence itself), so changing it does not touch
+    # `test_schedule.py`'s literal transcription of that dict.
+    pms_sync_window_days: int = 2
+
     # Object storage for the `S3` adapter (change `object-storage-provisioning`, design D4).
     # Three settings and no credentials: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` travel by
     # boto3's standard chain (environment, instance role), which is what rule 8 of

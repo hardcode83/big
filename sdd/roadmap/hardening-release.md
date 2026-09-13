@@ -1,0 +1,3 @@
+# hardening-release
+
+**El seed data de §27 salió a `seed-data-demo`** el 2026-08-07, para que el producto sea demostrable sin esperar al endurecimiento de release. **El SMTP real salió a `smtp-delivery-adapter`** el 2026-08-28 por el mismo motivo. **La pantalla de settings salió a `tenant-settings-web`** el 2026-09-04, por el mismo motivo otra vez: un owner no puede dar de alta a su personal y eso no espera al endurecimiento; `/settings/integrations` (conexión PMS por UI) queda fuera del MVP. Lo que queda aquí necesita algo entero que proteger, así que va detrás del ciclo operativo completo desde el navegador

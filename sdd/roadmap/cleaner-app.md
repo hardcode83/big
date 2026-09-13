@@ -176,3 +176,7 @@ cifrado en reposo sigue viva y con dueño, en
 
 - `sdd/specs/cleaner-task-context.md` — *«…y `access_records.notes`, que sigue siendo de `cleaner-app`»*.
 - `sdd/specs/access-notifications.md` — *«Anotado en la entrada de roadmap de `cleaner-app`, que es quien ampliará la superficie de `notes`»*.
+
+---
+
+`/cleaner` (mis tareas) y `/cleaner/tasks/[id]` (detalle + checklist + fotos + reportar incidencia), PRD §26.19 y §24. Estrena el rol CLEANER en el frontend, y con él el aterrizaje por rol tras el login —hoy `login-form.tsx` manda a todos a `/dashboard`, que a una limpiadora le contesta 403 en cada llamada—. **Ya NO decide `access_records.notes` en la tabla de sumideros de la regla 11**: su `/sdd:new` del 2026-08-23 comprobó que el disparador no ocurre —PRD §11 y §6 no dan accesos a `CLEANER` y `policy.py` le niega `READ_ACCESS_RECORDS` por escrito—, así que esa decisión se queda aparcada sin dueño … (no está en el plan original: `field-apps` se partió en cuatro el 2026-08-18, porque agrupaba cuatro superficies de frontend sobre tres dominios distintos —limpieza, mantenimiento, mensajería— y estrenaba dos roles nuevos, así que no cabía en un solo change; mismo criterio que partió `revenue` en tres el 2026-08-16)

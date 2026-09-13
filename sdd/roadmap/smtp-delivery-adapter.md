@@ -53,3 +53,7 @@ muerto a mitad reenvía hasta ese techo y no más.
 `channel = EMAIL` salvo el reset de contraseña, así que un adapter real entregaría un caso de prueba y nada
 más. Con ella, el reset de contraseña deja de ser un `logger.info` el mismo día — y ése es el primer
 recorrido que conviene medir en dev.
+
+---
+
+`ConsoleEmailAdapter` registra longitudes y devuelve éxito, y las seis `SMTP_*` están reservadas y vacías sin lector. **Extraído de `hardening-release`**, que lo tenía enterrado junto a la suite E2E y el DoD §28 (no está en el plan original, añadida el 2026-08-28) …

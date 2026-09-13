@@ -112,5 +112,10 @@
 | approvals-web | new, design, tasks, run, review, ship, archive | 347007 | 1194492 | 432430285 | 131.5077 | 2026-09-05 | 2026-09-10 |
 | reservations-identity-web | new, tasks, run, review, ship, archive | 48198 | 268325 | 60302554 | 18.8499 | 2026-09-05 | 2026-09-05 |
 | sim-advance | new, design, tasks, run, review, ship, archive | 3845110 | 1006870 | 206761779 | 113.1049 | 2026-09-10 | 2026-09-11 |
+| tenant-settings-web | new, design, tasks, run, review, ship, archive | 272162 | 1352598 | 287757813 | 96.7433 | 2026-09-11 | 2026-09-12 |
 | human-reply-outbound-delivery | new, design, run, review, archive | 3951453 | 473040 | 94190363 | 78.6784 | 2026-09-11 | 2026-09-11 |
 | revenue-statements-detail-breakdown | review | 578364 | 51539 | 8639235 | 8.4999 | 2026-09-13 | — |
+| properties-create-web | new, tasks, run, review, ship, archive | 271467 | 1238775 | 417813500 | 128.9786 | 2026-09-11 | 2026-09-12 |
+| pms-sync-schedule | new, design, run, review, ship, archive | 132517 | 619440 | 159754893 | 48.7891 | 2026-09-11 | 2026-09-12 |
+| reviews-web | new, design, tasks, run | 2077351 | 964782 | 425992934 | 159.7995 | 2026-09-11 | 2026-09-12 |
+| whatsapp-dev-credentials-render | new, tasks, run, review, ship, archive | 29110 | 535016 | 556620487 | 125.3342 | 2026-09-12 | 2026-09-12 |

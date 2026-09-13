@@ -72,6 +72,13 @@ told us something changed" is a different answer from "the periodic sync came ro
 travels the same road (the re-read goes through the same adapter and the same mapping); what
 differs is what set it in motion, and that is exactly what `source` records.
 """
+SCHEDULED_SOURCE = "pms_scheduled"
+"""A fourth value, and still not a reuse of `PMS_SOURCE` (change `pms-sync-schedule`, design D4,
+R3). `PMS_SOURCE` is what the *manual* CLI sweep has always meant; the Celery-beat job that now
+runs every 6 hours is a different *why* on the same timeline question above — "nobody asked, the
+schedule came round" is distinguishable from both "an operator ran the CLI" and "the provider told
+us something changed" — so it gets its own value rather than collapsing into either.
+"""
 
 
 class SyncReservationsFromPmsUseCase:

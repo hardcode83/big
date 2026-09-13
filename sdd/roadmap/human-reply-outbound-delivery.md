@@ -64,3 +64,7 @@ de Meta; mensajería OTA (`beds24-messaging-adapter`).
 `notifications.mock_whatsapp_delivered`; con `SMTP_HOST` y un hilo `EMAIL`, el correo llega. Y
 `rtk proxy grep -n "adapter.send" backend/app/messaging/application/use_cases.py` devuelve dos
 caminos, no uno.
+
+---
+
+`RecordHumanReplyUseCase` (`messaging/application/use_cases.py:642-732`) se construye con `conversations, messages, timeline, uow` y sin registry de canales, así que persiste el `Message`, escribe `HUMAN_RESPONSE_SENT` y hace `take_over` — y no llama a ningún `OutboundMessagePort`. Sólo la respuesta de la IA lo hace (:509-517, :542-550). Para `PORTAL` da igual (la fila es la entrega); para `WHATSAPP` y `EMAIL` el huésped recibe la IA y **nunca al humano**, con credenciales de Meta o sin ellas. R4 de `specs/messaging-ai.md:187-191` exige exactamente lo que el código hace, así que la suite está verde y ningún spec ni doc lo declara como límite. De paso: `outbound_registry` hardcodea `ConsoleEmailAdapter()` para `EMAIL` (`channels.py:265-267`) aunque haya SMTP (no está en el plan original, añadida el 2026-09-04 al auditar la comunicación con el huésped; hito «MVP operable» 2) …

@@ -22,6 +22,16 @@ export const propertiesKeys = {
       "properties-list",
       normalizePropertyFilters(filters),
     ),
+  /** One property's full detail (proposal R2.2, design D7). */
+  detail: (tenantId: string, id: string): QueryKey =>
+    tenantScopedKey(tenantId, "properties-detail", id),
+  /**
+   * Prefix of `list`, so one invalidation reaches every filter/page
+   * combination (design D10) — precedent: `incidentsKeys.listPrefix`. Used by
+   * `useCreateProperty`/`useUpdateProperty`'s `onSettled`, never by a query.
+   */
+  listPrefix: (tenantId: string): QueryKey =>
+    tenantScopedKey(tenantId, "properties-list"),
 } as const;
 
 /**

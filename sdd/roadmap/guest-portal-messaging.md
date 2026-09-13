@@ -38,3 +38,7 @@ i18n ES/EN, de `guest-portal-web`.
 escritura de un **portador anónimo** y no de un usuario autenticado. Es la primera vez que eso pasa en esa
 columna, así que su fila del censo cambia de audiencia y la entrada tiene que decirlo. La disciplina que ya
 existe ayuda: `MockAIAdapter` nunca cita la entrada del huésped en su respuesta (R3.3/D7 de `messaging-ai`).
+
+---
+
+Cierra el bucle huésped → IA → escalación → manager sin proveedor externo ni ventana de corte de OTA, sobre el token opaco que `guest-portal-api` ya tiene (no está en el plan original, añadida el 2026-08-28) …

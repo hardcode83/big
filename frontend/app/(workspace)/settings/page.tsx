@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 
 import { routeMetadata } from "@/features/shell/server";
-import { RoutePlaceholder } from "@/features/shell/components/route-placeholder";
+import { TenantSettingsView } from "@/features/tenant-settings";
 
 export function generateMetadata(): Promise<Metadata> {
   return routeMetadata("settings");
 }
 
 export default function Page() {
-  return <RoutePlaceholder routeId="settings" />;
+  return <TenantSettingsView />;
 }

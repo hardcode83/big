@@ -51,3 +51,7 @@ la admite. Sin backend.
 
 **Fuera de alcance**: conexión al PMS por UI; borrado físico; fotos de la propiedad (no hay
 entidad); la rejilla con foto de `/properties` que `visual-restyle-workspace` dejó fuera.
+
+---
+
+`POST` (`properties/api/router.py:112-161`) y `PATCH` (:210) existen, `409` en colisión de `internal_code`/`pms_external_id`, y `frontend/features/properties` no tiene ni un `useMutation`. Hoy una propiedad sólo nace por `seed_demo` o por `curl`. Cierra el «Fuera de alcance» que `properties-web` dejó escrito. **Lo que decide y no es cosmético**: el formulario es el primer **escritor** desde la UI de `access_notes`/`cleaning_notes`/`emergency_notes`, sumideros de la regla 11 con excepción 6 (`tech-incident-context`), y `pms_provider` es create-only por diseño (`schemas.py:134-144`) — la pantalla no lo edita, y el PMS se conecta con el CLI (no está en el plan original, añadida el 2026-09-04 al auditar el onboarding del tenant; hito «MVP operable» 3) …

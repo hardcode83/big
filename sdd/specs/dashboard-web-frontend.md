@@ -171,8 +171,20 @@ stalled property stayed stalled until a guest wrote.
   failure renders the error state with retry.
 - WHERE last-cleaning photos are shown, THE SYSTEM SHALL use the URL provided by
   the data source and SHALL NOT construct a storage URL in the client.
-- THE SYSTEM SHALL keep the detail page read-only: no mutations (approvals,
-  assignments, or state changes) are performed.
+- **The page is no longer fully read-only.** `properties-create-web` added an "Edit
+  property"/"Retire property" pair of actions to this view, gated by
+  `useHasPermission("MANAGE_PROPERTIES")` (visible to `PROPERTY_MANAGER`, hidden from
+  `TENANT_OWNER` and every other role) — everything else on the page (reservation,
+  guest, access, cleaning, incidents, financial, approvals, notes, photos, timeline)
+  stays exactly as read-only as before; the two buttons are additive, not a broader
+  loosening. Both actions call `useUpdateProperty`/`useProperty` from
+  `features/properties` (`EditPropertyForm` is imported across the feature boundary,
+  per `properties-crud.md`'s "Key files"), so this file hosts the trigger and dialog
+  chrome but not the form or mutation logic, which is specified in full in
+  `properties-crud.md`'s "Registrar y editar una propiedad desde la web" section.
+- WHERE the property's `status` is already `INACTIVE`, THE SYSTEM SHALL hide the
+  "Retire property" action (retiring an already-retired property is a no-op the UI
+  does not offer a button for), and SHALL keep offering "Edit property".
 
 ### Timeline screen (`/timeline`)
 
@@ -400,7 +412,10 @@ para el de la tarea.
   `usePropertyTimeline` + `retryPolicy`).
 - `frontend/features/dashboard/components/` — `property-card.tsx`,
   `dashboard-view.tsx`, `detail/{property-detail-view,property-detail-sections,
-  property-timeline}.tsx`, `timeline/timeline-view.tsx` (the `/timeline` screen:
+  property-timeline}.tsx` (`property-detail-view.tsx` also hosts the "Edit
+  property"/"Retire property" buttons, a `Sheet` around `features/properties`'
+  `EditPropertyForm`, and the retire confirmation `AlertDialog` — see
+  `properties-crud.md`), `timeline/timeline-view.tsx` (the `/timeline` screen:
   selector + the shared timeline).
 - `frontend/features/dashboard/stalls/` — the blocked-transitions section:
   `data/` (`dto.ts` aliasing `BlockedTransitionResponse`, `stalls-source.ts`,

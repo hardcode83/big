@@ -6,7 +6,8 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-postgres",
+        "@bytebase/dbhub",
+        "--dsn",
         "postgresql://autohostai:localdev@localhost:5432/autohostai"
       ]
     },

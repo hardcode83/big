@@ -70,3 +70,7 @@ seis filas nuevas abre plazo de SLA, exactamente por el riesgo que este párrafo
 
 Estado vivo en [`sdd/specs/access-notifications.md`](../specs/access-notifications.md) §El censo de
 escritores; cómo se opera, en [`docs/access-notifications.md`](../../docs/access-notifications.md).
+
+---
+
+sin `INCIDENT_CREATED_CRITICAL`/`HIGH`, un huésped reporta una incidencia crítica y no se entera nadie. Van con ellas `CLEANING_COMPLETED`/`FAILED` y `TECHNICIAN_NO_RESPONSE` (no está en el plan original, añadida el 2026-08-28; censo completo en la nota) …

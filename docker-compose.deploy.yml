@@ -244,6 +244,18 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-}
+      # WhatsApp Cloud API (change `whatsapp-dev-credentials-render`). Sin `:?`, y aquí el motivo NO
+      # es el de los bloques de arriba (la ventana merge→primer-render sin ninguna de las cinco es
+      # el mismo, pero eso solo explicaría el `:-`, no bastaría solo): `whatsapp_provider` sin
+      # declarar resuelve en `Settings` a `"mock"`, así que un deployment sin WhatsApp configurado
+      # sigue arrancando el contenedor sin más. `WhatsAppCloudAdapter`/`outbound_registry()` se
+      # construyen aquí para el envío síncrono de la respuesta humana
+      # (`messaging/api/dependencies.py`), y el webhook entrante también corre en `backend`.
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${WHATSAPP_WEBHOOK_VERIFY_TOKEN:-}
     volumes:
       # Fotos de limpieza y demás ficheros subidos (change `cleaning-photos-storage`, R1.3).
       # Aquí la imagen no lleva bind mount del código, pero el volumen sigue siendo obligatorio
@@ -300,6 +312,17 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-}
+      # WhatsApp Cloud API (change `whatsapp-dev-credentials-render`). `worker`, no `beat`: beat solo
+      # programa (`celery -A app.worker beat`, sin `-B`, nunca ejecuta un cuerpo de tarea); el envío
+      # en segundo plano lo construye `backend/app/scheduler/whatsapp_tasks.py` vía
+      # `outbound_registry()` y lo EJECUTA el worker. Sin `:?`, mismo motivo que en `backend`:
+      # `whatsapp_provider` sin declarar resuelve a `"mock"` en `Settings`, así que un deployment
+      # sin WhatsApp configurado sigue arrancando.
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${WHATSAPP_WEBHOOK_VERIFY_TOKEN:-}
     depends_on:
       redis:
         condition: service_healthy

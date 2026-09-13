@@ -89,3 +89,7 @@ no el número de peticiones.
 
 El render del importe vacío (`?? ""` → `" EUR"`), que la misma maqueta destapó. Es
 presentación pura y no toca el contrato: entrada `reservation-amount-empty-render`.
+
+---
+
+sin nombre ni código interno. Mismo problema y misma forma que ya resolvieron `cleaner-task-context` y `tech-incident-context`. Descubierto analizando el export de Stitch …

@@ -1,0 +1,214 @@
+{
+  "title": "Reviews",
+  "tabs": {
+    "label": "Review sections",
+    "drafts": "Drafts",
+    "reviews": "Reviews"
+  },
+  "list": {
+    "label": "Reviews list",
+    "title": "Reviews list",
+    "loading": "Loading…",
+    "empty": {
+      "title": "No reviews",
+      "description": "No reviews match the current filters."
+    },
+    "draftsEmpty": {
+      "title": "No pending drafts",
+      "description": "There are no pending drafts."
+    },
+    "error": {
+      "title": "Could not load reviews",
+      "description": "Try again in a few seconds."
+    },
+    "draftsError": {
+      "title": "Could not load drafts",
+      "description": "Try again in a few seconds."
+    }
+  },
+  "separator": "·",
+  "columns": {
+    "property": "Property",
+    "channel": "Channel",
+    "rating": "Rating",
+    "sentiment": "Sentiment",
+    "status": "Status",
+    "publishedAt": "Date"
+  },
+  "status": {
+    "NEW": "New",
+    "DRAFTED": "Draft",
+    "APPROVED": "Approved",
+    "POSTED_MANUALLY": "Posted manually",
+    "IGNORED": "Ignored"
+  },
+  "sentiment": {
+    "POSITIVE": "Positive",
+    "NEUTRAL": "Neutral",
+    "NEGATIVE": "Negative"
+  },
+  "channel": {
+    "AIRBNB": "Airbnb",
+    "BOOKING": "Booking",
+    "GOOGLE": "Google",
+    "MANUAL": "Manual",
+    "OTHER": "Other"
+  },
+  "recurringIssue": {
+    "WIFI": "Wifi",
+    "NOISE": "Noise",
+    "CLEANLINESS": "Cleanliness",
+    "ACCESS": "Access",
+    "COMMUNICATION": "Communication",
+    "LOCATION": "Location",
+    "VALUE": "Value for money",
+    "AMENITIES": "Amenities",
+    "OTHER": "Other"
+  },
+  "identity": {
+    "unavailable": "Property unavailable",
+    "loading": "Loading catalog…",
+    "pending": "Loading catalog…",
+    "portfolio": "Whole portfolio"
+  },
+  "filters": {
+    "property": {
+      "label": "Property",
+      "all": "All properties"
+    },
+    "channel": {
+      "label": "Channel",
+      "all": "All channels"
+    },
+    "sentiment": {
+      "label": "Sentiment",
+      "all": "All sentiments"
+    },
+    "status": {
+      "label": "Status",
+      "all": "All statuses"
+    },
+    "rating": {
+      "label": "Rating (/5)",
+      "min": "Min",
+      "max": "Max"
+    },
+    "dateFrom": { "label": "From" },
+    "dateTo": { "label": "To" },
+    "all": "All"
+  },
+  "pagination": {
+    "label": "Review pagination",
+    "drafts": "Draft pagination",
+    "reviews": "Reviews pagination",
+    "previous": "Previous page",
+    "next": "Next page",
+    "pageOfTotal": "Page {{page}} of {{totalPages}}",
+    "totalItems": "{{total}} total"
+  },
+  "respond": {
+    "approve": "Approve",
+    "ignore": "Ignore",
+    "markPosted": "Mark as posted",
+    "editDraft": "Edit draft",
+    "edit": "Edit draft",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "editSave": "Save changes",
+    "editCancel": "Cancel editing",
+    "sending": "Sending…",
+    "success": "Review updated.",
+    "confirmQuestion": {
+      "APPROVE": "Approve this review?",
+      "IGNORE": "Ignore this review?",
+      "MARK_POSTED": "Mark this review as posted?",
+      "EDIT": "Save the draft changes?"
+    },
+    "error": {
+      "forbidden": "You do not have permission to decide on this review.",
+      "notFound": "That review no longer exists.",
+      "conflict": "That review is no longer in the state you thought. Reload the list.",
+      "invalid": "That move is not valid for this review.",
+      "generic": "Could not save your decision. Try again."
+    }
+  },
+  "create": {
+    "title": "Add review",
+    "body": "Record a review by hand. The review will appear as Pending and the pipeline will analyse it in the next few minutes.",
+    "button": "Add review",
+    "trigger": "Add review",
+    "selectProperty": "Select a property",
+    "sending": "Sending…",
+    "success": "Review created.",
+    "propertyLabel": "Property",
+    "channelLabel": "Channel",
+    "reviewerNameLabel": "Reviewer name (optional)",
+    "ratingLabel": "Rating (/5)",
+    "contentLabel": "Review text (optional)",
+    "languageLabel": "Language (optional)",
+    "fields": {
+      "property": "Property",
+      "channel": "Channel",
+      "reviewerName": "Reviewer name (optional)",
+      "rating": "Rating (/5)",
+      "content": "Review text (optional)",
+      "language": "Language (optional)"
+    },
+    "placeholders": {
+      "reviewerName": "Reviewer name",
+      "content": "Type the review text…",
+      "language": "es, en, …"
+    },
+    "submit": "Create review",
+    "cancel": "Cancel",
+    "error": {
+      "forbidden": "You do not have permission to create reviews.",
+      "invalid": "The submitted data is not valid.",
+      "generic": "Could not create the review. Try again."
+    }
+  },
+  "read": {
+    "error": {
+      "forbidden": "You do not have permission to view these reviews.",
+      "notFound": "The review no longer exists.",
+      "generic": "Could not load the review. Try again."
+    }
+  },
+  "preview": {
+    "guestText": "Guest text",
+    "guestContent": "Guest text",
+    "reviewerName": "Reviewer",
+    "rating": "Rating",
+    "channel": "Channel",
+    "publishedAt": "Published",
+    "sentiment": "Sentiment",
+    "aiSummary": "Auto summary",
+    "recurringIssues": "Recurring issues",
+    "draftContent": "Suggested draft",
+    "noDraft": "No draft.",
+    "empty": "—"
+  },
+  "markPosted": {
+    "dialog": {
+      "title": "Mark as posted",
+      "body": "You are about to record that you already posted this reply on the corresponding channel. This action cannot be undone from this screen.",
+      "guestPreview": "Guest text",
+      "draftPreview": "Approved draft",
+      "confirm": "Confirm",
+      "confirmAria": "Confirm that you already posted this reply on the corresponding channel.",
+      "cancel": "Cancel"
+    }
+  },
+  "detail": {
+    "title": "Review detail",
+    "close": "Close",
+    "loading": "Loading detail…",
+    "error": "Could not load the detail.",
+    "guestContent": "Guest text",
+    "rating": "Rating",
+    "reviewer": "Reviewer",
+    "sentiment": "Sentiment",
+    "aiSummary": "Auto summary",
+    "draft": "Suggested draft"
+  }
+}

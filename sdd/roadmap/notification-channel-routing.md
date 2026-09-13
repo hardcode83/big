@@ -42,3 +42,7 @@ que hoy no lo lee ningún cuerpo de notificación: `subject`/`body` se escriben 
 E2E + docker + README + DoD §28», y esto no es configuración de pantalla sino una decisión de dominio sobre
 quién recibe qué y por dónde. Además es `needs:` de tres entradas y meterla dentro de un `[CROSS]` las
 bloquearía a todas.
+
+---
+
+y no lo lee nadie**: ninguna fila nace con `channel = EMAIL` o `WHATSAPP` salvo el reset de contraseña, así que un adapter real no tendría hoy quién lo invocase. Es la pieza que hace que las dos siguientes signifiquen algo; separada de `hardening-release` porque es decisión de dominio (no está en el plan original, añadida el 2026-08-28) …

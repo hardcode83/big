@@ -37,3 +37,7 @@ horaria. Sin ellos, sería escribir filas `PENDING` que nadie entrega.
    contenido al que esa regla concede paso en forma enmascarada por `subject`/`body`. Todos los cuerpos
    escritos hasta hoy llevan solo ids y un tipo, precisamente para no tener que resolver esto; este change es
    el que no puede esquivarlo y tiene que declarar la forma exacta.
+
+---
+
+`send_checkin_reminders` es uno de los ocho jobs de PRD §8.3 y no tiene código, sus tres tipos no los escribe nadie, y de las instrucciones de acceso solo existe el registro manual de entrega. Aquí la regla 11 muerde: llevan código de acceso (no está en el plan original, añadida el 2026-08-28) …

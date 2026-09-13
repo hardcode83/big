@@ -101,6 +101,25 @@
     "notFound": {
       "title": "Propiedad no encontrada",
       "description": "No existe ninguna propiedad con ese identificador."
+    },
+    "edit": {
+      "button": "Editar propiedad",
+      "title": "Editar propiedad",
+      "close": "Cerrar",
+      "submit": "Guardar cambios",
+      "submitting": "Guardando…",
+      "cancel": "Cancelar",
+      "success": "Cambios guardados.",
+      "genericError": "No se pudieron guardar los cambios. Vuelve a intentarlo."
+    },
+    "retire": {
+      "button": "Retirar propiedad",
+      "title": "Retirar propiedad",
+      "description": "Esta acción retira la propiedad de forma permanente. No se puede deshacer desde esta pantalla.",
+      "cancel": "Cancelar",
+      "confirm": "Retirar propiedad",
+      "confirming": "Retirando…",
+      "genericError": "No se pudo retirar la propiedad. Vuelve a intentarlo."
     }
   },
   "financial": {

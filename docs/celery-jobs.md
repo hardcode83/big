@@ -4,7 +4,7 @@ Cómo se opera el scheduler que mueve el estado operacional de las viviendas con
 El *qué hace* está en [`sdd/specs/celery-jobs.md`](../sdd/specs/celery-jobs.md); esta página
 es el *cómo se usa y se diagnostica*.
 
-## Los doce jobs
+## Los trece jobs
 
 | Job | Cadencia | Qué hace |
 |---|---|---|
@@ -18,30 +18,44 @@ es el *cómo se usa y se diagnostica*.
 | `classify_incidents` | cada 5 min | Pasa por el clasificador toda incidencia `OPEN` que nadie ha mirado (change `maintenance`) — ver [`maintenance.md`](maintenance.md) |
 | `reconcile_owner_approvals_for_expenses` | cada 5 min | Aplica las respuestas de aprobación del owner a los gastos pendientes de la liquidación (change `revenue-statements`) — ver [`revenue-statements.md`](revenue-statements.md) |
 | `classify_reviews` | cada 5 min | Pasa por el pipeline de análisis toda reseña `NEW` (change `revenue-reviews`) — ver [`reviews.md`](reviews.md) |
+| `sync_pms_reservations` | cada 6 h | Barre el portfolio completo de cada tenant contra su PMS —todos los proveedores que resuelva, `MOCK` incluido— con la misma vía que `pms_sync` (change `pms-sync-schedule`) |
 | `generate_price_recommendations` | **diario, 06:00 UTC** | Recalcula el horizonte de 60 días de precio recomendado de cada vivienda activa con regla aplicable (change `revenue-pricing`) — ver [`pricing.md`](pricing.md) |
 | `generate_owner_statements` | **mensual, día 1, 02:00 UTC** | Genera la liquidación mensual de cada vivienda activa (change `revenue-statements`) — ver [`revenue-statements.md`](revenue-statements.md) |
 
 El calendario vive en `backend/app/scheduler/schedule.py`, en **tres tablas**: `CADENCES` para
-los diez que corren por periodo, `DAILY_JOBS` para el que corre a una hora del día y
+los once que corren por periodo, `DAILY_JOBS` para el que corre a una hora del día y
 `MONTHLY_JOBS` para el que corre un día del mes. `beat_schedule()` sale de las tres.
 
 De `CADENCES` sale también el TTL del lock de cada job periódico —cadencia × 3—, así que esos
-diez no se pueden desincronizar. **El diario y el mensual no pueden derivarlo así**: cadencia ×
+once no se pueden desincronizar. **El diario y el mensual no pueden derivarlo así**: cadencia ×
 3 sobre un job diario son tres días de bloqueo si un worker muere a mitad de ejecución, y sobre
 uno mensual no hay cadencia de la que partir, de modo que `DAILY_JOBS` y `MONTHLY_JOBS` llevan
 el suyo escrito (tres horas y seis horas).
 
 **Seis son de PRD §8.3, con sus números: los cuatro primeros, el diario y el mensual. Los otros
-seis no están en el PRD**, y es una divergencia declarada (`access-notifications` design D2 y
+siete no están en el PRD**, y es una divergencia declarada (`access-notifications` design D2 y
 D3, `reservations-webhooks` design D10, `maintenance` D2, `revenue-statements` D4,
-`revenue-reviews` D2): el PRD dice *qué* tiene que pasar —§14 entrega notificaciones, §15 le da
-un registro de acceso a cada reserva confirmada, §16 recibe los avisos del PMS, §12 pide que
-una incidencia llegue clasificada, §18 declara el pipeline de reseñas y R5.7 exige la
-aprobación del owner sobre gastos— y no dice qué lo dispara. Los seis son idempotentes y
-dependen del reloj, así que beat es su sitio; los nombres del PRD no se han tocado.
-`test_schedule.py` los separa (`PRD_8_3`, `PRD_8_3_DAILY` y `PRD_8_3_MONTHLY` frente a
-`BEYOND_PRD_8_3`) para que nadie invoque «lo dice el PRD» sobre un número que el PRD no ha
-visto nunca.
+`revenue-reviews` D2, `pms-sync-schedule` D1): el PRD dice *qué* tiene que pasar —§14 entrega
+notificaciones, §15 le da un registro de acceso a cada reserva confirmada, §16 recibe los
+avisos del PMS, §12 pide que una incidencia llegue clasificada, §18 declara el pipeline de
+reseñas, R5.7 exige la aprobación del owner sobre gastos y §5.5 (la afirmación de que el PMS es
+la fuente de verdad) requiere un barrido que la sostenga aunque falle un webhook— y no dice qué
+lo dispara. Los siete son idempotentes y dependen del reloj, así que beat es su sitio; los
+nombres del PRD no se han tocado. `test_schedule.py` los separa (`PRD_8_3`, `PRD_8_3_DAILY` y
+`PRD_8_3_MONTHLY` frente a `BEYOND_PRD_8_3`) para que nadie invoque «lo dice el PRD» sobre un
+número que el PRD no ha visto nunca.
+
+**`sync_pms_reservations` reemplaza una ausencia documentada, no añade una capacidad nueva**:
+`celery-jobs` design D16 (2026-08-04) decidió explícitamente no programarlo porque su único
+proveedor evaluado (Beds24) no tenía adapter todavía — la cadencia ya estaba medida entonces
+(8 créditos/ciclo, recomendación del proveedor ~6 h). `pms-beds24-adapter` cerró esa premisa;
+este change añade el job que D16 dejó pendiente. Dos diferencias con el `pms_sync` manual: la
+ventana de barrido es `settings.pms_sync_window_days` (2 días por defecto, no los 30 del CLI —
+un job de 6 en 6 horas solo necesita cubrir el hueco desde su última pasada más margen, no un
+mes) y el `TimelineEvent` de cada reserva lleva `source="pms_scheduled"` en vez de `"pms"`
+(CLI) o `"webhook"`, para que el timeline distinga "vino del reloj" de "lo disparó un operador"
+o "avisó el proveedor". El informe es el mismo `IngestReport` que ya usan el CLI y el drenaje
+de webhooks — ver más abajo.
 
 **Por qué `provision_access_records` es un barrido y no un enganche a la confirmación**: ya hay
 reservas confirmadas en la base de datos. Un hook en la transición solo cubriría las futuras y
@@ -134,6 +148,47 @@ llegado sino porque el día no coincide. Calcula `AT` en la zona de la vivienda,
 **Sólo dev/local.** El comando se niega con exit 1 si `settings.environment` (variable
 `APP_ENVIRONMENT`, default `local`) no es `local` ni `dev` (design D5): es una herramienta
 para probar en desarrollo, no una vía para adelantar el reloj de un tenant real.
+
+## Disparar el sync del PMS a mano (`make pms-sync`)
+
+`sync_pms_reservations` corre cada 6 h; para verificarlo sin esperar, `make pms-sync
+TENANT=<uuid> [WINDOW=<días>] [PROVIDER=<nombre>]` ejecuta el mismo
+`python -m app.integrations.cli.pms_sync` que el job de beat llama por dentro — el informe
+(`created`/`updated`/`skipped`) tiene que salir idéntico entre los dos caminos, y una segunda
+pasada sobre el mismo dataset tiene que dar `created: 0` (idempotencia).
+
+En un worktree recién levantado no hay tenant: `make bootstrap` lo crea (pide
+`BOOTSTRAP_*` en `.env`, contraseñas desechables de dev — steering/security.md #8) y
+`make seed-demo` (presupone bootstrap) le añade dos propiedades `MOCK` y tres reservas. El
+UUID del tenant sale de:
+
+```bash
+docker compose exec -T backend uv run python -c "
+import asyncio
+from app.core.db import async_session_factory
+from sqlalchemy import select
+from app.tenants.infrastructure.models import TenantModel
+async def main():
+    async with async_session_factory() as s:
+        print((await s.execute(select(TenantModel.id, TenantModel.name))).all())
+asyncio.run(main())
+"
+```
+
+Para confirmar que el propio job (no solo el CLI) está registrado y corre igual:
+
+```bash
+docker compose exec -T backend uv run python -c "
+from app.scheduler.tasks import sync_pms_reservations
+print(sync_pms_reservations())
+"
+celery -A app.worker inspect registered  # lista sync_pms_reservations entre las tareas del worker
+```
+
+Verificado 2026-09-11 contra el seed de demo (cuyos códigos de propiedad no coinciden con los
+que trae `MockPMSAdapter` de fábrica): las tres vías —CLI manual, `make pms-sync` y la llamada
+directa al task— dieron el mismo informe (`created 0, updated 0, skipped 4`, mismos motivos de
+`skipped`), y una segunda ejecución repitió el informe sin duplicar nada.
 
 ## Cómo leer el informe
 

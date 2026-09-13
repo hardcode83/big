@@ -48,3 +48,7 @@ una decisión que nadie ha tomado.
 incidente, PRD §12) y `revenue` (`expenses.receipt_storage_key`, PRD §7.x).
 
 completes: cleaning-photos-storage · size: M · kind: infra
+
+---
+
+El nombre no lleva `s3-` a propósito: el proveedor es parte de lo que hay que decidir, y OCI Object Storage (compatible con S3, y el dev ya corre en Oracle) compite con R2 y AWS. Arrastra una obligación que no puede llegar como sorpresa: el día que se configure un bucket, R3.2 de `cleaning-photos-storage` se incumple en ese mismo commit y ningún test lo detiene …

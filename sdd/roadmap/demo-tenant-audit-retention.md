@@ -1,0 +1,3 @@
+# demo-tenant-audit-retention
+
+su reset diario preserva esa tabla por requisito (R3.6 de `demo-user`), así que es la única tabla de un tenant que se vacía cada noche y que **nunca** se reduce — y el `entity_id` polimórfico de cada fila queda colgando en cuanto pasa el primer reset, porque la entidad a la que apuntaba ya se borró. Cada ejecución añade además una fila de convergencia por cuenta. Lo que decide la entrada es la regla de retención de las filas de auditoría de ese tenant; es el seguimiento obvio y quedó deliberadamente fuera de aquel change (no está en el plan original, registrada al archivar `demo-user` el 2026-08-24, de sus §Roadmap candidates y del punto 3 de su design D4bis, que es donde vive el detalle)

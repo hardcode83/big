@@ -269,3 +269,33 @@ variable "public_hostname" {
     error_message = "public_hostname debe ser UNA sola etiqueta bajo cloudflare_zone_name y empezar por 'autohostai' (p. ej. autohostai.digitalsec.work, autohostai-staging.digitalsec.work). El apex desnudo, los wildcards y los subdominios más profundos quedan fuera del Universal SSL gratuito; el prefijo evita apropiarse de un hostname ajeno de una zona compartida."
   }
 }
+
+# WhatsApp Cloud API (change whatsapp-dev-credentials-render)
+#
+# Cuatro credenciales de la App de Meta, externas: Terraform SOLO las transporta al Vault, igual
+# que `github_app_private_key` — nunca las genera (`random_*` o similar). `WHATSAPP_PROVIDER` no
+# está aquí porque no es un secreto: llega por repo variable directamente al workflow (tasks.md 3.2).
+
+variable "whatsapp_access_token" {
+  description = "Access token de la WhatsApp Cloud API (App de Meta). Credencial externa: Terraform solo la transporta al Vault, igual que `github_app_private_key`."
+  type        = string
+  sensitive   = true
+}
+
+variable "whatsapp_phone_number_id" {
+  description = "Phone Number ID de la WhatsApp Cloud API (App de Meta). Credencial externa: Terraform solo la transporta al Vault, igual que `github_app_private_key`."
+  type        = string
+  sensitive   = true
+}
+
+variable "whatsapp_app_secret" {
+  description = "App secret de la App de Meta usada para verificar la firma de los webhooks de WhatsApp. Credencial externa: Terraform solo la transporta al Vault, igual que `github_app_private_key`."
+  type        = string
+  sensitive   = true
+}
+
+variable "whatsapp_webhook_verify_token" {
+  description = "Verify token del webhook de WhatsApp (handshake de suscripción de Meta). Credencial externa: Terraform solo la transporta al Vault, igual que `github_app_private_key`."
+  type        = string
+  sensitive   = true
+}

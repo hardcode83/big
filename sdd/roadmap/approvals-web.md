@@ -62,3 +62,7 @@ más allá de lo que `notification-channel-routing` ya haga.
 **Verificación que el change debe dejar hecha**: incidencia resuelta por el técnico con coste
 final 150 € → aparece en `/approvals` del owner → aprobar → el técnico ve la incidencia
 desbloqueada en `/tech` y la campana le lleva a ella.
+
+---
+
+el owner tiene `RESPOND_OWNER_APPROVALS` y ningún sitio donde ejercerlo. La ruta de respuesta existe (`maintenance/api/approvals_router.py:39`) y **la de lista no existe a propósito** (`approvals_router.py:3-8`), así que la mitad es backend. Toda resolución con coste > `owner_approval_threshold_eur` (default 100 €, `tenants/domain/entities.py:151`) aparca la incidencia en `AWAITING_OWNER_APPROVAL`, donde `/tech` ofrece cero acciones (`tech-actions.ts:31`) — callejón sin salida alcanzable en uso normal, cuya única pista es el id de la aprobación pintado en `/properties/[id]` (no está en el plan original, añadida el 2026-09-04 al auditar los flujos por rol; hito «MVP operable» 1) …

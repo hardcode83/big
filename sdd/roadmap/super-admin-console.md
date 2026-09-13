@@ -83,3 +83,7 @@ se cerró sin proposal, y de ahí salieron sus tres entradas `[BE]`).
 Las dos entradas `¿?` que `sdd_roadmap.py suggest` señaló al abrir este `/sdd:new` **no eran relaciones
 reales** y no se declararon: «no es `saas-cross-tenant`» es una frontera, no una dependencia, y la mención
 de `cleaner-app`/`tech-app` es un precedente citado, no algo de lo que esta entrada dependa.
+
+---
+
+aterrizaje por rol y las pantallas para crear tenants, managers, cleaners y technicians desde el navegador — hoy se hace a mano contra la base de datos. Requisito declarado por Jose el 2026-08-29; ampliación prevista y no comprometida: entrar en un tenant a comprobar que todo va bien (eso **no** es esta entrada, ver más abajo). Solo implementable una vez existan el modelo de identidad y las rutas de `super-admin-identity` y `platform-admin-api`: hasta entonces `roleHome` (`frontend/features/auth/lib/role-home.ts`) sigue cayendo a `/dashboard` y el `AuthGuard` de `frontend/app/(workspace)/layout.tsx` rebotando al `SUPER_ADMIN` — el censo completo que forzó la partición está en `sdd/roadmap/super-admin-console.md`. **No es `saas-cross-tenant`**: aquélla es leer datos de otros tenants e impersonar, ésta es administrar la plataforma; la ampliación de «entrar en un tenant» queda allí, fuera de alcance aquí (su `/sdd:new` del 2026-08-31 la partió en tres, mismo criterio que partió `tech-app`, `cleaner-app`, `revenue` y `field-apps`) …

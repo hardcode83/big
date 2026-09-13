@@ -65,6 +65,25 @@ export interface PropertySummaryDto {
 }
 
 /**
+ * One property in full (proposal R1.2, R2.2, design D7).
+ *
+ * Same shape as `PropertySummaryDto`, plus the three free-text notes the list
+ * response omits: `accessNotes`, `cleaningNotes`, `emergencyNotes`. Mirrors
+ * `PropertyResponse`, never `PropertyListItemResponse` — fetched one at a time
+ * via `HttpPropertiesSource.getProperty`, never batched into the list response
+ * (exception 6 of rule 11 in `steering/security.md`).
+ *
+ * Structurally without a WiFi password field, same as `PropertySummaryDto`:
+ * `PropertyResponse` never carries one, in any form (rule 5.2 of
+ * `steering/security.md`) — only `hasWifiPassword` signals whether one is set.
+ */
+export interface PropertyDetailDto extends PropertySummaryDto {
+  accessNotes: string | null;
+  cleaningNotes: string | null;
+  emergencyNotes: string | null;
+}
+
+/**
  * The paginated envelope of PRD §23, verbatim — the same shape reservations
  * uses. It is a flat `{data, page, perPage, total, totalPages}`, **not** a
  * nested `meta` envelope (proposal R1.4); assuming otherwise is the mistake
@@ -94,4 +113,87 @@ export interface PropertyFilters {
   currentOperationalState?: PropertyOperationalState;
   page?: number;
   perPage?: number;
+}
+
+/**
+ * The `CreatePropertyRequest` command, camelCase (proposal R1.2, design D7/D8).
+ *
+ * Exactly the fields R1.2 names — `name`/`internalCode` are the only required
+ * ones, matching the backend's own required pair; every other field is
+ * optional and left out entirely lets the backend apply its own default
+ * (`country`, `timezone`, `maxGuests`, `bedrooms`, `bathrooms`, the two
+ * check-in/out times), same as an unset key in `CreatePropertyRequest`.
+ *
+ * Deliberately absent, and must stay absent:
+ *  - `pmsProvider` — create-only in the backend contract, but not offered by
+ *    this UI (R1.2).
+ *  - `status`/`currentOperationalState` — a new property always starts
+ *    `VACANT_READY`/`ACTIVE`; this UI never chooses it (R1.2).
+ */
+export interface CreatePropertyInput {
+  name: string;
+  internalCode: string;
+  pmsExternalId?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  province?: string | null;
+  postalCode?: string | null;
+  country?: string;
+  timezone?: string;
+  maxGuests?: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  defaultCheckInTime?: string;
+  defaultCheckOutTime?: string;
+  wifiName?: string | null;
+  wifiPassword?: string | null;
+  accessNotes?: string | null;
+  cleaningNotes?: string | null;
+  emergencyNotes?: string | null;
+}
+
+/**
+ * The `UpdatePropertyRequest` command, camelCase (proposal R2.2, R2.3, R2.6,
+ * design D8, D9).
+ *
+ * Every field optional: only the keys the caller sets are meant to travel
+ * (the diffing itself is `EditPropertyForm`'s job, D8 — `HttpPropertiesSource
+ * .updateProperty` sends `input` through as given, it does not filter). A
+ * value of `null` on a nullable field (`pmsExternalId`, the address fields,
+ * `wifiName`, `wifiPassword`, the three notes) is a deliberate "clear this
+ * field"; omitting the key entirely means "leave it alone".
+ *
+ * Deliberately absent, and must stay absent:
+ *  - `pmsProvider` — create-only, never patchable (R2.3).
+ *  - `currentOperationalState` — not patchable by this endpoint at all;
+ *    `PropertyStateMachine` is the only thing that moves it.
+ *
+ * `status` IS present, but only for the dedicated retire path (D9, R2.6):
+ * `EditPropertyForm` itself never renders or sets it (R2.3) — only the
+ * "Retire property" confirmation calls `useUpdateProperty` with exactly
+ * `{ status: "INACTIVE" }`.
+ */
+export interface UpdatePropertyInput {
+  name?: string;
+  internalCode?: string;
+  pmsExternalId?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  province?: string | null;
+  postalCode?: string | null;
+  country?: string;
+  timezone?: string;
+  maxGuests?: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  defaultCheckInTime?: string;
+  defaultCheckOutTime?: string;
+  wifiName?: string | null;
+  wifiPassword?: string | null;
+  accessNotes?: string | null;
+  cleaningNotes?: string | null;
+  emergencyNotes?: string | null;
+  status?: PropertyStatus;
 }

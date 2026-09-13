@@ -1,0 +1,3 @@
+# incident-status-tone
+
+`features/incidents/lib/severity-tone.ts` mapea `IncidentSeverity` y nada mapea `IncidentStatus`, así que `tech-app` pinta el estado como un chip neutro (`text-muted-foreground`) y `frontend-foundation.md` sigue exigiendo que la paleta de badges viva en un solo sitio. Es una decisión de **vocabulario** antes que de código —qué significa cada color para un estado del ciclo— y por eso no se tomó dentro de un change que no la pedía. Alcanza también al detalle del manager (`/incidents/[id]`), que tiene el mismo hueco (no está en el plan original, candidata de `tech-app` el 2026-08-30 desde la enmienda de su R6.4) …

@@ -55,3 +55,7 @@ esa bolsa: lo que hace falta para operar no espera al endurecimiento de release.
 **Fuera de alcance**: `/settings/integrations` funcional; plantillas de checklist (candidata
 `cleaning-templates-web`); segundo `SUPER_ADMIN` (`super-admin-identity` lo dejó abierto);
 `saas-cross-tenant`.
+
+---
+
+usuarios del tenant y configuración**. Un `TENANT_OWNER` tiene `MANAGE_USERS` y `MANAGE_TENANT_SETTINGS` y ninguna pantalla: **no puede dar de alta a su propia limpiadora** —sólo el `SUPER_ADMIN` desde `/platform`—, ni tocar `owner_approval_threshold_eur`, los SLA, `auto_create_cleaning_task` ni los conmutadores `notification_email_enabled`/`notification_whatsapp_enabled` (`tenants/api/schemas.py:75-89`). Backend completo: seis rutas de `auth/api/users_router.py` (:73-:220) y `GET`/`PATCH /tenants/{id}` (`tenants/api/router.py:47`, :60). El formulario de alta y la revelación única de la contraseña temporal ya existen en `features/platform` y se reutilizan. **Sale de `hardening-release`**, que retenía «la pantalla de settings/integraciones»; `/settings/integrations` (PMS por UI) queda fuera del MVP — las credenciales son CLI por la regla 3(a) (no está en el plan original, separada de `hardening-release` el 2026-09-04; hito «MVP operable» 3) …
