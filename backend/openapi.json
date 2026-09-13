@@ -4892,6 +4892,190 @@
         "title": "OwnerApprovalStatus",
         "type": "string"
       },
+      "OwnerStatementDetailResponse": {
+        "description": "Flat additive detail response; the summary fields remain top-level.",
+        "properties": {
+          "amenities_costs": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amenities Costs",
+            "type": "string"
+          },
+          "cleaning_costs": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Cleaning Costs",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expenses": {
+            "items": {
+              "$ref": "#/components/schemas/OwnerStatementExpenseBreakdownResponse"
+            },
+            "title": "Expenses",
+            "type": "array"
+          },
+          "gross_revenue": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Gross Revenue",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "laundry_costs": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Laundry Costs",
+            "type": "string"
+          },
+          "maintenance_costs": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Maintenance Costs",
+            "type": "string"
+          },
+          "net_owner_result": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Net Owner Result",
+            "type": "string"
+          },
+          "net_revenue": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Net Revenue",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "ota_commissions": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Ota Commissions",
+            "type": "string"
+          },
+          "other_costs": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Other Costs",
+            "type": "string"
+          },
+          "period_end": {
+            "format": "date",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "platform_fee": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Platform Fee",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "reservations": {
+            "items": {
+              "$ref": "#/components/schemas/OwnerStatementReservationBreakdownResponse"
+            },
+            "title": "Reservations",
+            "type": "array"
+          },
+          "specialist_costs": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Specialist Costs",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OwnerStatementStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "period_start",
+          "period_end",
+          "status",
+          "notes",
+          "gross_revenue",
+          "ota_commissions",
+          "net_revenue",
+          "cleaning_costs",
+          "laundry_costs",
+          "amenities_costs",
+          "maintenance_costs",
+          "specialist_costs",
+          "platform_fee",
+          "other_costs",
+          "net_owner_result",
+          "created_at",
+          "updated_at",
+          "expenses",
+          "reservations"
+        ],
+        "title": "OwnerStatementDetailResponse",
+        "type": "object"
+      },
+      "OwnerStatementExpenseBreakdownResponse": {
+        "description": "Minimal read-only expense projection for statement financial detail.",
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "category": {
+            "$ref": "#/components/schemas/ExpenseCategory"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "category",
+          "description",
+          "amount",
+          "currency",
+          "date"
+        ],
+        "title": "OwnerStatementExpenseBreakdownResponse",
+        "type": "object"
+      },
       "OwnerStatementGenerationReportResponse": {
         "description": "R2.6 / D9 — the three counters the manual generation reports.\n\n`currency_mismatch` is the list of `(property_id, period_start, period_end, mismatches)`\nentries the use case collects when D3 aborts one or more `(tenant, property, period)`\nslices for non-EUR rows. The shape matches what the use case builds; the router hands\nit through unchanged.",
         "properties": {
@@ -4975,6 +5159,76 @@
           "per_page"
         ],
         "title": "OwnerStatementPageResponse",
+        "type": "object"
+      },
+      "OwnerStatementReservationBreakdownResponse": {
+        "description": "Minimal read-only reservation projection for statement financial detail.",
+        "properties": {
+          "check_in_date": {
+            "format": "date",
+            "title": "Check In Date",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "gross_amount": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gross Amount"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "net_amount": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Amount"
+          },
+          "nights": {
+            "title": "Nights",
+            "type": "integer"
+          },
+          "ota_commission": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ota Commission"
+          }
+        },
+        "required": [
+          "id",
+          "check_in_date",
+          "nights",
+          "gross_amount",
+          "ota_commission",
+          "net_amount",
+          "currency"
+        ],
+        "title": "OwnerStatementReservationBreakdownResponse",
         "type": "object"
       },
       "OwnerStatementResponse": {
@@ -16658,7 +16912,7 @@
     },
     "/api/v1/owner-statements/{statement_id}": {
       "get": {
-        "description": "Returns the statement's eleven monetary columns and its `status`/`notes`. Only statements of the caller's tenant are reachable — a `404` with the same body whether the id is unknown or belongs to another tenant (R3.4, R7.2).\n\n**The detail payload composes here, not in the API layer**: the PDF exporter (`ExportOwnerStatementPdfUseCase`) reads the same `GetOwnerStatementUseCase`, so the two surfaces cannot drift on what 'the detail' is (R3.5).",
+        "description": "Returns the statement's current summary fields plus read-only `expenses` and `reservations` breakdown collections. Only statements of the caller's tenant are reachable — a `404` with the same body whether the id is unknown or belongs to another tenant (R3.4, R7.2).\n\nThe detail payload is composed by `GetOwnerStatementUseCase` and exposed here with the summary plus the read-only breakdown collections (R3.5).",
         "operationId": "get_owner_statement_api_v1_owner_statements__statement_id__get",
         "parameters": [
           {
@@ -16677,7 +16931,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OwnerStatementResponse"
+                  "$ref": "#/components/schemas/OwnerStatementDetailResponse"
                 }
               }
             },

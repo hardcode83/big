@@ -166,9 +166,14 @@ de tablas locales, igual que `revenue-pricing`. La pantalla `/statements` queda 
 - THE SYSTEM SHALL devolver el sobre `{items, total, page, per_page}` — `items`, no
   `data` — siguiendo la convención que `revenue-pricing` fijó para este proyecto.
 - WHEN un usuario emite `GET /api/v1/owner-statements/{statement_id}`, THE SYSTEM SHALL
-  devolver el detalle con los once importes y `status`/`notes`; el mismo caso de uso
-  (`GetOwnerStatementUseCase`) alimenta el exportador PDF, así que las dos superficies
-  no pueden divergir sobre qué es "el detalle".
+  devolver el detalle con los once importes, `status`/`notes` y las colecciones top-level
+  `expenses` y `reservations`, compuestas por `GetOwnerStatementUseCase`. Las reservas
+  SHALL exponer sólo `id`, `check_in_date`, `nights`, `gross_amount`, `ota_commission`,
+  `net_amount` y `currency`; los gastos SHALL exponer sólo `id`, `category`,
+  `description`, `amount`, `currency` y `date`.
+- THE SYSTEM SHALL usar `OwnerStatementDetailResponse` exclusivamente para el GET detail;
+  `OwnerStatementPageResponse` y la respuesta de PATCH SHALL continuar usando
+  `OwnerStatementResponse` sin esas colecciones.
 - IF el `statement_id` no existe o pertenece a otro tenant, THEN THE SYSTEM SHALL
   responder `404` con **el mismo cuerpo constante** en los dos casos.
 - `GET /api/v1/expenses` SHALL filtrar por `property_id`, el rango
@@ -343,12 +348,6 @@ de tablas locales, igual que `revenue-pricing`. La pantalla `/statements` queda 
   (`errors="replace"`) en vez de preservarse. Suficiente para español (acentos, `ñ`,
   `€` no se usa porque el PDF no imprime símbolo de moneda), pero un nombre de tenant o
   vivienda con un carácter fuera de Latin-1 perdería fidelidad en el PDF.
-- **El detalle JSON no lleva el desglose por reserva ni la lista de `Expense`.**
-  R3.3/R3.5 del proposal lo pedían, pero `OwnerStatementResponse` expone sólo identidad,
-  período, `status`, `notes`, los once importes y timestamps. El desglose por reserva y
-  los gastos consolidados sólo son alcanzables hoy por `export.pdf` (ambos) y
-  `export.csv` (gastos), o filtrando `GET /api/v1/expenses` por vivienda y período.
-  Quien lo quiera en JSON tiene que añadirlo al DTO en un change propio.
 - **`failed` sí está en el contrato publicado** — a diferencia de `revenue-pricing`,
   `OwnerStatementGenerationReportResponse` expone los cinco contadores (`created`,
   `skipped`, `failed`, `consolidated_count`, `currency_mismatch`), así que un barrido
