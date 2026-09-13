@@ -4,13 +4,13 @@
      "manual" en una línea de tarea marca lo que solo un humano o un entorno
      inalcanzable desde el worktree puede hacer. -->
 
-## 1. Infraestructura E2E (Playwright)
+## 1. Infraestructura E2E (Playwright) <!-- panel: PASS 2026-09-13 receipt:40b9b4c6 -->
 
-- [ ] 1.1 Añadir `@playwright/test` (misma major que la `playwright` ya fijada en `frontend/package.json`, `^1.62.1`) como devDependency; nuevo script `"test:e2e": "playwright test"`. [R1]
-- [ ] 1.2 `frontend/playwright.config.ts`: proyecto Chromium, `testDir: './e2e'`, `use: { baseURL: 'http://localhost:3000' }`, timeouts razonables para flujos multi-página. Distinto de `vitest.config.ts` — no toca ese fichero. [R1]
-- [ ] 1.3 `globalSetup` en `frontend/e2e/global-setup.ts`: petición HTTP a `http://localhost:8000/health` (backend directo, no vía proxy) antes de correr cualquier spec; si no responde, aborta con mensaje explícito ("stack no levantado — corre `make up` primero") en vez de dejar que cada test falle por timeout genérico. Referenciarlo desde `playwright.config.ts` (`globalSetup`). [R1.2]
-- [ ] 1.4 Fixture compartida `frontend/e2e/fixtures/auth.ts`: helper que hace login por clic (navegar a `/login`, rellenar credenciales, enviar, esperar `/dashboard`) parametrizado por rol — inspeccionar `frontend/features/auth/components/login-form.tsx` para los selectores reales, no inventarlos. Reutilizada por los tres specs de flujo. [R1]
-- [ ] 1.5 Fixture `frontend/e2e/fixtures/seed-context.ts`: helpers de API (autenticados) para crear por API el dato de partida que cada spec necesite más allá de `make seed-demo` (p. ej. una `CleaningTask`/incidencia en el estado exacto del test), documentando qué endpoint usa cada helper. [R1]
+- [x] 1.1 Añadir `@playwright/test` (misma major que la `playwright` ya fijada en `frontend/package.json`, `^1.62.1`) como devDependency; nuevo script `"test:e2e": "playwright test"`. [R1]
+- [x] 1.2 `frontend/playwright.config.ts`: proyecto Chromium, `testDir: './e2e'`, `use: { baseURL: 'http://localhost:3000' }`, timeouts razonables para flujos multi-página. Distinto de `vitest.config.ts` — no toca ese fichero. [R1]
+- [x] 1.3 `globalSetup` en `frontend/e2e/global-setup.ts`: petición HTTP a `http://localhost:8000/health` (backend directo, no vía proxy) antes de correr cualquier spec; si no responde, aborta con mensaje explícito ("stack no levantado — corre `make up` primero") en vez de dejar que cada test falle por timeout genérico. Referenciarlo desde `playwright.config.ts` (`globalSetup`). [R1.2]
+- [x] 1.4 Fixture compartida `frontend/e2e/fixtures/auth.ts`: helper que hace login por clic (navegar a `/login`, rellenar credenciales, enviar, esperar `/dashboard`) parametrizado por rol — inspeccionar `frontend/features/auth/components/login-form.tsx` para los selectores reales, no inventarlos. Reutilizada por los tres specs de flujo. [R1]
+- [x] 1.5 Fixture `frontend/e2e/fixtures/seed-context.ts`: helpers de API (autenticados) para crear por API el dato de partida que cada spec necesite más allá de `make seed-demo` (p. ej. una `CleaningTask`/incidencia en el estado exacto del test), documentando qué endpoint usa cada helper. [R1]
 
 ## 2. E2E: flujo de login [R2]
 
@@ -49,3 +49,87 @@
 ## Implementation Notes
 
 <!-- Append-only: cada implementador de sección añade aquí lo que la siguiente necesita. -->
+
+### Section 1 (Infraestructura E2E)
+
+- **Health-check endpoint discrepancy (D1 vs task 1.3):** `design.md` D1 says the `globalSetup`
+  health check goes through the proxy at `/api/v1/health`. That endpoint does not exist —
+  verified against `backend/app/main.py:392-397`: the real health route is `GET /health`,
+  deliberately mounted OUTSIDE `API_V1_PREFIX` ("the container healthcheck in
+  docker-compose.yml ... probes /health"). Followed task 1.3 instead: `frontend/e2e/global-setup.ts`
+  hits `http://localhost:8000/health` directly (backend, no proxy). Override with
+  `BACKEND_HEALTH_URL` env var for a `PORT_OFFSET` worktree (backend port shifts to `8000+n`).
+- **`baseURL` override:** `playwright.config.ts` reads `process.env.BASE_URL` (default
+  `http://localhost:3000`) so task 7.3's `BASE_URL=http://localhost:<3000+n> npm run test:e2e`
+  works as documented, without editing the config per worktree.
+- **Login selectors (`frontend/features/auth/components/login-form.tsx`) — no `data-testid`s
+  exist on this form:** email input `#email`, password input `#password`, submit button
+  `button[type="submit"]` (the label text is i18n and intentionally not used as a selector).
+- **Post-login landing is role-dependent, not uniformly `/dashboard`** (task 1.4's text says
+  "esperar /dashboard" for all roles — only true for two of the four):
+  `TENANT_OWNER`/`PROPERTY_MANAGER` → `/dashboard` directly. `CLEANER`/`TECHNICIAN` → the login
+  form redirects to `/welcome?role=<role>` first (`role-home.ts` + `app/(authenticated)/welcome/page.tsx`),
+  which shows one CTA `<a href="/cleaner">` / `<a href="/tech">` the visitor must click — it does
+  **not** auto-navigate. `fixtures/auth.ts`'s `loginAs(page, role)` handles this: it waits for
+  `/welcome`, clicks the CTA (selected by `href`, not label text), then waits for the real shell
+  route. Sections 2-4 should call `loginAs` rather than assume a single post-login URL.
+- **Credentials come from the repo root `.env`, not hardcoded:** `BOOTSTRAP_OWNER_EMAIL/PASSWORD`,
+  `BOOTSTRAP_MANAGER_EMAIL/PASSWORD` (from `make bootstrap`), `SEED_CLEANER_EMAIL/PASSWORD`,
+  `SEED_TECHNICIAN_EMAIL/PASSWORD` (from `make seed-demo`) — steering/security.md #8 ships no
+  defaults for these. `frontend/e2e/fixtures/load-env.ts` (`loadRootEnv()`) parses `.env` from
+  the repo root once and copies keys into `process.env` without overwriting anything already
+  set (so a CI runner that exports them as real env vars is unaffected); it's a small inline
+  parser, not a new `dotenv` devDependency, since task 1.1 only asked for `@playwright/test`.
+  Called from `global-setup.ts` (workers inherit `process.env` from the forked-after-setup
+  process) and defensively again from `fixtures/auth.ts`/`fixtures/seed-context.ts`.
+- **Reusable fixture API for sections 2-4:**
+  - `fixtures/auth.ts`: `type Role = "TENANT_OWNER" | "PROPERTY_MANAGER" | "CLEANER" | "TECHNICIAN"`;
+    `credentialsFor(role): { email, password }`; `loginAs(page, role): Promise<void>`.
+  - `fixtures/seed-context.ts` (extend this file, don't fork a new one): `apiLogin(email, password): Promise<{ accessToken }>`
+    (`POST /api/v1/auth/login`, hits the backend directly, no browser); `firstProperty(session): Promise<{ id, name }>`
+    (`GET /api/v1/properties?page=1&per_page=1`); `createCleaningTask(session, { propertyId, reservationId?, scheduledStart?, scheduledEnd? })`
+    (`POST /api/v1/cleaning-tasks`, `backend/app/cleaning/api/tasks_router.py` `create_cleaning_task`
+    — the manual path alongside the automatic `process_checkouts`; caller needs a role `ManageDep`
+    accepts, i.e. `TENANT_OWNER`/`PROPERTY_MANAGER` credentials). `BACKEND_URL` env override exists
+    for `PORT_OFFSET` worktrees (default `http://localhost:8000`). No incident-seed helper yet —
+    section 4's implementer should add it here with the same pattern (document the endpoint it calls).
+- **Verification run:** `cd frontend && npm install` (host `node_modules` did not exist in this
+  worktree — Docker volume-only, see `sdd/project.md` §Worktree bootstrap — installed here only
+  for local verification), `npm run typecheck` (clean), `npm run lint` (clean),
+  `npx playwright test --list` from an empty `e2e/` correctly reports "No tests found" / exit 1
+  (Playwright's standard behavior for zero spec files, not a config error) — confirmed the config
+  itself resolves correctly by temporarily dropping in a throwaway spec, which listed
+  `[chromium] › _probe.spec.ts:2:5 › probe`, `Total: 1 test in 1 file`, exit 0, then removed it
+  (no spec files belong to section 1).
+
+### Section 1 — fix round 1
+
+Three QA findings from the section 1 review, all fixed:
+
+- **HIGH (`fixtures/load-env.ts:6`, R1.1) + HIGH (`global-setup.ts:3`, R1.2):** same root
+  cause. `frontend/package.json` has no `"type": "module"`, so Playwright's TS loader
+  transpiles specs/config to CJS, where `import.meta.url` (used to resolve the repo-root
+  `.env` path) is a `SyntaxError` at parse time — before `global-setup.ts`'s health-check
+  try/catch ever runs, so its intended clear message never surfaced. Fixed by resolving the
+  path from `__dirname` instead: `@types/node` declares `__dirname` as a global regardless of
+  `tsconfig.json`'s `module: esnext`, and it's populated for real once ts-node's CJS
+  transpilation puts the file back in a CommonJS module scope. Removed the now-unused
+  `node:url`/`fileURLToPath` import.
+- **MEDIUM (`fixtures/seed-context.ts:71`, R1):** `firstProperty()` read `body.items`, but
+  `GET /api/v1/properties` returns `PropertyPageResponse` (`backend/app/properties/api/schemas.py:391`),
+  keyed `data`, not `items` — so the destructure always threw `undefined`. Changed both the cast
+  (`{ items: SeedProperty[] }` → `{ data: SeedProperty[] }`) and the destructure
+  (`body.items` → `body.data`).
+
+Verification (this worktree, `cd frontend` first):
+- `npm run typecheck` — clean, no errors.
+- `npx playwright test` with zero spec files — `Error: No tests found` (expected: no specs
+  exist yet for sections 2-4), no module-system error.
+- Forced `global-setup.ts` to actually run (temporary throwaway spec, removed immediately
+  after) with `BACKEND_HEALTH_URL=http://localhost:59999/health npx playwright test`: got the
+  intended Spanish message — `E2E: no se pudo contactar con el backend en
+  http://localhost:59999/health. Stack no levantado — corre \`make up\` primero (...). Causa:
+  fetch failed` — thrown from `global-setup.ts:31`, confirming the ESM crash is gone and the
+  real health-check failure path now surfaces as designed.
+- `grep -n "body.items\|body.data" frontend/e2e/fixtures/seed-context.ts` — only `body.data`
+  remains.
