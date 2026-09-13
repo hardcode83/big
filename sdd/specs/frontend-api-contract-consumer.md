@@ -62,6 +62,10 @@ backend runtime y evita que el artefacto generado derive silenciosamente entre d
   por recurso.
 - THE SYSTEM SHALL conservar `npm run api:check` como guardia de que estas operaciones y sus
   DTOs siguen alineados con `backend/openapi.json`.
+- WHEN la web confirma una reserva `PENDING` o edita `payment_status`, THE SYSTEM SHALL
+  reutilizar `updateReservation`/`UpdateReservationRequest` — sin operación ni DTO nuevos —
+  porque el contrato ya listaba `status` y `payment_status` como campos parcheables antes de
+  que la UI los expusiera.
 
 ## Key files
 

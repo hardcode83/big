@@ -84,6 +84,7 @@ export function ReviewsTabs<Tab extends string>({
               }}
               type="button"
               role="tab"
+              id={`reviews-tab-${key}`}
               aria-selected={selected}
               aria-controls={panelKey}
               tabIndex={selected ? 0 : -1}
@@ -108,7 +109,7 @@ export function ReviewsTabs<Tab extends string>({
             key={key}
             role="tabpanel"
             id={panel.key}
-            aria-labelledby={key}
+            aria-labelledby={`reviews-tab-${key}`}
             tabIndex={0}
           >
             {panel.node}

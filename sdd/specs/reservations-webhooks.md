@@ -336,6 +336,16 @@ redactarse juntos. Los dos bordes tienen test propio.
   el dato del que se deduce. La cadena queda legible de punta a punta —fila en `webhook_events` →
   `TimelineEvent` de ingesta con actor `WEBHOOK` → transición con actor `SYSTEM`— sin inventar actores,
   y por tanto la cláusula «`WEBHOOK` no está exento» de la regla 9 no se activa.
+- Desde `pms-ingest-change-events`, la re-lectura de webhook tiene **dos** llamantes de este mismo
+  disparo para `RESERVATION_CANCELLED_BEFORE_CHECKIN`: uno anidado dentro de la propia re-lectura
+  (`SyncReservationsFromPmsUseCase`, vía `ReservationIngestor`, con `uow=CallerOwnedUnitOfWork()`,
+  comitea junto con la re-lectura) y el que ya existía aquí (`ProcessTenantWebhookEventsUseCase`,
+  con `SqlAlchemyUnitOfWork` propio, ejecutado después). THE SYSTEM SHALL apoyarse en que el caso
+  de uso de propiedades re-evalúa candidatos en cada llamada y no escribe ni comitea si no
+  encuentra ninguno: cuando la re-lectura ya movió la vivienda fuera de `AWAITING_CHECKIN`, esta
+  segunda llamada no produce una segunda `PropertyStateTransition` para la misma cancelación. La
+  llamada de esta capacidad se mantiene sin cambios, como red de seguridad; el detalle completo de
+  la composición vive en [`ingest.md`](ingest.md).
 
 ### Observabilidad
 

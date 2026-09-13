@@ -102,9 +102,9 @@ Categorías:
   deferred-until: **dos condiciones, no una**. (1) La cuenta de medición de Beds24 esté viva: su trial venció el 2026-08-17 sin convertirse a pago y la API responde 401, así que hoy no hay contra qué medir — reactivarla cuesta ~€15,50/mes y es decisión de negocio, no de desarrollo (`docs/beds24-spike.md` §Alta de la cuenta). (2) Los canales OTA reales se conecten (ventana de corte de los dos anuncios de Madrid, sin fecha). El banco de medición ya está construido y probado, así que no espera a ningún desarrollo · size: S · kind: spike
 - [ ] beds24-messaging-adapter — [BE] **la mensajería de Beds24: el primer implementador real de `PMSMessagingPort`**, que llega vacío de `pms-provider-resolution` y sigue vacío después de `pms-beds24-adapter`.
   needs: pms-beds24-adapter · deferred-until: los canales OTA reales se conecten a la cuenta de Beds24 (misma ventana de corte que `beds24-webhook-cutover-measurement`, sin fecha), porque sin canal no hay conversación que leer ni reserva de OTA a la que responder. **Ese «ni» está sin comprobar y hay sonda para ello**: lo medido fue un GET vacío, que solo prueba que no hay nada que *leer*; si `POST /bookings/messages` acepta `source: guest`, el camino de entrada de `messaging-ai` tiene fuente hoy y el aplazamiento se reduce a la mitad de lectura. El subcomando `beds24_probe.py messages` está construido, probado y mergeado (PR #93), y espera a que la cuenta de medición vuelva a estar viva — la condición (1) de `beds24-webhook-cutover-measurement` · size: M · kind: feature
-- [ ] pms-sync-schedule — [BE] **el sync periódico del PMS que hoy no existe** …
+- [x] pms-sync-schedule — [BE] **el sync periódico del PMS que hoy no existe** … → changes/archive/2026-09-12-pms-sync-schedule/
   needs: celery-jobs, pms-provider-resolution, pms-beds24-adapter · size: S · kind: feature
-- [ ] pms-ingest-change-events — [BE] **una modificación o cancelación que llega del PMS actualiza la fila en silencio** …
+- [x] pms-ingest-change-events — [BE] **una modificación o cancelación que llega del PMS actualiza la fila en silencio** … → changes/archive/2026-09-13-pms-ingest-change-events/
   needs: reservations, reservations-webhooks, pms-sync-schedule · size: S · kind: feature
 - [x] channex-validation-limits — [TECH] **corregir en las specs lo que la validación con Channex puede y no puede hacer**. → changes/archive/2026-08-17-channex-validation-limits/
   completes: channex-staging-adapter · size: S · kind: tech
@@ -133,7 +133,7 @@ Categorías:
   needs: maintenance, frontend-auth-session · size: M · kind: feature
 - [x] properties-web — [FE] **la pantalla de listado de propiedades, `/properties` … → changes/archive/2026-08-22-properties-web/
   needs: properties-crud, frontend-auth-session · size: S · kind: feature
-- [ ] properties-create-web — [FE] **alta y edición de propiedad desde `/properties`**, que hoy es sólo lectura …
+- [x] properties-create-web — [FE] **alta y edición de propiedad desde `/properties`**, que hoy es sólo lectura … → changes/archive/2026-09-12-properties-create-web/
   needs: properties-crud, properties-web · size: S · kind: feature
 - [x] timeline-web — [FE] **la pantalla `/timeline`, que hoy es un placeholder sobre un backend entregado** … → changes/archive/2026-08-22-timeline-web/
   needs: dashboard-api, dashboard-web · size: S · kind: feature
@@ -189,7 +189,7 @@ Categorías:
   needs: notification-channel-routing · completes: messaging-ai · size: L · kind: feature
 - [x] human-reply-outbound-delivery — [BE] **la respuesta del manager se guarda y nunca sale**: `RecordHumanReplyUseCase` (`messaging/application/use_cases.py:642-732`) se construye con `conversations, messages, timeline, uow` y sin registry de canales, así que persiste el `Message`, escribe `HUMAN_RESPONSE_SENT` y hace `take_over` — y no llama a ningún `OutboundMessagePort`. Sólo la respuesta de la IA lo hace (:509-517, :542-550). Para `PORTAL` da igual (la fila es la entrega); para `WHATSAPP` y `EMAIL` el huésped recibe la IA y **nunca al humano**, con credenciales de Meta o sin ellas. R4 de `specs/messaging-ai.md:187-191` exige exactamente lo que el código hace, así que la suite está verde y ningún spec ni doc lo declara como límite. De paso: `outbound_registry` hardcodea `ConsoleEmailAdapter()` para `EMAIL` (`channels.py:265-267`) aunque haya SMTP (no está en el plan original, añadida el 2026-09-04 al auditar la comunicación con el huésped; hito «MVP operable» 2) … → changes/archive/2026-09-11-human-reply-outbound-delivery/
   needs: messaging-ai, whatsapp-cloud-adapter, smtp-delivery-adapter · completes: messaging-ai · size: S · kind: fix
-- [ ] whatsapp-dev-credentials-render — [INFRA] **que el `.env` que el CD renderiza en la VM lleve las cinco `WHATSAPP_*`** …
+- [x] whatsapp-dev-credentials-render — [INFRA] **que el `.env` que el CD renderiza en la VM lleve las cinco `WHATSAPP_*`** … → changes/archive/2026-09-12-whatsapp-dev-credentials-render/
   needs: whatsapp-cloud-adapter, app-deploy-dev, human-reply-outbound-delivery · size: S · kind: infra
 - [x] staff-messaging — [BE] **el tramo que no existe en absoluto … → changes/archive/2026-09-03-staff-messaging/
   needs: cleaning, maintenance, access-notifications · size: L · kind: feature
@@ -249,7 +249,7 @@ Categorías:
   needs: revenue-statements, frontend-auth-session · size: M · kind: feature
 - [x] revenue-reviews — [BE] **gestión de reseñas**: `Review` + `ReviewResponseDraft`, análisis de sentimiento, detección de problemas recurrentes y borrador de respuesta, con aprobación humana y **sin posting automático en OTAs** (PRD §26.23, … → changes/archive/2026-09-02-revenue-reviews/
   needs: messaging-ai · size: M · kind: feature
-- [ ] reviews-web — [FE] **`/reviews`, hoy `RoutePlaceholder` sobre un backend entregado** …
+- [x] reviews-web — [FE] **`/reviews`, hoy `RoutePlaceholder` sobre un backend entregado** … → changes/archive/2026-09-12-reviews-web/
   needs: revenue-reviews, frontend-auth-session · size: M · kind: feature
 - [x] public-zone-hardening — [FE] **endurecimiento de la zona pública tras el primer deploy** … → changes/archive/2026-08-26-public-zone-hardening/
   size: S · kind: fix
@@ -271,9 +271,11 @@ Categorías:
   needs: reservations, reservations-web, reservations-identity-web · size: M · kind: feature
 - [x] reservation-create-web — [FE] **crear, modificar y cancelar una reserva desde `/reservations`**, que hoy es sólo lectura: `POST` (:90), `PATCH` (:154) y `DELETE` (:180) de `reservations/api/router.py` existen y `http-reservations-source.ts` sólo tiene los dos `GET`. Es la única forma de **empezar** un ciclo operativo nuevo desde el navegador sin OTA ni PMS: canal `DIRECT`/`MANUAL`, nace `PENDING`, y `check_in_date`/`check_out_date`/`status` son parcheables (`schemas.py:75-79`). Cierra el «Fuera de alcance» que `reservations-web` dejó escrito sin entrada de seguimiento. Va detrás de `reservations-identity-web` para no construir un formulario sobre una lista que aún pinta UUIDs (no está en el plan original, añadida el 2026-09-04 al auditar los flujos por rol; hito «MVP operable» 1) … → changes/archive/2026-09-11-reservation-create-web/
   needs: reservations, reservations-web, reservations-identity-web, reservation-manual-guest-resolution · size: S · kind: feature
+- [x] reservation-confirm-web — [FE] **confirmar o rechazar una reserva `PENDING`, y registrar su señal de pago, desde `/reservations/[id]`** — lo único que `reservation-create-web` dejó sin mover: el backend admite `PATCH {"status": "CONFIRMED"}` sin restricción de transición (`schemas.py:150-176`), pero `EDITABLE_FIELDS` del formulario de edición excluye `status` y `payment_status` a propósito (`edit-reservation-form.tsx:17-20`, fijado por su propio test) y ningún control las dispara. Sin ella, ninguna reserva directa alcanza el reloj de estados (`sim-advance`/`beat` sólo mueven `CONFIRMED`) sin un `PATCH` manual por API — el mismo patrón que usa `seed-data-demo-extension` para sus estancias sembradas. Investigado el 2026-09-12 contra la práctica real del sector (ventana de 24h del host en Airbnb/Booking "Request to Book", no ligada a la fecha de check-in; arras/señal 20-30% y aprobación manual en gestión directa, patrón Guesty/OwnerRez) antes de decidir el mecanismo: confirmación **manual y desacoplada del pago** — un botón que el manager acciona con su propio criterio — con `payment_status` expuesto en el mismo formulario como registro, no como gate; rechazar reutiliza el `DELETE`/cancelar ya existente (no está en el plan original, añadida el 2026-09-12 al auditar el ciclo completo tras cerrar `reservation-create-web`; hito «MVP operable» 1) → changes/archive/2026-09-13-reservation-confirm-web/
+  needs: reservation-create-web · size: S · kind: feature
 - [x] shell-topbar-overflow-360 — [FE] **la cabecera compartida desborda a 360 px, en todas las superficies** … → changes/archive/2026-09-01-shell-topbar-overflow-360/
   needs: · size: S · kind: fix
-- [ ] tenant-settings-web — [FE] **`/settings`, hoy `RoutePlaceholder` …
+- [x] tenant-settings-web — [FE] **`/settings`, hoy `RoutePlaceholder` … → changes/archive/2026-09-12-tenant-settings-web/
   needs: user-management, frontend-auth-session, frontend-auth-role-routing · size: M · kind: feature
 - [ ] hardening-release — [CROSS] suite E2E Playwright, docker + README, DoD §28 completo (PRD §26.25-28). …
   needs: incident-triage-web, approvals-web, reservation-create-web, cleaning-task-manage-web, sim-advance · size: L · kind: tech

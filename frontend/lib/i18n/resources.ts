@@ -34,6 +34,8 @@ import esPlatform from "@/locales/es/platform.json";
 import enPlatform from "@/locales/en/platform.json";
 import esApprovals from "@/locales/es/approvals.json";
 import enApprovals from "@/locales/en/approvals.json";
+import esTenantSettings from "@/locales/es/tenant-settings.json";
+import enTenantSettings from "@/locales/en/tenant-settings.json";
 import esReviews from "@/locales/es/reviews.json";
 import enReviews from "@/locales/en/reviews.json";
 
@@ -57,6 +59,7 @@ export const NAMESPACES = [
   "cleaner",
   "platform",
   "approvals",
+  "tenant-settings",
   "reviews",
 ] as const;
 export const DEFAULT_NS = "common";
@@ -82,6 +85,7 @@ export const resources = {
     cleaner: esCleaner,
     platform: esPlatform,
     approvals: esApprovals,
+    "tenant-settings": esTenantSettings,
     reviews: esReviews,
   },
   en: {
@@ -103,6 +107,7 @@ export const resources = {
     cleaner: enCleaner,
     platform: enPlatform,
     approvals: enApprovals,
+    "tenant-settings": enTenantSettings,
     reviews: enReviews,
   },
 } as const;

@@ -64,12 +64,21 @@ const RATING_STEP = 0.5;
  * Closing without sending does **not** fire the mutation: the dialog
  * resets its local state on close via `key={open ? "open" : "closed"}`
  * (the same pattern as `resolve-incident-dialog.tsx` in the dashboard).
+ *
+ * **`errorKey` renders INSIDE the dialog, not just in the view's shared
+ * banner** (R5.5): `AlertDialogContent` is a portal overlay
+ * (`fixed inset-0 z-50`) that covers the whole screen, so a `422` shown only
+ * in `reviews-view.tsx`'s `role="status"` region would sit behind this
+ * dialog and never be seen while the form is still open — exactly the case
+ * a create failure needs.
  */
 export interface CreateReviewDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   catalog: readonly PropertySummary[];
   isBusy: boolean;
+  /** Localized error key from `createErrorKey`, or `null` when there is none to show. */
+  errorKey: string | null;
   onSubmit: (input: CreateReviewInput) => void;
 }
 
@@ -78,6 +87,7 @@ export function CreateReviewDialog({
   onOpenChange,
   catalog,
   isBusy,
+  errorKey,
   onSubmit,
 }: CreateReviewDialogProps) {
   const { t } = useTranslation("reviews");
@@ -86,6 +96,7 @@ export function CreateReviewDialog({
   const [reviewerName, setReviewerName] = useState("");
   const [rating, setRating] = useState<number>(5);
   const [content, setContent] = useState("");
+  const [language, setLanguage] = useState("");
 
   const canSubmit = propertyId !== "" && !isBusy;
 
@@ -95,6 +106,7 @@ export function CreateReviewDialog({
     setReviewerName("");
     setRating(5);
     setContent("");
+    setLanguage("");
   }
 
   return (
@@ -122,6 +134,7 @@ export function CreateReviewDialog({
               ...(reviewerName !== "" ? { reviewerName } : {}),
               rating,
               ...(content !== "" ? { content } : {}),
+              ...(language !== "" ? { language } : {}),
             });
           }}
         >
@@ -202,6 +215,27 @@ export function CreateReviewDialog({
               className="rounded-md border border-border bg-background px-2 py-1.5 text-body-base"
             />
           </label>
+          <label className="flex flex-col gap-1 text-body-base">
+            <span className="font-medium text-foreground">
+              {t("create.fields.language")}
+            </span>
+            <input
+              type="text"
+              value={language}
+              placeholder={t("create.placeholders.language")}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="rounded-md border border-border bg-background px-2 py-1.5 text-body-base"
+            />
+          </label>
+          {errorKey !== null && (
+            <p
+              role="status"
+              aria-live="polite"
+              className="rounded-md border border-destructive bg-destructive/10 px-3 py-2 text-body-base text-destructive"
+            >
+              {t(errorKey)}
+            </p>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel type="button" disabled={isBusy}>
               {t("create.cancel")}

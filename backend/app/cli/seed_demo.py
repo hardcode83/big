@@ -74,6 +74,9 @@ from app.core.db import async_session_factory, bind_session_to_tenant
 from app.core.unit_of_work import CallerOwnedUnitOfWork, SqlAlchemyUnitOfWork
 from app.guests.domain.entities import Guest
 from app.guests.infrastructure.postgres_guest_email_exclusion import PostgresGuestEmailExclusion
+from app.integrations.infrastructure.postgres_reservation_ingest_lock import (
+    PostgresReservationIngestLock,
+)
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.integrations.application.ingest import IngestRow, ReservationIngestor
 from app.integrations.domain.dtos import ReservationDTO
@@ -1902,6 +1905,7 @@ async def _seed_ota_reservations(
         guests=guests,
         timeline=timeline,
         email_exclusion=PostgresGuestEmailExclusion(session),
+        ingest_lock=PostgresReservationIngestLock(session),
     )
     report = await ingestor.ingest(
         tenant_id=tenant_id,

@@ -207,6 +207,9 @@ no las dispara; aporta el dato del que cuelgan.
 - IF la reserva ya está en `CANCELLED`, THEN THE SYSTEM SHALL responder `204` sin registrar
   un segundo evento de cancelación.
 - THE SYSTEM SHALL permitir editar una reserva cancelada, registrando la edición como tal.
+- La misma garantía de evidencia — ningún cambio de campos ni ninguna cancelación queda sin su
+  `TimelineEvent` — se extiende a los tres caminos de ingest (sync PMS, re-read de webhook, CSV
+  reimportado): ver "Timeline: evidencia de cada mutación" más abajo.
 
 ### Superficie web del ciclo manual
 
@@ -227,6 +230,24 @@ no las dispara; aporta el dato del que cuelgan.
 - THE SYSTEM SHALL proporcionar las etiquetas, ayudas, confirmaciones y errores de esta
   superficie en español e inglés, mostrar la zona horaria y horas por defecto de la propiedad,
   y no SHALL exponer ni generar `guest_id` desde el flujo web.
+- WHEN un `PROPERTY_MANAGER` abre `/reservations/{id}` sobre una reserva con `status ===
+  "PENDING"`, THE SYSTEM SHALL ofrecer un botón «Confirmar reserva» de un solo clic,
+  diferenciado visualmente del botón de cancelar, que envíe `PATCH {"status": "CONFIRMED"}`
+  e invalide el detalle y el listado afectados. WHEN la reserva no está `PENDING`, o el
+  usuario no tiene `MANAGE_RESERVATIONS`, THE SYSTEM SHALL NOT mostrar ese botón.
+- THE SYSTEM SHALL NOT ofrecer un selector genérico con los siete valores de
+  `ReservationStatus` desde esta superficie: sólo las dos acciones con nombre (confirmar,
+  cancelar) mutan `status`; `CHECKED_IN_ESTIMATED`, `CHECKED_OUT_ESTIMATED`, `COMPLETED` y
+  `NO_SHOW` los alcanza únicamente la máquina de estados/reloj (`sim-advance`/`beat`), nunca
+  un formulario.
+- THE SYSTEM SHALL exponer `payment_status` como campo editable en el formulario de edición,
+  con los cuatro valores de `PaymentStatus`, independiente de `status`: cambiarlo no exige
+  que la reserva esté `CONFIRMED` ni dispara ningún cambio de `status`, y no está entre los
+  campos que el canal `INGEST_OWNED_FIELDS` deshabilita para canales no manuales —queda
+  editable para cualquier canal, decisión tomada en `reservation-confirm-web` (D4) para poder
+  anotar la señal cobrada también en reservas de origen OTA, sin gate de pago propio.
+- Rechazar una reserva `PENDING` reutiliza la acción de cancelar (`DELETE`) ya existente; no
+  hay un botón ni un estado distintos para el rechazo.
 
 **Confirmar y cancelar tienen consecuencias fuera de esta capacidad, y no son hooks.** Desde
 `access-notifications`, el barrido `provision_access_records` recorre cada cinco minutos las
@@ -245,9 +266,18 @@ está permitido, una reserva re-confirmada acaba con un `AccessRecord` nuevo jun
 algo que crear en un paso— mientras que las cuatro precondiciones de reloj de
 [`timeline-state-machine.md`](timeline-state-machine.md) exigen `CONFIRMED` o
 `CHECKED_IN_ESTIMATED`. Las dos decisiones son correctas por separado y su composición deja un
-hueco: una reserva creada por `POST /reservations` y nunca confirmada por `PATCH` es invisible para
-la máquina de estados, sin que nada falle ni avise. Se descubrió al sembrar el dataset de demo
-(2026-08-17), que por eso confirma explícitamente su estancia manual antes de avanzarla.
+hueco a nivel de dominio: una reserva creada por `POST /reservations` y nunca confirmada por
+`PATCH` es invisible para la máquina de estados, sin que nada falle ni avise. Se descubrió al
+sembrar el dataset de demo (2026-08-17), que por eso confirma explícitamente su estancia manual
+antes de avanzarla. **`reservation-confirm-web` cierra el hueco práctico para el canal
+web** —el botón «Confirmar reserva» de arriba es la vía para que un manager saque una reserva
+directa de `PENDING` sin un `PATCH` manual por API—, pero deja intacta la decisión de dominio: el
+backend sigue sin validar transiciones de `status` (cualquier valor pasa por `PATCH`, salvo el caso
+especial de `CANCELLED`), y `RESERVATION_UPDATED` genérico —no un `RESERVATION_CONFIRMED`
+propio— es el evento de timeline que deja la confirmación (D6 de ese change). Verificado
+end-to-end el 2026-09-13: crear → confirmar con un clic → `sim-advance` mueve el
+`current_operational_state` de la propiedad a `OCCUPIED_ESTIMATED` sin ningún `curl` de por
+medio.
 
 **`CHECKED_IN_ESTIMATED` y `COMPLETED` no tienen escritor propio en esta capacidad, y eso es un
 hueco declarado.** La máquina de estados los **lee** como precondición y nunca los escribe, y no
@@ -266,7 +296,14 @@ definitiva. Abrir esas dos operaciones es trabajo de esta capacidad y está pend
   `RESERVATION_CANCELLED`, igual que la cancelación por `DELETE`: una reserva no puede
   quedar cancelada sin que exista su evento de cancelación.
 - WHEN una reserva se crea por sincronización con el PMS, THE SYSTEM SHALL persistir un
-  `RESERVATION_IMPORTED` con `actor_type` `SYSTEM` y sin `actor_user_id`.
+  `RESERVATION_IMPORTED` con `actor_type` `SYSTEM` y sin `actor_user_id`. `source` distingue
+  el disparador de ese mismo caso de uso: `PMS_SOURCE = "pms"` para el CLI manual (`pms_sync`),
+  `WEBHOOK_SOURCE = "webhook"` para el recorte de un aviso del proveedor
+  (`reservations-webhooks`), y `SCHEDULED_SOURCE = "pms_scheduled"` para el barrido periódico de
+  beat cada 6 horas (`pms-sync-schedule` R3, `celery-jobs` §El calendario). Los tres llaman a
+  `SyncReservationsFromPmsUseCase.execute(...)` sin una segunda implementación; lo único que
+  cambia entre ellos es `source`, `since` y, para el CLI, un `forced_provider` opcional que
+  ni el webhook ni el barrido pasan nunca.
 - WHEN una reserva se crea por importación CSV, THE SYSTEM SHALL persistir un
   `RESERVATION_IMPORTED` con `actor_type` `USER` y el `actor_user_id` de quien subió el
   fichero.
@@ -275,6 +312,17 @@ definitiva. Abrir esas dos operaciones es trabajo de esta capacidad y está pend
   `source = "seed"` — la tercera procedencia de ese evento, y la única en la que nadie subió
   ningún fichero. Ni `"csv"` ni `"pms"`: las dos serían falsas, y el evento es lo que lee una
   persona cuando pregunta de dónde salió una reserva (spec `seed-data-demo`).
+- WHEN una reserva existente se modifica por sincronización PMS (periódica o CLI manual),
+  re-read de webhook o reimportación CSV, THE SYSTEM SHALL persistir la misma pareja de eventos
+  que la edición/cancelación manual — `RESERVATION_CANCELLED` si el cambio deja la reserva en
+  `CANCELLED` sin estarlo antes, `RESERVATION_UPDATED` en cualquier otro caso — con `actor_type`
+  `SYSTEM` para sync y webhook, `USER` para CSV, y `metadata` con los campos cambiados. Detalle
+  de la regla de selección y de la serialización de escrituras concurrentes en
+  [`ingest.md`](ingest.md).
+- WHEN esa cancelación por ingest libera una vivienda que estaba en `AWAITING_CHECKIN` para esa
+  estancia, THE SYSTEM SHALL disparar `RESERVATION_CANCELLED_BEFORE_CHECKIN` una sola vez para
+  esa cancelación, igual que ya ocurre con la cancelación manual — nunca dos transiciones
+  independientes para el mismo hecho.
 - WHILE se escribe una mutación, THE SYSTEM SHALL persistir la reserva y su evento en una
   única transacción, de modo que un fallo al escribir el evento deje la reserva sin cambiar.
 - WHEN una edición no cambia nada —cuerpo vacío o campos con el valor que ya tenían— THE
@@ -332,9 +380,13 @@ definitiva. Abrir esas dos operaciones es trabajo de esta capacidad y está pend
 - THE SYSTEM SHALL tratar un email en blanco como ausencia de email: no coincide con nadie
   y no se almacena, de modo que dos filas sin email son dos personas y no una.
 - WHEN se ejecuta el comando `python -m app.integrations.cli.pms_sync <tenant> [días]
-  [--provider {mock,channex,beds24}]`, THE SYSTEM SHALL sincronizar ese tenant e imprimir el
-  informe, marcando la sesión con el tenant indicado porque un comando no atraviesa la
-  verificación del token.
+  [--provider {mock,channex,beds24}]` (`make pms-sync TENANT=<uuid> [WINDOW=<días>]
+  [PROVIDER=<proveedor>]`), THE SYSTEM SHALL sincronizar ese tenant e imprimir el informe,
+  marcando la sesión con el tenant indicado porque un comando no atraviesa la verificación del
+  token. Sin `[días]`, THE SYSTEM SHALL usar una ventana de 30 días — distinta de los 2 días por
+  defecto de `Settings.pms_sync_window_days` que usa el barrido periódico de beat cada 6 horas
+  (`celery-jobs` §El calendario), porque un disparo manual bajo demanda no tiene el mismo margen
+  de recuperación que un ciclo corto y repetido.
 - WHEN no se pasa `--provider`, THE SYSTEM SHALL dejar que **cada propiedad resuelva el suyo**
   (`sdd/specs/pms-provider-resolution.md`), y una propiedad que no declara ninguno cae al
   proveedor por defecto, `MOCK` — de modo que el comportamiento de la suite y del arranque local

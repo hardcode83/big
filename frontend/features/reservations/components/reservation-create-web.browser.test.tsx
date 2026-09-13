@@ -30,6 +30,7 @@ vi.mock("../hooks/use-reservations", () => ({
   useCreateReservation: useCreateReservationMock,
   useUpdateReservation: useUpdateReservationMock,
   useCancelReservation: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
+  useConfirmReservation: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
 }));
 vi.mock("../hooks/use-guest-access-token", () => ({
   useGuestAccessTokenStatus: () => ({ isPending: false, data: undefined }),
@@ -123,8 +124,10 @@ describe("reservation create web review coverage", () => {
     renderEditForm();
     const form = screen.getByRole("form");
     const internalNotes = document.getElementById("reservation-edit-internalNotes");
+    const paymentStatus = document.getElementById("reservation-edit-paymentStatus");
     const submit = form.querySelector("button[type=submit]");
     expect(internalNotes).not.toBeNull();
+    expect(paymentStatus).not.toBeNull();
     expect(submit).not.toBeNull();
 
     await userEvent.keyboard("{Tab}");
@@ -134,8 +137,11 @@ describe("reservation create web review coverage", () => {
     expect(Number.parseFloat(focusStyle.outlineWidth)).toBeGreaterThanOrEqual(2);
 
     await userEvent.keyboard("{Tab}");
+    expect(document.activeElement).toBe(paymentStatus);
+
+    await userEvent.keyboard("{Tab}");
     expect(document.activeElement).toBe(submit);
-    expect(Array.from(form.querySelectorAll("input, textarea")).filter((control) => !control.hasAttribute("disabled"))).toEqual([internalNotes]);
+    expect(Array.from(form.querySelectorAll("input, textarea, select")).filter((control) => !control.hasAttribute("disabled"))).toEqual([internalNotes, paymentStatus]);
   });
 
   it("renders the reservation back link with normal-text WCAG contrast", () => {

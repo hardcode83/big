@@ -9,6 +9,7 @@ export { ReservationDetailView } from "./components/detail/reservation-detail-vi
 export { EditReservationForm, buildReservationPatch, initialEditValues } from "./components/edit/edit-reservation-form";
 export {
   useCancelReservation,
+  useConfirmReservation,
   useCreateReservation,
   useReservation,
   useReservations,
@@ -16,6 +17,7 @@ export {
 } from "./hooks/use-reservations";
 export type {
   CancelReservationVariables,
+  ConfirmReservationVariables,
   UpdateReservationVariables,
 } from "./hooks/use-reservations";
 export { reservationsKeys } from "./hooks/query-keys";

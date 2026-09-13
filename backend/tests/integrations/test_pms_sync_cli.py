@@ -6,12 +6,21 @@ session (the test session is a different one, by design).
 """
 
 import uuid
+from datetime import UTC, date, datetime, time
 
 import pytest
+from sqlalchemy import select
 
 from app.integrations.application.ingest import IngestReport, RowError
 from app.integrations.cli import pms_sync
 from app.integrations.cli.pms_sync import UnknownTenantError
+from app.integrations.domain.dtos import PmsFetchResult, ReservationDTO
+from app.integrations.domain.enums import PMSProvider
+from app.integrations.infrastructure.mock_pms import SEED_PROPERTY_CODE
+from app.properties.domain.enums import PropertyOperationalState
+from app.properties.infrastructure.models import PropertyStateTransitionModel
+from app.reservations.domain.enums import ReservationStatus
+from app.reservations.infrastructure.models import ReservationModel
 
 
 def test_it_refuses_to_run_without_a_tenant(capsys) -> None:
@@ -180,4 +189,120 @@ def test_main_returns_zero_when_every_provider_answered(monkeypatch, capsys) -> 
     monkeypatch.setattr(cli, "run", _fake_run)
 
     assert cli.main([str(uuid.uuid4())]) == 0
+
+
+# --- The property transition the manual sync now triggers (`pms-ingest-change-events` R3.3) --
+#
+# `sync_with_session` is thin: whether a cancellation frees a flat is `AdvancePropertyStates
+# UseCase`'s own subject (`tests/properties/`) and the sync route's half of the wiring is
+# already `test_sync.py`'s subject. What is only true HERE is that the manual CLI's own
+# composition root (`sync_with_session`) supplies that collaborator too — before this change it
+# did not, so an operator running the command by hand could learn a booking was cancelled and
+# still leave the flat waiting for a guest who was never coming.
+
+CLI_CANCEL_EXTERNAL_ID = "CLI-SYNC-CANCEL-1"
+CLI_NOW = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+
+
+def _cli_stay(status: str) -> ReservationDTO:
+    """A stay checking in the day after `CLI_NOW`, so it is still *before* check-in."""
+    return ReservationDTO(
+        external_id=CLI_CANCEL_EXTERNAL_ID,
+        channel="AIRBNB",
+        property_external_id=SEED_PROPERTY_CODE,
+        check_in_date=date(2026, 8, 2),
+        check_out_date=date(2026, 8, 5),
+        check_in_time=time(15, 0),
+        check_out_time=time(11, 0),
+        guest_name="Ada Lovelace",
+        adults=2,
+        status=status,
+    )
+
+
+class _CliFeedAdapter:
+    """A provider answering the manual sync with exactly the row the test names."""
+
+    def __init__(self, *rows: ReservationDTO) -> None:
+        self._rows = list(rows)
+
+    async def list_reservations(self, since, property_external_id=None) -> PmsFetchResult:
+        return PmsFetchResult(reservations=list(self._rows), failures=[])
+
+    async def get_reservation(self, external_id):
+        return None
+
+
+class _CliFeedFactory:
+    """Stands in for `SqlAlchemyPMSAdapterFactory`, structurally (the port is a Protocol).
+
+    Only the factory is replaced. Everything `sync_with_session` wires below it — the
+    repositories, the two units of work, the advancer — stays real, which is the point: a stub
+    of the use case itself would pass whether or not the collaborator was supplied.
+    """
+
+    def __init__(self, adapter: _CliFeedAdapter) -> None:
+        self._adapter = adapter
+
+    def supports_messaging(self, provider) -> bool:
+        return False
+
+    def provider_for(self, property):
+        return PMSProvider.MOCK
+
+    async def reservations_for(self, property, *, read_log=None):
+        return self._adapter
+
+    async def messaging_for(self, property):
+        raise AssertionError("the manual sync must never resolve messaging")
+
+
+def _feed_cli(monkeypatch, status: str) -> None:
+    monkeypatch.setattr(
+        pms_sync,
+        "SqlAlchemyPMSAdapterFactory",
+        lambda **kwargs: _CliFeedFactory(_CliFeedAdapter(_cli_stay(status))),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_cancellation_the_manual_sync_discovers_frees_the_property(
+    db_session, monkeypatch, tenant_a, property_a
+) -> None:
+    """R3.3 through `sync_with_session`'s own composition root.
+
+    Two runs: the first creates the booking and must move nothing, the second reports it
+    CANCELLED. The flat lands in `VACANT_READY` with exactly one `PropertyStateTransition`
+    row — and it can only get there through the `advance=` this command now passes.
+    """
+    property_a.current_operational_state = PropertyOperationalState.AWAITING_CHECKIN
+    await db_session.flush()
+
+    _feed_cli(monkeypatch, "CONFIRMED")
+    created = await pms_sync.sync_with_session(db_session, tenant_a.id, now=CLI_NOW)
+    assert created.created == 1
+    await db_session.refresh(property_a)
+    assert property_a.current_operational_state is PropertyOperationalState.AWAITING_CHECKIN
+
+    _feed_cli(monkeypatch, "CANCELLED")
+    outcome = await pms_sync.sync_with_session(db_session, tenant_a.id, now=CLI_NOW)
+
+    assert outcome.updated == 1
+    await db_session.refresh(property_a)
+    assert property_a.current_operational_state is PropertyOperationalState.VACANT_READY
+    transitions = (
+        await db_session.execute(
+            select(PropertyStateTransitionModel).where(
+                PropertyStateTransitionModel.property_id == property_a.id
+            )
+        )
+    ).scalars().all()
+    assert len(transitions) == 1
+    assert transitions[0].to_state is PropertyOperationalState.VACANT_READY
+    reservation = await db_session.scalar(
+        select(ReservationModel).where(
+            ReservationModel.external_pms_id == CLI_CANCEL_EXTERNAL_ID
+        )
+    )
+    assert reservation.status is ReservationStatus.CANCELLED
 

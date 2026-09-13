@@ -130,6 +130,14 @@ jobs:
           TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}
           TF_VAR_github_app_installation_id: ${{ vars.GH_APP_INSTALLATION_ID }}
           TF_VAR_github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          # Credenciales de WhatsApp Cloud API (change whatsapp-dev-credentials-render). Las cuatro
+          # son sensibles → secrets; Terraform las escribe al Vault de cada entorno, igual que la
+          # clave privada de la GitHub App. NO se registran con el provider `github` de Terraform
+          # (esa gestión-como-código del lado GitHub es alcance de infra-github-iac, roadmap).
+          TF_VAR_whatsapp_access_token: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+          TF_VAR_whatsapp_phone_number_id: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+          TF_VAR_whatsapp_app_secret: ${{ secrets.WHATSAPP_APP_SECRET }}
+          TF_VAR_whatsapp_webhook_verify_token: ${{ secrets.WHATSAPP_WEBHOOK_VERIFY_TOKEN }}
           # Ingress HTTPS vía Cloudflare Tunnel (change ingress-https-dev). El hostname y el apex
           # son nombres DNS públicos → vars; el zone id y el API token → secrets.
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -229,6 +237,14 @@ jobs:
           TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}
           TF_VAR_github_app_installation_id: ${{ vars.GH_APP_INSTALLATION_ID }}
           TF_VAR_github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          # Credenciales de WhatsApp Cloud API (change whatsapp-dev-credentials-render). Las cuatro
+          # son sensibles → secrets; Terraform las escribe al Vault de cada entorno, igual que la
+          # clave privada de la GitHub App. NO se registran con el provider `github` de Terraform
+          # (esa gestión-como-código del lado GitHub es alcance de infra-github-iac, roadmap).
+          TF_VAR_whatsapp_access_token: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+          TF_VAR_whatsapp_phone_number_id: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+          TF_VAR_whatsapp_app_secret: ${{ secrets.WHATSAPP_APP_SECRET }}
+          TF_VAR_whatsapp_webhook_verify_token: ${{ secrets.WHATSAPP_WEBHOOK_VERIFY_TOKEN }}
           # Ingress HTTPS vía Cloudflare Tunnel (change ingress-https-dev). El hostname y el apex
           # son nombres DNS públicos → vars; el zone id y el API token → secrets.
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}

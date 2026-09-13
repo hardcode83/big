@@ -212,6 +212,11 @@ jobs:
           # contraseña. Sin esto el backend usa su default http://localhost:3000 y el PRIMER
           # correo real que salió (smtp-delivery-adapter, 2026-09-03) llegó con un link inservible.
           PUBLIC_HOSTNAME: ${{ vars.PUBLIC_HOSTNAME }}
+          # Proveedor de WhatsApp (variable de repo, no secreto): documentado como opcional en
+          # .env.example, donde en blanco/ausente ya resuelve a "mock" en app/core/config.py sin
+          # fallar el arranque. Por eso no pasa por Vault ni por Terraform (change
+          # whatsapp-dev-credentials-render, R3.2).
+          WHATSAPP_PROVIDER: ${{ vars.WHATSAPP_PROVIDER }}
         run: |
           set -euo pipefail
           source /etc/autohostai-deploy.env   # OCIDs de los secrets + POSTGRES_DB/USER (sin secretos)
@@ -260,6 +265,13 @@ jobs:
           SMTP_PASSWORD="$(read_secret_by_name "autohostai-${ENV}-smtp-password" SMTP_PASSWORD)"
           SMTP_FROM_EMAIL="$(read_secret_by_name "autohostai-${ENV}-smtp-from-email" SMTP_FROM_EMAIL)"
           SMTP_USE_TLS="$(read_secret_by_name "autohostai-${ENV}-smtp-use-tls" SMTP_USE_TLS)"
+          # WhatsApp (change whatsapp-dev-credentials-render). Los cuatro secretos se leen POR
+          # NOMBRE por el mismo motivo que el token del túnel, medios y SMTP: los nombres son
+          # deterministas a partir de ENV, así que no hace falta ninguna variable de repo nueva.
+          WHATSAPP_ACCESS_TOKEN="$(read_secret_by_name "autohostai-${ENV}-whatsapp-access-token" WHATSAPP_ACCESS_TOKEN)"
+          WHATSAPP_PHONE_NUMBER_ID="$(read_secret_by_name "autohostai-${ENV}-whatsapp-phone-number-id" WHATSAPP_PHONE_NUMBER_ID)"
+          WHATSAPP_APP_SECRET="$(read_secret_by_name "autohostai-${ENV}-whatsapp-app-secret" WHATSAPP_APP_SECRET)"
+          WHATSAPP_WEBHOOK_VERIFY_TOKEN="$(read_secret_by_name "autohostai-${ENV}-whatsapp-webhook-verify-token" WHATSAPP_WEBHOOK_VERIFY_TOKEN)"
           # Idempotente: `install -d` no toca nada si el directorio ya existe con este dueño/modo.
           # `2770` (setgid) para que todo fichero creado dentro herede el grupo `ci-agents` sin
           # depender de qué agente numerado escriba primero.
@@ -293,6 +305,14 @@ jobs:
             echo "SMTP_PASSWORD=${SMTP_PASSWORD}"
             echo "SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL}"
             echo "SMTP_USE_TLS=${SMTP_USE_TLS}"
+            # WHATSAPP_PROVIDER es opcional (":-", no ":?"): una `vars.WHATSAPP_PROVIDER` sin
+            # definir renderiza vacío, el mismo default que .env.example deja a propósito y que
+            # app/core/config.py ya resuelve a "mock" sin fallar el arranque (R3.4).
+            echo "WHATSAPP_PROVIDER=${WHATSAPP_PROVIDER:-}"
+            echo "WHATSAPP_ACCESS_TOKEN=${WHATSAPP_ACCESS_TOKEN}"
+            echo "WHATSAPP_PHONE_NUMBER_ID=${WHATSAPP_PHONE_NUMBER_ID}"
+            echo "WHATSAPP_APP_SECRET=${WHATSAPP_APP_SECRET}"
+            echo "WHATSAPP_WEBHOOK_VERIFY_TOKEN=${WHATSAPP_WEBHOOK_VERIFY_TOKEN}"
             # Literal "dev", no variable: este workflow solo despliega el entorno dev, así que
             # no hay nada que parametrizar todavía (change `sim-advance`, R2/D5). Un futuro
             # deploy-staging.yml/deploy-prod.yml pondría aquí "staging"/"production" igual.

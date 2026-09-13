@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 
 import type {
   Review,
-  ReviewAction,
   ReviewDraft,
 } from "../data";
 import { fmtDay, fmtRating } from "../lib/format";
+import { legalActions } from "../lib/review-actions";
+import type { ReviewerRole } from "../lib/review-actions";
 import { MarkPostedDialog } from "./mark-posted-dialog";
 
 /**
@@ -34,6 +35,21 @@ import { MarkPostedDialog } from "./mark-posted-dialog";
  * **Edit** is in-line: the operator changes `draft_content` and submits
  * with `action: "EDIT"`. The validation is `draftContent.trim().length > 0`,
  * in line with the no-empty-content norm of every mutation in the tree.
+ *
+ * **`onConfirm` only ever fires with `action: "EDIT"` from this component.**
+ * Approve/Ignore are the row's `ReviewActions`' job (rendered by
+ * `drafts-panel.tsx`/`reviews-panel.tsx`, which stays mounted under this
+ * detail overlay) — narrowing the type here is what stops a future edit from
+ * re-adding the duplicate buttons this file used to render.
+ *
+ * **`role` gates both Edit and Mark-Posted through the same `legalActions`
+ * matrix the row uses** (D5, D15): opening a review's detail is not itself
+ * gated by role — any authenticated visitor to `/reviews` can open any row —
+ * so without this check a `PROPERTY_MANAGER` who opens an `APPROVED` review
+ * would see **Marcar como publicada**, an owner-only action per `policy.py`'s
+ * `_REVIEW_OPERATE`/`_REVIEW_MANAGE` split and D15's UX framing. The backend
+ * still decides (R7.4) — this is the UI's mirror of that split, not a second
+ * authority.
  */
 export interface ReviewDetailProps {
   review: Review;
@@ -42,11 +58,13 @@ export interface ReviewDetailProps {
   isBusy: boolean;
   /** The currently in-flight mutation is this row's (D9). */
   isPending: boolean;
+  /** The current user's role for the action matrix (D5, D15). */
+  role: ReviewerRole;
   onClose: () => void;
   onConfirm: (input: {
     reviewId: string;
-    action: Exclude<ReviewAction, "MARK_POSTED">;
-    draftContent?: string;
+    action: "EDIT";
+    draftContent: string;
   }) => void;
   onMarkPosted: (reviewId: string) => void;
 }
@@ -56,6 +74,7 @@ export function ReviewDetail({
   draft,
   isBusy,
   isPending,
+  role,
   onClose,
   onConfirm,
   onMarkPosted,
@@ -64,6 +83,9 @@ export function ReviewDetail({
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(draft?.draftContent ?? "");
   const [markOpen, setMarkOpen] = useState(false);
+  const moves = legalActions(review.status, role);
+  const canEdit = moves.includes("EDIT");
+  const canMarkPosted = moves.includes("MARK_POSTED");
 
   function startEdit() {
     setEditValue(draft?.draftContent ?? "");
@@ -110,7 +132,7 @@ export function ReviewDetail({
         </p>
       )}
       <p className="text-body-base text-muted-foreground">
-        {t(`preview.channel`)}
+        {t(`channel.${review.channel}`)}
         {review.publishedAt !== null
           ? ` · ${fmtDay(review.publishedAt, i18n.language)}`
           : ""}
@@ -187,7 +209,7 @@ export function ReviewDetail({
               <p className="whitespace-pre-wrap text-body-base text-foreground">
                 {draft.draftContent}
               </p>
-              {review.status === "DRAFTED" && (
+              {canEdit && (
                 <Button
                   type="button"
                   variant="outline"
@@ -204,32 +226,19 @@ export function ReviewDetail({
       {isPending && (
         <p className="text-body-base text-muted-foreground">{t("respond.sending")}</p>
       )}
-      <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-        {review.status === "DRAFTED" && draft !== null && !editing && (
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={isBusy}
-              onClick={() =>
-                onConfirm({ reviewId: review.id, action: "APPROVE" })
-              }
-            >
-              {t("respond.approve")}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={isBusy}
-              onClick={() =>
-                onConfirm({ reviewId: review.id, action: "IGNORE" })
-              }
-            >
-              {t("respond.ignore")}
-            </Button>
-          </>
-        )}
-        {review.status === "APPROVED" && (
+      {/*
+       * Approve/Ignore are NOT rendered here (design D5, D12): they live in the
+       * row's `ReviewActions` (rendered by `drafts-panel.tsx`/`reviews-panel.tsx`),
+       * which stays mounted under this detail overlay. Rendering them here too
+       * would double the controls for the same review — the exact bug the
+       * round-1 review-panel fix was supposed to close and initially missed
+       * (only the i18n keys were touched, not this block). `Marcar como
+       * publicada` is the one exception: it opens THIS detail's dialog, because
+       * only the detail has loaded the `content`/`draft_content` the preview
+       * needs (R4.2) — the row never fetches them.
+       */}
+      {canMarkPosted && (
+        <div className="flex flex-wrap gap-2 border-t border-border pt-3">
           <Button
             type="button"
             variant="outline"
@@ -238,8 +247,8 @@ export function ReviewDetail({
           >
             {t("respond.markPosted")}
           </Button>
-        )}
-      </div>
+        </div>
+      )}
       <MarkPostedDialog
         open={markOpen}
         onOpenChange={setMarkOpen}

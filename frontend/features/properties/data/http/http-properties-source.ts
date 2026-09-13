@@ -1,10 +1,18 @@
 import type { ApiClient } from "@/lib/api";
 import type { components } from "@/lib/api/generated/openapi";
 
-import type { PropertyFilters, PropertyList, PropertySummaryDto } from "../dto";
+import type {
+  CreatePropertyInput,
+  PropertyDetailDto,
+  PropertyFilters,
+  PropertyList,
+  PropertySummaryDto,
+  UpdatePropertyInput,
+} from "../dto";
 
 type PropertyListItemResponse =
   components["schemas"]["PropertyListItemResponse"];
+type PropertyResponse = components["schemas"]["PropertyResponse"];
 
 /**
  * Map one list-row API response to `PropertySummaryDto`.
@@ -39,6 +47,46 @@ function mapPropertySummary(
     defaultCheckOutTime: value.default_check_out_time,
     wifiName: value.wifi_name,
     hasWifiPassword: value.has_wifi_password,
+    status: value.status,
+    createdAt: value.created_at,
+    updatedAt: value.updated_at,
+  };
+}
+
+/**
+ * Map one full-detail API response to `PropertyDetailDto` (design D7).
+ *
+ * Unlike `mapPropertySummary`, this one DOES read `access_notes`,
+ * `cleaning_notes` and `emergency_notes` — `PropertyResponse` (unlike
+ * `PropertyListItemResponse`) carries them. It never reads a `wifi_password`
+ * field: `PropertyResponse` has no such field to read (rule 5.2 of
+ * `steering/security.md`), only the derived `has_wifi_password` boolean.
+ */
+function mapPropertyDetail(value: PropertyResponse): PropertyDetailDto {
+  return {
+    id: value.id,
+    name: value.name,
+    internalCode: value.internal_code,
+    pmsProvider: value.pms_provider,
+    pmsExternalId: value.pms_external_id,
+    addressLine1: value.address_line1,
+    addressLine2: value.address_line2,
+    city: value.city,
+    province: value.province,
+    postalCode: value.postal_code,
+    country: value.country,
+    timezone: value.timezone,
+    maxGuests: value.max_guests,
+    bedrooms: value.bedrooms,
+    bathrooms: value.bathrooms,
+    currentOperationalState: value.current_operational_state,
+    defaultCheckInTime: value.default_check_in_time,
+    defaultCheckOutTime: value.default_check_out_time,
+    wifiName: value.wifi_name,
+    hasWifiPassword: value.has_wifi_password,
+    accessNotes: value.access_notes,
+    cleaningNotes: value.cleaning_notes,
+    emergencyNotes: value.emergency_notes,
     status: value.status,
     createdAt: value.created_at,
     updatedAt: value.updated_at,
@@ -101,5 +149,165 @@ export class HttpPropertiesSource {
       total: page.total,
       totalPages: page.total_pages,
     };
+  }
+
+  /**
+   * Fetch a single property in full (proposal R2.2, design D7). A 404 from
+   * the backend (other tenant, or unknown id) surfaces as an `ApiError`
+   * thrown by the client.
+   */
+  async getProperty(
+    _tenantId: string,
+    id: string,
+  ): Promise<PropertyDetailDto> {
+    const response = await this.client.request(
+      "/api/v1/properties/{property_id}",
+      { pathParams: { property_id: id } },
+    );
+    return mapPropertyDetail(response as PropertyResponse);
+  }
+
+  /**
+   * Create a property (proposal R1.2, R1.4). Only the keys `input` actually
+   * sets are sent — an absent optional key lets the backend apply its own
+   * default, exactly as an unset field does on `CreatePropertyRequest`.
+   * Neither `pms_provider` nor `status` is ever sent (R1.2): `input`'s type
+   * has no such fields to forward.
+   */
+  async createProperty(
+    _tenantId: string,
+    input: CreatePropertyInput,
+  ): Promise<PropertyDetailDto> {
+    const response = await this.client.request("/api/v1/properties", {
+      method: "POST",
+      body: {
+        name: input.name,
+        internal_code: input.internalCode,
+        ...(input.pmsExternalId !== undefined
+          ? { pms_external_id: input.pmsExternalId }
+          : {}),
+        ...(input.addressLine1 !== undefined
+          ? { address_line1: input.addressLine1 }
+          : {}),
+        ...(input.addressLine2 !== undefined
+          ? { address_line2: input.addressLine2 }
+          : {}),
+        ...(input.city !== undefined ? { city: input.city } : {}),
+        ...(input.province !== undefined ? { province: input.province } : {}),
+        ...(input.postalCode !== undefined
+          ? { postal_code: input.postalCode }
+          : {}),
+        ...(input.country !== undefined ? { country: input.country } : {}),
+        ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
+        ...(input.maxGuests !== undefined
+          ? { max_guests: input.maxGuests }
+          : {}),
+        ...(input.bedrooms !== undefined ? { bedrooms: input.bedrooms } : {}),
+        ...(input.bathrooms !== undefined
+          ? { bathrooms: input.bathrooms }
+          : {}),
+        ...(input.defaultCheckInTime !== undefined
+          ? { default_check_in_time: input.defaultCheckInTime }
+          : {}),
+        ...(input.defaultCheckOutTime !== undefined
+          ? { default_check_out_time: input.defaultCheckOutTime }
+          : {}),
+        ...(input.wifiName !== undefined ? { wifi_name: input.wifiName } : {}),
+        ...(input.wifiPassword !== undefined
+          ? { wifi_password: input.wifiPassword }
+          : {}),
+        ...(input.accessNotes !== undefined
+          ? { access_notes: input.accessNotes }
+          : {}),
+        ...(input.cleaningNotes !== undefined
+          ? { cleaning_notes: input.cleaningNotes }
+          : {}),
+        ...(input.emergencyNotes !== undefined
+          ? { emergency_notes: input.emergencyNotes }
+          : {}),
+      },
+    });
+    return mapPropertyDetail(response as PropertyResponse);
+  }
+
+  /**
+   * Update a property partially (proposal R2.2, R2.5, R2.6, design D8, D9).
+   *
+   * Sends only the keys present on `input`, exactly as given — the caller
+   * (`EditPropertyForm`'s diffing, or the retire confirmation's
+   * `{ status: "INACTIVE" }`) is responsible for deciding which fields belong
+   * in the body, including `null` for an explicit clear. This method does
+   * not filter or reinterpret that decision.
+   */
+  async updateProperty(
+    _tenantId: string,
+    id: string,
+    input: UpdatePropertyInput,
+  ): Promise<PropertyDetailDto> {
+    const response = await this.client.request(
+      "/api/v1/properties/{property_id}",
+      {
+        method: "PATCH",
+        pathParams: { property_id: id },
+        body: {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.internalCode !== undefined
+            ? { internal_code: input.internalCode }
+            : {}),
+          ...(input.pmsExternalId !== undefined
+            ? { pms_external_id: input.pmsExternalId }
+            : {}),
+          ...(input.addressLine1 !== undefined
+            ? { address_line1: input.addressLine1 }
+            : {}),
+          ...(input.addressLine2 !== undefined
+            ? { address_line2: input.addressLine2 }
+            : {}),
+          ...(input.city !== undefined ? { city: input.city } : {}),
+          ...(input.province !== undefined
+            ? { province: input.province }
+            : {}),
+          ...(input.postalCode !== undefined
+            ? { postal_code: input.postalCode }
+            : {}),
+          ...(input.country !== undefined ? { country: input.country } : {}),
+          ...(input.timezone !== undefined
+            ? { timezone: input.timezone }
+            : {}),
+          ...(input.maxGuests !== undefined
+            ? { max_guests: input.maxGuests }
+            : {}),
+          ...(input.bedrooms !== undefined
+            ? { bedrooms: input.bedrooms }
+            : {}),
+          ...(input.bathrooms !== undefined
+            ? { bathrooms: input.bathrooms }
+            : {}),
+          ...(input.defaultCheckInTime !== undefined
+            ? { default_check_in_time: input.defaultCheckInTime }
+            : {}),
+          ...(input.defaultCheckOutTime !== undefined
+            ? { default_check_out_time: input.defaultCheckOutTime }
+            : {}),
+          ...(input.wifiName !== undefined
+            ? { wifi_name: input.wifiName }
+            : {}),
+          ...(input.wifiPassword !== undefined
+            ? { wifi_password: input.wifiPassword }
+            : {}),
+          ...(input.accessNotes !== undefined
+            ? { access_notes: input.accessNotes }
+            : {}),
+          ...(input.cleaningNotes !== undefined
+            ? { cleaning_notes: input.cleaningNotes }
+            : {}),
+          ...(input.emergencyNotes !== undefined
+            ? { emergency_notes: input.emergencyNotes }
+            : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+        },
+      },
+    );
+    return mapPropertyDetail(response as PropertyResponse);
   }
 }
