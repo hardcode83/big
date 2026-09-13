@@ -16911,7 +16911,7 @@
     },
     "/api/v1/owner-statements/{statement_id}": {
       "get": {
-        "description": "Returns the statement's current summary fields plus read-only `expenses` and `reservations` breakdown collections. Only statements of the caller's tenant are reachable — a `404` with the same body whether the id is unknown or belongs to another tenant (R3.4, R7.2).\n\n**The detail payload composes here, not in the API layer**: the PDF exporter (`ExportOwnerStatementPdfUseCase`) reads the same `GetOwnerStatementUseCase`, so the two surfaces cannot drift on what 'the detail' is (R3.5).",
+        "description": "Returns the statement's current summary fields plus read-only `expenses` and `reservations` breakdown collections. Only statements of the caller's tenant are reachable — a `404` with the same body whether the id is unknown or belongs to another tenant (R3.4, R7.2).\n\nThe detail payload is composed by `GetOwnerStatementUseCase` and exposed here with the summary plus the read-only breakdown collections (R3.5).",
         "operationId": "get_owner_statement_api_v1_owner_statements__statement_id__get",
         "parameters": [
           {

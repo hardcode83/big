@@ -225,9 +225,8 @@ async def generate_owner_statement(
         "`reservations` breakdown collections. Only "
         "statements of the caller's tenant are reachable — a `404` with the same body "
         "whether the id is unknown or belongs to another tenant (R3.4, R7.2).\n\n"
-        "**The detail payload composes here, not in the API layer**: the PDF exporter "
-        "(`ExportOwnerStatementPdfUseCase`) reads the same `GetOwnerStatementUseCase`, "
-        "so the two surfaces cannot drift on what 'the detail' is (R3.5)."
+        "The detail payload is composed by `GetOwnerStatementUseCase` and exposed here "
+        "with the summary plus the read-only breakdown collections (R3.5)."
     ),
 )
 async def get_owner_statement(
