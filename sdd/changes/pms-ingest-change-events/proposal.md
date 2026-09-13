@@ -183,3 +183,7 @@ Acceptance criteria:
 - `sdd/specs/reservations-webhooks.md` — si el design mueve el disparo de
   `RESERVATION_CANCELLED_BEFORE_CHECKIN` fuera de `webhooks.py`, se documenta ahí quién lo posee
   ahora (hoy esa llamada no está descrita en ninguna spec).
+- `docs/reservations.md` — la tabla "Timeline: qué queda registrado" (líneas 145-153) gana filas
+  para edición/cancelación vía sync PMS, re-read de webhook y reimportación CSV (actor `SYSTEM`
+  para sync/webhook, `USER` para CSV) — señalado por el panel de `/sdd:review` a escala de
+  feature (revisor de documentación) como trabajo de archivado, igual que las specs de arriba.

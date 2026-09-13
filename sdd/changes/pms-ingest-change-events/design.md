@@ -117,6 +117,33 @@ Rejected: adding a "check-in window closed/stale" trigger — real design work (
 states in `state_machine.py`, a new detector in `stalls.py`) for a scenario neither the proposal
 nor the roadmap note treats as required for this change.
 
+### D4 — Serialize concurrent ingest of the same PMS booking with a transaction-scoped advisory lock
+
+**Chosen:** the feature-scale review panel found that R3.2/R2.2's no-duplicate-write guarantee
+relied entirely on `update_details()`'s no-op detection, which only holds for *sequential*
+ingest passes within one session — with three unsynchronized writers (the periodic sync beat,
+the webhook re-read, and the CSV upload endpoint, each its own transaction under READ COMMITTED,
+no row locking anywhere in `reservations`/`properties` repositories), two truly concurrent
+transactions could each read a reservation's pre-cancellation state and each emit a duplicate
+`RESERVATION_CANCELLED` event and `PropertyStateTransition` row. Fixed by adding
+`ReservationIngestLock` (`integrations/domain/ports.py`) and its Postgres adapter
+`PostgresReservationIngestLock` (`integrations/infrastructure/`), mirroring
+`GuestEmailExclusion`/`PostgresGuestEmailExclusion` exactly: a `pg_advisory_xact_lock` keyed by
+`(tenant_id, external_pms_id)`, acquired in `ReservationIngestor._ingest_row` immediately before
+the `find_by_external_pms_id` lookup that decides create-vs-update, released automatically at
+the caller's commit/rollback. Made a **required** constructor parameter on `ReservationIngestor`
+(unlike the optional `advance`), since acquiring it is always safe and always cheap, and an
+opt-out would silently reopen exactly the race it exists to close — threaded through all 6
+composition roots (`scheduler/tasks.py` x2, `pms_sync.py`, `dependencies.py`, `seed_demo.py`, and
+`SyncReservationsFromPmsUseCase`/`ImportReservationsFromCsvUseCase`).
+
+Rejected: a unique constraint on `property_state_transitions` — would catch only the transition
+half of the race (not the duplicate `TimelineEvent`), and turns a race into a 500 for one of the
+two concurrent callers instead of preventing it. Rejected: full pessimistic row locking
+(`SELECT ... FOR UPDATE`) across `reservations`/`properties`/`property_state_transitions` — a
+much larger change to this codebase's concurrency model, for a race window this advisory lock
+already closes at the one point it actually occurs (the create-vs-update decision).
+
 ## Changes by area
 
 | Area | Files | Change |
