@@ -1,11 +1,11 @@
-# Runner self-hosted en la VM dev (label `[self-hosted, dev]`) — mismo runner
-# que `infra-dev.yml` y `deploy-dev.yml` (change `ci-runner-oci`).
-# Solo validación con `terraform plan` — el `apply` se queda fuera: este workflow
-# es para "deploy from zero" verificable desde la pipeline (R7 del change
-# `infra-github-iac`). El bootstrap irreducible (crear la GitHub App, generar su
-# clave `.pem`) está documentado en `infra/github/RUNBOOK.md` §1 (sección 5 del
-# change). El apply real, cuando se decida, sigue el mismo patrón que
-# `infra-dev.yml` job `apply` (D7 del design).
+# Runner self-hosted en la VM dev (label `[self-hosted, dev]`) para los jobs
+# `plan`/`apply` — mismo runner que `infra-dev.yml` y `deploy-dev.yml` (change
+# `ci-runner-oci`). El bootstrap irreducible (crear la GitHub App, generar su
+# clave `.pem`, instalarla sobre el repo) está documentado en
+# `infra/github/RUNBOOK.md` §1 (sección 5 del change). Sección 6 del change
+# `infra-github-iac` añade el job `apply` (gateado por `action: apply`) y el
+# job `verify-ghcr` (D9) sobre este esqueleto — ver `## Implementation Notes`
+# de `sdd/changes/infra-github-iac/tasks.md` para las decisiones tomadas.
 name: infra-github
 
 on:
@@ -13,6 +13,14 @@ on:
     paths:
       - "infra/github/**"
   workflow_dispatch:
+    inputs:
+      action:
+        description: "Acción a ejecutar contra el módulo infra/github/ (repo GitHub-side de autohostai-labs/AutoHostAI)"
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
 
 defaults:
   run:
@@ -20,10 +28,11 @@ defaults:
 
 jobs:
   # PR que toca infra/github/**: sin credenciales (init -backend=false). Mismo
-  # patrón que `infra-dev.yml` job `check` — barato, en cada PR.
+  # patrón que `infra-dev.yml` job `check` — barato, en cada PR. `ubuntu-latest`
+  # a propósito (R7.1): no toca nada real, no necesita el runner self-hosted.
   check:
     if: github.event_name == 'pull_request'
-    runs-on: [self-hosted, dev]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -37,13 +46,92 @@ jobs:
       - name: terraform validate
         run: terraform validate
 
-  # workflow_dispatch: plan real contra el state en `autohostai-tfstate-dev`
-  # (key = "github.tfstate" — compartido con el módulo dev). Gate `main` por el
-  # mismo motivo que `infra-dev.yml`: el job mintea installation tokens de la
-  # GitHub App y recibe secrets con control del repo (D7 del design). Solo desde
-  # `main` el plan ejecuta código revisado.
+  # PR que toca infra/github/**: verificación end-to-end de D9 — el permiso
+  # `packages: write` de la GitHub App (RUNBOOK §1.3) + lo que sea que el repo
+  # necesite del lado de GHCR componen un acceso que funciona. Publica una
+  # imagen efímera de una sola capa (`FROM scratch` + LABEL, sin contenido) a
+  # `ghcr.io/<owner>/infra-github-iac-smoke:ephemeral-<run_id>` autenticando
+  # con un installation token de la App (no `GITHUB_TOKEN`: el push real del
+  # CD ya usa `GITHUB_TOKEN` — RUNBOOK §1.3 — así que esta es la pieza que
+  # faltaba probar, la App). `ubuntu-latest`: no toca infra gestionada por
+  # Terraform (ni OCI ni el módulo `infra/github/`), solo GHCR — mismo
+  # argumento de bajo privilegio que `check`, aunque a diferencia de `check`
+  # SÍ usa el secret de la App (R4.2 lo exige explícitamente: push+delete de
+  # prueba desde un workflow `pull_request`; repo privado, sin PRs de forks
+  # externos, así que el secret no se expone fuera del equipo).
+  verify-ghcr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Mintear installation token de la GitHub App
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
+      - name: Construir la imagen efímera de una sola capa
+        run: |
+          set -euo pipefail
+          printf 'FROM scratch\nLABEL org.opencontainers.image.description="Smoke test efimero de infra-github-iac (R4.2/D9) -- se borra al terminar este job"\n' > Dockerfile.smoke
+          docker build -t "ghcr.io/${{ github.repository_owner }}/infra-github-iac-smoke:ephemeral-${{ github.run_id }}" -f Dockerfile.smoke .
+
+      - name: Login a GHCR con el installation token de la App
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: echo "$APP_TOKEN" | docker login ghcr.io -u x-access-token --password-stdin
+
+      - name: "Publicar la imagen efímera (pieza 1 de D9: packages:write de la App)"
+        run: docker push "ghcr.io/${{ github.repository_owner }}/infra-github-iac-smoke:ephemeral-${{ github.run_id }}"
+
+      - name: Resolver el id de la versión publicada
+        id: resolve-version
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          id="$(gh api "/orgs/${{ github.repository_owner }}/packages/container/infra-github-iac-smoke/versions" \
+            --jq '.[] | select(.metadata.container.tags[]? == "ephemeral-${{ github.run_id }}") | .id' | head -n1)"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Borrar la imagen efímera
+        id: delete-version
+        if: always() && steps.resolve-version.outputs.id != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: gh api --method DELETE "/orgs/${{ github.repository_owner }}/packages/container/infra-github-iac-smoke/versions/${{ steps.resolve-version.outputs.id }}"
+
+      # D9: "si (2) resulta no modelable, el job sigue siendo válido" — el push (pieza App) ya
+      # verificó lo que R4.2 pide; si el borrado no compone (p. ej. la App no tiene permiso de
+      # borrado sobre el paquete, o el flag de Actions access del paquete no lo cubre), se deja
+      # constancia explícita en el log en vez de fallar el job por una pieza documentada como
+      # potencialmente no modelable.
+      - name: Documentar limitación si el borrado no compone (D9)
+        if: always() && (steps.delete-version.outcome == 'failure' || steps.resolve-version.outcome == 'failure')
+        run: |
+          echo "::warning::verify-ghcr: el push funcionó (packages:write de la App + acceso del repo componen), pero resolver/borrar la versión del paquete efímero falló -- límite conocido de D9 si el borrado de paquetes no está concedido a esta App o no es modelable. Borrar manualmente ghcr.io/${{ github.repository_owner }}/infra-github-iac-smoke:ephemeral-${{ github.run_id }} y revisar infra/github/RUNBOOK.md §1.3/§3."
+
+      - name: Logout GHCR
+        if: always()
+        run: docker logout ghcr.io || true
+
+  # workflow_dispatch action=plan: plan real contra el state en
+  # `autohostai-tfstate-dev` (key = "github.tfstate" — compartido con el
+  # módulo dev). Gate `main` por el mismo motivo que `infra-dev.yml`: el job
+  # mintea installation tokens de la GitHub App y recibe secrets con control
+  # del repo (D7 del design). Solo desde `main` el plan ejecuta código
+  # revisado. Gateado también por `action == 'plan'` (D7/tarea 6.1): un
+  # dispatch con `action: apply` no vuelve a correr este job por separado —
+  # el job `apply` re-planifica y aplica en el mismo job (igual que
+  # `infra-dev.yml`).
   plan:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'plan' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, dev]
     timeout-minutes: 15
     steps:
@@ -109,6 +197,13 @@ jobs:
           TF_VAR_allowed_ssh_cidrs: ${{ secrets.ALLOWED_SSH_CIDRS || format('["{0}"]', secrets.ALLOWED_SSH_CIDR) }}
           TF_VAR_allowed_ssh_cidrs_wide: ${{ secrets.ALLOWED_SSH_CIDRS_WIDE || '[]' }}
           TF_VAR_ssh_public_keys: ${{ secrets.SSH_PUBLIC_KEYS || format('["{0}"]', secrets.SSH_PUBLIC_KEY) }}
+          # `next_public_app_env`/`public_hostname` (sección 4): default "" +
+          # validación fail-fast en `variables.tf` — si no se inyectan aquí, el
+          # `plan` falla explícitamente en vez de propagar un valor vacío hasta
+          # el `apply` (mismo patrón que `GH_APP_ID`/`GH_APP_INSTALLATION_ID`,
+          # documentado en `infra/github/RUNBOOK.md` §2.3).
+          TF_VAR_next_public_app_env: ${{ vars.NEXT_PUBLIC_APP_ENV }}
+          TF_VAR_public_hostname: ${{ vars.PUBLIC_HOSTNAME }}
         # NO se usa `-out=tfplan` ni se sube el plan como artifact: el plan contendría
         # secretos (clave de la App + las `oci_*` sensibles). Terraform redacta los
         # valores sensibles en consola — el plan es para revisión por logs.
@@ -118,5 +213,84 @@ jobs:
         # `errored.tfstate` (si el push del state falla) contiene el state en claro;
         # `backend.hcl` referencia la private key por ruta; los `.pem` en
         # `$RUNNER_TEMP` los escribió este job. Mismo cleanup que `infra-dev.yml`.
+        if: always()
+        run: rm -rf errored.tfstate backend.hcl .terraform "$RUNNER_TEMP/oci_private_key.pem" "$RUNNER_TEMP/gh_app_private_key.pem"
+
+  # workflow_dispatch action=apply: solo desde main. `needs: plan` + `always()`
+  # al frente del `if` (importante): como `plan` ahora está gateado por
+  # `action == 'plan'`, en un dispatch con `action: apply` el job `plan` se
+  # SALTA (skipped) — y sin `always()`, GitHub Actions propaga ese skip a todo
+  # job que declare `needs: plan`, dejando `apply` también skipped aunque su
+  # propio `if` sea cierto. `always()` desactiva ese comportamiento implícito
+  # y deja que la condición explícita decida. `concurrency` serializa applies
+  # sobre el mismo state (mismo patrón que `infra-dev.yml`). [R7.2, R7.4]
+  apply:
+    if: always() && github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply' && github.ref == 'refs/heads/main'
+    needs: plan
+    runs-on: [self-hosted, dev]
+    timeout-minutes: 15
+    concurrency:
+      group: infra-github-apply
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.15.8"
+      - name: Escribir las private keys a ficheros
+        env:
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$OCI_PRIVATE_KEY"  > "$RUNNER_TEMP/oci_private_key.pem"
+          printf '%s\n' "$GH_APP_PRIVATE_KEY" > "$RUNNER_TEMP/gh_app_private_key.pem"
+      - name: Escribir configuración del backend
+        env:
+          TFSTATE_BUCKET: ${{ secrets.TFSTATE_BUCKET }}
+          TFSTATE_NAMESPACE: ${{ secrets.TFSTATE_NAMESPACE }}
+          OCI_REGION: ${{ secrets.OCI_REGION }}
+          OCI_TENANCY_OCID: ${{ secrets.OCI_TENANCY_OCID }}
+          OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+        run: |
+          umask 077
+          cat > backend.hcl <<EOF
+          bucket           = "${TFSTATE_BUCKET}"
+          namespace        = "${TFSTATE_NAMESPACE}"
+          key              = "github.tfstate"
+          region           = "${OCI_REGION}"
+          tenancy_ocid     = "${OCI_TENANCY_OCID}"
+          user_ocid        = "${OCI_USER_OCID}"
+          fingerprint      = "${OCI_FINGERPRINT}"
+          private_key_path = "${RUNNER_TEMP}/oci_private_key.pem"
+          EOF
+      - name: terraform init
+        run: terraform init -input=false -backend-config=backend.hcl
+      # Sin plan pre-guardado (ver job `plan`): el apply re-planifica y aplica en el mismo job,
+      # así ningún fichero con secrets sale del runner. Necesita TODAS las vars del módulo (18:
+      # 12 sensibles + 6 no sensibles; `github_owner`/`github_repository_name` usan su default
+      # de `variables.tf` y no se inyectan aquí), porque re-evalúa el plan completo.
+      - name: terraform apply
+        env:
+          TF_VAR_oci_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+          TF_VAR_oci_user_ocid: ${{ secrets.OCI_USER_OCID }}
+          TF_VAR_oci_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+          TF_VAR_oci_private_key_path: ${{ runner.temp }}/oci_private_key.pem
+          TF_VAR_oci_region: ${{ secrets.OCI_REGION }}
+          TF_VAR_oci_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
+          TF_VAR_tfstate_namespace: ${{ secrets.TFSTATE_NAMESPACE }}
+          TF_VAR_tfstate_bucket: ${{ secrets.TFSTATE_BUCKET }}
+          TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}
+          TF_VAR_github_app_installation_id: ${{ vars.GH_APP_INSTALLATION_ID }}
+          TF_VAR_github_app_private_key_path: ${{ runner.temp }}/gh_app_private_key.pem
+          TF_VAR_allowed_ssh_cidrs: ${{ secrets.ALLOWED_SSH_CIDRS || format('["{0}"]', secrets.ALLOWED_SSH_CIDR) }}
+          TF_VAR_allowed_ssh_cidrs_wide: ${{ secrets.ALLOWED_SSH_CIDRS_WIDE || '[]' }}
+          TF_VAR_ssh_public_keys: ${{ secrets.SSH_PUBLIC_KEYS || format('["{0}"]', secrets.SSH_PUBLIC_KEY) }}
+          TF_VAR_next_public_app_env: ${{ vars.NEXT_PUBLIC_APP_ENV }}
+          TF_VAR_public_hostname: ${{ vars.PUBLIC_HOSTNAME }}
+        run: terraform apply -input=false -auto-approve
+
+      - name: Limpiar ficheros con estado/credenciales del workspace
         if: always()
         run: rm -rf errored.tfstate backend.hcl .terraform "$RUNNER_TEMP/oci_private_key.pem" "$RUNNER_TEMP/gh_app_private_key.pem"
