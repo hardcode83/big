@@ -57,15 +57,18 @@ Aceptación:
 3. THE SYSTEM SHALL NO crear la GitHub App desde Terraform (bootstrap irreducible — la API de GitHub no lo permite headless); el módulo asume que la App existe y se identifica por `app_id`/`installation_id` aportados como variables.
 4. THE SYSTEM SHALL NO crear la organización desde Terraform (bootstrap irreducible — `ADR 0002`); el módulo asume que `autohostai-labs` existe y que el repo está transferido.
 
-### R5 — Declarar las branch protections como código, dentro del techo del plan Free
+### R5 — Branch protection: documentar el rechazo total del plan Free, no declararla en Terraform
 
-**As a** revisor del proyecto, **I want** que las reglas de protección de rama que el plan Free permita estén declaradas en Terraform, **so that** el "PR revisado antes de merge" del RUNBOOK quede anclado a un recurso versionado y no a una convención oral.
+**Enmendado en `/sdd:run` sección 4 (2026-09-13)**, tras confirmar en vivo (`gh api repos/autohostai-labs/AutoHostAI/branches/main/protection` → `403 "Upgrade to GitHub Pro or make this repository public"`) que la API de branch protection está bloqueada **por completo** para este repo mientras siga privado en el plan Free — no solo el sub-bloque de required reviewers que la redacción original anticipaba como único rechazo (`ADR 0002` §"Consecuencias"). El hecho ya estaba documentado en `infra/environments/dev/RUNBOOK.md` §0 desde antes de este change; esta sección solo lo cruza contra el módulo GitHub por primera vez. Declarar `github_branch_protection` haría fallar el primer `apply` real por completo (R7.3, "deploy from zero"), no producir el "rechazo sin fallar" que la redacción original pedía — un rechazo total en la creación del recurso no es lo mismo que un sub-bloque rechazado dentro de un recurso que sí se crea.
+
+**As a** revisor del proyecto, **I want** que quede explícito qué parte de "PR revisado antes de merge" está forzada técnicamente y cuál es solo convención, **so that** nadie asuma un enforcement que la API no da mientras el repo siga privado en el plan Free.
 
 Aceptación:
 
-1. THE SYSTEM SHALL declarar `github_branch_protection` (o el recurso equivalente del provider vigente) sobre `main` con las reglas que el plan Free soporte: required status checks (los checks que `infra-dev.yml`, `deploy-dev.yml` y los demás workflows relevantes expongan en `permissions`/`checks`), required linear history, y la prohibición de bypass por administradores si el provider/API lo permite en el tier Free.
-2. WHERE la API de GitHub rechace alguna regla por el límite del plan Free (documentado en `ADR 0002` §"Consecuencias": branch protection con required reviewers requiere Pro/Team), THE SYSTEM SHALL dejar constancia del rechazo en el `plan` (no fallar) y reflejarlo en una sección del RUNBOOK que diga exactamente qué reglas quedan enforced técnicamente y cuáles siguen siendo solo convención.
-3. THE SYSTEM SHALL NO sustituir el gate de aprobación humano por reglas automáticas — el gate sigue siendo "review del PR + apply manual desde main" según `RUNBOOK.md` §0; este R solo automatiza lo automatizable.
+1. THE SYSTEM SHALL NOT declarar `github_branch_protection` (ni el recurso equivalente del provider vigente) en Terraform mientras el repo `autohostai-labs/AutoHostAI` sea privado en el plan Free — la API la rechaza por completo (`403`), verificado en vivo el 2026-09-13.
+2. THE SYSTEM SHALL documentar en `infra/github/RUNBOOK.md` (R6) que las reglas de protección de rama (required status checks, required linear history, prohibición de bypass por administradores) son **convención no forzada** mientras dure esta restricción — mismo trato que ya lleva "required reviewers" en `infra/environments/dev/RUNBOOK.md` §0 — y que la fuente de la restricción es el plan/visibilidad del repo, no un límite parcial de un recurso.
+3. THE SYSTEM SHALL NO sustituir el gate de aprobación humano por reglas automáticas — el gate sigue siendo "review del PR + apply manual desde main" según `infra/environments/dev/RUNBOOK.md` §0; esta R no cambia ese gate, solo deja de prometer un enforcement técnico que la API no permite hoy.
+4. IF en el futuro el repo pasa a GitHub Pro/Team o se hace público (decisión de negocio ajena a este change, fuera de scope), THEN un change futuro puede retomar la declaración de `github_branch_protection` con el mismo contenido que esta R original preveía.
 
 ### R6 — Documentar el bootstrap irreducible en un único RUNBOOK
 

@@ -8,10 +8,12 @@
 # subsequent `apply` reconciles them.
 #
 # SECTIONS (sección 3 añadió los once secrets; sección 4 añade las cuatro
-# variables y el branch protection):
+# variables — el branch protection de la tarea 4.3 original NO se declara:
+# D5 se enmendó en la propia sección 4 tras confirmar en vivo que la API la
+# rechaza por completo en el plan Free, no solo el sub-bloque de reviewers;
+# ver `sdd/changes/infra-github-iac/design.md` §D5 y `main.tf`):
 #   3.1 — eleven github_actions_secret.*            (sección 3, importado en commit 74d96322)
 #   4.1 — four  github_actions_variable.*           (sección 4, tarea 4.2)
-#   4.3 — one   github_branch_protection.this        (sección 4, tarea 4.2)
 #
 # FORMAT (correction vs. some task text):
 # The provider `integrations/github` v5.45.0 accepts DIFFERENT import ID formats
@@ -20,7 +22,6 @@
 #
 #   github_actions_secret.<name>      <repository>/<secret_name>          (slash)
 #   github_actions_variable.<name>    <repository>:<variable_name>        (colon)
-#   github_branch_protection.this     <repository>:<pattern>              (colon)
 #
 # The `<repository>` component is the GitHub repo name (NOT the OCID). The
 # repo name is fixed to `AutoHostAI` for now (the default in `variables.tf`),
@@ -81,8 +82,9 @@ terraform import github_actions_variable.gh_app_installation_id ${REPO}:GH_APP_I
 terraform import github_actions_variable.next_public_app_env   ${REPO}:NEXT_PUBLIC_APP_ENV
 terraform import github_actions_variable.public_hostname       ${REPO}:PUBLIC_HOSTNAME
 
-# --- Sección 4 — one github_branch_protection.* (R5.1) ---
-# Format: <repository>:<pattern>  (colon)
-
-terraform import github_branch_protection.this                 ${REPO}:main
+# NOTE: no github_branch_protection import — D5 (amended in section 4) does
+# NOT declare that resource. The GitHub API rejects it entirely on this repo
+# while private on the Free plan (confirmed live 2026-09-13); the three
+# rules it would have enforced are documented as unforced convention in
+# infra/github/RUNBOOK.md instead. See design.md §D5.
 EOF
