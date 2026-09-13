@@ -86,6 +86,7 @@ from app.properties.infrastructure.repositories import (
     SqlAlchemyPropertyRepository,
     SqlAlchemyPropertyStateTransitionRepository,
 )
+from app.reservations.application.use_cases import SendCheckinRemindersUseCase
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
 from app.scheduler.locks import lock_ttl_for, task_lock
 from app.scheduler.runner import (
@@ -191,6 +192,17 @@ async def _escalate(session: AsyncSession, tenant_id, now: datetime):
         notifications=SqlAlchemyNotificationLogRepository(session),
         users=SqlAlchemyUserRepository(session),
         tenant_configs=SqlAlchemyTenantConfigRepository(session),
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+    return await use_case.execute(tenant_id=tenant_id, now=now)
+
+
+async def _send_checkin_reminders(session: AsyncSession, tenant_id, now: datetime):
+    use_case = SendCheckinRemindersUseCase(
+        properties=SqlAlchemyPropertyRepository(session),
+        reservations=SqlAlchemyReservationRepository(session),
+        guests=SqlAlchemyGuestRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
     return await use_case.execute(tenant_id=tenant_id, now=now)
@@ -463,6 +475,25 @@ def check_checkin_windows() -> dict:
     """PRD §8.3, every 5 min: a confirmed reservation entering its check-in window."""
     return run_sync(
         _clock_task("check_checkin_windows", PropertyStateTrigger.CHECKIN_WINDOW_OPENED)
+    )
+
+
+@celery_app.task(name="send_checkin_reminders")
+def send_checkin_reminders() -> dict:
+    """PRD §8.3, every 15 min (`guest-scheduled-comms` R1, design D1, D2): a `CONFIRMED`
+    reservation crossing the 24h or 2h check-in reminder threshold.
+
+    Same `_guarded`/`run_for_every_tenant` shape as `check_checkin_windows` above — one
+    difference: this evaluates a threshold crossing plus `exists_for` dedup
+    (`SendCheckinRemindersUseCase`), not a `PropertyStateTrigger`, so it is wired directly
+    rather than through `_clock_task`.
+    """
+    return run_sync(
+        _guarded(
+            "send_checkin_reminders",
+            CADENCES["send_checkin_reminders"],
+            _send_checkin_reminders,
+        )
     )
 
 

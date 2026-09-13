@@ -11,7 +11,7 @@ single commit, so a failure recording the event leaves the reservation unchanged
 
 import uuid
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -20,7 +20,12 @@ from app.guests.application.resolution import ManualGuestIdentityInput, ResolveO
 from app.guests.domain.repositories import GuestRepository
 from app.guests.domain.ports import GuestEmailExclusion
 from app.guests.domain.value_objects import GuestSummary
+from app.notifications.domain.entities import NotificationLog
+from app.notifications.domain.enums import NotificationChannel, NotificationStatus, NotificationType
+from app.notifications.domain.repositories import NotificationLogRepository
+from app.properties.domain.clock_triggers import effective_bounds
 from app.properties.domain.enums import PropertyStatus
+from app.properties.domain.exceptions import IncompatibleTransitionContextError
 from app.properties.domain.repositories import PropertyRepository
 from app.reservations.domain.entities import Reservation
 from app.reservations.domain.enums import PaymentStatus, ReservationChannel, ReservationStatus
@@ -31,6 +36,7 @@ from app.reservations.domain.exceptions import (
     ReservationNotFoundError,
     ReservationValidationError,
 )
+from app.reservations.domain.notifications import render_checkin_reminder_email
 from app.reservations.domain.repositories import (
     Page,
     ReservationFilters,
@@ -488,3 +494,264 @@ class ListReservationsUseCase:
                                     property_internal_code=prop.internal_code if prop else None,
                                     guest_full_name=guest.full_name if guest else None))
         return Page(items=tuple(enriched), total=page_result.total)
+
+
+# --- `guest-scheduled-comms` R1: check-in reminders at 24h and 2h (design D1-D8, D11, D12) ----
+
+#: `related_type` this use case's rows are dedup-keyed on (design D8) — a reservation, never
+#: a property or a guest, because R1's dedup is per-reservation-and-type.
+RELATED_TYPE_RESERVATION = "reservation"
+
+#: How far the candidate query looks on either side of `now` (design D4). Narrow on purpose:
+#: this is not `properties.domain.clock_triggers.CANDIDATE_LOOKAHEAD`/`CANDIDATE_LOOKBEHIND`
+#: (which bound a different job's much wider backlog-recovery window) — a guest reminder only
+#: ever fires inside a 24h lead, so one day on each side already covers every property's
+#: timezone offset and both lead times. `list_for_properties`' own stay-overlap semantics make
+#: this an upper bound on the candidate set, never a hole in it: the precise threshold check
+#: below is what actually decides.
+_CANDIDATE_WINDOW = timedelta(days=1)
+
+#: Which `NotificationType` is due at which lead time before the check-in instant (design D1,
+#: D3). A mapping, not two near-identical `if`s, so the loop that evaluates both is the same
+#: code for each.
+_CHECKIN_REMINDER_LEADS: dict[NotificationType, timedelta] = {
+    NotificationType.CHECKIN_REMINDER_24H: timedelta(hours=24),
+    NotificationType.CHECKIN_REMINDER_2H: timedelta(hours=2),
+}
+
+
+@dataclass
+class CheckinReminderReport:
+    """What one tenant's sweep did (R1, R4).
+
+    `candidates` counts every `CONFIRMED` reservation the candidate query returned, whether or
+    not either reminder type turned out to be due for it. `skipped_missing_email` and
+    `skipped_invalid_local_time` are R1.3's and the DST risk's "skip and count" cases,
+    respectively — neither aborts the tenant's sweep (R4).
+    """
+
+    candidates: int = 0
+    written: int = 0
+    skipped_missing_email: int = 0
+    skipped_invalid_local_time: int = 0
+
+
+class SendCheckinRemindersUseCase:
+    """`send_checkin_reminders` (PRD §8.3, `guest-scheduled-comms` R1; design D1, D3-D5, D8,
+    D11, D12).
+
+    One sweep evaluates both `CHECKIN_REMINDER_24H` and `CHECKIN_REMINDER_2H` per candidate
+    reservation (design D1) — they share the identical "confirmed reservation, property-timezone
+    instant, threshold, dedup" shape and differ only in their lead time
+    (`_CHECKIN_REMINDER_LEADS`).
+
+    **The candidate query is deliberately approximate; the threshold check is not** (design D3,
+    D4). `list_for_properties`' stay-overlap window can return a reservation whose check-in is
+    not actually near `now` (e.g. a long stay that started days ago); that costs nothing but a
+    wasted iteration, because `effective_bounds` plus the threshold comparison below is the
+    real gate, and it is symmetric with a missed tick: `checkin_instant - lead <= now <
+    checkin_instant` stays true until the check-in itself, so a reservation a sweep does not
+    reach this tick is still caught by the next one, and `exists_for` (design D8) is what stops
+    a caught-twice reservation from being reminded twice.
+
+    **Recipient resolution only runs for a reservation with at least one due type** (design
+    D5) — resolving the guest is one more query, and most candidates the window returns are not
+    due at all.
+    """
+
+    def __init__(
+        self,
+        *,
+        properties: PropertyRepository,
+        reservations: ReservationRepository,
+        guests: GuestRepository,
+        notifications: NotificationLogRepository,
+        uow: UnitOfWork,
+    ) -> None:
+        self._properties = properties
+        self._reservations = reservations
+        self._guests = guests
+        self._notifications = notifications
+        self._uow = uow
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, now: datetime
+    ) -> CheckinReminderReport:
+        report = CheckinReminderReport()
+
+        properties = await self._properties.list_all(tenant_id)
+        if not properties:
+            return report
+        properties_by_id = {property.id: property for property in properties}
+
+        date_from = (now - _CANDIDATE_WINDOW).date()
+        date_to = (now + _CANDIDATE_WINDOW).date()
+        candidates = await self._reservations.list_for_properties(
+            tenant_id, list(properties_by_id), date_from, date_to
+        )
+
+        for reservation in candidates:
+            if reservation.status is not ReservationStatus.CONFIRMED:
+                continue
+            report.candidates += 1
+
+            property = properties_by_id.get(reservation.property_id)
+            if property is None:
+                # The reservation's own FK guarantees the property exists within the tenant;
+                # unreachable in practice, and treated the same as an incompatible context
+                # rather than raised, so a wiring surprise cannot abort the whole sweep.
+                report.skipped_invalid_local_time += 1
+                continue
+
+            try:
+                checkin_instant, _ = effective_bounds(property, reservation)
+            except IncompatibleTransitionContextError:
+                # A nonexistent/ambiguous local wall time, or an invalid property timezone
+                # (design *Risks*): skip and count this reservation for this tick rather than
+                # letting one bad property abort the tenant's sweep. The next tick tries again
+                # with the same inputs, so this is not silent unless the property never gets
+                # fixed — which is the same tolerance `_active_reservations` callers already
+                # give this error.
+                report.skipped_invalid_local_time += 1
+                continue
+
+            due_types = [
+                notification_type
+                for notification_type, lead in _CHECKIN_REMINDER_LEADS.items()
+                if checkin_instant - lead <= now < checkin_instant
+            ]
+            if not due_types:
+                continue
+
+            recipient = await self._recipient(tenant_id, reservation.guest_id)
+            if recipient is None:
+                report.skipped_missing_email += 1
+                continue
+            email, language = recipient
+
+            check_in_time_local = reservation.check_in_time or property.default_check_in_time
+            subject, body = render_checkin_reminder_email(
+                language,
+                property.name,
+                reservation.check_in_date,
+                check_in_time_local,
+            )
+
+            if NotificationType.CHECKIN_REMINDER_24H in due_types and await self._write_if_new(
+                tenant_id,
+                reservation.id,
+                NotificationType.CHECKIN_REMINDER_24H,
+                email,
+                subject,
+                body,
+                now,
+            ):
+                report.written += 1
+
+            if NotificationType.CHECKIN_REMINDER_2H in due_types and await self._write_if_new(
+                tenant_id,
+                reservation.id,
+                NotificationType.CHECKIN_REMINDER_2H,
+                email,
+                subject,
+                body,
+                now,
+            ):
+                report.written += 1
+
+        await self._uow.commit()
+        return report
+
+    async def _write_if_new(
+        self,
+        tenant_id: uuid.UUID,
+        reservation_id: uuid.UUID,
+        notification_type: NotificationType,
+        email: str,
+        subject: str,
+        body: str,
+        now: datetime,
+    ) -> bool:
+        """`exists_for` dedup (design D8), then one of exactly two literal `NotificationLog(...)`
+        constructions — one per `NotificationType` member, never a single call parameterised by
+        a variable.
+
+        **Not folded into one call with `notification_type.value`, on purpose.**
+        `tests/notifications/test_writer_census.py` counts a writer only when the AST sees the
+        literal shape `NotificationType.<X>.value` at the `NotificationLog(...)` call site
+        itself — a local variable holding the member is invisible to it. `exists_for` has no
+        such constraint (the census only matches `NotificationLog`/`Escalation` callees), so its
+        `notification_type=notification_type.value` above stays a plain parameter.
+        """
+        if await self._notifications.exists_for(
+            tenant_id,
+            related_type=RELATED_TYPE_RESERVATION,
+            related_id=reservation_id,
+            notification_type=notification_type.value,
+        ):
+            return False
+
+        if notification_type is NotificationType.CHECKIN_REMINDER_24H:
+            await self._notifications.add(
+                tenant_id,
+                NotificationLog(
+                    id=uuid.uuid4(),
+                    tenant_id=tenant_id,
+                    recipient_contact=email,
+                    channel=NotificationChannel.EMAIL,
+                    notification_type=NotificationType.CHECKIN_REMINDER_24H.value,
+                    created_at=now,
+                    updated_at=now,
+                    subject=subject,
+                    body=body,
+                    status=NotificationStatus.PENDING,
+                    related_type=RELATED_TYPE_RESERVATION,
+                    related_id=reservation_id,
+                    # D11: none of the four writers this change adds carries an SLA deadline —
+                    # a guest reminder has nobody to escalate to if "late".
+                    sla_deadline_at=None,
+                ),
+            )
+        elif notification_type is NotificationType.CHECKIN_REMINDER_2H:
+            await self._notifications.add(
+                tenant_id,
+                NotificationLog(
+                    id=uuid.uuid4(),
+                    tenant_id=tenant_id,
+                    recipient_contact=email,
+                    channel=NotificationChannel.EMAIL,
+                    notification_type=NotificationType.CHECKIN_REMINDER_2H.value,
+                    created_at=now,
+                    updated_at=now,
+                    subject=subject,
+                    body=body,
+                    status=NotificationStatus.PENDING,
+                    related_type=RELATED_TYPE_RESERVATION,
+                    related_id=reservation_id,
+                    sla_deadline_at=None,
+                ),
+            )
+        else:  # pragma: no cover - defensive; only the two members above are ever passed
+            raise ValueError(f"Unsupported check-in reminder type: {notification_type!r}")
+        return True
+
+    async def _recipient(
+        self, tenant_id: uuid.UUID, guest_id: uuid.UUID | None
+    ) -> tuple[str, str] | None:
+        """The guest's email and preferred language, or `None` to skip-and-count (R1.3,
+        design D5).
+
+        Mirrors `SendGuestAccessTokenUseCase._recipient`
+        (`guests/application/portal.py:915-941`), adapted from "raise
+        `GuestContactMissingError`" to "return `None`": there is no HTTP caller here to answer
+        `422` to, only a sweep that must count the candidate and move on.
+        """
+        if guest_id is None:
+            return None
+        guest = await self._guests.get(tenant_id, guest_id)
+        if guest is None:
+            return None
+        email = (guest.email or "").strip()
+        if not email:
+            return None
+        return email, guest.preferred_language
