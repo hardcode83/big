@@ -151,6 +151,18 @@ cada vivienda debe llevar el suyo para que la sincronización la encuentre.
 | Cancelación (`DELETE` o `PATCH` a `CANCELLED`) | `RESERVATION_CANCELLED` | `USER` |
 | Alta por importación CSV | `RESERVATION_IMPORTED` | `USER` (quien subió el fichero) |
 | Alta por sincronización PMS | `RESERVATION_IMPORTED` | `SYSTEM` |
+| Edición o cancelación por sincronización PMS periódica | `RESERVATION_UPDATED` / `RESERVATION_CANCELLED` | `SYSTEM` |
+| Edición o cancelación por re-read de webhook | `RESERVATION_UPDATED` / `RESERVATION_CANCELLED` | `SYSTEM` |
+| Edición o cancelación por reimportación CSV | `RESERVATION_UPDATED` / `RESERVATION_CANCELLED` | `USER` (quien subió el fichero) |
+
+Los tres caminos de ingest (sync periódico, re-read de webhook, CSV reimportado) usan la misma
+regla de selección que la edición/cancelación manual: si el cambio deja la reserva en
+`CANCELLED` sin estarlo antes, el evento es `RESERVATION_CANCELLED`; para cualquier otro cambio
+aplicado, `RESERVATION_UPDATED`. Una cancelación detectada por ingest que libera una vivienda en
+`AWAITING_CHECKIN` dispara la misma transición de estado (`RESERVATION_CANCELLED_BEFORE_CHECKIN`)
+que ya disparaba la cancelación manual, una sola vez por cancelación aunque varias rutas de
+ingest la detecten. Un ciclo de sync o re-read que no encuentra cambios reales (fila ya al día)
+sigue sin dejar rastro: se cuenta como `skipped`, sin evento.
 
 El evento de edición registra **qué campos** cambiaron. En los campos de texto libre
 (`internal_notes`, `special_requests`) registra que cambiaron pero **no su contenido**: el
