@@ -53,7 +53,7 @@
 - [ ] 5.4 Ejecutar el primer `apply` real (vía `workflow_dispatch action: apply` — el local sin credenciales reales no es suficiente para validar la importación) y verificar post-apply que `terraform plan` queda **completamente vacío** sobre los once secrets + cuatro variables + repo settings + App installation (**NO** incluye branch protection — D5 enmendado, no se declara ese recurso). Si el plan muestra diff, NO marcar la tarea como hecha — el diff es un bug del `import.sh` o de los recursos. [R7.3, D6]
 - [ ] 5.5 Verificar que ningún `output` de Terraform expone el valor de un secret — `terraform show -json | jq '.outputs'` debe mostrar solo los tres outputs planeados y ningún valor que parezca PEM o CIDR. [R1]
 
-## 6. CI workflow + GHCR verification job
+## 6. CI workflow + GHCR verification job <!-- panel: PASS 2026-09-13 receipt:c8e7c8df -->
 
 - [x] 6.1 Crear `.github/workflows/infra-github.yml` siguiendo el patrón de `.github/workflows/infra-dev.yml`: (1) job `check` para `pull_request` con `paths: ['infra/github/**']`, sin secretos, en `ubuntu-latest`, ejecutando `terraform fmt -check -recursive infra/github/`, `terraform -chdir=infra/github init -backend=false`, `terraform -chdir=infra/github validate`; (2) workflow `workflow_dispatch` con `action: plan|apply`, gateado por `if: github.ref == 'refs/heads/main'` (D7), ejecutado en `[self-hosted, dev]`, con `concurrency` (serializa applies) y `timeout-minutes`. [R7.1, R7.2, R7.4]
 - [x] 6.2 Reutilizar el patrón de `terraform` por SHA de commit (mismo SHA que `infra-dev.yml`); inyectar las variables sensibles con `env: TF_VAR_github_app_private_key_path: ${{ env.GH_APP_PRIVATE_KEY_PATH }}` y compañía desde `${{ secrets.* }}`. [R7]
