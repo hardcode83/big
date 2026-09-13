@@ -52,9 +52,23 @@ describe("reservation edit patch", () => {
     expect(validateEditValues(values)).toHaveProperty("checkOutDate", "dateOrder");
   });
 
-  it("keeps contract-supported edit fields closed", () => {
+  it("keeps contract-supported edit fields closed (payment_status is allowed when changed)", () => {
     const values = initialEditValues(detail);
     const patch = buildReservationPatch(detail, values);
-    expect(Object.keys(patch)).not.toEqual(expect.arrayContaining(["status", "payment_status", "cleaning_required", "channel", "guest_id"]));
+    expect(Object.keys(patch)).not.toEqual(expect.arrayContaining(["status", "cleaning_required", "channel", "guest_id"]));
+  });
+
+  it("omits payment_status from the patch when it matches the loaded detail", () => {
+    const values = initialEditValues(detail);
+    const patch = buildReservationPatch(detail, values);
+    expect(Object.keys(patch)).not.toContain("payment_status");
+  });
+
+  it("emits only payment_status snake_case when the selected value differs from the loaded detail", () => {
+    const values = initialEditValues(detail);
+    values.paymentStatus = "PARTIALLY_PAID";
+    const patch = buildReservationPatch(detail, values);
+    expect(patch).toEqual({ payment_status: "PARTIALLY_PAID" });
+    expect(Object.keys(patch)).toEqual(["payment_status"]);
   });
 });

@@ -30,4 +30,44 @@ describe("reservationMutationErrorKey (D5)", () => {
     ).toBe("reservations:mutation.errors.cancel.server");
     expect(reservationMutationErrorKey(new TypeError("network PII"), "cancel")).toBe("reservations:mutation.errors.cancel.network");
   });
+
+  describe("operation=\"confirm\" (R4, D7)", () => {
+    it.each([
+      [401, "session"],
+      [403, "forbidden"],
+      [404, "notFound"],
+      [409, "conflict"],
+      [422, "validation"],
+    ] as const)(
+      "maps ApiError %s to reservations:mutation.errors.confirm.%s",
+      (status, expected) => {
+        expect(
+          reservationMutationErrorKey(
+            new ApiError({
+              code: "PRIVATE_CODE",
+              message: "PII secret message",
+              details: { email: "guest@example.com" },
+              status,
+            }),
+            "confirm",
+          ),
+        ).toBe(`reservations:mutation.errors.confirm.${expected}`);
+      },
+    );
+
+    it("maps a 5xx ApiError to reservations:mutation.errors.confirm.server", () => {
+      expect(
+        reservationMutationErrorKey(
+          new ApiError({ code: "INTERNAL", message: "trace PII", status: 503 }),
+          "confirm",
+        ),
+      ).toBe("reservations:mutation.errors.confirm.server");
+    });
+
+    it("maps a non-ApiError (network) to reservations:mutation.errors.confirm.network", () => {
+      expect(
+        reservationMutationErrorKey(new TypeError("network PII"), "confirm"),
+      ).toBe("reservations:mutation.errors.confirm.network");
+    });
+  });
 });
