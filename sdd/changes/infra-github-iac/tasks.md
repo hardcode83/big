@@ -37,7 +37,7 @@
 - [x] 3.4 Crear `infra/github/import.sh` (script versionado) que imprime los once `terraform import github_actions_secret.<nombre> <SECRET_NAME>` listos para copiar/pegar — orden: alfabético por nombre del recurso. Incluir comentario de cabecera explicando que el script se ejecuta **una sola vez** durante este change, y que cada `import` consume el ID externo (el nombre del secret en GitHub). [R3.1, D6]
 - [x] 3.5 Verificación: `terraform -chdir=infra/github plan` (con valores reales cargados desde el workflow de CI, NO localmente) debe mostrar los once secretos como **ya en el state** tras ejecutar `bash infra/github/import.sh` + `terraform -chdir=infra/github apply -target=github_actions_secret.*` — el plan post-import debe quedar vacío sobre estos recursos. **Ejecutar `terraform plan` localmente solo si se dispone de credenciales reales de la App — NO versionar.** [R3, D6]
 
-## 4. Actions variables + branch protection
+## 4. Actions variables + branch protection <!-- panel: PASS 2026-09-13 receipt:9ae5b702 -->
 
 - [x] 4.1 `main.tf`: declarar los cuatro `github_actions_variable` (R3.2): `github_actions_variable.gh_app_id` (`GH_APP_ID`), `.gh_app_installation_id` (`GH_APP_INSTALLATION_ID`), `.next_public_app_env` (`NEXT_PUBLIC_APP_ENV`), `.public_hostname` (`PUBLIC_HOSTNAME`). `GH_APP_ID` y `GH_APP_INSTALLATION_ID` leen de variables no sensibles; `NEXT_PUBLIC_APP_ENV` y `PUBLIC_HOSTNAME` requieren variables nuevas — añadirlas a `variables.tf` como no sensibles con defaults `""` y validación fail-fast si el workflow no las inyecta. [R3.2]
 - [x] 4.2 Actualizar `infra/github/import.sh` para incluir los cuatro `terraform import github_actions_variable.<nombre> <VARIABLE_NAME>`. [R3.2, D6]
