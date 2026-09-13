@@ -769,3 +769,77 @@ minutos.
 
 **7.4** — `python3 scripts/check-detect-surface.py e2e` → `OK: detect-surface covers the whole
 suite input surface.`
+
+### Review fix round 1
+
+Six findings from `/sdd:review`'s panel, round 1. No `tasks.md` checkboxes touched — this is a
+review-fix round, not new task work.
+
+- **[sdd-architect/low] design.md D1 stale health-check description.** D1 still said the
+  `globalSetup` health check hit `/api/v1/health` via the same-origin proxy; the real
+  implementation (task 1.3) hits `http://localhost:8000/health` directly, and that correction was
+  already recorded in this file (Section 1 — fix round 1) and in the CI workflow, but design.md's
+  own prose was never amended. **Fixed**: reworded D1's paragraph in `design.md` to state the
+  direct `/health` call and why it is not under `API_V1_PREFIX`, with a pointer back to this file.
+  **Verified**: re-read `design.md` D1 — now matches task 1.3 and the CI workflow's `/health`
+  wording.
+
+- **[sdd-qa/medium] `playwright.config.ts` CI retries risk exhausting the shared login/refresh
+  rate-limit budget.** `retries: process.env.CI ? 1 : 0` was set with no mitigation, despite this
+  file's own section-4 notes ("El presupuesto de login del backend es de toda la suite E2E")
+  warning that one full pass already runs close to the 10/min/IP budget and that a retry would
+  need to count navigations, not just logins. **Fixed**: set `retries: 0` unconditionally (removed
+  the CI branch), with an inline comment explaining why, rather than building new
+  navigation-counting machinery into the throttle-recovery helpers for a suite that is not flaky.
+  **Verified**: `npx playwright test --list` still lists all 8 tests across the 3 specs correctly;
+  no live stack was brought up for this fix since no throttle-recovery code was touched (per the
+  task contract, only required when touching the helpers).
+
+- **[sdd-qa/low] proposal.md R4.2 wording narrower than the passing test structure.** R4.2 said the
+  red-dashboard CRITICAL state must be verified "dentro del mismo test", but the implementation
+  classifies to CRITICAL in test 4.1 and asserts the red badge in test 4.2, with state carried by
+  `describe.serial`'s guaranteed execution order — a defensible, smaller-risk structure than one
+  merged test, but the proposal's literal wording didn't say so. **Fixed**: reworded R4.2 in
+  `proposal.md` to say "dentro del mismo ciclo `describe.serial`" and note explicitly that the
+  classification and the badge assertion may live in different tests of the same serial block. Did
+  **not** touch `incident.spec.ts` — merging 4.1/4.2 was explicitly out of scope. **Verified**:
+  re-read `incident.spec.ts` 4.1 (lines 373-458, classifies to `CRITICAL_INCIDENT` at line 419-421)
+  and 4.2 (lines 460-469, asserts `RED_BADGE` on the dashboard) — the new wording accurately
+  describes that structure.
+
+- **[sdd-review-cicd/medium] `.github/workflows/e2e-tests.yml` Compose project-name collision
+  between concurrent PRs.** D2 only reasoned about port collision (5432/6379), same precedent as
+  `backend-tests.yml`; it never addressed that `docker compose`/`make up` in this job derive the
+  Compose project name from the checkout directory basename — identical across the 4 concurrent
+  self-hosted agents — so two different PRs' `e2e-tests-suite` runs (different `github.ref`, not
+  covered by the ref-keyed `concurrency:` group) could have one run's
+  `docker compose down --volumes --remove-orphans` delete or corrupt another run's live named
+  volumes (`postgres_data`, etc.). **Fixed**: added `env: COMPOSE_PROJECT_NAME: e2e-${{
+  github.run_id }}` at the `e2e-tests-suite` job level, so every `docker compose`/`make up`/
+  `make down` invocation in the job picks up a unique project name per run automatically (`make`'s
+  `COMPOSE :=` wraps bare `docker compose`, which reads `COMPOSE_PROJECT_NAME` from the
+  environment) — no per-command rewrite needed. **Verified**: `python3 -c "import yaml;
+  yaml.safe_load(open('.github/workflows/e2e-tests.yml'))"` → no error; `python3
+  scripts/check-detect-surface.py e2e` → `OK: detect-surface covers the whole suite input surface.`
+  (an env var addition doesn't change the suite's input-file surface, confirmed).
+
+- **[sdd-review-documentation/low] `.env.example` missing `BACKEND_HEALTH_URL`/`BACKEND_URL`.** The
+  E2E suite reads both for `PORT_OFFSET` worktree overrides (`frontend/e2e/fixtures/load-env.ts`,
+  `global-setup.ts`), but neither appeared in `.env.example`, so a developer in a shifted-port
+  worktree had no way to discover them. **Fixed**: added a new `--- E2E test overrides ---` section
+  to `.env.example`, both commented out with their working defaults and an explanation of when to
+  uncomment them (an SDD worktree with `PORT_OFFSET`), following the file's existing convention for
+  optional overrides with working defaults (e.g. the `CSV_IMPORT_MAX_BYTES`/`BEDS24_MAX_PAGES`
+  blocks). **Verified**: format matches surrounding entries — commented `KEY=value` pairs with a
+  prose comment block above explaining the mechanism and pointing at the reading code.
+
+- **[sdd-review-documentation/low] `sdd/steering/architecture.md` stale "diecisiete dominios".**
+  Line 40 still said 17 domains (now stale — 18, per this change's own `docs/dod-audit.md` §28.18
+  audit), and the correction lived only in that separate document. **Fixed**: added a short
+  blockquote note right after the existing paragraph, pointing to `docs/dod-audit.md` §28.18
+  "Corrección de la cifra de dominios" for the corrected count, without rewriting the paragraph
+  itself (which reasons about a 16-box diagram that would need re-measuring — explicitly out of
+  scope, same reasoning `dod-audit.md` already gives for why it left `architecture.md` alone).
+  **Verified**: re-read `docs/dod-audit.md`'s own "Corrección de la cifra de dominios" section — the
+  new note (18 real, 17 stale, full fix deferred to the change that regenerates the diagram) matches
+  it and adds nothing it doesn't already say.

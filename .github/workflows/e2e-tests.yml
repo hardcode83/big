@@ -204,6 +204,18 @@ jobs:
     permissions:
       contents: read
 
+    # Aislamiento de proyecto Compose, no solo de puertos: sin esto, `docker compose` deriva el
+    # nombre del proyecto del basename del directorio de checkout, IDÉNTICO en los 4 agentes
+    # concurrentes del runner self-hosted (`RUNBOOK.md` §6.2) — y el `concurrency:` de arriba solo
+    # agrupa por `github.ref`, así que dos PRs distintos SÍ pueden correr `e2e-tests-suite` a la
+    # vez. Con el mismo nombre de proyecto, los volúmenes con nombre (`postgres_data`, etc.) de
+    # ambas corridas son EL MISMO volumen: el `docker compose down --volumes --remove-orphans` de
+    # una corrida borra o corrompe los datos que la otra está usando en ese momento. `make up`/
+    # `make down` (y el `docker compose` desnudo del primer paso) recogen `COMPOSE_PROJECT_NAME`
+    # solos — no hace falta reescribir cada invocación con `-p`.
+    env:
+      COMPOSE_PROJECT_NAME: e2e-${{ github.run_id }}
+
     outputs:
       e2e_seconds: ${{ steps.e2e.outputs.seconds }}
 

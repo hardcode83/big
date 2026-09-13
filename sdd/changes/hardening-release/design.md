@@ -16,7 +16,7 @@ CI ya tiene el patrón de tres jobs condicionales (`*-detect` / `*-suite` / cons
 
 Rejected: extender el proyecto `browser` de Vitest para E2E — mezclaría dos unidades de prueba distintas (un componente vs. un flujo de usuario completo) en la misma config, y el modo browser de Vitest no tiene primitivas de multi-page/multi-context que el flujo de limpieza (manager reasigna, limpiadora acepta) necesita.
 
-`playwright.config.ts` fija `use: { baseURL: 'http://localhost:3000' }` y un `globalSetup` que hace una petición HTTP a `/api/v1/health` (vía el proxy same-origin) **antes** de que corra cualquier spec: si no responde, aborta con un mensaje explícito ("el stack no está arriba — corre `make up` primero"), en vez de dejar que cada test falle por separado con un timeout de navegación genérico (R1.2).
+`playwright.config.ts` fija `use: { baseURL: 'http://localhost:3000' }` y un `globalSetup` que hace una petición HTTP directa a `http://localhost:8000/health` (backend, sin pasar por el proxy same-origin del frontend) **antes** de que corra cualquier spec: si no responde, aborta con un mensaje explícito ("el stack no está arriba — corre `make up` primero"), en vez de dejar que cada test falle por separado con un timeout de navegación genérico (R1.2). No es `/api/v1/health` — esa ruta no existe: `/health` está deliberadamente montado FUERA de `API_V1_PREFIX` (`backend/app/main.py`, comentario junto a `@app.get("/health")`), porque es el mismo endpoint que ya usa el healthcheck del contenedor en `docker-compose.yml`. Corregido durante `/sdd:run` (task 1.3) tras verificarlo contra el código real; ver `tasks.md`, Implementation Notes de la sección 1.
 
 ### D2 — Contra el stack real de `make up`, sin orquestación nueva
 
