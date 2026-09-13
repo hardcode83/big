@@ -1,19 +1,20 @@
-import { loadRootEnv } from "./load-env";
+import { loadRootEnv, resolveBackendUrl } from "./load-env";
 
 /**
  * API helpers for seeding data a spec needs *beyond* `make seed-demo` — e.g. a
  * `CleaningTask` in an exact starting state — so a test does not depend on
  * timing/ordering of the demo seed to find one. Calls the backend directly
- * (`BACKEND_URL`, default `http://localhost:8000`), never through the
- * frontend's same-origin proxy: these run from Node in the test process, not
- * from the browser page.
+ * (`BACKEND_URL`, default `http://localhost:8000`, derived from
+ * `BACKEND_HEALTH_URL` in a `PORT_OFFSET` worktree — see `resolveBackendUrl`),
+ * never through the frontend's same-origin proxy: these run from Node in the
+ * test process, not from the browser page.
  *
  * Every helper documents the exact endpoint it calls, per task 1.5. Extend
  * this file (do not create a parallel one) as later sections need more seed
  * data — e.g. an incident helper for section 4.
  */
 
-const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8000";
+const BACKEND_URL = resolveBackendUrl();
 
 export interface ApiSession {
   accessToken: string;
@@ -120,4 +121,48 @@ export async function createCleaningTask(
     );
   }
   return (await response.json()) as SeedCleaningTask;
+}
+
+export interface CreatedUserWithTemporaryPassword {
+  email: string;
+  temporaryPassword: string;
+}
+
+/**
+ * `POST /api/v1/users` (`backend/app/auth/api/users_router.py` `create_user`,
+ * requires `MANAGE_USERS` — `TENANT_OWNER`/`PROPERTY_MANAGER` credentials via
+ * `session`) — the cheapest realistic way to get a fresh user with
+ * `must_change_password: true`: `CreateUserUseCase` always sets that flag
+ * (`backend/app/auth/application/user_admin.py:134`, "a fresh temporary
+ * password... the flag is what stops it from quietly becoming the account's
+ * permanent credential") and returns the one-time temporary password in the
+ * response body (never logged, per `docs/auth-account-recovery.md`). Used by
+ * `login.spec.ts` (R2.3) instead of resetting a seeded user's password, which
+ * would clobber the credentials sections 3/4 rely on.
+ *
+ * Email is randomised per call so re-running the spec against an already-seeded
+ * tenant never collides with a previous run's `409`.
+ */
+export async function createUserWithTemporaryPassword(
+  session: ApiSession,
+  role: "PROPERTY_MANAGER" | "CLEANER" | "TECHNICIAN",
+): Promise<CreatedUserWithTemporaryPassword> {
+  const email = `e2e-must-change-${Date.now()}-${Math.floor(Math.random() * 1e6)}@hardening-e2e.local`;
+  const response = await fetch(`${BACKEND_URL}/api/v1/users`, {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({
+      name: "E2E Must Change Password",
+      email,
+      role,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `seed-context.createUserWithTemporaryPassword: POST /api/v1/users -> ${response.status} ` +
+        `${await response.text()}`,
+    );
+  }
+  const body = (await response.json()) as { temporary_password: string };
+  return { email, temporaryPassword: body.temporary_password };
 }

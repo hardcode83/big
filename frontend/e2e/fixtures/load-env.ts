@@ -70,3 +70,26 @@ export function loadRootEnv(): void {
     }
   }
 }
+
+/**
+ * Resolves the backend base URL specs and fixtures call directly (never
+ * through the frontend's same-origin proxy), matching the same override
+ * precedence `global-setup.ts` documents for `BACKEND_HEALTH_URL`:
+ *
+ * 1. `BACKEND_URL`, if set explicitly — an explicit override always wins.
+ * 2. Otherwise derived from `BACKEND_HEALTH_URL` (already required for a
+ *    `PORT_OFFSET` worktree's health check, per task 7.3) by stripping its
+ *    trailing `/health`, so the same var points both the health check and
+ *    the API calls at the shifted port without a third env var to keep in
+ *    sync.
+ * 3. Otherwise the unshifted local default.
+ */
+export function resolveBackendUrl(): string {
+  if (process.env.BACKEND_URL) {
+    return process.env.BACKEND_URL;
+  }
+  if (process.env.BACKEND_HEALTH_URL) {
+    return process.env.BACKEND_HEALTH_URL.replace(/\/health\/?$/, "");
+  }
+  return "http://localhost:8000";
+}

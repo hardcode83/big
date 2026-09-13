@@ -12,9 +12,9 @@
 - [x] 1.4 Fixture compartida `frontend/e2e/fixtures/auth.ts`: helper que hace login por clic (navegar a `/login`, rellenar credenciales, enviar, esperar `/dashboard`) parametrizado por rol — inspeccionar `frontend/features/auth/components/login-form.tsx` para los selectores reales, no inventarlos. Reutilizada por los tres specs de flujo. [R1]
 - [x] 1.5 Fixture `frontend/e2e/fixtures/seed-context.ts`: helpers de API (autenticados) para crear por API el dato de partida que cada spec necesite más allá de `make seed-demo` (p. ej. una `CleaningTask`/incidencia en el estado exacto del test), documentando qué endpoint usa cada helper. [R1]
 
-## 2. E2E: flujo de login [R2]
+## 2. E2E: flujo de login [R2] <!-- panel: PASS 2026-09-13 receipt:fbb62c47 -->
 
-- [ ] 2.1 `frontend/e2e/login.spec.ts`: login válido → redirect a `/dashboard`; login inválido → error visible sin redirect; una petición autenticada representativa con un usuario `must_change_password` confirma el bloqueo `403 PASSWORD_CHANGE_REQUIRED` salvo `me`/`logout`/`change-password` (ver `docs/auth-account-recovery.md`). [R2]
+- [x] 2.1 `frontend/e2e/login.spec.ts`: login válido → redirect a `/dashboard`; login inválido → error visible sin redirect; una petición autenticada representativa con un usuario `must_change_password` confirma el bloqueo `403 PASSWORD_CHANGE_REQUIRED` salvo `me`/`logout`/`change-password` (ver `docs/auth-account-recovery.md`). [R2]
 
 ## 3. E2E: ciclo de limpieza <!-- hard -->
 
@@ -133,3 +133,90 @@ Verification (this worktree, `cd frontend` first):
   real health-check failure path now surfaces as designed.
 - `grep -n "body.items\|body.data" frontend/e2e/fixtures/seed-context.ts` — only `body.data`
   remains.
+
+### Section 2 (E2E: flujo de login)
+
+- **Stack left running for sections 3/4 to reuse:** this worktree had NO `.env` at all
+  (`docker compose ps` failed with "Falta POSTGRES_DB en .env") — `make up PORT_OFFSET=77`
+  created it from `.env.example` and generated `JWT_SECRET_KEY` as documented. Filled in the
+  previously-empty secrets it needed to go further: `DEMO_ACCOUNT_PASSWORD`, the nine
+  `BOOTSTRAP_*` vars, and `SEED_CLEANER_*`/`SEED_TECHNICIAN_*` (all local-only throwaway
+  values, e.g. `owner@hardening-e2e.local` / `E2eOwnerPassw0rd!` — not secrets worth
+  protecting, this is a local worktree stack). Ran `make bootstrap && make seed-demo`
+  successfully after that. **Left running**: compose project `hardening-release`,
+  `PORT_OFFSET=77` → postgres `5509`, redis `6456`, backend `8077`, frontend `3077`. Sections
+  3/4 should reuse this (`BASE_URL=http://localhost:3077 BACKEND_HEALTH_URL=http://localhost:8077/health
+  BACKEND_URL=http://localhost:8077 npx playwright test e2e/<spec>.ts` from `frontend/`) instead
+  of running `make up`/`make bootstrap`/`make seed-demo` again — re-running `seed-demo` resets
+  the demo tenant (see its own docstring: "lo aprovisiona si no existe y lo resetea si existe"),
+  which would be harmless but unnecessary.
+- **`must_change_password` user: created fresh via API per test run, not a static seeded
+  account.** `POST /api/v1/users` (`CreateUserUseCase`) always sets `must_change_password: true`
+  on a new user and returns its one-time temporary password in the response body — the cheapest
+  realistic way to get one, and it does not clobber the `CLEANER`/`TECHNICIAN` credentials
+  sections 3/4 depend on (resetting one of those via the CLI rescue command would have). Added
+  `createUserWithTemporaryPassword(session, role)` to `fixtures/seed-context.ts`, following the
+  file's existing pattern; email is randomised (`e2e-must-change-<ts>-<rand>@hardening-e2e.local`)
+  so reruns never collide with a `409`.
+- **`POST /api/v1/users` requires `MANAGE_USERS`, which is `TENANT_OWNER`-only.**
+  `backend/app/auth/domain/policy.py`: `_USER_MANAGE` (`READ_USERS`+`MANAGE_USERS`) is folded into
+  `ROLE_PERMISSIONS[TENANT_OWNER]` but not `PROPERTY_MANAGER`'s — confirmed by a live `403
+  FORBIDDEN` when first tried with the manager's credentials. The login.spec.ts `must_change_password`
+  test therefore calls `apiLogin`/`createUserWithTemporaryPassword` as `TENANT_OWNER`, not
+  `PROPERTY_MANAGER`.
+- **Representative non-exempt request used for the block assertion:** `GET /api/v1/properties`.
+  The gate (`get_authenticated_request` in `backend/app/auth/api/dependencies.py`) runs before any
+  route's own permission check, so it fires regardless of whether the `must_change_password` role
+  would otherwise be allowed to call that route.
+- **Error wire format confirmed:** `{"error": {"code": "PASSWORD_CHANGE_REQUIRED", ...}}`
+  (`backend/app/core/errors.py`), not a flat `{"code": ...}`.
+- **Post-login landing for this spec:** used `PROPERTY_MANAGER` throughout (both the valid-login
+  test and the invalid-credentials test) rather than `TENANT_OWNER`/`CLEANER`/`TECHNICIAN` — it
+  lands directly on `/dashboard` via `loginAs` (no `/welcome` detour), keeping the valid-login
+  assertion simple. No new post-login-landing discoveries beyond what section 1 already documented
+  above (`loginAs` handled the role-dependent landing correctly, unchanged).
+- **Invalid-login test:** one deliberate bad password, no retry loop (steering/security.md #7
+  rate-limit budget), asserted via `page.getByRole("alert")` (the form renders `<p role="alert">`)
+  plus the URL still matching `/login` — no assertion on the i18n error text itself.
+- **Verification run (this worktree, `cd frontend` first, stack at `PORT_OFFSET=77` above):**
+  `npm run typecheck` — clean. `npm run lint` — clean. `npx playwright install chromium` (browser
+  binary was missing in this worktree's Playwright cache). Then twice in a row:
+  `BASE_URL=http://localhost:3077 BACKEND_HEALTH_URL=http://localhost:8077/health
+  BACKEND_URL=http://localhost:8077 npx playwright test e2e/login.spec.ts` → `3 passed` both times
+  (first run ~10.8s, second ~3.6s), confirming the randomised-email must_change_password user
+  doesn't collide across reruns.
+
+### Section 2 — fix round 1
+
+QA HIGH finding (`fixtures/seed-context.ts:16` + `login.spec.ts:6`, referent R2.3): both files
+defaulted `BACKEND_URL` to `http://localhost:8000` independently, unrelated to
+`global-setup.ts`'s `BACKEND_HEALTH_URL`. Running the documented worktree command with only
+`BACKEND_HEALTH_URL` set (as the section-2 notes above and task 7.3 imply is enough) correctly
+pointed the health check at the shifted port but left every API call in `seed-context.ts` and
+`login.spec.ts` hitting the unshifted `:8000` — a different, unrelated stack on this machine —
+producing a misleading 401/403 instead of the intended assertion.
+
+Fixed by adding `resolveBackendUrl()` to `frontend/e2e/fixtures/load-env.ts` (single shared
+helper, not duplicated): explicit `BACKEND_URL` wins if set; otherwise it's derived from
+`BACKEND_HEALTH_URL` by stripping a trailing `/health`; otherwise the `http://localhost:8000`
+default. Both `fixtures/seed-context.ts` and `login.spec.ts` now call it instead of reading
+`process.env.BACKEND_URL` directly.
+
+Practical effect: exporting `BACKEND_HEALTH_URL` alone (already required for the health check)
+is now sufficient — `BACKEND_URL` no longer needs to be set as a separate third var, though
+setting it explicitly still works as an override (verified both ways below). Task 7.3's own
+example command (line 46 above) only ever mentioned `BASE_URL`, never `BACKEND_HEALTH_URL`/
+`BACKEND_URL`, so it didn't imply a third var and needed no change there. `global-setup.ts`'s
+doc comment likewise only documents `BACKEND_HEALTH_URL` and didn't need updating. Left the
+section-2 notes/verification-run text above as the historical record of that run (it exported
+all three vars, which still worked and still passed); new runs only need `BACKEND_HEALTH_URL`.
+
+Verification (this worktree, `cd frontend` first, stack at `PORT_OFFSET=77` still running from
+section 2):
+- `BASE_URL=http://localhost:3077 BACKEND_HEALTH_URL=http://localhost:8077/health npx
+  playwright test e2e/login.spec.ts` (no `BACKEND_URL`) — `3 passed` (previously would have hit
+  `:8000`).
+- `BASE_URL=http://localhost:3077 BACKEND_HEALTH_URL=http://localhost:8077/health
+  BACKEND_URL=http://localhost:8077 npx playwright test e2e/login.spec.ts` (explicit override) —
+  `3 passed`.
+- `npm run typecheck` — clean.
