@@ -55,6 +55,11 @@ DECLARED_DIVERGENCES = (
     # `guest-link-delivery` R4.1: an operator sending the guest their portal link is not one of
     # §14's sixteen operational events. No SLA, no escalation (R4.2) — see the test below.
     "GUEST_PORTAL_LINK_DELIVERED",
+    # `guest-scheduled-comms` R3, design D10: a guest's access instructions being ready to send is
+    # not one of §14's sixteen operational events either. Named `_SENT`, not `_DELIVERED` —
+    # deliberately, to avoid colliding with `AccessRecordStatus.DELIVERED`'s distinct meaning (the
+    # operator's own out-of-band confirmation, unrelated to this automated email).
+    "ACCESS_INSTRUCTIONS_SENT",
 )
 
 
