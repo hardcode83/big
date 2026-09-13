@@ -104,7 +104,7 @@
 - [x] 4.5 Static typing passes: `docker compose exec backend uv run pyright .` — run from
       `backend` per `sdd/project.md`'s documented invocation (`uv sync --frozen` first if not
       already run in this worktree).
-- [ ] 4.6 Manual smoke of the roadmap note's verification script: `make pms-sync
+- [x] 4.6 Manual smoke of the roadmap note's verification script: `make pms-sync
       TENANT=<demo tenant id>` after moving `SEED-AIRBNB-1`'s check-out date in the mock adapter
       fixture, confirm `updated: 1` and a new event on `/timeline`; then cancel `SEED-BOOKING-1`
       the same way and confirm the reservation is `CANCELLED`, carries its event, and REDES11
