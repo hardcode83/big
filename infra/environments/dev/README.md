@@ -103,12 +103,14 @@ Está separada a propósito: si el rango ancho pudiera ir en la lista normal, «
 
 Workflow `deploy-dev` (`.github/workflows/deploy-dev.yml`): push a `main` sobre `backend/**`/`frontend/**` → build `prod` arm64 → GHCR → deploy **local** en el runner self-hosted de la VM (sin SSH). Flujo, provisión/recuperación del runner, GitHub App (permisos, `GH_APP_PRIVATE_KEY`, rotación) y rollback en [`RUNBOOK.md`](./RUNBOOK.md) §6.
 
-Variables/secret del repo que consume el CD (además de los de `infra-dev`). **No hay secrets de app de runtime en GitHub** — los genera Terraform y viven en el Vault; el deploy los lee de ahí por instance principal:
+Variables/secret del repo que consume el CD (además de los de `infra-dev`). **Ningún secret de app de runtime *generable* vive en GitHub** — los genera Terraform y viven en el Vault; el deploy los lee de ahí por instance principal. Las credenciales **externas**, que nadie puede generar (la clave de la GitHub App y las de Meta), sí entran como secret del repo: Terraform las transporta al Vault y el deploy las lee de ahí igual que al resto:
 
 | Nombre | Tipo | Para qué |
 |---|---|---|
 | `GH_APP_ID`, `GH_APP_INSTALLATION_ID` | **variable** | Identifican la GitHub App que mintea el token de **registro del runner** (el pull de GHCR lo hace el `GITHUB_TOKEN` del job, no la App). No sensibles. |
-| `GH_APP_PRIVATE_KEY` | **secret** | Clave privada (`.pem`) de la App. Único secret-zero; Terraform la escribe al Vault de cada entorno (`TF_VAR_github_app_private_key`). |
+| `GH_APP_PRIVATE_KEY` | **secret** | Clave privada (`.pem`) de la App. Secret-zero del runner — credencial externa: Terraform la escribe al Vault de cada entorno (`TF_VAR_github_app_private_key`), nunca la genera. |
+| `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | **secret** | Credenciales de la App de Meta (WhatsApp Cloud API) — change `whatsapp-dev-credentials-render`. Mismo patrón que `GH_APP_PRIVATE_KEY`: **externas**, Terraform solo las **transporta** al Vault de cada entorno (`TF_VAR_whatsapp_*`, jobs `plan`/`apply` de `infra-dev`), nunca las genera; el deploy las lee del Vault **por nombre** (`autohostai-<env>-whatsapp-*`). |
+| `WHATSAPP_PROVIDER` | **variable** | Selector de proveedor de WhatsApp (`meta` para el relay real). No sensible → variable, no secret. **Opcional**: sin definir se renderiza vacío en el `.env` y el backend resuelve `mock`, el comportamiento de hoy. |
 | `NEXT_PUBLIC_APP_ENV` | **variable** | Var pública del frontend — se **hornea en build** (Next standalone) como `build-arg`, no en el `.env` de runtime. |
 
 Los secrets de runtime (`POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`) los **genera Terraform** (`random_*`) → `oci_vault_secret`. `POSTGRES_DB`/`POSTGRES_USER` son variables Terraform con default. `github_app_id`/`github_app_installation_id` van también en `dev.tfvars`. Ver RUNBOOK §6.

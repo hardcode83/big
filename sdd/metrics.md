@@ -86,7 +86,6 @@
 | super-admin-identity | new, design, tasks, run, review, ship, archive | 769300 | 932530 | 648171596 | 170.5192 | 2026-08-31 | 2026-09-02 |
 | dashboard-operational-kpis | new, tasks, run, review, ship, archive | 262470 | 350753 | 105167969 | 37.8678 | 2026-08-31 | 2026-09-02 |
 | notification-channel-routing | new, design, tasks, run, review, ship, archive | 1107558 | 563328 | 313576317 | 108.5665 | 2026-08-31 | 2026-09-02 |
-| rule11-guard-trigger-and-scope | new, design, tasks, run, review | 1661381 | 2756674 | 459941800 | 340.0561 | 2026-08-31 | — |
 | rule11-guard-trigger-and-scope | new, design, tasks, run, review, ship, archive | 2605754 | 3120937 | 598433744 | 423.8289 | 2026-08-31 | 2026-09-02 |
 | shell-topbar-overflow-360 | new, design, tasks, run, review, ship, archive | 622710 | 1301477 | 280668088 | 189.6256 | 2026-08-30 | 2026-09-01 |
 | cleaner-app | new, tasks, run, review, ship, archive | 1913125 | 420916 | 113055583 | 70.1061 | 2026-08-18 | 2026-08-31 |
@@ -117,4 +116,5 @@
 | properties-create-web | new, tasks, run, review, ship, archive | 271467 | 1238775 | 417813500 | 128.9786 | 2026-09-11 | 2026-09-12 |
 | pms-sync-schedule | new, design, run, review, ship, archive | 132517 | 619440 | 159754893 | 48.7891 | 2026-09-11 | 2026-09-12 |
 | reviews-web | new, design, tasks, run | 2077351 | 964782 | 425992934 | 159.7995 | 2026-09-11 | 2026-09-12 |
+| whatsapp-dev-credentials-render | new, tasks, run, review, ship, archive | 29110 | 535016 | 556620487 | 125.3342 | 2026-09-12 | 2026-09-12 |
 | pms-ingest-change-events | new, tasks, run, review | 186915 | 810360 | 161854814 | 68.4502 | 2026-09-12 | — |
