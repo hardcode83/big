@@ -370,7 +370,7 @@ test.afterAll(async () => {
 });
 
 test.describe.serial("R4 — ciclo de incidencia", () => {
-  test("4.1 el huésped reporta, MockAIAdapter clasifica y el manager tría y asigna desde /incidents/[id]", async ({
+  test("4.1 el huésped reporta, RuleBasedIncidentClassifier clasifica y el manager tría y asigna desde /incidents/[id]", async ({
     browser,
   }) => {
     const token = await ensureGuestPortalToken(managerSession, property.id);

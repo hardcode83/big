@@ -21,9 +21,9 @@
 - [x] 3.1 `frontend/e2e/cleaning.spec.ts`: con una `CleaningTask` sembrada (fixture 1.5), el `PROPERTY_MANAGER` la reasigna desde `/cleaning` y el nuevo asignado se refleja. [R3.2]
 - [x] 3.2 Mismo spec: el rol `CLEANER` acepta la tarea desde `/cleaner`, abre `/cleaner/tasks/[id]`, completa el checklist y sube las fotos requeridas por categoría (ver `docs/cleaning.md`, `docs/cleaner-photo-requirements.md`); verificar que la tarea queda completada y que el estado operacional de la propiedad cambia según corresponda (`docs/dashboard.md`). [R3.1]
 
-## 4. E2E: ciclo de incidencia <!-- hard -->
+## 4. E2E: ciclo de incidencia <!-- hard --> <!-- panel: PASS 2026-09-13 receipt:41ef4146 -->
 
-- [x] 4.1 `frontend/e2e/incident.spec.ts`: crear una incidencia (por API o portal del huésped, según lo que el flujo real permita) y verificar que `MockAIAdapter` la clasifica; un manager la tría y asigna a un técnico desde `/incidents/[id]`. [R4.1]
+- [x] 4.1 `frontend/e2e/incident.spec.ts`: crear una incidencia (por API o portal del huésped, según lo que el flujo real permita) y verificar que `RuleBasedIncidentClassifier` la clasifica; un manager la tría y asigna a un técnico desde `/incidents/[id]`. [R4.1]
 - [x] 4.2 Mismo spec: el técnico acepta y resuelve desde `/tech/incidents/[id]` con coste y materiales; verificar el cierre. Con severidad `CRITICAL`, verificar que la propiedad aparece en rojo en el dashboard mientras esté abierta. [R4.1, R4.2]
 - [x] 4.3 Mismo spec, variante con coste sobre el umbral del tenant: verificar que se genera un `OwnerApproval` visible en `/approvals` para su respuesta (`docs/maintenance.md`). [R4.3]
 
@@ -514,7 +514,7 @@ section 2):
   (2.3 m), o sea que las secciones 2 y 3 siguen verdes y no hay contaminación cruzada.
   **Prueba de mutación**: quitando el clic de clasificar en 4.1, el spec falla en
   `expect(page.getByText(SAFETY_AI_SUMMARY)).toBeVisible()` — «element(s) not found» —, así que la
-  aserción que sostiene «MockAIAdapter la clasifica» no es vacía. (Los fallos reales de las primeras
+  aserción que sostiene «RuleBasedIncidentClassifier la clasifica» no es vacía. (Los fallos reales de las primeras
   corridas sirvieron de mutación natural para otras dos: el badge rojo resolvió al `<span>` real con
   su clase `bg-state-error/…`, y `toHaveCount(3)` de la barra del manager dio 0 cuando la página no
   era la esperada.)

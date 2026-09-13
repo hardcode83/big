@@ -47,7 +47,7 @@ Acceptance criteria:
 
 Acceptance criteria:
 
-1. WHEN se crea una incidencia y `MockAIAdapter` la clasifica, un manager la tría y asigna a un técnico, y el técnico la acepta y resuelve desde `/tech/incidents/[id]`, THE SYSTEM SHALL cerrar la incidencia con su coste registrado.
+1. WHEN se crea una incidencia y `RuleBasedIncidentClassifier` (el `IncidentClassifier` propio de `maintenance` — no hay `AIAdapter`/`MockAIAdapter` en este dominio a propósito, `sdd/specs/maintenance.md`) la clasifica, un manager la tría y asigna a un técnico, y el técnico la acepta y resuelve desde `/tech/incidents/[id]`, THE SYSTEM SHALL cerrar la incidencia con su coste registrado.
 2. WHEN la incidencia es `CRITICAL`, THE SYSTEM SHALL reflejar la propiedad en rojo mientras esté abierta, verificado en el dashboard dentro del mismo test.
 3. IF el coste supera el umbral configurado del tenant, THEN THE SYSTEM SHALL generar un `OwnerApproval` y el test verifica que aparece en `/approvals` para su respuesta.
 
