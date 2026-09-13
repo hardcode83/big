@@ -234,3 +234,170 @@ resource "github_actions_secret" "tfstate_namespace" {
   secret_name     = "TFSTATE_NAMESPACE"
   plaintext_value = var.tfstate_namespace
 }
+
+# =============================================================================
+# R3.2 — Variables de GitHub Actions declaradas como código (sección 4).
+# =============================================================================
+#
+# Las cuatro `github_actions_variable` de abajo adoptan las variables que ya
+# existen en el repo (las cuatro las enumera `sdd/changes/infra-github-iac/
+# design.md` §R3.2 y las consume `deploy-dev.yml` — `build-args` del
+# frontend y `FRONTEND_BASE_URL` del render de `.env`). El primer `apply` no
+# las CREA — las IMPORTA: el procedimiento exacto está codificado en
+# `import.sh` (D6), ejecutado una sola vez durante esta sección y la 5
+# (RUNBOOK). Tras el import, `terraform plan` debe quedar vacío sobre estos
+# recursos.
+#
+# Cada `value` se lee de una variable Terraform. Las DOS que leen de
+# variables ya existentes (`GH_APP_ID`, `GH_APP_INSTALLATION_ID`) son no
+# sensibles (IDs públicos, sección 2). Las DOS que requieren variables nuevas
+# (`NEXT_PUBLIC_APP_ENV`, `PUBLIC_HOSTNAME`) son hostname DNS y literal de
+# entorno: información pública, NO secretos, y llegan como variables NO
+# sensibles con default `""` + validación fail-fast (sección 4 tarea 4.1,
+# `variables.tf`). Ninguna de las cuatro lleva `sensitive = true`.
+#
+# El provider `integrations/github` exige `repository` como nombre del repo
+# en GitHub (no OCID), mismo patrón que `github_actions_secret` (sección 3).
+# El formato del import ID es `<repository>:<variable_name>` (con dos puntos,
+# NO barra como en los secrets — verificado contra la doc de la versión
+# pinada v5.45.0; `import.sh` actualiza la cabecera y las líneas
+# correspondientes en la tarea 4.2).
+
+# 1. GH_APP_ID — ID público de la GitHub App que autentica el provider. Lo
+# consume `infra-dev.yml` como `TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}`.
+resource "github_actions_variable" "gh_app_id" {
+  repository    = var.github_repository_name
+  variable_name = "GH_APP_ID"
+  value         = var.github_app_id
+}
+
+# 2. GH_APP_INSTALLATION_ID — ID público de la instalación de la App sobre
+# el repo. Lo consume `infra-dev.yml` como `TF_VAR_github_app_installation_id:
+# ${{ vars.GH_APP_INSTALLATION_ID }}`. El módulo NO modela la instalación
+# (D11 — `github_app_installation_repositories` es incompatible con `app_auth`
+# en el provider v5.45.0); el ID lo aporta el operador como variable.
+resource "github_actions_variable" "gh_app_installation_id" {
+  repository    = var.github_repository_name
+  variable_name = "GH_APP_INSTALLATION_ID"
+  value         = var.github_app_installation_id
+}
+
+# 3. NEXT_PUBLIC_APP_ENV — env de runtime que Next.js exporta como
+# `NEXT_PUBLIC_APP_ENV`. Lo consume `deploy-dev.yml` como build-arg del
+# frontend (`NEXT_PUBLIC_APP_ENV=${{ vars.NEXT_PUBLIC_APP_ENV }}`) y se
+# hornea en el bundle del frontend. Validación fail-fast en `variables.tf`
+# (lista cerrada dev/staging/production/test, default `""` falla).
+resource "github_actions_variable" "next_public_app_env" {
+  repository    = var.github_repository_name
+  variable_name = "NEXT_PUBLIC_APP_ENV"
+  value         = var.next_public_app_env
+}
+
+# 4. PUBLIC_HOSTNAME — hostname DNS público bajo el que se sirve el
+# frontend. Lo consume `deploy-dev.yml` como `FRONTEND_BASE_URL=https://
+# ${PUBLIC_HOSTNAME:?falta la variable de repo PUBLIC_HOSTNAME}` en el
+# render de `.env` y como `vars.PUBLIC_HOSTNAME` en el `frontend` build.
+# Validación fail-fast en `variables.tf` (regex DNS básico, default `""`
+# falla).
+resource "github_actions_variable" "public_hostname" {
+  repository    = var.github_repository_name
+  variable_name = "PUBLIC_HOSTNAME"
+  value         = var.public_hostname
+}
+
+# =============================================================================
+# R5 — Branch protection (sección 4).
+# =============================================================================
+#
+# Recurso: `github_branch_protection` (no `_v3`) del provider v5.45.0 — es la
+# versión API REST clásica (`PUT /repos/{owner}/{repo}/branches/{branch}/
+# protection`), no la GraphQL (`_v3`). Atributos disponibles en esta versión
+# (verificado contra `website/docs/r/branch_protection.html.markdown` del
+# tag v5.45.0 del upstream):
+#
+#   repository_id             (Required) — node_id del repo, o nombre (este módulo usa nombre)
+#   pattern                   (Required) — branch pattern (este módulo usa "main")
+#   enforce_admins            (Optional, Boolean)
+#   require_signed_commits    (Optional, Boolean)
+#   required_linear_history   (Optional, Boolean) — lo que R5 pide
+#   require_conversation_resolution (Optional, Boolean)
+#   required_status_checks    (Optional, Block) { strict, contexts (DEPRECATED), checks }
+#   required_pull_request_reviews (Optional, Block) — RECHAZADO en plan Free (D5)
+#   restrictions              (Optional, Block) — RECHAZADO en plan Free (D5)
+#   allows_deletions          (Optional, Boolean)
+#   allows_force_pushes       (Optional, Boolean)
+#   lock_branch               (Optional, Boolean)
+#
+# Lista de `required_status_checks.contexts` (R5.1): los checks que el
+# branch protection exige deben existir SIEMPRE en los PR — un check con
+# filtro de rutas a nivel de `on:` no se reporta en los PR que no las tocan,
+# y GitHub deja el PR bloqueado esperando para siempre (precedente literal
+# de `backend-tests.yml` y `compose-ports.yml`, ver `sdd/specs/backend-ci.md`).
+# Se incluyen los SIETE workflows always-run del repo (los que NO filtran
+# `on:` por paths). Quedan EXCLUIDOS a propósito:
+#
+#   - `infra-dev / check`            — paths-filtered (`infra/environments/dev/**`)
+#   - `deploy-dev / {provenance, build-backend, build-frontend, deploy}`
+#                                    — solo `push: branches: [main]`, no `pull_request`
+#   - `multiarch-build-check / {build-backend, build-frontend}`
+#                                    — paths-filtered (Dockerfiles/lockfiles)
+#
+# Y los nombres son los del JOB, no del workflow (precedente de
+# `backend-tests.yml` y `compose-ports.yml`): el check run que GitHub evalúa
+# en branch protection toma el nombre del job que reporta.
+#
+# Si la API rechaza alguna regla por el límite del plan Free (típicamente
+# `required_pull_request_reviews`, R5.2), el `terraform plan` lo reportará
+# como `Error: ...` — NO se ha añadido `required_pull_request_reviews` a
+# este recurso, así que hoy no aplica; si en el futuro se añade, el RUNBOOK
+# §3 (sección 5) documenta cómo se traslada el rechazo a una nota de "regla
+# no enforced por el plan Free; queda por convención". D5 lo fija así.
+resource "github_branch_protection" "this" {
+  # `repository_id` acepta tanto el `node_id` del repo como el nombre del
+  # repo en GitHub (verificado contra la doc v5.45.0). Usamos el nombre para
+  # no introducir una referencia cruzada al recurso `github_repository.this`
+  # (que en este módulo se usa solo para gestionar settings — ver §R2).
+  repository_id = var.github_repository_name
+
+  pattern = "main"
+
+  # R5.1 — checks que el branch protection exige (los SIETE always-run).
+  # `strict = false`: no exigimos que la rama esté al día con `main` antes
+  # de mergear — lo que evita el falso verde de "no se puede mergear porque
+  # main se ha movido" en PRs que no entran en conflicto. El merge de `main`
+  # en la rama antes del merge del PR ya garantiza linealidad (ver
+  # `require_linear_history` abajo).
+  required_status_checks {
+    strict = false
+    contexts = [
+      "api-contract",          # api-contract.yml (single job, always-run)
+      "backend-tests",         # backend-tests.yml (consolidador, always-run)
+      "compose-ports",         # compose-ports.yml (consolidador, always-run)
+      "frontend-api-contract", # frontend-api-contract.yml (single job, always-run)
+      "frontend-tests",        # frontend-tests.yml (consolidador, always-run)
+      "rule11-ownership",      # rule11-ownership.yml (consolidador, always-run)
+      "version-parity",        # version-parity.yml (single job, always-run)
+    ]
+  }
+
+  # R5 — exige merge fast-forward / rebase (no merge commits desde la UI).
+  # El CD del repo (`deploy-dev.yml`) dispara tras push a `main`, así que
+  # cualquier merge commit ahí genera un deploy fantasma sin SHA trazable.
+  # Nombre del atributo en v5.45.0: `required_linear_history` (con "d") —
+  # la tarea 4.3 decía `require_linear_history` pero el provider v5.45.0
+  # exige `required_linear_history`; documentado en `## Implementation Notes`.
+  required_linear_history = true
+
+  # R5 — los admins respetan la branch protection (sin bypass por owner). Si
+  # el plan Free lo rechaza (típicamente sí lo permite), el `plan` lo diría;
+  # la doc v5.45.0 no excluye `enforce_admins` del tier Free.
+  enforce_admins = true
+
+  # NO se declara `required_pull_request_reviews` (R5.2 + D5): la API de
+  # GitHub lo rechaza en plan Free (recurso que requiere reviewers). Si en
+  # el futuro se añade un bloque `required_pull_request_reviews` y el `plan`
+  # lo reporta como error, el RUNBOOK §3 (sección 5) lo documenta como
+  # "regla no enforced por el plan Free; queda por convención" — el gate
+  # humano sigue siendo el del PR-review + `workflow_dispatch` desde main
+  # (ADR 0002).
+}

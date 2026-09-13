@@ -1,25 +1,37 @@
 #!/usr/bin/env bash
-# import.sh — adoption procedure for the eleven `github_actions_secret` resources.
+# import.sh — adoption procedure for the GitHub-side resources of `infra/github/`.
 #
-# SCOPE: this script prints the eleven `terraform import` commands that adopt the
-# secrets already in the repo (created with `gh secret set` during the bootstrap
-# irreducible). It is executed ONCE during this change (R3 + D6): after the import
-# the secrets live in Terraform and every subsequent `apply` reconciles them.
+# SCOPE: this script prints the `terraform import` commands that adopt the
+# resources already in the repo (created by hand during the bootstrap irreducible
+# or in earlier sections of this change). It is executed ONCE during this change
+# (R3 + R5 + D6): after the import the resources live in Terraform and every
+# subsequent `apply` reconciles them.
 #
-# FORMAT (correction vs. the task text):
-# The task text says `<SECRET_NAME>` as the import ID; the actual import ID
-# required by the `integrations/github` provider v5.45.0 is
-# `<repository>/<secret_name>` (verified against the upstream import function in
-# `resource_github_actions_secret.go` at tag v5.45.0). The repository component
-# is fixed to `AutoHostAI` for now (the default in `variables.tf`), so the
-# produced lines all start with `AutoHostAI/...`.
+# SECTIONS (sección 3 añadió los once secrets; sección 4 añade las cuatro
+# variables y el branch protection):
+#   3.1 — eleven github_actions_secret.*            (sección 3, importado en commit 74d96322)
+#   4.1 — four  github_actions_variable.*           (sección 4, tarea 4.2)
+#   4.3 — one   github_branch_protection.this        (sección 4, tarea 4.2)
 #
-# ORDER: alphabetical by GitHub secret name (per task 3.4 — interpreted as
-# alphabetical by the `secret_name` field, NOT by the Terraform resource name,
-# so the lines mirror the human reading of the repo's Secrets page).
+# FORMAT (correction vs. some task text):
+# The provider `integrations/github` v5.45.0 accepts DIFFERENT import ID formats
+# per resource kind (verified against the upstream import functions at tag
+# v5.45.0 and the `terraform-provider-github` v5.45.0 README/CHANGELOG):
+#
+#   github_actions_secret.<name>      <repository>/<secret_name>          (slash)
+#   github_actions_variable.<name>    <repository>:<variable_name>        (colon)
+#   github_branch_protection.this     <repository>:<pattern>              (colon)
+#
+# The `<repository>` component is the GitHub repo name (NOT the OCID). The
+# repo name is fixed to `AutoHostAI` for now (the default in `variables.tf`),
+# so the produced lines all start with `AutoHostAI/...` or `AutoHostAI:...`.
+#
+# ORDER: alphabetical by GitHub-side identifier (per task 3.4 — interpreted as
+# alphabetical by the human-facing name in the repo's Settings page). Within
+# each section the lines mirror the GitHub UI order.
 #
 # USAGE:
-#   bash infra/github/import.sh                   # prints the eleven commands
+#   bash infra/github/import.sh                   # prints all commands
 #   bash infra/github/import.sh | bash            # runs them (only after the
 #                                                  # CI workflow has populated
 #                                                  # the `backend.hcl` with real
@@ -27,7 +39,7 @@
 #                                                  # with real credentials on
 #                                                  # a developer machine)
 #
-# Each import consumes the external ID (the secret's name in GitHub); running
+# Each import consumes the external ID (the resource's name in GitHub); running
 # the script a second time against an already-imported state is a no-op for
 # Terraform but produces a confusing error. The script does not run the
 # commands — that is the operator's call, after reading the produced lines.
@@ -37,12 +49,17 @@ set -euo pipefail
 REPO="AutoHostAI"
 
 cat <<EOF
-# Import commands for the eleven github_actions_secret resources.
+# ============================================================================
+# Import commands for the GitHub-side resources of 'infra/github/'.
 # Run AFTER 'terraform init' against the real OCI backend and BEFORE
-# 'terraform apply -target=github_actions_secret.*'.
+# 'terraform apply -target=<kind>.*'.
 #
-# Each line is idempotent against the secret in GitHub; running twice is safe
-# only if the secret hasn't been re-created in the meantime.
+# Each line is idempotent against the resource in GitHub; running twice is safe
+# only if the resource hasn't been re-created in the meantime.
+# ============================================================================
+
+# --- Sección 3 — eleven github_actions_secret.* (R3.1) ---
+# Format: <repository>/<secret_name>
 
 terraform import github_actions_secret.allowed_ssh_cidrs      ${REPO}/ALLOWED_SSH_CIDRS
 terraform import github_actions_secret.allowed_ssh_cidrs_wide ${REPO}/ALLOWED_SSH_CIDRS_WIDE
@@ -55,4 +72,17 @@ terraform import github_actions_secret.oci_user_ocid          ${REPO}/OCI_USER_O
 terraform import github_actions_secret.ssh_public_keys        ${REPO}/SSH_PUBLIC_KEYS
 terraform import github_actions_secret.tfstate_bucket         ${REPO}/TFSTATE_BUCKET
 terraform import github_actions_secret.tfstate_namespace      ${REPO}/TFSTATE_NAMESPACE
+
+# --- Sección 4 — four github_actions_variable.* (R3.2) ---
+# Format: <repository>:<variable_name>  (colon, NOT slash like secrets)
+
+terraform import github_actions_variable.gh_app_id             ${REPO}:GH_APP_ID
+terraform import github_actions_variable.gh_app_installation_id ${REPO}:GH_APP_INSTALLATION_ID
+terraform import github_actions_variable.next_public_app_env   ${REPO}:NEXT_PUBLIC_APP_ENV
+terraform import github_actions_variable.public_hostname       ${REPO}:PUBLIC_HOSTNAME
+
+# --- Sección 4 — one github_branch_protection.* (R5.1) ---
+# Format: <repository>:<pattern>  (colon)
+
+terraform import github_branch_protection.this                 ${REPO}:main
 EOF

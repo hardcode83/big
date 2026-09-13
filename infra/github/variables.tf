@@ -1,12 +1,15 @@
-# Variables del módulo `infra/github/` (change infra-github-iac, secciones 1+2).
+# Variables del módulo `infra/github/` (change infra-github-iac, secciones 1+2+4).
 #
 # Conteo verificado contra el §"Variables nuevas (resumen)" de `design.md`:
-# 16 variables declaradas — 12 sensibles + 4 no sensibles.
+# 18 variables declaradas — 12 sensibles + 6 no sensibles.
 # - Sección 1 añadió 14 (12 sensibles + 2 no sensibles: `github_owner`,
 #   `github_repository_name`).
 # - Sección 2 añadió 2 no sensibles (`github_app_id`, `github_app_installation_id`)
 #   que la tarea 2.1 declara explícitamente sin `sensitive = true` por ser
 #   IDs públicos (mismo patrón que el módulo dev).
+# - Sección 4 añade 2 no sensibles más (`next_public_app_env`, `public_hostname`)
+#   que alimentan las `github_actions_variable` que la tarea 4.1 declara; ambas
+#   llegan con default `""` y validación fail-fast (R3.2).
 #
 # Patrón de validación copiado de `infra/environments/dev/variables.tf`:
 # - `allowed_ssh_cidrs` (mínimo /24) — el suelo por defecto para operadores.
@@ -160,4 +163,58 @@ variable "github_app_id" {
 variable "github_app_installation_id" {
   description = "ID público (no sensible) de la instalación de la GitHub App sobre el repo/owner. El módulo NO declara `github_app_installation_repositories` (D11 — bootstrap irreducible: `github_app_installation_repositories` es incompatible con `app_auth` en el provider v5.45.0, documentado en `infra/github/RUNBOOK.md` §1); este valor lo aporta el operador porque la App ya está creada, registrada en la org e instalada sobre el repo."
   type        = string
+}
+
+# --- Variables de Actions que NO son IDs públicos (no sensibles) ---
+# Las dos se inyectan como `github_actions_variable` (`NEXT_PUBLIC_APP_ENV`,
+# `PUBLIC_HOSTNAME`) — sección 4 tarea 4.1 — y se consumen en runtime desde
+# `deploy-dev.yml` (`build-args` del frontend) y desde el render de `.env`
+# (`FRONTEND_BASE_URL`). El valor es información pública (un hostname DNS y
+# un literal de entorno), NO un secreto, así que llegan como variables NO
+# sensibles — mismo trato que `github_app_id` y `github_app_installation_id`
+# arriba. El `sdd/steering/security.md` regla 8 (no secretos en el tfstate
+# plano) NO se ve afectado: el tfstate guarda los valores que el operador
+# pasó como variables, igual que guarda `github_app_id` hoy.
+#
+# Defaults `""` + validación fail-fast: el workflow de CI inyecta ambas vía
+# `TF_VAR_*` desde `${{ vars.* }}` (mismo patrón que `infra-dev.yml`). Si el
+# workflow no las inyecta —porque alguien reusó la plantilla y olvidó el
+# `vars:` del job—, Terraform debe fallar **aquí**, con un mensaje que nombre
+# la variable ausente, NO más tarde con un apply que crea la variable de
+# Actions vacía y un `NEXT_PUBLIC_APP_ENV=""` horneado en el frontend.
+variable "next_public_app_env" {
+  description = "Valor de la variable de repo `NEXT_PUBLIC_APP_ENV` (env de runtime que Next.js exporta como `NEXT_PUBLIC_APP_ENV`). Default vacío para que `terraform plan` sin vars inyectadas falle aquí con un mensaje explícito en vez de seguir con un valor vacío hasta el `apply`."
+  type        = string
+  default     = ""
+
+  validation {
+    # Lista cerrada de entornos que el frontend distingue; cualquier valor fuera
+    # de la lista se considera un error de configuración (typo en el dispatch
+    # del workflow, p. ej. `prod` vs `production`). El coste de un valor
+    # incorrecto es bajo (el badge muestra el literal erróneo), pero el coste
+    # de silenciar typos es alto (un futuro `if APP_ENV == 'production'` que
+    # nunca dispara). El default `""` queda FUERA de la lista para que
+    # `terraform plan` sin vars inyectadas falle aquí — fail-fast en
+    # validación, no en `apply` con un valor vacío propagado al frontend.
+    condition     = contains(["dev", "staging", "production", "test"], var.next_public_app_env)
+    error_message = "next_public_app_env debe ser uno de: dev, staging, production, test — el valor vacío (default) significa que el workflow no inyectó la variable y el plan debe fallar aquí, no propagar el vacío al apply."
+  }
+}
+
+variable "public_hostname" {
+  description = "Valor de la variable de repo `PUBLIC_HOSTNAME` (hostname DNS público bajo el que se sirve el frontend). Default vacío para que `terraform plan` sin vars inyectadas falle aquí con un mensaje explícito en vez de seguir con un valor vacío hasta el `apply`."
+  type        = string
+  default     = ""
+
+  validation {
+    # Forma de hostname DNS relajada: no exigimos TLD real (los entornos de
+    # preview usan `.local`, `.test`, etc.) y aceptamos tanto un apex como un
+    # subdominio. Lo que SÍ exigimos es no vacío: si el workflow no inyecta la
+    # variable, el default `""` se queda con `length() == 0` y la validación
+    # falla. La regex permite letras, dígitos, guion y punto; lo que un
+    # hostname real puede llevar — el resto son artefactos de una inyección
+    # accidental (espacios, saltos de línea, comillas).
+    condition     = length(var.public_hostname) > 0 && can(regex("^[A-Za-z0-9.-]+$", var.public_hostname))
+    error_message = "public_hostname no puede llegar vacío (default) y debe tener solo letras, dígitos, guion y punto — el valor vacío significa que el workflow no inyectó la variable y el plan debe fallar aquí, no propagar el vacío al apply."
+  }
 }
