@@ -95,6 +95,8 @@ Recordatorio del bug histórico: `docker-compose-plugin` no está en los repos p
 
 ## 6. Despliegue de la app (CD — change `app-deploy-dev`)
 
+El bootstrap irreducible de la GitHub App (creación, permisos, generación de clave `.pem`) está documentado en `infra/github/RUNBOOK.md` §1; este §6 mantiene cómo se opera el runner.
+
 La app se despliega con `.github/workflows/deploy-dev.yml`: un **push a `main`** que toque `backend/**`/`frontend/**` (o `workflow_dispatch`) construye las imágenes `prod` arm64, las publica en **GHCR** (tag `sha-<commit>` + `dev`), y un job `deploy` en un **runner self-hosted que corre EN la VM** hace el deploy **localmente** (`docker compose --env-file "/opt/autohostai-dev-runtime/dev-runtime.env" -f docker-compose.deploy.yml pull && up -d --wait`) — sin SSH ni puertos entrantes. El `.env` de runtime lo **lee del OCI Vault** por instance principal en cada deploy (secrets generados por Terraform); el `docker login ghcr.io` usa el **`GITHUB_TOKEN`** del propio job (la GitHub App **solo** registra el runner, no interviene en el pull de GHCR). **Cero secrets de app a mano.**
 
 ### 6.1 GitHub App (único secret-zero) + variables

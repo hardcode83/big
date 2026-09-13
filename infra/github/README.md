@@ -43,8 +43,8 @@ El workflow `infra-github` (job `plan`/`apply`, disparo `workflow_dispatch`, aú
 
 ## Pendiente (no automatizable por este change)
 
-- Crear la GitHub App con los permisos que `RUNBOOK.md` §1 detallará (sección 5).
+- Crear la GitHub App con los permisos que detalla [`RUNBOOK.md` §1](./RUNBOOK.md).
 
 ## Operación
 
-Los procedimientos de mantenimiento (rotación de la clave de la App, bootstrap irreducible, import de recursos existentes, free-plan branch protection) viven en `RUNBOOK.md` (a redactar en sección 5).
+Los procedimientos de mantenimiento (rotación de la clave de la App, bootstrap irreducible, import de recursos existentes con [`import.sh`](./import.sh), branch protection como convención no forzada en el plan Free) viven en [`RUNBOOK.md`](./RUNBOOK.md).
