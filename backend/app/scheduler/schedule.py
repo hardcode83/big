@@ -20,7 +20,7 @@ from celery.schedules import crontab
 
 #: Every periodic job, with its cadence: the four of PRD §8.3 that `celery-jobs` owns, with
 #: the PRD's own numbers, plus the two that `access-notifications` adds, the one that
-#: `reservations-webhooks` adds, and the one that `guest-scheduled-comms` adds.
+#: `reservations-webhooks` adds, and the two that `guest-scheduled-comms` adds.
 #:
 #: One of PRD §8.3 is absent from *this* table: `generate_price_recommendations` is not
 #: periodic — it runs at an hour of the day, so it lives in `DAILY_JOBS` below
@@ -89,6 +89,11 @@ CADENCES: dict[str, timedelta] = {
     # multiply per-tenant query round-trips for reservations that are, by construction, still
     # hours away from the threshold.
     "send_checkin_reminders": timedelta(minutes=15),
+    # `guest-scheduled-comms` (R2, design D1/D2) — a declared divergence: PRD §8.3 names no
+    # checkout-reminder job at all. Same fifteen-minute cadence and same reasoning as
+    # `send_checkin_reminders` above: a guest checkout reminder tolerates the same coarse
+    # worst-case delay, and there is no PRD number to defer to either way.
+    "send_checkout_reminders": timedelta(minutes=15),
 }
 
 

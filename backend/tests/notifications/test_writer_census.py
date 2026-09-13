@@ -115,19 +115,21 @@ WITH_WRITER = frozenset(
         # `reservations/domain/notifications.py`.
         "CHECKIN_REMINDER_24H",
         "CHECKIN_REMINDER_2H",
+        # `guest-scheduled-comms` R2 (section 2) — `SendCheckoutRemindersUseCase`
+        # (`reservations/application/use_cases.py`) writes one row per due candidate
+        # reservation, via `render_checkout_reminder_email` in
+        # `reservations/domain/notifications.py`.
+        "CHECKOUT_REMINDER",
     }
 )
 
-#: Types nothing writes, and the change that owes each one (R6.2). Two.
+#: Types nothing writes, and the change that owes each one (R6.2). One.
 #:
 #: `LOCK_ALERT` wants a lock-import surface that does not exist
-#: (`maintenance/api/incidents_router.py` says so). `CHECKOUT_REMINDER` belongs to
-#: `guest-scheduled-comms` section 2, not yet implemented: there is no channel to the guest
-#: until `SendCheckoutRemindersUseCase` exists.
+#: (`maintenance/api/incidents_router.py` says so).
 WITHOUT_WRITER = frozenset(
     {
         "LOCK_ALERT",
-        "CHECKOUT_REMINDER",
     }
 )
 
@@ -196,16 +198,15 @@ def test_the_two_lists_partition_the_enum() -> None:
 def test_exactly_four_types_have_no_writer() -> None:
     """R6.2 — the list is literal, so shrinking it requires saying which type gained a writer.
 
-    Down to two as of `guest-scheduled-comms` section 1: `CHECKIN_REMINDER_24H` and
-    `CHECKIN_REMINDER_2H` now have their writer (`SendCheckinRemindersUseCase`), leaving
-    `LOCK_ALERT` and `CHECKOUT_REMINDER` (section 2, not yet implemented). The function name
-    is stale — kept until section 3 retitles it alongside `ACCESS_INSTRUCTIONS_SENT`'s own
-    writer, per this change's `tasks.md` §1.5/§3.6 — but the assertion itself is measured,
-    not carried forward.
+    Down to one as of `guest-scheduled-comms` section 2: `CHECKIN_REMINDER_24H`,
+    `CHECKIN_REMINDER_2H` (section 1) and now `CHECKOUT_REMINDER` (section 2,
+    `SendCheckoutRemindersUseCase`) all have their writer, leaving only `LOCK_ALERT`. The
+    function name is stale — kept until section 3 retitles it alongside
+    `ACCESS_INSTRUCTIONS_SENT`'s own writer, per this change's `tasks.md` §1.5/§3.6 — but the
+    assertion itself is measured, not carried forward.
     """
     assert WITHOUT_WRITER == {
         "LOCK_ALERT",
-        "CHECKOUT_REMINDER",
     }
 
 

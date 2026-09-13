@@ -71,6 +71,12 @@ PRD_8_3 = {
 #:                                                            tolerates a coarser worst-case
 #:                                                            delay than same-day operational
 #:                                                            automation does.
+#:   send_checkout_reminders                      | 15 min | `guest-scheduled-comms` R2,
+#:                                                            D1/D2 — a declared divergence:
+#:                                                            PRD §8.3 names no checkout-
+#:                                                            reminder job at all. Same
+#:                                                            cadence and reasoning as
+#:                                                            `send_checkin_reminders`.
 BEYOND_PRD_8_3 = {
     "dispatch_notifications": timedelta(minutes=1),
     "provision_access_records": timedelta(minutes=5),
@@ -82,6 +88,8 @@ BEYOND_PRD_8_3 = {
     "sync_pms_reservations": timedelta(hours=6),
     # `guest-scheduled-comms` D1/D2 — see the note above this table.
     "send_checkin_reminders": timedelta(minutes=15),
+    # `guest-scheduled-comms` R2, D1/D2 — see the note above this table.
+    "send_checkout_reminders": timedelta(minutes=15),
 }
 
 ALL_CADENCES = PRD_8_3 | BEYOND_PRD_8_3

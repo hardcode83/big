@@ -86,7 +86,10 @@ from app.properties.infrastructure.repositories import (
     SqlAlchemyPropertyRepository,
     SqlAlchemyPropertyStateTransitionRepository,
 )
-from app.reservations.application.use_cases import SendCheckinRemindersUseCase
+from app.reservations.application.use_cases import (
+    SendCheckinRemindersUseCase,
+    SendCheckoutRemindersUseCase,
+)
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
 from app.scheduler.locks import lock_ttl_for, task_lock
 from app.scheduler.runner import (
@@ -199,6 +202,17 @@ async def _escalate(session: AsyncSession, tenant_id, now: datetime):
 
 async def _send_checkin_reminders(session: AsyncSession, tenant_id, now: datetime):
     use_case = SendCheckinRemindersUseCase(
+        properties=SqlAlchemyPropertyRepository(session),
+        reservations=SqlAlchemyReservationRepository(session),
+        guests=SqlAlchemyGuestRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+    return await use_case.execute(tenant_id=tenant_id, now=now)
+
+
+async def _send_checkout_reminders(session: AsyncSession, tenant_id, now: datetime):
+    use_case = SendCheckoutRemindersUseCase(
         properties=SqlAlchemyPropertyRepository(session),
         reservations=SqlAlchemyReservationRepository(session),
         guests=SqlAlchemyGuestRepository(session),
@@ -493,6 +507,25 @@ def send_checkin_reminders() -> dict:
             "send_checkin_reminders",
             CADENCES["send_checkin_reminders"],
             _send_checkin_reminders,
+        )
+    )
+
+
+@celery_app.task(name="send_checkout_reminders")
+def send_checkout_reminders() -> dict:
+    """Every 15 min (`guest-scheduled-comms` R2, design D1, D2): a `CONFIRMED` reservation
+    crossing the 2h checkout reminder threshold.
+
+    Declared divergence — PRD §8.3 names no checkout-reminder job at all. Same
+    `_guarded`/`run_for_every_tenant` shape as `send_checkin_reminders` above, wired directly
+    (not through `_clock_task`) for the same reason: this evaluates a threshold crossing plus
+    `exists_for` dedup (`SendCheckoutRemindersUseCase`), not a `PropertyStateTrigger`.
+    """
+    return run_sync(
+        _guarded(
+            "send_checkout_reminders",
+            CADENCES["send_checkout_reminders"],
+            _send_checkout_reminders,
         )
     )
 

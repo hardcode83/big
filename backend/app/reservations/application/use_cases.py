@@ -36,7 +36,10 @@ from app.reservations.domain.exceptions import (
     ReservationNotFoundError,
     ReservationValidationError,
 )
-from app.reservations.domain.notifications import render_checkin_reminder_email
+from app.reservations.domain.notifications import (
+    render_checkin_reminder_email,
+    render_checkout_reminder_email,
+)
 from app.reservations.domain.repositories import (
     Page,
     ReservationFilters,
@@ -746,6 +749,182 @@ class SendCheckinRemindersUseCase:
         `GuestContactMissingError`" to "return `None`": there is no HTTP caller here to answer
         `422` to, only a sweep that must count the candidate and move on.
         """
+        if guest_id is None:
+            return None
+        guest = await self._guests.get(tenant_id, guest_id)
+        if guest is None:
+            return None
+        email = (guest.email or "").strip()
+        if not email:
+            return None
+        return email, guest.preferred_language
+
+
+# --- `guest-scheduled-comms` R2: checkout reminder (design D1-D5, D8, D11, D12) --------------
+
+#: The checkout reminder's lead time, **reused** from `CHECKIN_REMINDER_2H`'s own number
+#: rather than a fresh `timedelta(hours=2)` literal (design D3): R2 left the exact lead open,
+#: and inventing a third magic number with no PRD support would be worse than pointing at the
+#: one number that already has a reason attached to it.
+_CHECKOUT_REMINDER_LEAD: timedelta = _CHECKIN_REMINDER_LEADS[NotificationType.CHECKIN_REMINDER_2H]
+
+
+@dataclass
+class CheckoutReminderReport:
+    """What one tenant's checkout-reminder sweep did (R2, R4).
+
+    Same four fields as `CheckinReminderReport`, for the same reasons: `candidates` counts
+    every `CONFIRMED` reservation the candidate query returned, whether or not the reminder
+    turned out to be due; the two `skipped_*` fields are R1.3's contact-missing skip (reused
+    by R2.2) and the DST-invalid-local-time skip, neither of which aborts the sweep (R4).
+    """
+
+    candidates: int = 0
+    written: int = 0
+    skipped_missing_email: int = 0
+    skipped_invalid_local_time: int = 0
+
+
+class SendCheckoutRemindersUseCase:
+    """`send_checkout_reminders` (declared divergence — PRD §8.3 names no checkout-reminder
+    job at all; `guest-scheduled-comms` R2; design D1, D3-D5, D8, D11, D12).
+
+    Same shape as `SendCheckinRemindersUseCase`, evaluated against `effective_bounds`'s
+    **checkout** instant instead of its check-in one, with a single due type
+    (`CHECKOUT_REMINDER`) at `_CHECKOUT_REMINDER_LEAD`'s lead time rather than two. The
+    candidate query, the DST-invalid skip, the missing-email skip, and the dedup-via-
+    `exists_for` shape are all identical to the check-in use case's — the only real
+    difference is which instant and which field of the reservation is read.
+    """
+
+    def __init__(
+        self,
+        *,
+        properties: PropertyRepository,
+        reservations: ReservationRepository,
+        guests: GuestRepository,
+        notifications: NotificationLogRepository,
+        uow: UnitOfWork,
+    ) -> None:
+        self._properties = properties
+        self._reservations = reservations
+        self._guests = guests
+        self._notifications = notifications
+        self._uow = uow
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, now: datetime
+    ) -> CheckoutReminderReport:
+        report = CheckoutReminderReport()
+
+        properties = await self._properties.list_all(tenant_id)
+        if not properties:
+            return report
+        properties_by_id = {property.id: property for property in properties}
+
+        date_from = (now - _CANDIDATE_WINDOW).date()
+        date_to = (now + _CANDIDATE_WINDOW).date()
+        candidates = await self._reservations.list_for_properties(
+            tenant_id, list(properties_by_id), date_from, date_to
+        )
+
+        for reservation in candidates:
+            if reservation.status is not ReservationStatus.CONFIRMED:
+                continue
+            report.candidates += 1
+
+            property = properties_by_id.get(reservation.property_id)
+            if property is None:
+                # Unreachable in practice (see the sibling comment in
+                # `SendCheckinRemindersUseCase.execute`); treated the same way here.
+                report.skipped_invalid_local_time += 1
+                continue
+
+            try:
+                _, checkout_instant = effective_bounds(property, reservation)
+            except IncompatibleTransitionContextError:
+                report.skipped_invalid_local_time += 1
+                continue
+
+            if not (
+                checkout_instant - _CHECKOUT_REMINDER_LEAD <= now < checkout_instant
+            ):
+                continue
+
+            recipient = await self._recipient(tenant_id, reservation.guest_id)
+            if recipient is None:
+                report.skipped_missing_email += 1
+                continue
+            email, language = recipient
+
+            check_out_time_local = (
+                reservation.check_out_time or property.default_check_out_time
+            )
+            subject, body = render_checkout_reminder_email(
+                language,
+                property.name,
+                reservation.check_out_date,
+                check_out_time_local,
+            )
+
+            if await self._write_if_new(
+                tenant_id, reservation.id, email, subject, body, now
+            ):
+                report.written += 1
+
+        await self._uow.commit()
+        return report
+
+    async def _write_if_new(
+        self,
+        tenant_id: uuid.UUID,
+        reservation_id: uuid.UUID,
+        email: str,
+        subject: str,
+        body: str,
+        now: datetime,
+    ) -> bool:
+        """`exists_for` dedup (design D8), then one literal `NotificationLog(...)` construction
+        with `notification_type=NotificationType.CHECKOUT_REMINDER.value` at the call site
+        itself — the AST shape `tests/notifications/test_writer_census.py` requires (see
+        `SendCheckinRemindersUseCase._write_if_new`'s docstring for why a variable would be
+        invisible to it).
+        """
+        if await self._notifications.exists_for(
+            tenant_id,
+            related_type=RELATED_TYPE_RESERVATION,
+            related_id=reservation_id,
+            notification_type=NotificationType.CHECKOUT_REMINDER.value,
+        ):
+            return False
+
+        await self._notifications.add(
+            tenant_id,
+            NotificationLog(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                recipient_contact=email,
+                channel=NotificationChannel.EMAIL,
+                notification_type=NotificationType.CHECKOUT_REMINDER.value,
+                created_at=now,
+                updated_at=now,
+                subject=subject,
+                body=body,
+                status=NotificationStatus.PENDING,
+                related_type=RELATED_TYPE_RESERVATION,
+                related_id=reservation_id,
+                # D11: no SLA deadline — same reasoning as the check-in writer.
+                sla_deadline_at=None,
+            ),
+        )
+        return True
+
+    async def _recipient(
+        self, tenant_id: uuid.UUID, guest_id: uuid.UUID | None
+    ) -> tuple[str, str] | None:
+        """Identical to `SendCheckinRemindersUseCase._recipient` — duplicated rather than
+        shared, since the two use cases have no common base class to hang it on and the
+        method is four lines."""
         if guest_id is None:
             return None
         guest = await self._guests.get(tenant_id, guest_id)

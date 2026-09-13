@@ -59,3 +59,43 @@ def render_checkin_reminder_email(
         check_in_time=check_in_time_local.strftime("%H:%M"),
     )
     return _CHECKIN_SUBJECT[key], body
+
+
+_CHECKOUT_SUBJECT = {
+    "es": "Recordatorio de check-out",
+    "en": "Check-out reminder",
+}
+
+_CHECKOUT_BODY = {
+    "es": (
+        "Le recordamos que su check-out en {property_name} está previsto para el "
+        "{check_out_date}, antes de las {check_out_time}."
+    ),
+    "en": (
+        "This is a reminder that your check-out at {property_name} is scheduled for "
+        "{check_out_date}, before {check_out_time}."
+    ),
+}
+
+
+def render_checkout_reminder_email(
+    language: str,
+    property_name: str,
+    check_out_date: date,
+    check_out_time_local: time,
+) -> tuple[str, str]:
+    """The `(subject, body)` pair for `CHECKOUT_REMINDER` (R2, design D6).
+
+    Sibling of `render_checkin_reminder_email` above: same fallback rule (an unrecognised
+    `language` falls back to `"es"`), same guarantee that only fixed prose plus the
+    property's name and the reservation's own checkout date/local time ever reach this
+    function — nothing guest- or operator-authored, so nothing here can leak into
+    `notification_logs.subject`/`body` (R2.2, rule 11 of `sdd/steering/security.md`).
+    """
+    key = language if language in _CHECKOUT_SUBJECT else "es"
+    body = _CHECKOUT_BODY[key].format(
+        property_name=property_name,
+        check_out_date=check_out_date.isoformat(),
+        check_out_time=check_out_time_local.strftime("%H:%M"),
+    )
+    return _CHECKOUT_SUBJECT[key], body
