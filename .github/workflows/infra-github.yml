@@ -97,6 +97,14 @@ jobs:
       - name: "Publicar la imagen efímera (pieza 1 de D9: packages:write de la App)"
         run: docker push "ghcr.io/${{ github.repository_owner }}/infra-github-iac-smoke:ephemeral-${{ github.run_id }}"
 
+      # NOTA (panel de seguridad de /sdd:review, 2026-09-13): el token minteado
+      # con `permission-packages: write` puede no bastar para borrar un
+      # package de la ORG (`/orgs/.../packages/...` podría exigir
+      # `permission-organization-packages` en vez de `permission-packages`
+      # — no verificado contra una ejecución real). Si el borrado falla por
+      # eso, el paso de abajo ("Documentar limitación si el borrado no
+      # compone") ya lo cubre con un `::warning::` explícito (D9) — no hace
+      # fallar el job. Vigilar en la primera ejecución real (sección 8).
       - name: Resolver el id de la versión publicada
         id: resolve-version
         if: always()
