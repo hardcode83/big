@@ -445,3 +445,96 @@ async def test_no_properties_short_circuits_without_touching_other_ports() -> No
 
     assert report == type(report)()
     assert world.uow.commits == 0
+
+
+@pytest.mark.asyncio
+async def test_a_second_tenants_reservation_is_neither_read_nor_written() -> None:
+    """`sdd/steering/security.md` rule 1: a sweep for `TENANT` must not surface, nor emit a
+    `NotificationLog` for, a reservation belonging to `OTHER_TENANT` — even one that would
+    otherwise be a perfectly good candidate (inside both check-in windows, confirmed status, a
+    guest with a valid email) if it were evaluated as this tenant's own. Mirrors
+    `test_checkout_reminders.py`'s `test_a_second_tenants_reservation_is_neither_read_nor_written`."""
+    world = _world()
+
+    prop = world.properties.add_property(_property())
+    guest = world.guests.add_guest(_guest())
+    reservation = _reservation(
+        property_id=prop.id, check_in_date=date(2026, 9, 20), guest_id=guest.id
+    )
+    world.reservations.reservations[reservation.id] = reservation
+    checkin_instant = _checkin_instant(prop, reservation)
+    now = checkin_instant - timedelta(hours=1)  # inside both windows
+
+    other_prop = world.properties.add_property(_property(tenant_id=OTHER_TENANT))
+    other_guest = world.guests.add_guest(_guest(tenant_id=OTHER_TENANT))
+    other_reservation = _reservation(
+        property_id=other_prop.id,
+        check_in_date=date(2026, 9, 20),
+        guest_id=other_guest.id,
+        tenant_id=OTHER_TENANT,
+    )
+    world.reservations.reservations[other_reservation.id] = other_reservation
+    # Sanity check: `other_reservation` sits in the identical window relative to its own
+    # property's check-in instant, so it would be a candidate too if the sweep below leaked.
+    assert _checkin_instant(other_prop, other_reservation) - timedelta(hours=1) == now
+
+    report = await world.use_case.execute(tenant_id=TENANT, now=now)
+
+    assert report.candidates == 1
+    assert report.written == 2
+    assert len(world.notifications.rows) == 2
+    assert {row.tenant_id for row in world.notifications.rows} == {TENANT}
+    assert {row.related_id for row in world.notifications.rows} == {reservation.id}
+    assert other_reservation.id not in {row.related_id for row in world.notifications.rows}
+
+
+@pytest.mark.asyncio
+async def test_a_sibling_use_cases_existing_row_does_not_suppress_this_one() -> None:
+    """proposal.md R4.3: "WHEN a candidate has more than one outstanding notification type at
+    once, THE SYSTEM SHALL evaluate each type independently and SHALL NOT let one type's
+    existing row suppress another's." The other tests in this file and in
+    `test_checkout_reminders.py` only prove independence *within* one use case (24h vs 2h, or
+    a second run of the same type). This pins the cross-use-case case: a `CHECKOUT_REMINDER`
+    row already sitting on the same reservation — as `SendCheckoutRemindersUseCase` would leave
+    it — must not suppress `SendCheckinRemindersUseCase`'s own rows, because `exists_for` is
+    scoped by `notification_type` and not merely by `related_id`."""
+    world = _world()
+    prop = world.properties.add_property(_property())
+    guest = world.guests.add_guest(_guest())
+    reservation = _reservation(
+        property_id=prop.id, check_in_date=date(2026, 9, 20), guest_id=guest.id
+    )
+    world.reservations.reservations[reservation.id] = reservation
+    checkin_instant = _checkin_instant(prop, reservation)
+    now = checkin_instant - timedelta(hours=1)  # inside both check-in windows
+
+    # Pre-seed a sibling type's row for the same reservation, as `SendCheckoutRemindersUseCase`
+    # would have left it — a different `notification_type`, same `related_type`/`related_id`.
+    world.notifications.rows.append(
+        NotificationLog(
+            id=uuid.uuid4(),
+            tenant_id=TENANT,
+            recipient_contact="guest@example.com",
+            channel=NotificationChannel.EMAIL,
+            notification_type=NotificationType.CHECKOUT_REMINDER.value,
+            created_at=_now(),
+            updated_at=_now(),
+            subject="Recordatorio de check-out",
+            body="...",
+            status=NotificationStatus.PENDING,
+            related_type="reservation",
+            related_id=reservation.id,
+            sla_deadline_at=None,
+        )
+    )
+
+    report = await world.use_case.execute(tenant_id=TENANT, now=now)
+
+    assert report.written == 2
+    types = {row.notification_type for row in world.notifications.rows}
+    assert types == {
+        NotificationType.CHECKOUT_REMINDER.value,
+        NotificationType.CHECKIN_REMINDER_24H.value,
+        NotificationType.CHECKIN_REMINDER_2H.value,
+    }
+    assert len(world.notifications.rows) == 3
