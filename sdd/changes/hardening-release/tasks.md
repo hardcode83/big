@@ -39,12 +39,12 @@
 - [x] 6.2 Enumerar las transiciones (válidas e inválidas) de `PropertyStateMachine` (`backend/app/properties/domain/state_machine.py`) contra `backend/tests/properties/test_state_machine.py`; añadir el caso que falte. [R5.2]
 - [x] 6.3 `docs/dod-audit.md`: tabla de los 20 ítems de PRD §28 con su evidencia (test/archivo/comando); detalle de las tablas de 6.1 y 6.2. `#28.20` (un solo `make up` levanta todo) se documenta con la corrida de 7.3 como evidencia — ya construido por `local-environment`/`infra-scaffold`, no se reconstruye aquí. Corregir la cifra de dominios desactualizada en `README.md:311` (dice 19, con un roster que ya no incluye `statements` ni `audit`) contra el recuento real de 6.1. Enlazar `docs/dod-audit.md` desde `README.md`. [R5.3]
 
-## 7. Verificación
+## 7. Verificación <!-- panel: PASS 2026-09-13 receipt:a56d8bd3 -->
 
-- [ ] 7.1 Backend: `docker compose exec backend uv run pytest` — verde, incluyendo los tests nuevos de 6.1/6.2.
-- [ ] 7.2 Frontend: `cd frontend && npm run typecheck && npm run lint && npm test` — verde.
-- [ ] 7.3 E2E local: en este worktree, `make up PORT_OFFSET=<n>` (publica puertos — necesario porque Playwright corre en el host, no en la red de compose; ver `sdd/project.md` §Worktree bootstrap) y `cd frontend && BASE_URL=http://localhost:<3000+n> npm run test:e2e` (o el equivalente que 1.2 documente si `baseURL` se parametriza por variable de entorno) — los tres specs (2.1, 3.1-3.2, 4.1-4.3) en verde.
-- [ ] 7.4 `python3 scripts/check-detect-surface.py e2e` (5.3) — verde.
+- [x] 7.1 Backend: `docker compose exec backend uv run pytest` — verde, incluyendo los tests nuevos de 6.1/6.2.
+- [x] 7.2 Frontend: `cd frontend && npm run typecheck && npm run lint && npm test` — verde.
+- [x] 7.3 E2E local: en este worktree, `make up PORT_OFFSET=<n>` (publica puertos — necesario porque Playwright corre en el host, no en la red de compose; ver `sdd/project.md` §Worktree bootstrap) y `cd frontend && BASE_URL=http://localhost:<3000+n> npm run test:e2e` (o el equivalente que 1.2 documente si `baseURL` se parametriza por variable de entorno) — los tres specs (2.1, 3.1-3.2, 4.1-4.3) en verde.
+- [x] 7.4 `python3 scripts/check-detect-surface.py e2e` (5.3) — verde.
 
 ## Implementation Notes
 
@@ -722,3 +722,50 @@ exit 0. Sin tests nuevos que añadir, así que la cifra es la misma línea base 
 tiempo de forma sustancial y elimina rojos fantasma por contención) y **se volvió a levantar al
 terminar** (`docker compose start frontend`; verificado `Up` en `docker compose ps`), porque 7.3 sí
 lo necesita. El stack queda con los seis servicios arriba.
+
+### Section 7 (Verificación)
+
+**7.1** — `docker compose exec backend uv run pytest` → **11076 passed, 44 skipped in 512.90s**
+(re-corrida independiente de la orquestación, mismas cifras que dejó la sección 6 — sin cambios de
+backend desde entonces).
+
+**7.2 — un regresión real encontrada y cerrada, no ruido.** `cd frontend && npm test` falló en las
+primeras corridas con un fichero distinto cada vez (`button.test.tsx`, luego
+`recommendation-status.test.ts`, luego `pricing-pagination.test.tsx`) — la firma exacta de
+contención de host ya documentada (`suite-flake-is-host-contention-not-regression`): carga de la
+máquina en 6-9 (`uptime`), memoria casi agotada. Bajar `frontend` (igual que en 7.1) y correr con
+`--no-file-parallelism` sustituyó ese ruido por un **fallo estable, en el mismo fichero, con el mismo
+mensaje**: `test/color-tokens.test.ts`, que deriva `ROOTS` (los directorios de primer nivel de
+`frontend/`) y pin-ea la lista — y la sección 1 de este mismo change añadió `frontend/e2e/`, un
+directorio nuevo que el guard no conocía. Real, determinista, causado por este change.
+
+**Tres pin de esa misma prueba necesitaron el mismo ajuste**, uno detrás de otro según cada corrida
+lo reveló:
+1. `NOT_UI` (la lista de exclusión de `ROOTS`) — se le añadió `"e2e"`, con la misma exención
+   razonada que ya tenía `"test"` (R6.6 acota la obligación a "código no de test"; nada en `e2e/`
+   se renderiza).
+2. La propia lista pin-eada de `NOT_UI` (`expect([...NOT_UI].sort()).toEqual([...])`) — hubo que
+   añadir `"e2e"` ahí también, y de paso `"test-results"`/`"playwright-report"`/`"blob-report"`
+   (los tres directorios que `.gitignore` declaró en la sección 1): existen en este worktree
+   porque ya se corrió Playwright aquí, `readdirSync` los ve aunque estén gitignorados, y en un
+   checkout limpio de CI nunca aparecerían — pero un desarrollador que corra el E2E localmente
+   antes de `npm test` tropezaría con lo mismo, así que se corrige igual que `.next`/`coverage`.
+3. `looseRootFiles()` (ficheros sueltos en la raíz, no directorios) — `playwright.config.ts` es
+   nuevo y sin tocar la lista pin-eada rompe el mismo guard; añadido junto a `eslint.config.mjs`/
+   `next.config.ts`/etc., misma categoría ("configuración de build, ninguno renderiza nada").
+
+Verificado en aislado (`npx vitest run --project node test/color-tokens.test.ts`): **7 passed**.
+Suite completa dos veces más: la primera aún mostró un fallo transitorio (`auth-session.integration.test.tsx`,
+un fichero ajeno al diff de este change) que **pasó solo, aislado**, confirmando contención y no
+regresión; la segunda corrida completa salió **294 passed, 3300 tests passed** — limpia. `npm run
+typecheck` y `npm run lint` limpios en todo momento (dos advertencias preexistentes de variables sin
+usar en `color-tokens.test.ts`, `COLOR_PREFIX`/`NON_COLOR`, confirmadas ya presentes en `HEAD` antes
+de este change — no se tocan, fuera de alcance).
+
+**7.3** — con el stack reutilizado (`hardening-release`, `PORT_OFFSET=77`) y `frontend` relevantado:
+`BASE_URL=http://localhost:3077 BACKEND_HEALTH_URL=http://localhost:8077/health npm run test:e2e` →
+**8 passed** (los tres specs: `login.spec.ts` ×3, `cleaning.spec.ts` ×2, `incident.spec.ts` ×3), 2.6
+minutos.
+
+**7.4** — `python3 scripts/check-detect-surface.py e2e` → `OK: detect-surface covers the whole
+suite input surface.`
