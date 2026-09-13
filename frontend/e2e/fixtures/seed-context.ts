@@ -468,6 +468,485 @@ export function runSimAdvance(tenantId: string, at?: string): string {
 /** States the cleaning cycle can be driven from, via the clock chain below. */
 const CYCLE_START_STATES = new Set(["VACANT_READY", "READY_FOR_NEXT_GUEST"]);
 
+/*
+ * ---------------------------------------------------------------------------
+ * Section 4 — the incident cycle (`incident.spec.ts`, R4).
+ * ---------------------------------------------------------------------------
+ */
+
+/**
+ * States from which `cleaning.spec.ts` drives its own cycle — the set its
+ * property selection accepts. `propertyForIncidentCycle` below deliberately
+ * picks a flat **outside** this set, so the two specs never compete for the
+ * same property: a `CRITICAL` incident parks its flat in `CRITICAL_INCIDENT`
+ * for the length of the test, which would leave the cleaning spec with no
+ * eligible flat if they overlapped.
+ */
+const CLEANING_CYCLE_STATES = new Set([
+  "AWAITING_CLEANING",
+  "VACANT_READY",
+  "READY_FOR_NEXT_GUEST",
+]);
+
+/**
+ * A property the incident cycle can be driven on without disturbing
+ * `cleaning.spec.ts`: the first one whose operational state is **not** one the
+ * cleaning spec selects from (see `CLEANING_CYCLE_STATES`).
+ *
+ * With `make seed-demo` that is `REDES11`, which the seed leaves in
+ * `MAINTENANCE_REQUIRED` because it carries an open `HIGH` incident. That
+ * detail is what makes the cycle self-restoring rather than merely tidy:
+ * `ContextualStateResolver.after_incident_resolution`
+ * (`backend/app/properties/domain/state_resolution.py`) recomputes the state
+ * from the incidents still active, so resolving this spec's `CRITICAL` incident
+ * lands back on `MAINTENANCE_REQUIRED` — the same value the spec captured
+ * before it started. The spec asserts that round trip rather than a literal.
+ */
+export async function propertyForIncidentCycle(
+  session: ApiSession,
+): Promise<SeedPropertySummary> {
+  const properties = await listProperties(session);
+  const candidate = properties.find(
+    (property) => !CLEANING_CYCLE_STATES.has(property.current_operational_state),
+  );
+  if (!candidate) {
+    throw new Error(
+      "seed-context.propertyForIncidentCycle: every property is in a state " +
+        `cleaning.spec.ts also selects from (${properties
+          .map((p) => `${p.internal_code}=${p.current_operational_state}`)
+          .join(", ")}). Driving the incident cycle on one of them would park it in ` +
+        "CRITICAL_INCIDENT and leave the cleaning spec with no eligible flat. Run " +
+        "`make seed-demo` to restore the demo tenant's two-flat layout.",
+    );
+  }
+  return candidate;
+}
+
+/**
+ * The marker that makes this spec's portal reservation findable across runs,
+ * mirroring `CYCLE_RESERVATION_MARKER` above and for the same reason:
+ * `external_channel_id` is settable on create and absent from
+ * `UpdateReservationRequest`, so it is a handle the spec cannot overwrite.
+ */
+const INCIDENT_RESERVATION_MARKER = "e2e-incident-cycle";
+
+/**
+ * How far ahead this spec's reservation is placed. **Future on purpose**, and
+ * both halves of that matter:
+ *
+ * - the guest portal's window is an *upper* bound only — `token_still_authorises`
+ *   (`backend/app/guests/domain/portal_authorisation.py`) asks for
+ *   `now <= check_out + grace_days` and nothing about the stay having started —
+ *   so a stay 30 days out authorises just as well as one in progress, and keeps
+ *   authorising no matter how long the stack has been up;
+ * - it stays clear of *today*, so none of the three clock jobs
+ *   (`runSimAdvance`, which `cleaning.spec.ts` runs tenant-wide) ever finds it
+ *   eligible, and it can never be the second overlapping stay that makes those
+ *   jobs report `ambiguous`.
+ */
+const INCIDENT_RESERVATION_LEAD_DAYS = 30;
+
+/**
+ * Mints a fresh guest-portal token for `propertyId`, creating (once, keyed on
+ * `INCIDENT_RESERVATION_MARKER`) and re-pointing the stay it hangs off.
+ *
+ * Two endpoints, both documented per task 1.5:
+ * - `POST`/`PATCH /api/v1/reservations[/{id}]` — the stay the token belongs to.
+ * - `POST /api/v1/reservations/{id}/guest-access-token`
+ *   (`backend/app/guests/api/router.py` `issue_guest_access_token`, needs
+ *   `MANAGE_ACCESS_TOKENS` — a `PROPERTY_MANAGER`/`TENANT_OWNER` session).
+ *   It returns the token **in clear exactly once**; no later call reads it
+ *   back, so the value is used immediately and never stored. Issuing again
+ *   revokes the previous one in the same transaction, which is why this is safe
+ *   to call on every run.
+ *
+ * This exists because `maintenance` exposes **no** `POST /incidents` at all
+ * (`backend/app/maintenance/api/incidents_router.py`: "There is deliberately no
+ * `POST /incidents`") — every incident comes from a declared source, and the
+ * guest portal is the one R4.1 can drive end to end.
+ */
+export async function ensureGuestPortalToken(
+  session: ApiSession,
+  propertyId: string,
+): Promise<string> {
+  const today = new Date();
+  const day = 24 * 60 * 60 * 1000;
+  const checkInDate = utcDate(
+    new Date(today.getTime() + INCIDENT_RESERVATION_LEAD_DAYS * day),
+  );
+  const checkOutDate = utcDate(
+    new Date(today.getTime() + (INCIDENT_RESERVATION_LEAD_DAYS + 2) * day),
+  );
+
+  const existing = (await listReservations(session)).find(
+    (reservation) =>
+      reservation.property_id === propertyId &&
+      reservation.external_channel_id === INCIDENT_RESERVATION_MARKER,
+  );
+
+  let reservationId: string;
+  if (existing) {
+    reservationId = existing.id;
+  } else {
+    const created = await fetch(`${BACKEND_URL}/api/v1/reservations`, {
+      method: "POST",
+      headers: authHeaders(session),
+      body: JSON.stringify({
+        property_id: propertyId,
+        check_in_date: checkInDate,
+        check_out_date: checkOutDate,
+        external_channel_id: INCIDENT_RESERVATION_MARKER,
+        cleaning_required: false,
+      }),
+    });
+    if (!created.ok) {
+      throw new Error(
+        `seed-context.ensureGuestPortalToken: POST /api/v1/reservations -> ` +
+          `${created.status} ${await created.text()}`,
+      );
+    }
+    reservationId = ((await created.json()) as { id: string }).id;
+  }
+
+  // Sent on every run, not only on creation: `POST` leaves it `PENDING`, and a
+  // reservation reused from a previous run has to be walked forward so the
+  // portal window never lapses.
+  const patched = await fetch(`${BACKEND_URL}/api/v1/reservations/${reservationId}`, {
+    method: "PATCH",
+    headers: authHeaders(session),
+    body: JSON.stringify({
+      status: "CONFIRMED",
+      cleaning_required: false,
+      check_in_date: checkInDate,
+      check_out_date: checkOutDate,
+    }),
+  });
+  if (!patched.ok) {
+    throw new Error(
+      `seed-context.ensureGuestPortalToken: PATCH /api/v1/reservations/${reservationId} -> ` +
+        `${patched.status} ${await patched.text()}`,
+    );
+  }
+
+  const minted = await fetch(
+    `${BACKEND_URL}/api/v1/reservations/${reservationId}/guest-access-token`,
+    { method: "POST", headers: authHeaders(session) },
+  );
+  if (!minted.ok) {
+    throw new Error(
+      `seed-context.ensureGuestPortalToken: POST /api/v1/reservations/${reservationId}` +
+        `/guest-access-token -> ${minted.status} ${await minted.text()}`,
+    );
+  }
+  return ((await minted.json()) as { token: string }).token;
+}
+
+export interface ReportedIncident {
+  id: string;
+  status: string;
+}
+
+/**
+ * `POST /api/v1/guest/incident/{token}`
+ * (`backend/app/guests/api/portal_router.py` `report_incident`) — **anonymous**,
+ * so no session is passed and none is wanted: the token in the path is the whole
+ * credential, and every identifier (tenant, property, reservation) comes from
+ * the session the authoriser resolves, never from the body.
+ *
+ * The body is exactly `title` and `description` — anything else is a `422`
+ * rather than a silently dropped field. The acknowledgement is three fields, and
+ * the incident is born `OPEN` and **unclassified**: `docs/maintenance.md` §El job
+ * de clasificación spells out why nothing classifies inside this request (the
+ * only writer here is an anonymous caller from the internet, so hanging the
+ * classifier off it is what rule 12(d) of `sdd/steering/security.md` forbids).
+ */
+export async function reportGuestIncident(
+  token: string,
+  input: { title: string; description: string },
+): Promise<ReportedIncident> {
+  const response = await fetch(`${BACKEND_URL}/api/v1/guest/incident/${token}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: input.title, description: input.description }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `seed-context.reportGuestIncident: POST /api/v1/guest/incident/{token} -> ` +
+        `${response.status} ${await response.text()}`,
+    );
+  }
+  return (await response.json()) as ReportedIncident;
+}
+
+export interface SeedIncident {
+  id: string;
+  property_id: string;
+  status: string;
+  title: string;
+  category: string | null;
+  severity: string | null;
+  ai_summary: string | null;
+  assigned_technician_id: string | null;
+  estimated_cost: string | null;
+  approved_cost: string | null;
+  final_cost: string | null;
+  materials: string | null;
+  resolved_at: string | null;
+  owner_approval_required: boolean;
+}
+
+/** `GET /api/v1/incidents/{id}` — the incident as the backend has it. */
+export async function getIncident(
+  session: ApiSession,
+  incidentId: string,
+): Promise<SeedIncident> {
+  const response = await fetch(`${BACKEND_URL}/api/v1/incidents/${incidentId}`, {
+    headers: authHeaders(session),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `seed-context.getIncident: GET /api/v1/incidents/${incidentId} -> ` +
+        `${response.status} ${await response.text()}`,
+    );
+  }
+  return (await response.json()) as SeedIncident;
+}
+
+/**
+ * `GET /api/v1/incidents?page=1&per_page=100` — the tenant's incidents. Needs
+ * `READ_INCIDENTS`. Note the envelope is `items`, like `/owner-approvals` and
+ * unlike the `data` of properties/users/reservations.
+ */
+export async function listIncidents(session: ApiSession): Promise<SeedIncident[]> {
+  const response = await fetch(
+    `${BACKEND_URL}/api/v1/incidents?page=1&per_page=100`,
+    { headers: authHeaders(session) },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `seed-context.listIncidents: GET /api/v1/incidents -> ${response.status} ` +
+        `${await response.text()}`,
+    );
+  }
+  return ((await response.json()) as { items: SeedIncident[] }).items;
+}
+
+/**
+ * `POST /api/v1/incidents/{id}/cancel` — terminal from any non-terminal status
+ * (`Incident._TRANSITIONS`), and the property recomposes on the way out.
+ * Needs `MANAGE_INCIDENTS`.
+ */
+export async function cancelIncident(
+  session: ApiSession,
+  incidentId: string,
+): Promise<SeedIncident> {
+  const response = await fetch(
+    `${BACKEND_URL}/api/v1/incidents/${incidentId}/cancel`,
+    { method: "POST", headers: authHeaders(session) },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `seed-context.cancelIncident: POST /api/v1/incidents/${incidentId}/cancel -> ` +
+        `${response.status} ${await response.text()}`,
+    );
+  }
+  return (await response.json()) as SeedIncident;
+}
+
+/** Statuses from which an incident no longer affects anything. */
+const TERMINAL_INCIDENT_STATUSES = new Set(["RESOLVED", "CANCELLED"]);
+
+/**
+ * Cancels every still-live incident whose title carries `marker`, and answers
+ * how many it cancelled.
+ *
+ * This is what makes `incident.spec.ts` re-runnable, and it closes a hazard
+ * that is specific to this domain rather than a matter of tidiness. An incident
+ * a failed run left behind is not inert: `classify_incidents` runs every five
+ * minutes over everything `OPEN` without an `ai_classification`
+ * (`docs/maintenance.md` §El job de clasificación), so the spec's own
+ * deliberately-`SAFETY` report gets classified `CRITICAL` by the scheduler
+ * minutes later and parks the flat in `CRITICAL_INCIDENT` — permanently, since
+ * nothing else will ever close it. The next run then captures `CRITICAL_INCIDENT`
+ * as its baseline and the whole cycle is measured against a corrupted starting
+ * point. Measured, not theorised: two aborted runs of this spec left exactly
+ * that, and the flat stayed red.
+ *
+ * Keyed on a marker the spec puts in its own titles, so it can only ever reach
+ * incidents this spec created — never the seed's, and never a real one.
+ */
+export async function cancelLingeringIncidents(
+  session: ApiSession,
+  marker: string,
+): Promise<number> {
+  const lingering = (await listIncidents(session)).filter(
+    (incident) =>
+      incident.title.includes(marker) &&
+      !TERMINAL_INCIDENT_STATUSES.has(incident.status),
+  );
+  for (const incident of lingering) {
+    await cancelIncident(session, incident.id);
+  }
+  return lingering.length;
+}
+
+/**
+ * `POST /api/v1/incidents/{id}/classify` — runs the `IncidentClassifier` port's
+ * adapter over one incident on demand, the manual half of the pair
+ * `docs/maintenance.md` documents (the other is the `classify_incidents` job,
+ * which beat runs every 5 minutes). In this stack the adapter is
+ * `RuleBasedIncidentClassifier`
+ * (`backend/app/maintenance/infrastructure/classifier.py`), deterministic and
+ * offline. Needs `MANAGE_INCIDENTS` — a `PROPERTY_MANAGER` session.
+ *
+ * Used as *setup* by the 4.3 case; the 4.1 case clicks the same operation in the
+ * manager's screen instead, which is what R4.1 asks for.
+ */
+export async function classifyIncident(
+  session: ApiSession,
+  incidentId: string,
+): Promise<SeedIncident> {
+  const response = await fetch(
+    `${BACKEND_URL}/api/v1/incidents/${incidentId}/classify`,
+    { method: "POST", headers: authHeaders(session) },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `seed-context.classifyIncident: POST /api/v1/incidents/${incidentId}/classify -> ` +
+        `${response.status} ${await response.text()}`,
+    );
+  }
+  return (await response.json()) as SeedIncident;
+}
+
+/**
+ * `POST /api/v1/incidents/{id}/assign` — assigns (or reassigns) the technician.
+ * Needs `MANAGE_INCIDENTS`. `assignment_note` is a **complete** operation, not a
+ * patch: omitting it clears whatever the previous assignment carried
+ * (`docs/maintenance.md` §Dos avisos para quien opera).
+ */
+export async function assignIncident(
+  session: ApiSession,
+  incidentId: string,
+  technicianId: string,
+): Promise<SeedIncident> {
+  const response = await fetch(
+    `${BACKEND_URL}/api/v1/incidents/${incidentId}/assign`,
+    {
+      method: "POST",
+      headers: authHeaders(session),
+      body: JSON.stringify({ technician_id: technicianId }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `seed-context.assignIncident: POST /api/v1/incidents/${incidentId}/assign -> ` +
+        `${response.status} ${await response.text()}`,
+    );
+  }
+  return (await response.json()) as SeedIncident;
+}
+
+/**
+ * `POST /api/v1/incidents/{id}/resolve` — the technician's close, with the real
+ * cost. Needs `EXECUTE_INCIDENTS` (the assigned technician, or a manager, to
+ * unstick). Used by the 4.3 case only to *finish* the incident after the owner
+ * has approved the cost, so the stack is not left holding an
+ * `AWAITING_OWNER_APPROVAL`; the close the requirement is about is driven
+ * through `/tech/incidents/[id]`.
+ */
+export async function resolveIncident(
+  session: ApiSession,
+  incidentId: string,
+  finalCost: string,
+): Promise<SeedIncident> {
+  const response = await fetch(
+    `${BACKEND_URL}/api/v1/incidents/${incidentId}/resolve`,
+    {
+      method: "POST",
+      headers: authHeaders(session),
+      body: JSON.stringify({ final_cost: finalCost }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `seed-context.resolveIncident: POST /api/v1/incidents/${incidentId}/resolve -> ` +
+        `${response.status} ${await response.text()}`,
+    );
+  }
+  return (await response.json()) as SeedIncident;
+}
+
+/**
+ * `GET /api/v1/tenants/{tenant_id}` — the tenant with its `config`, which is
+ * where `owner_approval_threshold_eur` lives. Readable by `TENANT_OWNER` and
+ * `PROPERTY_MANAGER`; a `TECHNICIAN` gets `403`, which is exactly why
+ * `docs/maintenance.md` says the technician's screen "no calcula, no muestra y
+ * no anticipa" the threshold.
+ *
+ * Read rather than hardcoded: the spec crosses and stays under the tenant's
+ * **actual** configured value, so a tenant configured differently still gets a
+ * meaningful test instead of a silently wrong one.
+ */
+export async function ownerApprovalThresholdEur(
+  session: ApiSession,
+): Promise<number> {
+  const { tenantId } = await apiMe(session);
+  const response = await fetch(`${BACKEND_URL}/api/v1/tenants/${tenantId}`, {
+    headers: authHeaders(session),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `seed-context.ownerApprovalThresholdEur: GET /api/v1/tenants/${tenantId} -> ` +
+        `${response.status} ${await response.text()}`,
+    );
+  }
+  const body = (await response.json()) as {
+    config: { owner_approval_threshold_eur: string };
+  };
+  const threshold = Number(body.config.owner_approval_threshold_eur);
+  if (!Number.isFinite(threshold)) {
+    throw new Error(
+      "seed-context.ownerApprovalThresholdEur: tenant config carried a " +
+        `non-numeric owner_approval_threshold_eur (${body.config.owner_approval_threshold_eur}).`,
+    );
+  }
+  return threshold;
+}
+
+export interface SeedOwnerApproval {
+  id: string;
+  related_type: string;
+  status: string;
+  amount: string;
+  currency: string;
+  responded_at: string | null;
+  incident: { id: string; title: string } | null;
+}
+
+/**
+ * `GET /api/v1/owner-approvals?status=<status>` — the approval queue behind
+ * `/approvals`. Needs `READ_OWNER_APPROVALS` (owner **and** manager; only the
+ * owner may respond). Note the envelope is `items`, not the `data` the
+ * properties/users/reservations listings use.
+ */
+export async function listOwnerApprovals(
+  session: ApiSession,
+  status: string,
+): Promise<SeedOwnerApproval[]> {
+  const response = await fetch(
+    `${BACKEND_URL}/api/v1/owner-approvals?status=${status}`,
+    { headers: authHeaders(session) },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `seed-context.listOwnerApprovals: GET /api/v1/owner-approvals?status=${status} -> ` +
+        `${response.status} ${await response.text()}`,
+    );
+  }
+  return ((await response.json()) as { items: SeedOwnerApproval[] }).items;
+}
+
 /**
  * Leaves `propertyId` in `AWAITING_CLEANING`, which is the **only** state from
  * which a cleaning can be assigned and therefore the precondition of the whole

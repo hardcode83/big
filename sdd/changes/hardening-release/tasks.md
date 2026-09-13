@@ -23,9 +23,9 @@
 
 ## 4. E2E: ciclo de incidencia <!-- hard -->
 
-- [ ] 4.1 `frontend/e2e/incident.spec.ts`: crear una incidencia (por API o portal del huésped, según lo que el flujo real permita) y verificar que `MockAIAdapter` la clasifica; un manager la tría y asigna a un técnico desde `/incidents/[id]`. [R4.1]
-- [ ] 4.2 Mismo spec: el técnico acepta y resuelve desde `/tech/incidents/[id]` con coste y materiales; verificar el cierre. Con severidad `CRITICAL`, verificar que la propiedad aparece en rojo en el dashboard mientras esté abierta. [R4.1, R4.2]
-- [ ] 4.3 Mismo spec, variante con coste sobre el umbral del tenant: verificar que se genera un `OwnerApproval` visible en `/approvals` para su respuesta (`docs/maintenance.md`). [R4.3]
+- [x] 4.1 `frontend/e2e/incident.spec.ts`: crear una incidencia (por API o portal del huésped, según lo que el flujo real permita) y verificar que `MockAIAdapter` la clasifica; un manager la tría y asigna a un técnico desde `/incidents/[id]`. [R4.1]
+- [x] 4.2 Mismo spec: el técnico acepta y resuelve desde `/tech/incidents/[id]` con coste y materiales; verificar el cierre. Con severidad `CRITICAL`, verificar que la propiedad aparece en rojo en el dashboard mientras esté abierta. [R4.1, R4.2]
+- [x] 4.3 Mismo spec, variante con coste sobre el umbral del tenant: verificar que se genera un `OwnerApproval` visible en `/approvals` para su respuesta (`docs/maintenance.md`). [R4.3]
 
 ## 5. CI: workflow `e2e-tests` y detector
 
@@ -349,3 +349,172 @@ section 2):
   otra que arrancó ya en `AWAITING_CLEANING`. Suite E2E entera (`npx playwright test`, specs 2.1 +
   3.1-3.2) → **`5 passed`**, o sea que la sección 2 sigue verde. Comprobado además contra la API
   que la tarea del spec queda `COMPLETED`/`PASSED` y la vivienda en `VACANT_READY`.
+
+### Section 4 (E2E: ciclo de incidencia)
+
+- **La incidencia no la crea nadie por `POST /incidents`, porque esa ruta no existe.**
+  `backend/app/maintenance/api/incidents_router.py` lo dice en su propio docstring («There is
+  deliberately no `POST /incidents`»): cada fuente tiene dueño declarado. La única que un test
+  puede conducir de punta a punta es el **portal del huésped**, `POST /api/v1/guest/incident/{token}`,
+  **anónima** (el token del path es toda la credencial y tenant/vivienda/reserva salen de la sesión
+  que resuelve el autorizador, nunca del cuerpo). La otra fuente viva es la de la limpiadora
+  (`POST /cleaning-tasks/{id}/incidents`), descartada porque exige una limpieza viva y eso acopla
+  la sección 4 con el dato de la sección 3.
+- **La clasificación NO es síncrona, y eso es lo primero que había que medir.** Nada clasifica
+  dentro de la petición que crea la incidencia, a propósito: su único escritor es una llamada
+  anónima desde internet y colgar ahí el clasificador es lo que prohíbe la regla 12(d) de
+  `steering/security.md` (`docs/maintenance.md` §El job de clasificación). Las dos vías son el job
+  `classify_incidents` (beat, **cada 5 min**) y `POST /incidents/{id}/classify`. El spec usa la
+  segunda, **pulsada desde la pantalla del manager**, así que 4.1 asserta producto y no scheduler.
+  No hace falta `make sim-advance` en ningún punto de esta sección.
+- **Cómo se consigue `CRITICAL` de forma determinista**: no es una elección manual del manager, es
+  el veredicto del clasificador. `RuleBasedIncidentClassifier` mapea categoría → severidad
+  (`_SEVERITIES`) y **`SAFETY` es la única categoría `CRITICAL`**. Sus palabras son
+  `fuego, incendio, humo, gas, fire, smoke, alarm, alarma`. El spec reporta *«Olor a gas y humo en
+  la cocina» / «Hay humo y huele a gas. La alarma no para de sonar.»* → **tres** aciertos, que dan
+  `_STRONG_CONFIDENCE` **0.95**, por encima del `ai_confidence_threshold` **0.75** del tenant: con
+  un solo acierto la confianza sería 0.80 (aún pasa) y con ninguno 0.30, que deja la incidencia
+  `OPEN` para triaje humano. Para 4.3 se usa `APPLIANCE` (`nevera`, `horno`) → **`MEDIUM`**, que no
+  mueve la vivienda; se evita a propósito cualquier palabra de agua (`agua`, `fuga`, `gotea`…),
+  que la subiría a `HIGH`.
+- **Una incidencia recién creada NO trae `category`/`severity` a `null`** — medido, y contradice lo
+  que parecía razonable suponer: nace con los **defaults** de la entidad, `OTHER`/`MEDIUM` (que es
+  lo que `docs/maintenance.md` dice de la ruta de la limpiadora: «La incidencia nace MEDIUM»). Lo
+  que está vacío es `ai_summary`/`ai_classification`. El spec asserta los defaults, justamente para
+  que el salto `MEDIUM` → `CRITICAL` de después signifique algo.
+- **La prueba de que corrió el adaptador es `ai_summary`, y es la única cadena visible de la que el
+  spec se cuelga**: `"Possible safety hazard reported at the property"`, constante de `_SUMMARIES`.
+  **No es i18n** — sale del vocabulario cerrado en inglés que el adaptador declara y que
+  `IncidentClassification` impone, precisamente para que no exista camino desde la prosa del huésped
+  hasta esa columna (regla 11). Un badge de estado traducido habría probado sólo que *algo* cambió.
+- **Umbral real del tenant: `owner_approval_threshold_eur = 100.00` EUR** (leído en vivo de
+  `GET /api/v1/tenants/{tenant_id}` → `config`, que es el default de
+  `backend/app/tenants/domain/entities.py`). Lo leen la propietaria **y** el manager; al técnico le
+  responde **403**, que es exactamente por qué `docs/maintenance.md` dice que su pantalla «no
+  calcula, no muestra y no anticipa» el umbral. El spec **lo lee, no lo fija**: 4.1/4.2 cierran con
+  `45.50` (y trían con `umbral/2`), 4.3 cierra con `umbral + 150` = `250.00`. Las **dos** puertas
+  existen y son distintas: la del triaje (`estimated_cost`, `related_type=INCIDENT`) y la del cierre
+  (`final_cost`, `related_type=MAINTENANCE_COST`); 4.3 es la segunda, y por eso el triaje de 4.1 se
+  queda deliberadamente por debajo.
+- **La señal roja del dashboard, medida y no adivinada**: `PropertyCard` rotula cada tarjeta
+  `aria-labelledby="property-card-<propertyId>"` y mete `PropertyStateBadge` en su `<header>`;
+  `Badge` pinta un `<span data-slot="badge">`. El color sale de `TONE_BADGE_CLASS`
+  (`lib/ui/status-tone.ts`) y el tono `red` lo tiene **sólo** `CRITICAL_INCIDENT`
+  (`components/property-state-badge.tsx`), que es también la fila 🔴 de `docs/dashboard.md`
+  §Colores de estado. La clase concreta observada en el navegador es
+  `bg-state-error/15 text-state-error-text border-state-error/40` (etiqueta «Incidencia crítica»),
+  y el spec asserta `/bg-state-error\//`. **No existe `data-testid` en esa tarjeta.**
+- **Por qué el spec corre sobre REDES11 y no sobre la vivienda de la sección 3.**
+  `propertyForIncidentCycle()` elige la primera vivienda cuyo estado **no** esté en el conjunto del
+  que la sección 3 elige (`AWAITING_CLEANING`/`VACANT_READY`/`READY_FOR_NEXT_GUEST`). Con el seed
+  eso es REDES11, y el detalle que lo hace **auto-restaurable** es que REDES11 arrastra una
+  incidencia `HIGH` abierta del seed: `ContextualStateResolver.after_incident_resolution` recalcula
+  desde las incidencias todavía activas —`CRITICAL` → `CRITICAL_INCIDENT`, si no `HIGH` →
+  `MAINTENANCE_REQUIRED`, si no contextual—, así que el ciclo completo es
+  `MAINTENANCE_REQUIRED` →(clasificar `CRITICAL`)→ `CRITICAL_INCIDENT` →(resolver)→
+  **`MAINTENANCE_REQUIRED`**. El spec captura ese estado como *baseline* en `beforeAll` y asserta el
+  regreso, en vez de fijar un literal.
+- **Trampa real: una incidencia que el spec deje viva NO es inerte.** `classify_incidents` recoge
+  todo lo `OPEN` sin `ai_classification` cada 5 minutos, así que el reporte deliberadamente `SAFETY`
+  de una corrida abortada lo clasifica el scheduler minutos después, deja la vivienda en
+  `CRITICAL_INCIDENT` **para siempre** (nadie la va a cerrar) y la corrida siguiente captura ese
+  estado como su baseline. Medido: dos corridas abortadas dejaron exactamente eso y la vivienda se
+  quedó roja. Por eso `beforeAll` llama a `cancelLingeringIncidents(session, SPEC_MARKER)`, que
+  cancela sólo lo que lleva el marcador `[e2e-incident-spec` en el título — nunca las del seed,
+  nunca una real.
+- **El presupuesto de login del backend es de toda la suite E2E, y es el hallazgo con más alcance de
+  esta sección** (afecta a la sección 5, CI, y a la 7.3):
+  - `RedisLoginThrottle` cuenta en `login:ip:<ip>` y corta a partir de
+    `login_rate_limit_per_minute` = **10**, en ventana **fija** de 60 s (`EXPIRE … NX`, no desliza).
+  - **`RefreshTokenUseCase` gasta del MISMO contador**, a propósito y razonado en el código («The
+    SAME bucket as login on purpose… splitting it would let a caller spend two budgets»). Su
+    estimación de coste —«a legitimate refresh is a few per hour»— vale para una persona navegando
+    una SPA; **no vale para Playwright**, donde cada `page.goto` es una carga completa que tira el
+    access token de memoria y obliga a refrescar. **Una navegación, una unidad de las diez.**
+  - Y todas caen en **una sola clave**: `login:ip:172.20.0.7`, la IP del **contenedor de frontend**
+    (el navegador habla con Next.js y Next.js proxea al backend). Observado a 9/10 con 40 s de TTL.
+    Las llamadas de Node contra `BACKEND_URL` llegan desde el host (`192.168.65.1`) y gastan otro
+    contador — por eso los helpers de `seed-context.ts` son gratis y los pasos de navegador no.
+  - Se confirmó en los logs del backend: `Login rate limit exceeded for ip=172.20.0.7` → `429` en
+    `/auth/login`, y `Refresh rate limit exceeded for ip=172.20.0.7` → `429` en `/auth/refresh`.
+  - **Dos síntomas, y sólo el primero parece un fallo de login**: (1) el login se rechaza y
+    `loginAs` expira esperando la URL de destino; (2) **el login funciona y la navegación
+    *siguiente* rebota a `/login`** — la sesión es buena, su refresh es el rechazado. El (2) se
+    presenta como una aserción fallando contra la pantalla de login, sin nada que apunte a un rate
+    limit: la primera versión de este spec lo reportó como «la barra de acciones del manager tiene
+    0 botones».
+  - Mitigación, toda dentro de `incident.spec.ts`: **un contexto de navegador por rol, vivo durante
+    todo el fichero y logueado una sola vez** (tres logins para tres tests), y `visit()`/`loginOnce()`,
+    que esperan a que la ventana caduque (65 s) y reintentan **una** vez. No se snapshotea
+    `storageState`: el refresh **rota** (el claim `fam` es una familia de tokens), así que un estado
+    capturado al loguear queda obsoleto en cuanto el contexto vivo refresca, y restaurarlo aterriza
+    en `/login` — probado. El rebote hay que detectarlo **después** de `goto` (es client-side: el
+    documento carga en la ruta pedida y sólo al contestar el `429` enruta a `/login`), de ahí el
+    `BOUNCE_GRACE_MS` de 3 s.
+  - **Lo que esto significa para la sección 5**: una pasada completa de la suite cabe, pero **va al
+    filo**. Si se añade un cuarto spec, o si CI reintenta (`retries: 1`), hay que contar
+    navegaciones, no sólo logins. Las secciones 2 y 3 **no** tienen esta recuperación; hoy pasan
+    porque corren antes y el presupuesto aún no está agotado.
+- **Selectores descubiertos (ninguno depende del idioma, misma disciplina que la sección 3):**
+  - `/incidents/[id]`: la barra del manager es
+    `article[aria-labelledby="incident-heading"] section` filtrado por *tiene `button`* — es la
+    única `<section>` del detalle con botones (las demás son `<dl>` de sólo lectura) y las hojas
+    Radix se portalan a `document.body`, así que no entran. El orden es fijo
+    (`MANAGER_ACTIONS[status]` en `features/incidents/lib/manager-actions.ts`): `OPEN` →
+    [classify, triage, cancel]; `CLASSIFIED` → [assign, triage, cancel]. **`nth(0)` es siempre
+    «avanzar el ciclo»**, igual que la convención que documentó la sección 3 para la limpiadora.
+  - **El botón de confirmar de una hoja/diálogo se localiza por `button[aria-busy]`**: tanto
+    `AssignSheet` como `TriageSheet` pintan exactamente un control con
+    `aria-busy={mutation.isPending}` (React lo serializa como `aria-busy="false"` en reposo) y el
+    aspa de cerrar no lo lleva. Los `id` de sus campos vienen de `useId()` y **no** sirven como
+    selector; dentro del diálogo se va por `select` (asignar) e `input[type="number"]` (triaje).
+  - `/tech/incidents/[id]`: `page.locator("main button")` — el shell del técnico
+    (`TechnicianShell`) pinta un `<main>` que deja fuera la topbar. Orden fijo por `TECH_ACTIONS`
+    (`features/tech/lib/tech-actions.ts`): `ASSIGNED` → [accept, reject], `ACCEPTED` →
+    [en-route, reject], `IN_PROGRESS` → [wait-parts] **más el formulario de cierre**. El
+    `toHaveCount(2)` es lo que prueba en qué estado está la pantalla.
+  - **El formulario de cierre sí trae `id` estables**, los únicos de esta sección:
+    `#tech-final-cost` y `#tech-materials`, con `form:has(#tech-final-cost) button[type="submit"]`.
+  - `/approvals`: la cola es una `<table>`; la fila se localiza por el **título de la incidencia**,
+    que `RequestCell` pinta tal cual y que es cadena **propia del spec** (con `RUN_TAG` único), no
+    traducida. Dentro de la fila, los botones son **aprobar y luego rechazar**, en ese orden, y sólo
+    se pintan con `RESPOND_OWNER_APPROVALS` — verificado por API que el manager recibe **403** al
+    responder, aunque sí puede **leer** la cola.
+  - `GET /incidents` y `GET /owner-approvals` devuelven envelope **`items`**, no el `data` de
+    propiedades/usuarios/reservas. Cuesta un `undefined` silencioso si se asume mal.
+- **Hechos de producto que el spec asserta y conviene no reaprender**: aprobar el coste real **no
+  cierra** la incidencia — la devuelve a `IN_PROGRESS` con `approved_cost` fijado y el técnico
+  repite el cierre, para que `resolved_at` siga significando «lo dio por terminado»; y el cierre por
+  encima del umbral escribe `final_cost` pero deja `resolved_at` a `null`.
+- **Residuo conocido en el stack de este worktree, y el hecho de producto que lo explica**: queda
+  **una `OwnerApproval` `PENDING` huérfana** (`0b511362…`, 250.00 EUR, incidencia
+  `7b566b60… "(e2e 1789322804666)"`). Salió de limpiar a mano las incidencias que dejaron las
+  corridas abortadas *antes* de que existiera el marcador `SPEC_MARKER`. El hecho: **cancelar una
+  incidencia que está en `AWAITING_OWNER_APPROVAL` no cierra su aprobación**, y después ya no hay
+  forma de cerrarla — responderla da `409 "Incident is already CANCELLED and admits no further
+  transition"`. Es inerte para el spec (4.3 localiza su fila por el título con `RUN_TAG` único, y
+  las tres corridas verdes de abajo se hicieron con esa fila ya presente), pero se deja anotado
+  porque a) ensucia `/approvals` y b) es una asimetría real del dominio, no un accidente del test.
+- **En qué estado queda el stack**: vivienda PAJARITOS8 en `VACANT_READY` y REDES11 en
+  `MAINTENANCE_REQUIRED` (ambas como las dejó el seed / la sección 3); las tres incidencias del seed
+  intactas (`ASSIGNED HIGH`, `CLASSIFIED MEDIUM`, `CLASSIFIED LOW`); ninguna incidencia del spec
+  viva; la aprobación huérfana de arriba. El spec añade además una reserva reutilizable en REDES11
+  marcada `external_channel_id = "e2e-incident-cycle"`, `CONFIRMED`, con ventana **a 30 días vista**
+  y re-apuntada en cada corrida: futura a propósito, porque la ventana del portal es sólo cota
+  **superior** (`now <= check_out + grace_days`, sin cota inferior), así que autoriza siempre, y
+  porque estando lejos de *hoy* ningún job de reloj la ve elegible ni puede convertirse en la
+  segunda estancia solapada que haría que `sim-advance` reportara `ambiguous` a la sección 3.
+- **Verificación (este worktree, stack `PORT_OFFSET=77` de la sección 2, sin `make up`/`bootstrap`/
+  `seed-demo`):** `npm run typecheck` y `npm run lint` limpios.
+  `BASE_URL=http://localhost:3077 BACKEND_HEALTH_URL=http://localhost:8077/health npx playwright
+  test e2e/incident.spec.ts` → **`3 passed`** en **tres corridas seguidas** (27.2 s / 1.5 m / 2.0 m —
+  las dos últimas más lentas porque agotan el presupuesto de login y la recuperación espera la
+  ventana a propósito). Suite completa
+  `npx playwright test e2e/login.spec.ts e2e/cleaning.spec.ts e2e/incident.spec.ts` → **`8 passed`**
+  (2.3 m), o sea que las secciones 2 y 3 siguen verdes y no hay contaminación cruzada.
+  **Prueba de mutación**: quitando el clic de clasificar en 4.1, el spec falla en
+  `expect(page.getByText(SAFETY_AI_SUMMARY)).toBeVisible()` — «element(s) not found» —, así que la
+  aserción que sostiene «MockAIAdapter la clasifica» no es vacía. (Los fallos reales de las primeras
+  corridas sirvieron de mutación natural para otras dos: el badge rojo resolvió al `<span>` real con
+  su clase `bg-state-error/…`, y `toHaveCount(3)` de la barra del manager dio 0 cuando la página no
+  era la esperada.)
