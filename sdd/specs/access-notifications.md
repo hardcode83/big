@@ -474,6 +474,21 @@ texto libre que **no** son
 miembros del enum —`INCIDENT_REJECTED` y `LEGAL_REGISTRATION_FAILED`, sobre la columna
 `String(100)`— quedan fuera del censo por construcción: no hay `NotificationType.<X>` que casar.
 
+`guest-scheduled-comms` (2026-09-14) cierra los tres huérfanos que quedaban en
+`WITHOUT_WRITER` — `CHECKIN_REMINDER_24H`/`CHECKIN_REMINDER_2H`, escritos por
+`SendCheckinRemindersUseCase` (`reservations/application/use_cases.py`), y `CHECKOUT_REMINDER`,
+por `SendCheckoutRemindersUseCase` — y añade un miembro nuevo, `ACCESS_INSTRUCTIONS_SENT`, con
+escritor en `DeliverAccessInstructionsUseCase` (`access/application/use_cases.py`): **el primer
+escritor real de la excepción 1 de la regla 11** (el código de acceso enmascarado, `****XX`), que
+hasta entonces solo la tabla de la regla declaraba y ningún sumidero ejercitaba. Los tres jobs
+comparten forma con `provision_access_records`: candidato aproximado por ventana, umbral exacto
+en Python contra `effective_bounds`/`checkout_instant` (propiedades de `properties/domain/clock_triggers.py`),
+dedup por `exists_for(tenant_id, related_type="access_record"|"reservation", related_id, notification_type)`
+y ninguno muta el estado de la entidad que originó el aviso —`AccessRecord.status` sigue
+cambiando solo por `POST /access-records/{id}/delivered`, la confirmación independiente del
+operador. El catálogo sube de diecinueve a **veintitrés** miembros con escritor y de veintitrés a
+**veinticuatro** en total; el único miembro que sigue en `WITHOUT_WRITER` es `LOCK_ALERT`.
+
 ### La bandeja in-app
 
 - THE SYSTEM SHALL exponer `GET /api/v1/notifications` con el envelope paginado de PRD §23,

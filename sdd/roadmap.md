@@ -195,7 +195,7 @@ Categorías:
   needs: cleaning, maintenance, access-notifications · size: L · kind: feature
 - [ ] staff-messaging-web — [FE] **el hilo del personal donde ya se trabaja**: `/cleaner/tasks/[id]`, `/tech/incidents/[id]` y la vista del manager. Va detrás de `cleaner-app` y `tech-app`, que son las que estrenan esas páginas — hoy son `RoutePlaceholder` (no está en el plan original, añadida el 2026-08-28) …
   needs: staff-messaging, cleaner-app, tech-app · size: M · kind: feature
-- [ ] guest-scheduled-comms — [BE] **lo que el sistema debe decirle al huésped por su cuenta y hoy no dice** …
+- [x] guest-scheduled-comms — [BE] **lo que el sistema debe decirle al huésped por su cuenta y hoy no dice** … → changes/archive/2026-09-14-guest-scheduled-comms/
   needs: notification-channel-routing, smtp-delivery-adapter, celery-jobs, access-notifications · completes: access-notifications · size: M · kind: feature
 - [x] guest-link-delivery — [BE+FE] **el portal del huésped está entero y nadie le da el enlace** … → changes/archive/2026-09-08-guest-link-delivery/
   needs: guest-portal-api, reservations-web, smtp-delivery-adapter, notification-channel-routing · size: S · kind: feature
