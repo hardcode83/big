@@ -22,8 +22,12 @@ export interface StatementPropertyDirectory {
   isPending: boolean;
 }
 
-/** Design D5-equivalent: DRAFT is not yet final, READY is reviewable, SENT is done. */
-const STATUS_TONE: Record<OwnerStatementStatus, Tone> = {
+/**
+ * Design D5-equivalent: DRAFT is not yet final, READY is reviewable, SENT is
+ * done. Exported (task 3.3 note) so section 4's `StatementSummary` reuses the
+ * same status→tone mapping instead of redefining it for the identical enum.
+ */
+export const STATUS_TONE: Record<OwnerStatementStatus, Tone> = {
   DRAFT: "gray",
   READY: "blue",
   SENT: "green",

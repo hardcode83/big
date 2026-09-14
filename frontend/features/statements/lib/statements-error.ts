@@ -1,3 +1,5 @@
+import type { UseQueryResult } from "@tanstack/react-query";
+
 import { ApiError } from "@/lib/api";
 
 /**
@@ -28,4 +30,57 @@ export function readErrorKey(error: unknown): string {
     return GENERIC_READ_ERROR_KEY;
   }
   return READ_KEY_BY_STATUS[error.status] ?? GENERIC_READ_ERROR_KEY;
+}
+
+/**
+ * A discriminated union of the UI states `StatementDetailState` (task 4.4)
+ * needs to render for `GET /owner-statements/{id}`. Pure mapper — no React
+ * hooks — same shape/discipline as
+ * `features/reservations/lib/error-mapping.ts:mapReservationsError`.
+ *
+ * Rules (R1.2, R3.7):
+ * - `isPending`: `loading`.
+ * - `401`: delegated to the shared session-refresh/expiry flow (the same
+ *   discipline `readErrorKey` documents for the list) — stays `loading` so
+ *   this component never flashes a misleading `error`/`not-found` for what
+ *   is actually a session expiry.
+ * - `403`: `forbidden` — authenticated but not entitled; no financial data
+ *   is ever attached to this variant.
+ * - `404`: `not-found`. Per the backend contract (R3.7 / R7.2 del backend),
+ *   this status means EITHER "no such id" OR "id belongs to another
+ *   tenant" — this mapper deliberately collapses both into the same
+ *   variant with no extra detail, so the component cannot leak which one
+ *   occurred even by accident.
+ * - anything else (`422`, `5xx`, network/`TypeError`): generic `error`.
+ * - success: `ok` with the data.
+ */
+export type StatementDetailState<TData> =
+  | { kind: "loading" }
+  | { kind: "forbidden" }
+  | { kind: "not-found" }
+  | { kind: "error" }
+  | { kind: "ok"; data: TData };
+
+export function mapStatementDetailState<TData>(
+  queryResult: Pick<UseQueryResult<TData>, "isPending" | "isError" | "error" | "data">,
+): StatementDetailState<TData> {
+  if (queryResult.isPending) {
+    return { kind: "loading" };
+  }
+  if (queryResult.isError) {
+    const error = queryResult.error;
+    if (error instanceof ApiError) {
+      if (error.status === 401) {
+        return { kind: "loading" };
+      }
+      if (error.status === 403) {
+        return { kind: "forbidden" };
+      }
+      if (error.status === 404) {
+        return { kind: "not-found" };
+      }
+    }
+    return { kind: "error" };
+  }
+  return { kind: "ok", data: queryResult.data as TData };
 }

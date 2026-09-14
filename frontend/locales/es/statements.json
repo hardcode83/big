@@ -53,5 +53,75 @@
       "forbidden": "No tienes permiso para ver estas liquidaciones.",
       "generic": "No se pudieron cargar las liquidaciones. Vuelve a intentarlo."
     }
+  },
+  "detail": {
+    "backToList": "« Volver al listado »",
+    "notFound": {
+      "title": "Liquidación no encontrada"
+    },
+    "error": {
+      "forbidden": "No tienes permiso para ver esta liquidación.",
+      "generic": "No se pudo cargar la liquidación. Vuelve a intentarlo."
+    },
+    "summary": {
+      "title": "Resumen",
+      "notes": {
+        "label": "Notas",
+        "empty": "Sin notas"
+      },
+      "amounts": {
+        "grossRevenue": "Ingresos brutos",
+        "otaCommissions": "Comisiones OTA",
+        "netRevenue": "Ingresos netos",
+        "cleaningCosts": "Limpieza",
+        "laundryCosts": "Lavandería",
+        "amenitiesCosts": "Amenities",
+        "maintenanceCosts": "Mantenimiento",
+        "specialistCosts": "Especialistas",
+        "otherCosts": "Otros gastos",
+        "platformFee": "Comisión de plataforma",
+        "netOwnerResult": "Resultado neto del propietario"
+      }
+    },
+    "reservations": {
+      "title": "Reservas",
+      "empty": {
+        "title": "Sin reservas",
+        "description": "Esta liquidación no incluye reservas."
+      },
+      "fields": {
+        "id": "Identificador",
+        "checkIn": "Entrada",
+        "nights": "Noches",
+        "gross": "Importe bruto",
+        "ota": "Comisión OTA",
+        "net": "Importe neto",
+        "currency": "Moneda"
+      }
+    },
+    "expenses": {
+      "title": "Gastos",
+      "empty": {
+        "title": "Sin gastos",
+        "description": "Esta liquidación no incluye gastos."
+      },
+      "fields": {
+        "id": "Identificador",
+        "category": "Categoría",
+        "description": "Descripción",
+        "amount": "Importe",
+        "currency": "Moneda",
+        "date": "Fecha"
+      },
+      "category": {
+        "CLEANING": "Limpieza",
+        "LAUNDRY": "Lavandería",
+        "AMENITIES": "Amenities",
+        "MAINTENANCE": "Mantenimiento",
+        "SPECIALIST": "Especialista",
+        "PLATFORM_FEE": "Comisión de plataforma",
+        "OTHER": "Otro"
+      }
+    }
   }
 }
