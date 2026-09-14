@@ -121,8 +121,18 @@ cuatro nombres de hoy, porque un quinto servicio con bind mount no la dispara. A
 servicios en alcance del propio `docker-compose.yml`, un servicio nuevo entra en el guard sin que
 nadie lo añada.
 
+**Dónde corre**: como paso del workflow `compose-ports` existente, que ya es el gate de
+`docker-compose.yml` y ya paga el patrón detect/suite/gate. No se crea un décimo workflow: sería
+repetir esa estructura entera —y `specs/backend-ci.md` R1.3 prohíbe `paths:` en su `on:`, así que un
+workflow nuevo se ejecutaría en cada Pull Request— para vigilar el mismo fichero que aquél ya vigila.
+El script sí es propio (`scripts/compose-bytecode.py`), para no engordar `compose-ports.py`, y
+reutiliza su invocación (`config --no-interpolate --no-env-resolution`, suelo Compose 2.35.0), que
+está resuelta ahí por un motivo medido: `config` desnudo vuelca el `.env` entero.
+
 Rejected: comprobar por nombre `migrate`/`backend`/`worker`/`beat` — una lista de nombres que el
 siguiente servicio esquiva sin darse cuenta.
+Rejected: un workflow propio para el guard — duplica el patrón detect/suite/gate y, sin `paths:`,
+corre en cada Pull Request para vigilar un fichero que ya tiene gate.
 Rejected: sólo verificación puntual al implementar — cierra el incidente de hoy y deja la regla sin
 dueño mañana.
 
