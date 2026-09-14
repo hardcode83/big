@@ -23,6 +23,7 @@
     "OWNER_APPROVAL_APPROVED": "The owner approved the expense for your incident",
     "OWNER_APPROVAL_REJECTED": "The owner rejected the expense for your incident",
     "GUEST_PORTAL_LINK_DELIVERED": "Guest portal link delivered",
+    "ACCESS_INSTRUCTIONS_SENT": "Access instructions sent",
     "unknown": "System notice"
   },
   "bell": {

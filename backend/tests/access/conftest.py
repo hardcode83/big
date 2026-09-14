@@ -96,7 +96,7 @@ async def insert_reservation(
 
 
 async def insert_access_record(
-    session, tenant, prop, *, reservation=None, status=None, valid_to=None
+    session, tenant, prop, *, reservation=None, status=None, valid_to=None, code_masked=None
 ) -> AccessRecordModel:
     from app.access.domain.enums import AccessRecordStatus
 
@@ -106,6 +106,7 @@ async def insert_access_record(
         reservation_id=reservation.id if reservation is not None else None,
         status=status or AccessRecordStatus.PENDING,
         valid_to=valid_to,
+        code_masked=code_masked,
     )
     session.add(record)
     await session.flush()

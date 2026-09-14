@@ -4588,7 +4588,8 @@
           "INCIDENT_MESSAGE",
           "OWNER_APPROVAL_APPROVED",
           "OWNER_APPROVAL_REJECTED",
-          "GUEST_PORTAL_LINK_DELIVERED"
+          "GUEST_PORTAL_LINK_DELIVERED",
+          "ACCESS_INSTRUCTIONS_SENT"
         ],
         "title": "NotificationType",
         "type": "string"

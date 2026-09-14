@@ -19,16 +19,17 @@ from datetime import timedelta
 from celery.schedules import crontab
 
 #: Every periodic job, with its cadence: the four of PRD §8.3 that `celery-jobs` owns, with
-#: the PRD's own numbers, plus the two that `access-notifications` adds and the one that
-#: `reservations-webhooks` adds.
+#: the PRD's own numbers, plus the two that `access-notifications` adds, the one that
+#: `reservations-webhooks` adds, and the three that `guest-scheduled-comms` adds.
 #:
-#: Two of PRD §8.3 are absent from *this* table for different reasons.
-#: `generate_price_recommendations` is not periodic — it runs at an hour of the day, so it
-#: lives in `DAILY_JOBS` below (`revenue-pricing` D8) and the calendar still carries it.
-#: `send_checkin_reminders` has no code to schedule yet: it is a message to a guest, so what
-#: it needs is the channel adapter and the template that `messaging-ai` /
-#: `access-notifications` own. The clock is the trivial half, and a beat entry pointing at a
-#: task nobody has written fails once, at 03:00, in a worker log nobody is reading.
+#: One of PRD §8.3 is absent from *this* table: `generate_price_recommendations` is not
+#: periodic — it runs at an hour of the day, so it lives in `DAILY_JOBS` below
+#: (`revenue-pricing` D8) and the calendar still carries it.
+#:
+#: **`send_checkin_reminders` is PRD §8.3's own name**, and it sat without a beat entry until
+#: `guest-scheduled-comms` gave it both the channel (`EMAIL`, unconditionally — design D12) and
+#: the template (`reservations/domain/notifications.py`, design D6) a clock entry would
+#: otherwise have pointed at nothing.
 #:
 #: **`dispatch_notifications` and `provision_access_records` are not in PRD §8.3, and that
 #: is a declared divergence** (`access-notifications` design D3 and D2). The PRD says what
@@ -80,6 +81,27 @@ CADENCES: dict[str, timedelta] = {
     # `celery-jobs` design D16 declared absent on purpose, deferring the cadence decision to
     # whoever scheduled it on its own merits — this entry is that decision.
     "sync_pms_reservations": timedelta(hours=6),
+    # `guest-scheduled-comms` (R1, design D1/D2). PRD §8.3 names `send_checkin_reminders` but
+    # never schedules it — the note above records why the clock alone waited. Fifteen minutes,
+    # not `check_checkin_windows`'s five: that cadence exists for same-day operational
+    # automation (cleaning tasks, the state machine), while a guest reminder tolerates a much
+    # coarser worst-case delay with no operational cost, and a faster cadence would only
+    # multiply per-tenant query round-trips for reservations that are, by construction, still
+    # hours away from the threshold.
+    "send_checkin_reminders": timedelta(minutes=15),
+    # `guest-scheduled-comms` (R2, design D1/D2) — a declared divergence: PRD §8.3 names no
+    # checkout-reminder job at all. Same fifteen-minute cadence and same reasoning as
+    # `send_checkin_reminders` above: a guest checkout reminder tolerates the same coarse
+    # worst-case delay, and there is no PRD number to defer to either way.
+    "send_checkout_reminders": timedelta(minutes=15),
+    # `guest-scheduled-comms` (R3, design D9) — its own task, deliberately not folded into
+    # `provision_access_records`: that reconciler's own docstring and `access-notifications`'
+    # design scope it tightly to create/revoke/expire, and mixing a guest-messaging concern
+    # into its commit would put two responsibilities under one lock and one cadence. Fifteen
+    # minutes, the same cadence as the other two `guest-scheduled-comms` jobs — a masked access
+    # code tolerates the same coarse worst-case delay a check-in/checkout reminder does, and
+    # there is no PRD number for this job either.
+    "deliver_access_instructions": timedelta(minutes=15),
 }
 
 

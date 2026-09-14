@@ -72,6 +72,18 @@ class NotificationType(str, enum.Enum):
     # prices, SLA). No `escalation_for` entry (R4.2) — a link the operator chose to send has no
     # SLA to breach, unlike the cleaning/technician events the catalogue was built around.
     GUEST_PORTAL_LINK_DELIVERED = "GUEST_PORTAL_LINK_DELIVERED"
+    # `guest-scheduled-comms` R3, design D10. Another divergence from PRD §14's sixteen, of the
+    # same kind as `GUEST_PORTAL_LINK_DELIVERED`/`PASSWORD_RESET_REQUESTED` above: the catalogue
+    # has no slot for "a guest's access instructions are ready to send".
+    #
+    # Named `_SENT`, not `_DELIVERED` — deliberately, despite mirroring
+    # `AccessRecordStatus.DELIVERED`/`TimelineEventType.ACCESS_CODE_DELIVERED`. Those two name
+    # the operator's own independent, out-of-band confirmation (`MarkAccessDeliveredUseCase`,
+    # PRD §15). This type names a different fact entirely: an email left this system. Reusing
+    # `_DELIVERED` here would make one name mean two things a reader cannot tell apart without
+    # opening the code — exactly what D10 exists to avoid. `DeliverAccessInstructionsUseCase`
+    # never calls `mark_delivered` and never touches `AccessRecord.status`.
+    ACCESS_INSTRUCTIONS_SENT = "ACCESS_INSTRUCTIONS_SENT"
 
 
 class NotificationChannel(str, enum.Enum):
