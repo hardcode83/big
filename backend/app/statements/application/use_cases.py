@@ -712,10 +712,8 @@ class GetOwnerStatementUseCase:
     """`GET /api/v1/owner-statements/{id}` (R3.3, R3.4).
 
     Returns the statement, the expenses it absorbed, and the reservations whose
-    stay overlapped the period — the same payload the PDF exporter of §4.10 builds.
-    Composing here means the API layer (task 6.1) and the PDF exporter share one
-    read path; without it, the two would drift on what "the detail" actually
-    contains.
+    stay overlapped the period for the GET detail response. The PDF export flow is
+    separate and remains outside the scope of this change.
     """
 
     def __init__(

@@ -66,6 +66,7 @@ from app.statements.api.schemas import (
     ExpenseUpdateRequest,
     GenerateOwnerStatementRequest,
     OwnerStatementGenerationReportResponse,
+    OwnerStatementDetailResponse,
     OwnerStatementNotesUpdateRequest,
     OwnerStatementPageResponse,
     OwnerStatementResponse,
@@ -217,15 +218,15 @@ async def generate_owner_statement(
 
 @router.get(
     "/owner-statements/{statement_id}",
-    response_model=OwnerStatementResponse,
+    response_model=OwnerStatementDetailResponse,
     summary="Get one owner statement",
     description=(
-        "Returns the statement's eleven monetary columns and its `status`/`notes`. Only "
+        "Returns the statement's current summary fields plus read-only `expenses` and "
+        "`reservations` breakdown collections. Only "
         "statements of the caller's tenant are reachable — a `404` with the same body "
         "whether the id is unknown or belongs to another tenant (R3.4, R7.2).\n\n"
-        "**The detail payload composes here, not in the API layer**: the PDF exporter "
-        "(`ExportOwnerStatementPdfUseCase`) reads the same `GetOwnerStatementUseCase`, "
-        "so the two surfaces cannot drift on what 'the detail' is (R3.5)."
+        "The detail payload is composed by `GetOwnerStatementUseCase` and exposed here "
+        "with the summary plus the read-only breakdown collections (R3.5)."
     ),
 )
 async def get_owner_statement(
@@ -234,12 +235,16 @@ async def get_owner_statement(
     use_case: Annotated[
         GetOwnerStatementUseCase, Depends(get_owner_statement_use_case)
     ],
-) -> OwnerStatementResponse:
+) -> OwnerStatementDetailResponse:
     payload = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         statement_id=statement_id,
     )
-    return OwnerStatementResponse.from_domain(payload["statement"])
+    return OwnerStatementDetailResponse.from_detail_domain(
+        payload["statement"],
+        expenses=payload["expenses"],
+        reservations=payload["reservations"],
+    )
 
 
 @router.patch(
