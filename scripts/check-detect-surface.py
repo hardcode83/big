@@ -23,15 +23,16 @@ matcher (`uncovered`) are the single source of truth that `scripts/test_rule11_o
 and `scripts/test_detect_surface.py` import — one definition of "does this anchor cover this
 path", never a second copy that can drift.
 
-Known limitations (frontend surface only — D1.1.c). `frontend_surface()` reads the literal
-`run:` text of `frontend-tests-suite`; it does NOT follow indirection:
+Known limitations (frontend/e2e surfaces — D1.1.c; `e2e_surface()` added by `hardening-release`
+design D4, same mechanism, pointed at `e2e-tests-suite`). `frontend_surface()`/`e2e_surface()`
+read the literal `run:` text of their suite job; they do NOT follow indirection:
   - `make <target>` contributes `Makefile` but the recipe body is not resolved, so a *new*
     script a Make target invokes is seen only if the target's own inputs (`Makefile`) or that
     script's path already appears verbatim somewhere the model reads. Today this is covered by
     other means: `check-version-parity.py` (run via `make check-version-parity`) is anchored
     because a human listed it in the `case`, and its always-run gate `version-parity.yml`
     (SEC-2) runs it unconditionally regardless — but the *class* is open for any future Make
-    target the frontend suite grows.
+    target either suite grows.
   - a local composite action (`uses: ./.github/actions/**`) is not modelled at all; its own
     `run:` steps are outside this parser. `.github/scripts/*` (anchored) is the covered form.
   - a root-script path assembled at runtime out of pieces that never appear literally on the line
@@ -187,6 +188,9 @@ def compose_surface(root: Path = REPO_ROOT) -> list[str]:
 #: Job whose `run:` blocks define the frontend suite's cross-area executable surface.
 _FRONTEND_SUITE_JOB = "frontend-tests-suite"
 
+#: Job whose `run:` blocks define the e2e suite's cross-area executable surface.
+_E2E_SUITE_JOB = "e2e-tests-suite"
+
 _MAKE_TARGET = re.compile(r"\bmake\s+([A-Za-z0-9_.-]+)")
 
 #: A `scripts/<tail>` token, at a path-component boundary. The lookbehind rejects a mid-token hit
@@ -327,6 +331,32 @@ def frontend_surface(root: Path = REPO_ROOT) -> list[str]:
     return sorted(surface)
 
 
+def e2e_surface(root: Path = REPO_ROOT) -> list[str]:
+    """Executables the e2e suite runs OUTSIDE `backend/**`/`frontend/**` (design D4).
+
+    Same mechanism as `frontend_surface()`, pointed at `e2e-tests-suite` instead: every
+    `scripts/…` reference resolved to its true repo-relative path, plus `Makefile` for each
+    `make <target>` (today `make up`, `make bootstrap`, `make seed-demo` — the teardown is a bare
+    `docker compose down --volumes`, not a Make target, see the workflow). The `npm ci`/
+    `playwright install`/`npm run test:e2e` steps run under `working-directory: frontend`, so
+    they are `frontend/**` inputs already anchored by `frontend/*` and are not part of this
+    cross-area surface — same reasoning `frontend_surface()` gives for its own npm steps.
+    """
+    workflow = root / ".github/workflows/e2e-tests.yml"
+    lines = workflow.read_text(encoding="utf-8").splitlines()
+    job_lines = _job_lines(lines, _E2E_SUITE_JOB)
+    surface: set[str] = set()
+    for text in _run_texts(job_lines):
+        for raw_line in text.splitlines():
+            stripped = raw_line.strip()
+            if stripped.startswith("#"):
+                continue  # a bash comment line is not an executed reference
+            if _MAKE_TARGET.search(raw_line):
+                surface.add("Makefile")
+            surface.update(_root_script_refs(raw_line))
+    return sorted(surface)
+
+
 # ── The CLI ────────────────────────────────────────────────────────────────────────────────
 
 #: workflow name → (surface function, detect workflow file). One entry per conditional gate.
@@ -334,6 +364,7 @@ WORKFLOWS = {
     "rule11": (rule11_surface, REPO_ROOT / ".github/workflows/rule11-ownership.yml"),
     "compose": (compose_surface, REPO_ROOT / ".github/workflows/compose-ports.yml"),
     "frontend": (frontend_surface, REPO_ROOT / ".github/workflows/frontend-tests.yml"),
+    "e2e": (e2e_surface, REPO_ROOT / ".github/workflows/e2e-tests.yml"),
 }
 
 

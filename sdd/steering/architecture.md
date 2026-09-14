@@ -39,6 +39,12 @@ El hexagonal se regeneró en `dashboard-api` (el `2026-07-13_...` se borró). Di
 
 **Dieciséis cajas y diecisiete dominios no se contradicen**, y conviene decirlo porque la cuenta no cuadra a simple vista (el panel de documentación de `dashboard-api` la encontró sin cuadrar en una redacción anterior de este párrafo): el 17.º es **`integrations`**, que el diagrama sitúa en el anillo de adaptadores y no dentro del hexágono, porque eso es exactamente lo que es — el borde por el que se habla con sistemas externos. El diagrama anterior ya lo dibujaba así. `README.md` cuenta diecisiete porque cuenta directorios bajo `backend/app/`.
 
+> **Nota (change `hardening-release`)**: esta cifra de diecisiete quedó desactualizada tras la
+> incorporación del dominio `platform` — el recuento real hoy es **18**. La corrección completa de
+> este párrafo (que también exige re-medir el diagrama de dieciséis cajas) queda deliberadamente
+> fuera de alcance de este change; ver `docs/dod-audit.md` §28.18 "Corrección de la cifra de
+> dominios" para la cifra corregida y el detalle de qué queda pendiente.
+
 Al contrario que el de entidades, éste **no** se genera desde el código: describe una decisión de arquitectura, así que lo actualiza a mano el change que la cambia.
 
 ## Forma del sistema
