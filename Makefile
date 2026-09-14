@@ -371,6 +371,20 @@ compose-stacks:
 check-compose-ports:
 	python3 scripts/compose-ports.py
 
+# Comprueba que todo servicio Python que monta el árbol del repositorio por bind mount en
+# escritura declara PYTHONDONTWRITEBYTECODE (change `ci-runner-workspace-pollution`, R5). Sin
+# ella, `migrate`/`backend`/`worker`/`beat` escriben `__pycache__` de root en el árbol del host,
+# que en la VM de CI es el `_work/` persistente de un agente y hace fallar `actions/checkout`
+# antes de cualquier paso propio (`sdd/changes/ci-runner-workspace-pollution/proposal.md`).
+# Corre también en CI, dentro de `.github/workflows/compose-ports.yml` (design D8: no se crea un
+# décimo workflow para vigilar el mismo `docker-compose.yml` que aquél ya vigila).
+#
+# Fuera de $(COMPOSE) por el mismo motivo que `check-compose-ports` justo arriba: invoca
+# `docker compose config` desnudo con las dos banderas de siempre, y eso es lo que le da el mismo
+# veredicto en el principal, en un worktree enlazado y en CI.
+check-compose-bytecode:
+	python3 scripts/compose-bytecode.py
+
 # Comprueba que la propiedad de un sumidero de la regla 11 se declara en la tabla de
 # steering/security.md y en ningún otro sitio: recorre la prosa y los docstrings del alcance que
 # declara `SCOPE` y se pone en rojo nombrando fichero, línea y frase. Corre también en CI

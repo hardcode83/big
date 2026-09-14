@@ -55,6 +55,10 @@ services:
     command: uv run alembic upgrade head
     env_file: .env
     environment:
+      # ./backend:/app is a bind mount onto this tree, which on the CI VM is the runner's
+      # persistent `_work/` — a stray .pyc there survives the container and, root-owned,
+      # blocks the next job's checkout.
+      PYTHONDONTWRITEBYTECODE: "1"
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       # alembic/env.py imports app.core.config, which builds Settings at import time, so a
       # missing key fails the migration rather than the first credential read. `env_file`
@@ -75,6 +79,10 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      # ./backend:/app is a bind mount onto this tree, which on the CI VM is the runner's
+      # persistent `_work/` — a stray .pyc there survives the container and, root-owned,
+      # blocks the next job's checkout.
+      PYTHONDONTWRITEBYTECODE: "1"
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       # Generated into .env by `make up` (never versioned — steering/security.md #8).
@@ -195,6 +203,10 @@ services:
     command: uv run celery -A app.worker worker -l info
     env_file: .env
     environment:
+      # ./backend:/app is a bind mount onto this tree, which on the CI VM is the runner's
+      # persistent `_work/` — a stray .pyc there survives the container and, root-owned,
+      # blocks the next job's checkout.
+      PYTHONDONTWRITEBYTECODE: "1"
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY en .env (make up la genera)}
@@ -229,6 +241,10 @@ services:
     command: uv run celery -A app.worker beat -l info
     env_file: .env
     environment:
+      # ./backend:/app is a bind mount onto this tree, which on the CI VM is the runner's
+      # persistent `_work/` — a stray .pyc there survives the container and, root-owned,
+      # blocks the next job's checkout.
+      PYTHONDONTWRITEBYTECODE: "1"
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY en .env (make up la genera)}

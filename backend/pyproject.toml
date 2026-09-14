@@ -61,6 +61,11 @@ dependencies = [
     "uvicorn[standard]>=0.51.0",
 ]
 
+[tool.pytest.ini_options]
+# Bind mount (./backend:/app) is the CI runner's persistent _work/: a cache_dir inside the
+# tree lands root-owned on the host and blocks the next job's checkout.
+cache_dir = "/tmp/pytest_cache"
+
 [dependency-groups]
 dev = [
     # Node runtime for pyright, pinned via the lockfile (not fetched by nodeenv at

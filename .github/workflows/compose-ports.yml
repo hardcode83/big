@@ -253,6 +253,12 @@ jobs:
         # worktree, la guardia vería cero mapeos y daría verde en vacío.
         run: make check-compose-ports
 
+      - name: Ningún servicio Python deja bytecode en el árbol
+        # `ci-runner-workspace-pollution` R5/D8: engancha al gate existente en vez de crear un
+        # décimo workflow, porque vigila el mismo `docker-compose.yml`. Mismo motivo de estar
+        # fuera de `$(COMPOSE)` que el paso de arriba.
+        run: make check-compose-bytecode
+
       - name: La suite de la guardia
         # R6.4: si la guardia deja de detectar una vía, esto rompe el check. Hasta este change
         # NINGÚN workflow recogía `scripts/test_*.py` — `backend-tests.yml` invoca pytest con
