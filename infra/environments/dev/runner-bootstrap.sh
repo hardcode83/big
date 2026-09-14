@@ -56,6 +56,12 @@ SERVICE_PREFIX="actions.runner.${ORG_REPO_DASHED}.autohostai-${ENV}-vm"
 LEGACY_NAME="autohostai-${ENV}-vm"
 LEGACY_SERVICE="actions.runner.${ORG_REPO_DASHED}.${LEGACY_NAME}.service"
 LEGACY_HOME="/opt/actions-runner"
+# Hook de inicio de job (change ci-runner-workspace-pollution, R3.2). Ruta canónica FIJA, misma
+# convención que `/opt/gh-app-install-token.py`: la escribe el `write_files` del cloud-init en una
+# VM nueva, y el `sudo install -m0755` del RUNBOOK §6.2 en la VM viva. Este script la asume
+# presente y la copia al `hooks/` de cada agente.
+HOOK_SRC=/opt/runner-job-started.sh
+HOOK_NAME=runner-job-started.sh
 
 mkdir -p "$AGENTS_DIR"
 # Grupo docker: cloud-init lo crea; reasegurar para el alta out-of-band.
@@ -253,12 +259,113 @@ register_named_agent() {
     )
 }
 
-# Arranca el servicio de un agente ya registrado. Se llama SOLO después de que todos los
-# `register_named_agent` de esta pasada hayan terminado (Fase 2, más abajo).
-start_named_agent() {
+# === 5.b) Helpers del hook de inicio de job (change ci-runner-workspace-pollution, R3.2) ===
+#       Se llaman desde el CUERPO del script (Fase 2), NO desde la subshell de
+#       `register_named_agent`: `write_runner_env` produce un booleano ("¿cambió el .env?") que
+#       `start_named_agent` necesita para decidir el reinicio (D4), y una subshell `( ... )` no
+#       puede devolver una variable a su padre. La instalación del fichero sí sería inocua dentro
+#       de la subshell (copiar un fichero idéntico es un no-op), pero se mantiene junto a la
+#       escritura del `.env` para que el par viva en un solo sitio.
+
+# Copia el hook a `$RUNNER_HOME/hooks/runner-job-started.sh` del agente `i`, con dueño el propio
+# usuario del agente (el proceso del runner corre como él y tiene que poder leerlo y ejecutarlo)
+# y modo 0755 (el mismo que le da el cloud-init en `/opt`). `install` fija el modo explícitamente,
+# así que el `umask 077` de arriba no lo recorta. Idempotente por contenido: re-copiar un fichero
+# byte a byte idéntico no cambia nada observable.
+install_job_started_hook() {
     local i="$1"
     local runner_user="actions-runner-${i}"
     local runner_home="/opt/actions-runner-${i}"
+    if [[ ! -f "$HOOK_SRC" ]]; then
+        echo "ERROR: agent $i/$RUNNER_COUNT: falta $HOOK_SRC — lo escribe el cloud-init en una VM nueva; en la VM viva, 'sudo install -m0755 runner-job-started.sh $HOOK_SRC' (RUNBOOK §6.2)" >&2
+        return 1
+    fi
+    install -d -o "$runner_user" -g "$runner_user" -m 0755 "$runner_home/hooks"
+    install -o "$runner_user" -g "$runner_user" -m 0755 "$HOOK_SRC" "$runner_home/hooks/$HOOK_NAME"
+}
+
+# Declara `ACTIONS_RUNNER_HOOK_JOB_STARTED=<hook_path>` en el `.env` del agente, PRESERVANDO
+# cualquier otra clave que el fichero ya tuviera (nadie más escribe ahí hoy, pero el fichero es
+# del runner, no nuestro). Si la clave ya estaba, se sustituye en su sitio; si no, se añade al
+# final; si estaba duplicada, se colapsa en una sola línea.
+#
+# Imprime EXACTAMENTE una palabra en stdout: `changed` si el contenido resultante difiere del que
+# había en disco (→ el proceso del runner sigue con el entorno viejo y hay que reiniciarlo, D3),
+# o `unchanged` si ya estaba correcto (→ no tocar un servicio vivo, D4). Los diagnósticos van a
+# stderr para no contaminar esa palabra. Devuelve !=0 si la escritura falla.
+#
+# El `.env` NO lo carga ni `runsvc.sh` ni la unit de systemd: lo lee el propio proceso del runner
+# al arrancar, y por eso la doc de GitHub dice, literal, "any change to the .env file will require
+# restarting the runner" (D3). Escribirlo sobre un runner vivo no activa el hook por sí solo.
+#
+# Escritura atómica (temp + mv) y modo 0600, misma idea que el `agents.list` de más abajo: el
+# fichero no tiene por qué ser legible por el resto de la VM.
+#
+# Uso: write_runner_env <env_file> <hook_path> <runner_user>
+write_runner_env() {
+    local env_file="$1"
+    local hook_path="$2"
+    local runner_user="$3"
+    local key="ACTIONS_RUNNER_HOOK_JOB_STARTED"
+    local desired="${key}=${hook_path}"
+
+    local before=""
+    if [[ -f "$env_file" ]]; then
+        before="$(cat "$env_file")" || return 1
+    fi
+
+    local -a lines=()
+    local replaced=0 line
+    if [[ -f "$env_file" ]]; then
+        # `|| [[ -n "$line" ]]`: un fichero cuya última línea no acaba en \n no se pierde.
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            if [[ "$line" == "${key}="* ]]; then
+                if [[ "$replaced" -eq 0 ]]; then
+                    lines+=("$desired")
+                    replaced=1
+                fi
+                continue   # duplicados de la misma clave: se colapsan en la primera
+            fi
+            lines+=("$line")
+        done < "$env_file"
+    fi
+    if [[ "$replaced" -eq 0 ]]; then
+        lines+=("$desired")
+    fi
+
+    # `$(...)` recorta los \n finales por igual en los dos lados, así que la comparación no
+    # depende de si el fichero original terminaba o no en salto de línea.
+    local after
+    after="$(printf '%s\n' "${lines[@]}")"
+    if [[ -f "$env_file" && "$after" == "$before" ]]; then
+        printf 'unchanged\n'
+        return 0
+    fi
+
+    local tmp
+    tmp="$(mktemp "${env_file}.XXXXXX")" || return 1
+    printf '%s\n' "${lines[@]}" > "$tmp" || { rm -f "$tmp"; return 1; }
+    chown "${runner_user}:${runner_user}" "$tmp" || { rm -f "$tmp"; return 1; }
+    chmod 0600 "$tmp" || { rm -f "$tmp"; return 1; }
+    mv -f "$tmp" "$env_file" || { rm -f "$tmp"; return 1; }
+    printf 'changed\n'
+}
+
+# Arranca el servicio de un agente ya registrado. Se llama SOLO después de que todos los
+# `register_named_agent` de esta pasada hayan terminado (Fase 2, más abajo).
+#   $1 — índice `i` del agente.
+#   $2 — `1` si el `.env` de este agente CAMBIÓ en esta pasada (ver `write_runner_env`), `0` si no.
+#        Solo se LEE aquí dentro, así que cruzar la frontera de la subshell como argumento posicional
+#        basta: nada tiene que volver al padre.
+#   Códigos de salida: 0 = OK; 2 = el `.env` cambió pero el agente tiene un job en vuelo, así que el
+#   reinicio queda DIFERIDO (no es un fallo — el llamador lo anota en el resumen final, no en
+#   `had_failure`); cualquier otro !=0 = fallo real.
+start_named_agent() {
+    local i="$1"
+    local env_changed="${2:-0}"
+    local runner_user="actions-runner-${i}"
+    local runner_home="/opt/actions-runner-${i}"
+    local agent_name="autohostai-${ENV}-vm-${i}"
     local svc="${SERVICE_PREFIX}-${i}.service"
     local step=""
     (
@@ -273,8 +380,33 @@ start_named_agent() {
         cd "$runner_home"
         state="$(systemctl is-active "$svc" 2>&1 || true)"
         case "$state" in
-            active) ;;  # ya activo: no tocar (un servicio parado pero presente se reinicia abajo)
+            active)
+                # Ya activo. Hasta el change ci-runner-workspace-pollution esto era "no tocar", y
+                # sigue siéndolo salvo por UN caso: si el `.env` de este agente cambió en esta
+                # pasada, el proceso vivo arrancó con el entorno ANTERIOR y no tiene
+                # ACTIONS_RUNNER_HOOK_JOB_STARTED — ese fichero no lo carga systemd ni `runsvc.sh`,
+                # lo lee el propio proceso del runner al arrancar (D3; doc de GitHub, literal:
+                # "any change to the .env file will require restarting the runner"). Dejarlo así
+                # instalaría el hook sin que NINGÚN runner lo releyese: el fallo silencioso más
+                # probable de este change (D4).
+                # El reinicio se condiciona a que el agente no tenga un job en vuelo — misma
+                # guardia de liveness que la Fase 1 (`systemctl is-active` + la API de GitHub).
+                if [[ "$env_changed" -eq 1 ]]; then
+                    step="restart $svc (.env cambiado)"
+                    url="$(gh_in_progress_url_for_runner "$agent_name" || true)"
+                    if [[ -n "$url" ]]; then
+                        echo "[hook] agent $i/$RUNNER_COUNT: $svc activo CON job en vuelo ($url) — no se reinicia."
+                        echo "[hook]   El .env ya declara ACTIONS_RUNNER_HOOK_JOB_STARTED en disco, pero el proceso vivo aún no lo ha leído."
+                        echo "[hook]   Ejecutar 'systemctl restart $svc' cuando el agente quede ocioso (o reaplicar este bootstrap entonces)."
+                        exit 2
+                    fi
+                    systemctl restart "$svc"
+                    echo "[hook] agent $i/$RUNNER_COUNT: $svc reiniciado — el runner ya lee ACTIONS_RUNNER_HOOK_JOB_STARTED."
+                fi
+                ;;
             failed|inactive|unknown)
+                # Arranque desde cero: el proceso nace DESPUÉS de escribir el `.env`, así que lo lee
+                # sin más — no hay nada que reiniciar aquí.
                 ./svc.sh install "$runner_user"
                 ./svc.sh start
                 ;;
@@ -419,11 +551,32 @@ agents_temp="$(mktemp "${AGENTS_LIST}.XXXXXX")"
 trap 'rm -f "$agents_temp"' EXIT
 had_failure=0
 registered_idx=()   # índices `i` cuyo config.sh tuvo éxito — pendientes de arrancar servicio
+env_changed_idx=()  # índices `i` cuyo `.env` cambió en esta pasada → su runner debe releerlo (D3/D4)
+deferred_restart=() # agentes con el `.env` ya correcto en disco pero con job en vuelo (D4)
 
 for i in $(seq 1 "$RUNNER_COUNT"); do
     if register_named_agent "$i"; then
         registered_idx+=("$i")
         echo "autohostai-${ENV}-vm-${i}" >> "$agents_temp"
+        # Hook de inicio de job (R3.2): aquí, en el cuerpo del script, NO dentro de la subshell de
+        # `register_named_agent` — `write_runner_env` produce el booleano que decide el reinicio y
+        # una subshell no puede devolvérselo al padre (ver §5.b). Mismo gate que `registered_idx`:
+        # solo tiene sentido sobre un agente cuyo `config.sh` fue bien.
+        runner_home="/opt/actions-runner-${i}"
+        hook_state=""
+        if install_job_started_hook "$i" \
+            && hook_state="$(write_runner_env "$runner_home/.env" "$runner_home/hooks/$HOOK_NAME" "actions-runner-${i}")"; then
+            if [[ "$hook_state" == "changed" ]]; then
+                env_changed_idx+=("$i")
+                echo "[hook] agent $i/$RUNNER_COUNT: .env actualizado (ACTIONS_RUNNER_HOOK_JOB_STARTED) — requiere reinicio del runner"
+            fi
+        else
+            rc=$?
+            # No aborta el bucle (R3.3, misma filosofía que el resto de la fase): el agente queda
+            # registrado y arrancará, solo que sin el hook — y `had_failure` lo hace visible.
+            echo "ERROR: agent $i/$RUNNER_COUNT: instalación/declaración del hook de inicio de job falló (rc=$rc); el agente seguirá sin el hook" >&2
+            had_failure=1
+        fi
     else
         rc=$?
         echo "ERROR: agent $i/$RUNNER_COUNT config.sh failed (rc=$rc); se sigue intentando con los agentes restantes" >&2
@@ -432,9 +585,18 @@ for i in $(seq 1 "$RUNNER_COUNT"); do
 done
 
 for i in "${registered_idx[@]+"${registered_idx[@]}"}"; do
-    if ! start_named_agent "$i"; then
-        rc=$?
-        echo "ERROR: agent $i/$RUNNER_COUNT svc.sh failed (rc=$rc); registrado en GitHub pero el servicio no arrancó — sigue en agents.list para el siguiente reaprovisionamiento" >&2
+    env_changed=0
+    for c in "${env_changed_idx[@]+"${env_changed_idx[@]}"}"; do
+        if [[ "$c" == "$i" ]]; then env_changed=1; break; fi
+    done
+    start_rc=0
+    start_named_agent "$i" "$env_changed" || start_rc=$?
+    if [[ "$start_rc" -eq 2 ]]; then
+        # Reinicio diferido por job en vuelo: no es un fallo (el `.env` está bien en disco), pero
+        # tiene que verse en el resumen final o el operador se va creyendo que el hook ya actúa.
+        deferred_restart+=("autohostai-${ENV}-vm-${i} → systemctl restart ${SERVICE_PREFIX}-${i}.service")
+    elif [[ "$start_rc" -ne 0 ]]; then
+        echo "ERROR: agent $i/$RUNNER_COUNT svc.sh failed (rc=$start_rc); registrado en GitHub pero el servicio no arrancó — sigue en agents.list para el siguiente reaprovisionamiento" >&2
         had_failure=1
     fi
 done
@@ -444,6 +606,14 @@ mv -f "$agents_temp" "$AGENTS_LIST"
 trap - EXIT   # el temp ya no existe (lo mvimos); limpiar el trap evita `rm -f` espurio al salir.
 
 unset REG_TOKEN INSTALL_TOKEN
+
+if [[ "${#deferred_restart[@]}" -gt 0 ]]; then
+    echo "[hook] ${#deferred_restart[@]} agente(s) con ACTIONS_RUNNER_HOOK_JOB_STARTED escrito en disco pero PENDIENTES de reinicio (job en vuelo):"
+    for d in "${deferred_restart[@]}"; do
+        echo "[hook]   - $d"
+    done
+    echo "[hook] hasta que se reinicien, esos agentes NO ejecutan el hook de inicio de job."
+fi
 
 if [[ "$had_failure" -ne 0 ]]; then
     exit 1

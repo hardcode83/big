@@ -51,6 +51,15 @@ write_files:
     permissions: '0755'
     content: |
       ${indent(6, runner_bootstrap)}
+  # Hook de inicio de job del runner (change ci-runner-workspace-pollution, R3.2). Origen canónico
+  # fijo, igual que los dos de arriba: `runner-bootstrap.sh` lo copia desde aquí al
+  # `$RUNNER_HOME/hooks/` de cada agente y lo declara en su `.env`. En la VM viva esta ruta la pone
+  # a mano el RUNBOOK §6.2 (`metadata` es ForceNew + ignore_changes, así que este write_files solo
+  # llega a una VM NUEVA).
+  - path: /opt/runner-job-started.sh
+    permissions: '0755'
+    content: |
+      ${indent(6, runner_job_started)}
 runcmd:
   - systemctl enable --now docker
   - usermod -aG docker ubuntu

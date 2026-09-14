@@ -170,6 +170,7 @@ resource "oci_core_instance" "dev" {
       postgres_user              = var.postgres_user
       runner_bootstrap           = file("${path.module}/runner-bootstrap.sh")
       gh_app_token_helper        = file("${path.module}/gh-app-install-token.py")
+      runner_job_started         = file("${path.module}/runner-job-started.sh")
     }))
   }
 
