@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --project node",
     "test:layout": "npm run build:layout-css && vitest run --project browser",
+    "test:e2e": "playwright test",
     "build:layout-css": "tailwindcss --input app/globals.css --output test/artifacts/globals.css",
     "test:public-artifacts": "node scripts/test-public-artifacts.mjs",
     "test:entrypoint": "sh devops/test-entrypoint.sh",
@@ -37,6 +38,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/cli": "^4.3.3",
     "@tailwindcss/postcss": "^4.3.2",
     "@testing-library/jest-dom": "^6.9.1",

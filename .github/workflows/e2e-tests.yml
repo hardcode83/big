@@ -1,0 +1,550 @@
+name: e2e-tests
+
+# CI del change `hardening-release` (design.md D4, R1.3). Mismo patrón de tres jobs que
+# `backend-tests.yml`/`frontend-tests.yml` — la suite E2E de Playwright (`frontend/e2e/`) es
+# hermética a `backend/**` + `frontend/**` (navega la UI real contra el backend real), así que de
+# los PR que no tocan ninguna de las dos no puede decir nada nuevo:
+#
+#   e2e-tests-detect  decide si el diff toca el área      (siempre corre, ~segundos)
+#   e2e-tests-suite   la verificación de verdad           (corre si toca; levanta `make up` entero)
+#   e2e-tests         consolida y reporta                 (siempre corre)
+#
+# SIGUE PROHIBIDO poner `paths:` en `on:`: con un filtro en el disparador el workflow NO arranca,
+# así que un check requerido nunca reporta y GitHub deja el PR bloqueado esperando para siempre.
+# Lo que se decide es *dónde*: del disparador (donde condicionar implica no reportar) al interior
+# de la ejecución (donde se puede condicionar el trabajo y reportar igualmente).
+#
+# El check run toma el nombre del JOB, no del workflow. `e2e-tests` es por tanto el único
+# contexto marcable como obligatorio; `e2e-tests-suite` se salta de forma legítima y marcarlo
+# reproduciría el bloqueo indefinido por otra puerta.
+#
+# Runner self-hosted (`[self-hosted, dev]`), igual que el resto de workflows de este
+# repositorio. `e2e-tests-suite` corre Playwright en el HOST (no en un contenedor, design D1/D2):
+# navega contra el stack completo que `make up` levanta (postgres/redis/backend/worker/beat/
+# frontend), así que solo necesita Node en el runner — nada de `uv`/Python para el backend, que
+# vive por completo dentro de Docker.
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: e2e-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # --- ¿Hay que ejecutar la suite? Se decide una vez, aquí, y se publica. -----------
+  # Sin dependencias: solo git. Es el job que hace que el camino corto cueste segundos en vez
+  # de los varios minutos que tarda levantar el stack completo.
+  e2e-tests-detect:
+    runs-on: [self-hosted, dev]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      e2e: ${{ steps.decide.outputs.e2e }}
+      reason: ${{ steps.decide.outputs.reason }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Historia completa: el diff se calcula contra la base del PR (o el estado
+          # anterior de `main`), y un clon shallow no la contiene.
+          fetch-depth: 0
+          # Los pasos posteriores no necesitan Git autenticado.
+          persist-credentials: false
+
+      # Invariante temporal (mismo mecanismo que D1.1.c de `ci-pr-gates-optimization`, aplicado
+      # aquí por design D4): la superficie de detección de ESTE job debe cubrir todo lo que
+      # `e2e-tests-suite` ejecuta fuera de `backend/**`/`frontend/**` (hoy: `Makefile`, por los
+      # `make <target>` de la suite). Corre SIEMPRE y ANTES de `decide`, así que si la suite
+      # crece un input sin ampliar el `case` de abajo, este paso ABORTA el job en el mismo PR que
+      # abre la brecha. Un fallo aquí es un error de configuración del gate: el consolidador lo ve
+      # como `DETECT_RESULT != success` y reporta **fail-closed** (rojo), distinto del fail-open
+      # ante un diff ambiguo. Stdlib puro (`python3` del runner, sin `uv`).
+      - name: Verificar superficie de detección
+        run: python3 scripts/check-detect-surface.py e2e
+
+      - name: ¿El diff toca lo que cubre la suite E2E?
+        id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        # Aquí un fallo inesperado NO debe abortar el paso: si el diff no se puede determinar, el
+        # requisito (R1.3, mismo espíritu que R1.5/R2.4 de los otros dos workflows) es ejecutar
+        # la suite completa, no dejar el check en rojo — la duda se resuelve verificando. Por eso
+        # cada comando que puede fallar se comprueba explícitamente y `e2e` arranca en `true`:
+        # solo una ruta afirmativa lo baja a `false`.
+        run: |
+          # `set +e` explícito porque GitHub invoca los `run:` con `bash -e {0}`: `-e` está
+          # activo por defecto y un `set -uo pipefail` NO lo desactiva. Medida defensiva para el
+          # futuro: hoy todos los comandos que pueden fallar se invocan dentro de un
+          # condicional/negación, donde `-e` ya queda suspendido.
+          set +e
+          set -uo pipefail
+
+          e2e=true
+          reason="unknown-event-defaults-to-full-suite"
+          files=()
+
+          # `core.quotePath=false` y `-z`: sin ellos, un fichero con acento se escapa entre
+          # comillas y un patrón anclado como `frontend/*` no casa — la suite se saltaría con un
+          # cambio real de frontend, y el check saldría VERDE. `-z` separa por NUL, lo único
+          # seguro con nombres que llevan espacios o saltos de línea.
+          # `--no-renames`: sin él, mover un fichero FUERA de `backend/`/`frontend/` colapsa a
+          # una sola línea con la ruta destino y el PR se juzga "no toca el área" — código
+          # desaparecido con el check en verde.
+          read_diff() {
+            local out rc
+            out="$(mktemp)"
+            git -c core.quotePath=false diff -z --no-renames --name-only "$@" >"$out" 2>/dev/null
+            rc=$?
+            if [ "$rc" -eq 0 ]; then
+              mapfile -d '' -t files <"$out"
+            fi
+            rm -f "$out"
+            return "$rc"
+          }
+
+          # Comparación ruta a ruta con `case`, no un regex sobre el conjunto pegado: evita
+          # escapar el punto de `.github` y hace imposible un acierto parcial. Superficie de
+          # design D4: `backend/**` + `frontend/**` (la app que Playwright navega),
+          # `docker-compose.yml` + `Makefile` (lo que `make up`/`bootstrap`/`seed-demo` resuelve),
+          # `frontend/e2e/**` (los specs — subconjunto de `frontend/*`, listado aparte porque el
+          # proposal lo pide explícito) y este propio workflow.
+          evaluate() {
+            local f
+            for f in "${files[@]}"; do
+              case "$f" in
+                backend/* | frontend/* | frontend/e2e/* | docker-compose.yml | Makefile | .github/workflows/e2e-tests.yml)
+                  e2e=true
+                  reason="diff-touches-e2e"
+                  return
+                  ;;
+              esac
+            done
+            e2e=false
+            reason="no-e2e-changes"
+          }
+
+          case "$EVENT_NAME" in
+            workflow_dispatch)
+              # Vía de escape deliberada: una ejecución manual siempre verifica todo.
+              reason="workflow-dispatch-runs-full-suite"
+              ;;
+
+            pull_request)
+              if [ -z "${PR_BASE_SHA:-}" ] || [ -z "${PR_HEAD_SHA:-}" ]; then
+                reason="pr-shas-missing"
+              elif ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null; then
+                reason="pr-base-unreachable"
+              # Tres puntos, no dos: interesan los cambios de la rama desde el ancestro común.
+              # Con dos puntos, fusionar `main` en la rama dispararía la suite sin que el PR haya
+              # tocado el área.
+              elif ! read_diff "${PR_BASE_SHA}...${PR_HEAD_SHA}"; then
+                reason="git-diff-failed"
+              else
+                evaluate
+              fi
+              ;;
+
+            push)
+              if [ -z "${PUSH_BEFORE:-}" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                # Rama nueva o primer push: no hay estado anterior con el que comparar.
+                reason="push-before-is-zero"
+              elif ! git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+                # Force-push: el commit anterior ya no es alcanzable.
+                reason="push-before-unreachable"
+              elif ! read_diff "${PUSH_BEFORE}" "${PUSH_AFTER}"; then
+                reason="git-diff-failed"
+              else
+                evaluate
+              fi
+              ;;
+          esac
+
+          {
+            echo "e2e=${e2e}"
+            echo "reason=${reason}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "::notice::e2e=${e2e} (${reason})"
+
+          if [ "${#files[@]}" -gt 0 ]; then
+            echo "Ficheros cambiados considerados (${#files[@]}):"
+            # `%q` y el prefijo son contención, no formato: un nombre de fichero puesto al
+            # principio de una línea del log lo ejecuta el runner como comando de workflow
+            # (`::error::`, `::add-mask::`, `::stop-commands::`). `%q` colapsa cada ruta a una
+            # sola línea, así que el prefijo de dos espacios la cubre entera incluso si contiene
+            # saltos de línea.
+            printf '  %q\n' "${files[@]:0:50}"
+          fi
+
+  # --- La verificación de verdad. Levanta el stack completo y corre Playwright contra él. -------
+  e2e-tests-suite:
+    needs: e2e-tests-detect
+    if: needs.e2e-tests-detect.outputs.e2e == 'true'
+    runs-on: [self-hosted, dev]
+    # El suelo real: ~1-2 min de `make up` (build + migraciones + arranque de los 6 servicios),
+    # más `npm ci`/instalación del navegador Chromium, más la suite en sí. La suite en sí midió
+    # ~2.3-3 min en local (7.3), con hasta ~2 min extra si el limitador de login (10/min/IP,
+    # steering/security.md #7, contador COMPARTIDO por todo el run) obliga a una recuperación
+    # dentro de un spec — ya manejado por los specs, no algo que reintentar aquí. 25 minutos deja
+    # margen holgado sobre ese peor caso sin copiar el presupuesto de 15 min de
+    # `frontend-tests.yml`, que no arranca ningún stack.
+    timeout-minutes: 25
+    permissions:
+      contents: read
+
+    # Aislamiento de proyecto Compose, no solo de puertos: sin esto, `docker compose` deriva el
+    # nombre del proyecto del basename del directorio de checkout, IDÉNTICO en los 4 agentes
+    # concurrentes del runner self-hosted (`RUNBOOK.md` §6.2) — y el `concurrency:` de arriba solo
+    # agrupa por `github.ref`, así que dos PRs distintos SÍ pueden correr `e2e-tests-suite` a la
+    # vez. Con el mismo nombre de proyecto, los volúmenes con nombre (`postgres_data`, etc.) de
+    # ambas corridas son EL MISMO volumen: el `docker compose down --volumes --remove-orphans` de
+    # una corrida borra o corrompe los datos que la otra está usando en ese momento. `make up`/
+    # `make down` (y el `docker compose` desnudo del primer paso) recogen `COMPOSE_PROJECT_NAME`
+    # solos — no hace falta reescribir cada invocación con `-p`.
+    env:
+      COMPOSE_PROJECT_NAME: e2e-${{ github.run_id }}
+
+    outputs:
+      e2e_seconds: ${{ steps.e2e.outputs.seconds }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          # Misma versión que `frontend-tests.yml` y las dos etapas node:22-slim del Dockerfile
+          # del frontend. Playwright corre en este runner (design D1/D2), no en un contenedor.
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Hallazgo real de CI (PR #197, 2026-09-14, reproducido en tres agentes distintos del pool):
+      # `npm ci` fallaba con EACCES creando `frontend/node_modules/@adobe` cuando este bloque corría
+      # DESPUÉS de `make up`. `frontend_node_modules` es un volumen con nombre (`docker-compose.yml`)
+      # que en teoría solapa `/app/node_modules` DENTRO del contenedor — pero el residuo aparecía
+      # igual mientras el contenedor `frontend` seguía vivo (no se baja hasta el final del job),
+      # consistente con una escritura concurrente de ese contenedor sobre el mismo path del host
+      # que la teoría del volumen con nombre no explica del todo. En vez de perseguir la causa exacta
+      # sin acceso al runner, este bloque se mueve ANTES de `make up`: el `npm ci`/instalación de
+      # Playwright del host no depende del stack de Docker para nada, así que corriendo antes no hay
+      # ningún proceso del contenedor `frontend` vivo con el que competir por el mismo directorio.
+      - name: Limpiar node_modules residual antes de instalar
+        working-directory: frontend
+        run: |
+          set -uo pipefail
+          if [ -e node_modules ]; then
+            if rm -rf node_modules 2>/tmp/rm-node-modules.err; then
+              echo "::notice::frontend/node_modules residual eliminado antes de npm ci"
+            else
+              echo "::error::frontend/node_modules existe y no se pudo borrar (¿propiedad de otro usuario, p. ej. root de un contenedor? necesita intervención en el runner):"
+              cat /tmp/rm-node-modules.err
+              ls -la node_modules | head -5
+              exit 1
+            fi
+          fi
+
+      - name: Instalar dependencias del frontend (Playwright corre en el host)
+        working-directory: frontend
+        run: npm ci
+
+      # `npm exec --no --` y no `npx` (mismo motivo que `frontend-tests.yml`): con `npx`, un
+      # paquete ausente de `node_modules` se descarga del registro y se ejecuta — y
+      # `package.json` es contenido que controla el Pull Request, sobre un disparador
+      # `pull_request:` sin filtros de rutas. `--no` se niega a instalar nada: usa el binario que
+      # `npm ci` dejó desde el lockfile, o falla.
+      - name: Restaurar caché del navegador de Playwright
+        id: cache-restore
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Instalar el navegador Chromium de Playwright
+        working-directory: frontend
+        run: npm exec --no -- playwright install --with-deps chromium
+
+      - name: Guardar caché del navegador de Playwright
+        if: steps.cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
+
+      # Hallazgo real de CI (PR #197, 2026-09-14), no anticipado por el diseño: sin desplazamiento,
+      # `make up` publica backend/frontend en 127.0.0.1:8000/3000 — los MISMOS puertos que
+      # `docker-compose.deploy.yml` mantiene publicados de forma PERMANENTE en este mismo runner
+      # (RUNBOOK §7.4, para depuración por túnel SSH). Es la app de dev desplegada, no un job de CI:
+      # está arriba siempre, así que `make up` sin desplazar falla el 100% de las veces con
+      # "port is already allocated" — no es un riesgo de colisión ocasional entre corridas
+      # concurrentes (ese es un problema aparte, el que `COMPOSE_PROJECT_NAME` de abajo cubre para
+      # los volúmenes). El `PORT_OFFSET` de este proyecto (`sdd/project.md` §Worktree bootstrap) es
+      # el mecanismo que ya existe para "más de un stack en la misma máquina"; aquí se deriva del
+      # propio agente del runner (`RUNNER_NAME`, patrón `autohostai-dev-vm-<i>`, RUNBOOK §6.2) en
+      # vez de un valor fijo, porque cada agente ejecuta un job a la vez pero los 4 son
+      # concurrentes entre sí — un offset fijo compartido por los 4 reproduciría la misma colisión
+      # un nivel más abajo. Fail-closed: si `RUNNER_NAME` no encaja el patrón esperado, aborta en
+      # vez de adivinar un offset que podría chocar con el stack desplegado o con otro agente.
+      - name: Calcular PORT_OFFSET a partir del agente del runner
+        id: port-offset
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_NAME" =~ ^autohostai-dev-vm-([0-9]+)$ ]]; then
+            agent="${BASH_REMATCH[1]}"
+          else
+            echo "::error::RUNNER_NAME '${RUNNER_NAME}' no coincide con el patrón autohostai-dev-vm-<i>; no se deriva un PORT_OFFSET sin adivinar (evita chocar con el stack desplegado en 8000/3000)."
+            exit 1
+          fi
+          offset=$(( agent * 10 ))
+          echo "PORT_OFFSET=${offset}" >> "$GITHUB_ENV"
+          echo "::notice::PORT_OFFSET=${offset} (agente ${agent} de ${RUNNER_NAME})"
+
+      # El stack de `make up` vive en volúmenes con nombre (postgres_data, entre otros) que
+      # sobreviven al borrado de los contenedores — a diferencia de los `services:` efímeros de
+      # `backend-tests.yml`. Con el `COMPOSE_PROJECT_NAME` único por corrida de arriba, el caso
+      # normal es que aquí NO haya nada que heredar: el proyecto `e2e-<run_id>` no ha existido
+      # nunca antes. Lo que este paso cubre es el residual, que es real: `github.run_id` NO cambia
+      # al re-ejecutar un job desde la UI de GitHub (solo cambia `run_attempt`), así que un
+      # re-intento reutiliza exactamente este nombre de proyecto — y si el teardown del intento
+      # anterior se quedó a medias (job cancelado, runner reiniciado), sus volúmenes siguen ahí.
+      # Heredarlos importa porque `make bootstrap` es convergente
+      # (backend/app/cli/bootstrap.py) pero `make seed-demo` documenta explícitamente que su
+      # dataset de negocio (reservas, tarea de limpieza) NO tiene esa garantía. `|| true`: el caso
+      # normal es justamente que el proyecto no exista, y eso no es un fallo.
+      - name: Empezar de un stack limpio (sin volúmenes de un intento anterior)
+        run: docker compose down --volumes --remove-orphans || true
+
+      # `make bootstrap`/`make seed-demo` leen BOOTSTRAP_*/SEED_* del `.env` vía `env_file`
+      # (docker-compose.yml); `.env.example` los deja vacíos a propósito (regla 8 de
+      # steering/security.md: nunca un valor por defecto para un secreto real). `make up` solo
+      # copia `.env.example` -> `.env` si falta y solo genera JWT_SECRET_KEY/ENCRYPTION_KEY —
+      # nunca estos nueve. Así que se rellenan aquí, ANTES de `make up` (el `.env` tiene que
+      # existir con estos valores cuando se crea el contenedor `backend`, que los recibe vía
+      # `env_file` una sola vez al arrancar). Credenciales desechables: solo existen durante esta
+      # ejecución, el paso de arriba las borra en la siguiente corrida, y no son secretos reales
+      # — el mismo motivo por el que `backend-tests.yml` genera su JWT/cifrado con `openssl` en
+      # vez de un secret. `frontend/e2e/fixtures/load-env.ts` lee este mismo `.env` para que
+      # Playwright (en el host) inicie sesión con las mismas cuentas que `make bootstrap`/
+      # `make seed-demo` crean dentro de los contenedores.
+      - name: Preparar .env con credenciales efímeras de bootstrap/seed
+        run: |
+          set -euo pipefail
+          if [ ! -f .env ]; then
+            cp .env.example .env
+          fi
+          chmod 600 .env
+
+          set_var() {
+            key="$1"
+            value="$2"
+            if grep -q "^${key}=" .env; then
+              sed -i "s|^${key}=.*|${key}=${value}|" .env
+            else
+              printf '%s=%s\n' "$key" "$value" >> .env
+            fi
+          }
+
+          set_var BOOTSTRAP_TENANT_NAME "CI E2E Tenant"
+          set_var BOOTSTRAP_TENANT_BILLING_EMAIL "billing@ci-e2e.test"
+          set_var BOOTSTRAP_OWNER_NAME "CI E2E Owner"
+          set_var BOOTSTRAP_OWNER_EMAIL "owner@ci-e2e.test"
+          set_var BOOTSTRAP_OWNER_PASSWORD "$(openssl rand -hex 16)"
+          set_var BOOTSTRAP_MANAGER_NAME "CI E2E Manager"
+          set_var BOOTSTRAP_MANAGER_EMAIL "manager@ci-e2e.test"
+          set_var BOOTSTRAP_MANAGER_PASSWORD "$(openssl rand -hex 16)"
+          set_var BOOTSTRAP_SUPER_ADMIN_NAME "CI E2E Super Admin"
+          set_var BOOTSTRAP_SUPER_ADMIN_EMAIL "super-admin@ci-e2e.test"
+          set_var BOOTSTRAP_SUPER_ADMIN_PASSWORD "$(openssl rand -hex 16)"
+          set_var SEED_CLEANER_NAME "CI E2E Cleaner"
+          set_var SEED_CLEANER_EMAIL "cleaner@ci-e2e.test"
+          set_var SEED_CLEANER_PASSWORD "$(openssl rand -hex 16)"
+          set_var SEED_TECHNICIAN_NAME "CI E2E Technician"
+          set_var SEED_TECHNICIAN_EMAIL "technician@ci-e2e.test"
+          set_var SEED_TECHNICIAN_PASSWORD "$(openssl rand -hex 16)"
+
+          chmod 600 .env
+
+      # `PORT_OFFSET` calculado en el paso de arriba — obligatorio aquí, ver su comentario.
+      - name: make up
+        run: make up PORT_OFFSET=$PORT_OFFSET
+
+      # `frontend/e2e/global-setup.ts` (task 1.3) hace UNA sola petición a `/health` y aborta si
+      # falla — correcto para un humano que ya esperó a que `make up` terminara, pero
+      # `docker compose up -d` (dentro de `make up`) vuelve en cuanto los contenedores se han
+      # creado, no necesariamente cuando uvicorn ha terminado de arrancar dentro de `backend`.
+      # Este paso adapta el mismo endpoint (mismo criterio que 1.3: backend directo, sin pasar
+      # por el proxy del frontend) a un sondeo con reintentos, para que el chequeo de un solo
+      # intento de Playwright tenga algo estable contra lo que acertar.
+      - name: Esperar a que el backend responda en /health
+        run: |
+          set -uo pipefail
+          backend_port=$(( 8000 + PORT_OFFSET ))
+          for i in $(seq 1 60); do
+            if curl -fsS "http://localhost:${backend_port}/health" >/dev/null 2>&1; then
+              echo "::notice::backend saludable tras ${i} intento(s) (~$(( i * 5 ))s), puerto ${backend_port}"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::el backend no respondió 200 en /health (puerto ${backend_port}) tras 5 minutos"
+          docker compose logs backend --tail=200 || true
+          exit 1
+
+      - name: make bootstrap
+        run: make bootstrap
+
+      - name: make seed-demo
+        run: make seed-demo
+
+      - name: Ejecutar la suite E2E (Playwright)
+        id: e2e
+        working-directory: frontend
+        # `set +e` solo alrededor de `npm run test:e2e`, para cronometrar la suite y publicar los
+        # segundos AUNQUE falle — mismo patrón que `tests`/`layout` de `frontend-tests.yml` y
+        # `suite` de `backend-tests.yml`.
+        run: |
+          set -uo pipefail
+          export BASE_URL="http://localhost:$(( 3000 + PORT_OFFSET ))"
+          export BACKEND_HEALTH_URL="http://localhost:$(( 8000 + PORT_OFFSET ))/health"
+          started=$(date +%s)
+          set +e
+          npm run test:e2e
+          status=$?
+          set -e
+          echo "seconds=$(( $(date +%s) - started ))" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      # `if: always()`: el stack debe bajar tanto si la suite pasó como si falló o el job se
+      # canceló, para no dejar contenedores huérfanos consumiendo puertos/memoria en el runner
+      # persistente hasta la siguiente ejecución.
+      #
+      # `docker compose down --volumes` y NO `make down`, que es lo que había aquí antes: el
+      # target `down` del `Makefile` baja los contenedores pero CONSERVA los volúmenes a
+      # propósito, porque en dev local esos volúmenes son la base de datos de quien trabaja
+      # (`sdd/project.md` lo dice explícitamente al declarar el `teardown:` del worktree, que sí
+      # pasa `--volumes` por ser un stack desechable). En este job la conservación no tiene
+      # dueño: con `COMPOSE_PROJECT_NAME` único por corrida, los ~8 volúmenes de `e2e-<run_id>`
+      # (postgres_data, backend_media, los cuatro venvs, node_modules, la caché de next) no los
+      # va a reclamar NADIE — ni esta corrida, que ya terminó, ni la siguiente, que estrena
+      # nombre de proyecto. Sin esta bandera cada PR dejaría un juego completo en el disco del
+      # runner self-hosted, para siempre.
+      #
+      # Lo direcciona el `COMPOSE_PROJECT_NAME` del `env:` del job, así que borra los volúmenes
+      # de ESTA corrida y solo los de esta: los de un `e2e-<otro_run_id>` concurrente son otro
+      # proyecto y no se tocan. `docker compose` desnudo es exactamente lo que `make down`
+      # invoca aquí (el runner no es un worktree enlazado y no hay `PORT_OFFSET`, así que
+      # `COMPOSE_ARGS` del `Makefile` queda vacío) — lo único que cambia es la bandera.
+      - name: Bajar el stack y borrar sus volúmenes
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+
+      # El `.env` de arriba lleva cinco contraseñas de login vivas (owner/manager/super-admin de
+      # bootstrap, cleaner/technician del seed). Son efímeras —solo valen contra el stack que
+      # este job acaba de borrar—, pero el runner es SELF-HOSTED y persistente: el workspace se
+      # reutiliza entre jobs, así que sin este paso el fichero se queda en disco hasta que al
+      # próximo job le toque hacer `actions/checkout` (que limpia con `git clean -ffdx`) — una
+      # ventana de duración indeterminada. Se borra aquí, en cuanto deja de hacer falta.
+      #
+      # DESPUÉS del teardown y no antes: `docker compose down` interpola el fichero de compose,
+      # que tiene variables `${POSTGRES_DB:?…}` obligatorias, así que sin `.env` el paso de
+      # arriba fallaría en vez de bajar el stack.
+      - name: Borrar el .env con las credenciales efímeras
+        if: always()
+        run: rm -f .env
+
+  # --- El check que se reporta. SIEMPRE se ejecuta: es el invariante del gate. ------
+  # Este nombre de job es el contexto que ve GitHub, así que no se renombra sin romper cualquier
+  # selección de check obligatorio.
+  e2e-tests:
+    needs: [e2e-tests-detect, e2e-tests-suite]
+    if: always()
+    runs-on: [self-hosted, dev]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - name: Consolidar el resultado del gate
+        env:
+          DETECT_RESULT: ${{ needs.e2e-tests-detect.result }}
+          SUITE_RESULT: ${{ needs.e2e-tests-suite.result }}
+          E2E: ${{ needs.e2e-tests-detect.outputs.e2e }}
+          REASON: ${{ needs.e2e-tests-detect.outputs.reason }}
+          E2E_SECONDS: ${{ needs.e2e-tests-suite.outputs.e2e_seconds }}
+        # Los casos se enumeran uno a uno en vez de un `!= 'failure'` abreviado: esa forma daría
+        # verde ante una cancelación y ante un job de detección roto, que son precisamente los
+        # dos falsos verdes que hay que evitar. Mismo criterio que la consolidación de
+        # `backend-tests.yml`/`frontend-tests.yml`.
+        run: |
+          set -euo pipefail
+
+          if [ "$DETECT_RESULT" != "success" ]; then
+            verdict=fail
+            detail="el job de detección terminó en '${DETECT_RESULT}', así que no se sabe si la suite hacía falta"
+            suite_line="no ejecutada"
+          elif [ "$SUITE_RESULT" = "success" ]; then
+            verdict=pass
+            detail="la suite E2E se ejecutó completa y pasó"
+            suite_line="ejecutada y verde"
+          elif [ "$SUITE_RESULT" = "skipped" ]; then
+            if [ "$E2E" = "false" ]; then
+              verdict=pass
+              detail="el diff no toca \`backend/**\`/\`frontend/**\` (ni docker-compose.yml/Makefile/este workflow), así que la suite E2E NO se ejecutó"
+              suite_line="**OMITIDA** (no ejecutada)"
+            else
+              # No debería poder ocurrir: si hacía falta, no se salta. Si pasa, es un bug del
+              # gate y no un PR válido.
+              verdict=fail
+              detail="incoherencia del gate: la suite se saltó con e2e='${E2E}'"
+              suite_line="omitida indebidamente"
+            fi
+          else
+            verdict=fail
+            detail="la suite terminó en '${SUITE_RESULT}'"
+            suite_line="${SUITE_RESULT}"
+          fi
+
+          if [ "$SUITE_RESULT" = "skipped" ]; then
+            duration_line="no aplica — la suite no se ejecutó"
+          elif [ -n "${E2E_SECONDS:-}" ]; then
+            duration_line="**${E2E_SECONDS}s**"
+          else
+            duration_line="no medida"
+          fi
+
+          {
+            echo "## e2e-tests"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Veredicto | ${verdict} |"
+            echo "| Suite E2E | ${suite_line} |"
+            echo "| Decisión de área | \`${E2E:-desconocida}\` (\`${REASON:-sin razón}\`) |"
+            echo "| Duración de \`npm run test:e2e\` | ${duration_line} |"
+            echo ""
+            echo "${detail}"
+            if [ "$suite_line" = "**OMITIDA** (no ejecutada)" ]; then
+              echo ""
+              echo "> Este check está verde porque **no había nada que verificar**, no porque"
+              echo "> la suite haya pasado. Un PR que toque \`backend/**\`/\`frontend/**\` la ejecuta entera."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$verdict" != "pass" ]; then
+            echo "::error::${detail}"
+            exit 1
+          fi
+          echo "::notice::${detail}"

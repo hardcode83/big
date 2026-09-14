@@ -91,6 +91,15 @@ const NOT_UI = new Set([
    * already exempt by D12 for the same reason.
    */
   "test",
+  // Same exemption as `test/`, for the same reason: Playwright E2E specs and
+  // fixtures (`hardening-release`), not UI code — nothing here renders.
+  "e2e",
+  // Gitignored Playwright output (`.gitignore`), same category as `.next`/
+  // `coverage` above — present only after a local E2E run, never in a fresh
+  // checkout, but real when it exists.
+  "test-results",
+  "playwright-report",
+  "blob-report",
 ]);
 
 function uiRoots(): string[] {
@@ -362,13 +371,17 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
      */
     expect([...NOT_UI].sort()).toEqual([
       ".next",
+      "blob-report",
       "coverage",
       "devops",
+      "e2e",
       "locales",
       "node_modules",
+      "playwright-report",
       "public",
       "scripts",
       "test",
+      "test-results",
     ]);
     // Exactly D12's four today — and a NEW directory joins them by default,
     // which is the point of deriving rather than listing.
@@ -381,6 +394,7 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
       "eslint.config.mjs",
       "next-env.d.ts",
       "next.config.ts",
+      "playwright.config.ts",
       "postcss.config.mjs",
       "vitest.config.ts",
     ]);

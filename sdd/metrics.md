@@ -120,3 +120,4 @@
 | whatsapp-dev-credentials-render | new, tasks, run, review, ship, archive | 29110 | 535016 | 556620487 | 125.3342 | 2026-09-12 | 2026-09-12 |
 | pms-ingest-change-events | new, tasks, run, review, ship, archive | 187845 | 836628 | 190039718 | 74.5780 | 2026-09-12 | 2026-09-13 |
 | reservation-confirm-web | new, design, tasks, run, review, archive | 3072607 | 530938 | 118696062 | 67.2419 | 2026-09-12 | 2026-09-13 |
+| hardening-release | new, design, tasks, run, review | 371582 | 1594749 | 475044173 | 172.8846 | 2026-09-13 | — |

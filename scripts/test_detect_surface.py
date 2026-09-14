@@ -38,6 +38,7 @@ DETECTORS = (
     ("rule11", WORKFLOWS_DIR / "rule11-ownership.yml", "rule11-ownership-detect"),
     ("compose", WORKFLOWS_DIR / "compose-ports.yml", "compose-ports-detect"),
     ("frontend", WORKFLOWS_DIR / "frontend-tests.yml", "frontend-tests-detect"),
+    ("e2e", WORKFLOWS_DIR / "e2e-tests.yml", "e2e-tests-detect"),
 )
 
 
@@ -45,7 +46,7 @@ DETECTORS = (
 # `check()` returns the input-surface paths NOT covered by the detector's anchors. Empty is the
 # only green. rule11 has its own copy of this in test_rule11_ownership.py; compose and frontend
 # are asserted here so all three detectors are pinned.
-@pytest.mark.parametrize("workflow", ["compose", "frontend"])
+@pytest.mark.parametrize("workflow", ["compose", "frontend", "e2e"])
 def test_detect_surface_covers_suite_inputs(workflow):
     uncovered = cds.check(workflow)
     assert uncovered == [], (
@@ -237,6 +238,63 @@ def test_frontend_surface_end_to_end_resolves_prefixes_and_fails_closed(tmp_path
     assert "scripts/frontend-a11y-guard.sh" not in uncovered, uncovered
 
 
+# ── (a″) `e2e_surface()` (hardening-release, design D4): same mechanism, pointed at ────────
+# `e2e-tests-suite` instead of `frontend-tests-suite`. Today's real `e2e-tests.yml` only
+# contributes `Makefile` (via `make up`/`make bootstrap`/`make seed-demo`/`make down`) — no
+# `scripts/…` reference — but the parser is exercised end-to-end here the same way, including
+# the fail-closed case, so a future step that adds one is caught exactly like the frontend gate.
+def test_e2e_surface_end_to_end_resolves_makefile_and_fails_closed(tmp_path):
+    workflow = tmp_path / ".github" / "workflows" / "e2e-tests.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "jobs:\n"
+        "  e2e-tests-suite:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - name: make up\n"
+        "        run: make up\n"
+        "      - name: make bootstrap\n"
+        "        run: make bootstrap\n"
+        "      - name: an UN-ANCHORED real-directory guard\n"
+        "        run: bash tools/scripts/e2e-extra-guard.sh\n"
+        "      - name: make down\n"
+        "        run: make down\n"
+        "  e2e-tests:\n"
+        "    runs-on: ubuntu-latest\n",
+        encoding="utf-8",
+    )
+    surface = cds.e2e_surface(tmp_path)
+    assert "Makefile" in surface, surface
+    # A real subdirectory is reported by its TRUE path, not misread as a root `scripts/...`:
+    assert "tools/scripts/e2e-extra-guard.sh" in surface, surface
+
+    # Fail-closed: `Makefile` is anchored by the real `e2e-tests.yml`, but the synthesized
+    # un-anchored `tools/scripts/...` guard is not → the always-run CLI would go red.
+    e2e_anchors = cds.detect_anchors(WORKFLOWS_DIR / "e2e-tests.yml")
+    uncovered = cds.uncovered(surface, e2e_anchors)
+    assert "tools/scripts/e2e-extra-guard.sh" in uncovered, uncovered
+    assert "Makefile" not in uncovered, uncovered
+
+
+def test_e2e_surface_matches_todays_real_workflow():
+    # Non-vacuousness against the actual file (not a synthesized one): today's real surface is
+    # exactly `{"Makefile"}` (four `make` steps, no `scripts/…` reference), and it is covered.
+    assert cds.e2e_surface() == ["Makefile"]
+    assert cds.check("e2e") == []
+
+
+def test_e2e_surface_proves_the_red():
+    # Same non-vacuousness shape as `test_compose_discovery_guard_proves_the_red`: with the
+    # `Makefile` anchor removed, `Makefile` itself would be uncovered — the assertion above is
+    # really constraining something, not passing on an empty anchor list by accident.
+    anchors = cds.detect_anchors(WORKFLOWS_DIR / "e2e-tests.yml")
+    without_makefile = [a for a in anchors if a != "Makefile"]
+    assert cds.uncovered(["Makefile"], without_makefile) == ["Makefile"], (
+        "el guard de e2e no está probando el rojo: `Makefile` debería quedar descubierto si se "
+        "quitara su ancla."
+    )
+
+
 # ── (b) every Compose default-discovery name must be anchored by compose-ports-detect ──────
 def _compose_anchors():
     return cds.detect_anchors(WORKFLOWS_DIR / "compose-ports.yml")
@@ -332,6 +390,7 @@ def test_gate_altering_inputs_do_not_skip():
     compose_anchors = cds.detect_anchors(WORKFLOWS_DIR / "compose-ports.yml")
     rule11_anchors = cds.detect_anchors(WORKFLOWS_DIR / "rule11-ownership.yml")
     frontend_anchors = cds.detect_anchors(WORKFLOWS_DIR / "frontend-tests.yml")
+    e2e_anchors = cds.detect_anchors(WORKFLOWS_DIR / "e2e-tests.yml")
 
     # compose.yaml changes what `docker compose config` resolves -> must trigger compose-suite.
     assert _matches_any("compose.yaml", compose_anchors), (
@@ -346,8 +405,24 @@ def test_gate_altering_inputs_do_not_skip():
         "check de superficie no lo marcaría (SEC-3)."
     )
 
-    # No over-trigger: a repo-root README touches none of the three areas.
-    for anchors in (compose_anchors, rule11_anchors, frontend_anchors):
+    # e2e-tests-detect (design D4): un cambio en cualquiera de los dos lados de la app que
+    # Playwright ejercita, o en lo que `make up`/`bootstrap`/`seed-demo` resuelve, tiene que
+    # disparar la suite.
+    assert _matches_any("backend/app/main.py", e2e_anchors), (
+        "un cambio de `backend/**` altera lo que la suite E2E ejercita pero no casa ninguna ancla."
+    )
+    assert _matches_any("frontend/app/page.tsx", e2e_anchors), (
+        "un cambio de `frontend/**` altera lo que la suite E2E ejercita pero no casa ninguna ancla."
+    )
+    assert _matches_any("docker-compose.yml", e2e_anchors), (
+        "`docker-compose.yml` es lo que `make up` levanta pero no casa ninguna ancla."
+    )
+    assert _matches_any("Makefile", e2e_anchors), (
+        "`Makefile` es lo que `make up`/`bootstrap`/`seed-demo`/`down` resuelven pero no casa ninguna ancla."
+    )
+
+    # No over-trigger: a repo-root README touches none of the four areas.
+    for anchors in (compose_anchors, rule11_anchors, frontend_anchors, e2e_anchors):
         assert not _matches_any("README.md", anchors), (
             "`README.md` (raíz) no debería activar ningún detector (sobre-disparo, contra R7)."
         )
