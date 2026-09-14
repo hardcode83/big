@@ -1,0 +1,57 @@
+{
+  "title": "Liquidaciones",
+  "separator": "·",
+  "list": {
+    "label": "Listado de liquidaciones",
+    "loading": "Cargando…",
+    "empty": {
+      "title": "Sin liquidaciones",
+      "description": "No hay liquidaciones que coincidan con los filtros seleccionados."
+    }
+  },
+  "columns": {
+    "property": "Vivienda",
+    "period": "Período",
+    "status": "Estado",
+    "netOwnerResult": "Resultado neto"
+  },
+  "status": {
+    "DRAFT": "Borrador",
+    "READY": "Lista",
+    "SENT": "Enviada"
+  },
+  "identity": {
+    "loading": "Cargando catálogo…",
+    "unavailable": "Vivienda no disponible"
+  },
+  "filters": {
+    "label": "Filtros de liquidaciones",
+    "property": {
+      "label": "Vivienda",
+      "all": "Todas las viviendas"
+    },
+    "periodFrom": {
+      "label": "Período desde"
+    },
+    "periodTo": {
+      "label": "Período hasta"
+    },
+    "status": {
+      "label": "Estado",
+      "all": "Todos los estados"
+    }
+  },
+  "pagination": {
+    "label": "Paginación de liquidaciones",
+    "previous": "Página anterior",
+    "next": "Página siguiente",
+    "pageOfTotal": "Página {{page}} de {{totalPages}}",
+    "totalItems": "{{total}} en total"
+  },
+  "read": {
+    "error": {
+      "forbidden": "No tienes permiso para ver estas liquidaciones.",
+      "generic": "No se pudieron cargar las liquidaciones. Vuelve a intentarlo."
+    }
+  }
+}

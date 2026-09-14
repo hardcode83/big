@@ -38,6 +38,8 @@ import esTenantSettings from "@/locales/es/tenant-settings.json";
 import enTenantSettings from "@/locales/en/tenant-settings.json";
 import esReviews from "@/locales/es/reviews.json";
 import enReviews from "@/locales/en/reviews.json";
+import esStatements from "@/locales/es/statements.json";
+import enStatements from "@/locales/en/statements.json";
 
 /** i18next namespaces (design D13). */
 export const NAMESPACES = [
@@ -61,6 +63,7 @@ export const NAMESPACES = [
   "approvals",
   "tenant-settings",
   "reviews",
+  "statements",
 ] as const;
 export const DEFAULT_NS = "common";
 
@@ -87,6 +90,7 @@ export const resources = {
     approvals: esApprovals,
     "tenant-settings": esTenantSettings,
     reviews: esReviews,
+    statements: esStatements,
   },
   en: {
     common: enCommon,
@@ -109,5 +113,6 @@ export const resources = {
     approvals: enApprovals,
     "tenant-settings": enTenantSettings,
     reviews: enReviews,
+    statements: enStatements,
   },
 } as const;

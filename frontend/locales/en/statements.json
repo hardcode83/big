@@ -1,0 +1,57 @@
+{
+  "title": "Statements",
+  "separator": "·",
+  "list": {
+    "label": "Statements list",
+    "loading": "Loading…",
+    "empty": {
+      "title": "No statements",
+      "description": "There are no statements matching the selected filters."
+    }
+  },
+  "columns": {
+    "property": "Property",
+    "period": "Period",
+    "status": "Status",
+    "netOwnerResult": "Net result"
+  },
+  "status": {
+    "DRAFT": "Draft",
+    "READY": "Ready",
+    "SENT": "Sent"
+  },
+  "identity": {
+    "loading": "Loading catalog…",
+    "unavailable": "Property unavailable"
+  },
+  "filters": {
+    "label": "Statement filters",
+    "property": {
+      "label": "Property",
+      "all": "All properties"
+    },
+    "periodFrom": {
+      "label": "Period from"
+    },
+    "periodTo": {
+      "label": "Period to"
+    },
+    "status": {
+      "label": "Status",
+      "all": "All statuses"
+    }
+  },
+  "pagination": {
+    "label": "Statements pagination",
+    "previous": "Previous page",
+    "next": "Next page",
+    "pageOfTotal": "Page {{page}} of {{totalPages}}",
+    "totalItems": "{{total}} total"
+  },
+  "read": {
+    "error": {
+      "forbidden": "You do not have permission to view these statements.",
+      "generic": "Statements could not be loaded. Please try again."
+    }
+  }
+}

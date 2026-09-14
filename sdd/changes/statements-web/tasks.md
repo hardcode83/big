@@ -42,24 +42,24 @@ Cada sección deja sus módulos compilables y añade tests junto con el comporta
   respuesta, revocar y limpiar el recurso en éxito o error, y evitar descargas parciales o dobles.
   [R4, R5]
 
-## 3. Listado, filtros y paginación
+## 3. Listado, filtros y paginación <!-- panel: PASS 2026-09-14 receipt:de8192f8 -->
 
-- [ ] 3.1 `features/statements/components/statements-view.tsx` (y un hook/estado auxiliar local
+- [x] 3.1 `features/statements/components/statements-view.tsx` (y un hook/estado auxiliar local
   estrictamente acotado a esta vista, si hace falta) y sus tests: implementar filtros y página como
   estado ligero local de la vista, reiniciarlo al cambiar de tenant y no introducir un store global
   o persistente por conveniencia. Si se reutiliza un patrón scoped existente, mantenerlo limitado a
   esta vista y sin almacenar server state; TanStack Query sigue siendo la única fuente de
   statements y propiedades remotas. Cubrir propiedad, rango de período, estado y navegación de
   página sin inventar `total_pages`. [R1, R2, R5]
-- [ ] 3.2 `features/statements/components/statements-filters.tsx` y `.test.tsx`: construir filtros
+- [x] 3.2 `features/statements/components/statements-filters.tsx` y `.test.tsx`: construir filtros
   accesibles para propiedad, período y estado con labels programáticos, opciones del directorio
   completo de propiedades y actualización de página al cambiar filtros; enviar sólo los
   parámetros contractuales, sin `tenant_id`. [R1, R2, R5]
-- [ ] 3.3 `features/statements/components/statement-row.tsx`, `statements-pagination.tsx` y sus
+- [x] 3.3 `features/statements/components/statement-row.tsx`, `statements-pagination.tsx` y sus
   tests: mostrar propiedad resuelta, período, estado y resultado neto del resumen; tratar
   `total=0` como listado vacío; respetar `items`, `total`, `page`, `per_page`; probar teclado,
   foco visible, nombres accesibles y navegación sin overflow en viewport móvil. [R2, R5]
-- [ ] 3.4 `features/statements/components/statements-list.tsx`, `statements-view.tsx` y tests:
+- [x] 3.4 `features/statements/components/statements-list.tsx`, `statements-view.tsx` y tests:
   ensamblar queries, filtros, filas y paginación con estados explícitos de loading, error, vacío y
   éxito; distinguir 401/403 del vacío y no renderizar información financiera cuando la sesión no
   está autorizada. [R1, R2, R5]
@@ -139,3 +139,13 @@ Cada sección deja sus módulos compilables y añade tests junto con el comporta
 - `useStatementPropertyDirectory` consume directamente `@/features/properties`/`useActiveProperties()` y solo deriva un índice local de su resultado; los fallos del catálogo quedan aislados.
 - `useStatementDownload` mantiene locks y errores independientes por formato, entrega bytes opacos con el filename/header del response y revoca la URL siempre tras el click.
 - SUPERSEDED: la nota anterior que afirmaba que features/statements/data reexporta useActiveProperties ya no describe la implementación vigente. data/index.ts NO reexporta useActiveProperties. Las secciones posteriores deben reutilizar la fuente existente de properties sin acoplar la capa data de statements al barrel/UI de properties.
+- `StatementsView` es la única dueña de `filters`/`page` (plain `useState`, sin store); resetea ambos con un `useRef` que guarda el `tenant_id` anterior y compara en un `useEffect` — ningún Zustand ni persistencia.
+- `StatementsList` recibe `filters`/`page`/callbacks por props desde `StatementsView` y es quien llama a `useStatementsList`/`useStatementPropertyDirectory`; nunca guarda su propio estado de filtros.
+- Cambiar cualquier filtro (`onPropertyIdChange`/`onPeriodStartFromChange`/`onPeriodStartToChange`/`onStatusChange`) pasa siempre por `StatementsView.updateFilters`, que también fija `page` a `1`; `onPageChange` (paginación) no toca los filtros.
+- `StatementsPagination` (no `ReviewsPagination`/`PricingPagination` reutilizados) deriva `totalPages = ceil(total/perPage)` sólo para render/enable-disable — nunca lo persiste ni lo añade al DTO; sigue el mismo criterio de "sin inventar `total_pages`" que `data/dto.ts` ya documentaba. Se oculta sólo cuando `total === 0`; con una única página igualmente se muestra con ambos botones deshabilitados (paridad con reviews/pricing).
+- `StatementRow`/`StatementsFilters` resuelven/listan propiedades exclusivamente desde `useStatementPropertyDirectory().index`/`.data.data` (el directorio completo), nunca desde `items` de la página actual; identidad de propiedad usa tres estados (resuelta/pendiente/no disponible), igual que `reviews`/`pricing`.
+- `features/statements/lib/statements-error.ts` (`readErrorKey`) mapea sólo `403` a `statements:read.error.forbidden`; todo lo demás (incluye `401`, que el `ApiClient` ya resuelve globalmente) cae al genérico `statements:read.error.generic`. `StatementsList` renderiza `ErrorState` antes de comprobar `total === 0`, así que un `403`/error nunca se confunde con la lista vacía ni pinta datos financieros.
+- Formateo de fecha/importe de `statement-row.tsx` es una copia local temporal (`fmtDay`/`fmtAmount`, marcadas `TODO(section 6.2)`) idéntica en criterio a `features/pricing/lib/format.ts`/`features/reviews/lib/format.ts` (UTC-anchored, dos decimales, sin símbolo de moneda porque el summary no publica `currency`). La sección 6.2 debe sustituirlas por `features/statements/lib/format.ts` sin duplicar la lógica.
+- Namespace i18n `statements` registrado en `lib/i18n/resources.ts` con `locales/{es,en}/statements.json`; sólo cubre las claves que usa la sección 3 (title, list.*, columns.*, status.*, identity.*, filters.*, pagination.*, read.error.*). La sección 6.1 debe completar el catálogo (detalle, breakdowns, descargas) y re-verificar paridad — no se han añadido claves de esas áreas todavía.
+- `StatementRow` no es clicable ni navega a detalle (eso es la sección 4): es un `<li>`/`<Card>` estático con `aria-labelledby` sobre el nombre de propiedad; la sección 4 puede envolverlo o añadir un trigger sin tener que rehacer su marcado interno.
+- Tono de badge de estado (`STATUS_TONE` en `statement-row.tsx`): `DRAFT`→gray, `READY`→blue, `SENT`→green; decisión propia de esta sección, reutilizable por secciones posteriores si muestran el mismo enum.
