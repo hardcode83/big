@@ -138,3 +138,4 @@ Cada sección deja sus módulos compilables y añade tests junto con el comporta
 - `useStatementsList` y `useStatementDetail` leen el tenant de `useAuth()` y usan `retryPolicy`; el detalle queda disabled sin `statementId`.
 - `useStatementPropertyDirectory` consume directamente `@/features/properties`/`useActiveProperties()` y solo deriva un índice local de su resultado; los fallos del catálogo quedan aislados.
 - `useStatementDownload` mantiene locks y errores independientes por formato, entrega bytes opacos con el filename/header del response y revoca la URL siempre tras el click.
+- SUPERSEDED: la nota anterior que afirmaba que features/statements/data reexporta useActiveProperties ya no describe la implementación vigente. data/index.ts NO reexporta useActiveProperties. Las secciones posteriores deben reutilizar la fuente existente de properties sin acoplar la capa data de statements al barrel/UI de properties.

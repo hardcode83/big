@@ -37,13 +37,6 @@ One entry per pending item (shared rule 5): `decision` needs a human before the 
 - **what & why**: sdd-architect encontró que frontend/features/statements/data/index.ts reexporta useActiveProperties desde el barrel de properties, que también expone UI; esto acopla la capa data a exports de presentación y contradice D1/D2. El gate review persistió FAIL en el receipt canónico.
 - **exact resume command**: /sdd:review statements-web
 
-## Implementation Note contradice la corrección arquitectónica
-
-- **phase**: review
-- **type**: decision
-- **what & why**: El re-review de sdd-architect encontró en sdd/changes/statements-web/tasks.md:135 una nota que todavía dice que features/statements/data reexporta useActiveProperties. El código ya no lo hace; la nota contradice D1/D2 y puede guiar incorrectamente la implementación de la sección 2. Se requiere decidir/corregir esa documentación antes de continuar.
-- **exact resume command**: /sdd:review statements-web
-
 ## Reviewer QA no disponible por créditos
 
 - **phase**: review
