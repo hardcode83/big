@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# ACTIONS_RUNNER_HOOK_JOB_STARTED for AutoHostAI's self-hosted GitHub Actions runner pool.
+#
+# Why this exists: docker-compose.yml's services bind-mount the repo tree and (some) run as
+# root, writing root-owned files into what is, on the CI VM, the runner's persistent `_work/`.
+# `actions/checkout` (clean: true) cannot delete root-owned files there and fails with EACCES
+# in step 0, before any workflow step runs — nothing IN the workflow can react to that failure.
+# This hook returns `_work/` to a state `actions/checkout` CAN clean, before checkout runs.
+# See sdd/changes/ci-runner-workspace-pollution/proposal.md (R3) and design.md (D1/D2).
+#
+# Installed by `runner-bootstrap.sh` (section 4 of this change) at, per agent `i`:
+#   $RUNNER_HOME/hooks/runner-job-started.sh   (e.g. /opt/actions-runner-2/hooks/runner-job-started.sh)
+# and declared via $RUNNER_HOME/.env: ACTIONS_RUNNER_HOOK_JOB_STARTED=<that absolute path>.
+#
+# GitHub's hook contract (verified against GitHub's docs during design):
+#   - On Linux, the runner invokes this script via `bash -e <path>` (falls back to `sh`).
+#     A NON-ZERO EXIT CODE FAILS THE JOB.
+#   - There is no timeout for job-started hooks — GitHub's docs recommend the script add its
+#     own timeout handling if it might hang. This is why the D2 short-circuit below is a
+#     read-only `find ... -print -quit`: it must stay fast on a clean tree, since nothing else
+#     bounds this script's running time.
+#   - GITHUB_WORKSPACE / RUNNER_WORKSPACE are not documented for job-started hooks specifically
+#     — this script does NOT rely on any such env var. It self-locates instead (see below).
+#
+# This script's own exit-code decision (so sections 4/6 and the hook's own log agree on it):
+#   - A VALIDATION failure (WORK_DIR not absolute / doesn't exist as a directory / doesn't
+#     end in `/_work`) is logged and the script exits 0 WITHOUT acting. This "no actúa" behavior
+#     follows task 3.1's own description ("...; si la validación falla, no actúa") together with
+#     R3.6 ("THE SYSTEM SHALL acotar la actuación del hook al `_work/` del agente que lo ejecuta,
+#     y NOT actuar sobre el de otro agente ni sobre rutas fuera de él" — the closest EARS
+#     requirement in spirit to "don't act on an unrecognized/invalid path"). It is NOT what R3.1's
+#     own EARS text says: R3.1 is only "THE SYSTEM SHALL versionar en el repositorio un script de
+#     hook de inicio de job, bajo `infra/environments/dev/`" — purely about versioning the file,
+#     silent on validation-failure behavior. An overly strict validator that fails real jobs over
+#     a path edge case would be exactly the kind of fragility this change is trying to remove.
+#   - A `chown` that genuinely fails on a path that DID validate exits NON-ZERO (R3.5: the job
+#     should fail loudly here, naming $RUNNER_HOME, rather than silently proceed into a
+#     checkout that will EACCES anyway).
+#
+# Usage: runner-job-started.sh [WORK_DIR_OVERRIDE]
+#   No arguments (real installed usage): self-locates $RUNNER_HOME two directories up from this
+#   script's own resolved path (.../hooks/runner-job-started.sh -> .../hooks -> $RUNNER_HOME)
+#   and targets $RUNNER_HOME/_work.
+#   One positional argument: used as WORK_DIR verbatim instead of self-locating. This exists so
+#   infra/environments/dev/test_runner_job_started.py can drive this script against a real
+#   temporary directory instead of the (nonexistent, in a test sandbox) installed layout.
+#   Still subject to the same R3.1 validation as the self-located path.
+#
+# Deliberately self-contained: no dependency on the rest of this repo's Python tooling — this
+# has to run standalone on the VM from $RUNNER_HOME/hooks/, outside any checkout.
+
+set -uo pipefail
+# NOT `set -e`: R3.1's validation failure must exit 0 (see above), so the validation is a plain
+# `if`, never a bare failing command that `-e` would trip. Every other fallible command below is
+# guarded explicitly and its exit status handled on purpose.
+
+log() {
+    printf 'runner-job-started: %s\n' "$1"
+}
+
+err() {
+    printf 'runner-job-started: %s\n' "$1" >&2
+}
+
+# --- Resolve WORK_DIR: explicit override (tests) or self-location (real usage) -------------
+if [[ $# -ge 1 ]]; then
+    WORK_DIR="$1"
+else
+    script_path="${BASH_SOURCE[0]:-$0}"
+    script_dir="$(cd -- "$(dirname -- "$script_path")" >/dev/null 2>&1 && pwd -P)"
+    hooks_dir="$script_dir"
+    runner_home_self_located="$(dirname -- "$hooks_dir")"
+    WORK_DIR="$runner_home_self_located/_work"
+fi
+
+# RUNNER_HOME for logging (R3.5 wants it named explicitly on chown failure): the parent of
+# WORK_DIR. Computed uniformly for both the self-located and override cases — after validation,
+# WORK_DIR is guaranteed to end in `/_work`, so this is exactly $RUNNER_HOME either way.
+RUNNER_HOME="$(dirname -- "$WORK_DIR")"
+
+# --- Task 3.1 / R3.6: validate before touching anything ---------------------------------------
+# Absolute, exists as a directory, ends in `/_work`. On failure: log why, exit 0 (does not act
+# — see the exit-code note above; that behavior comes from task 3.1's description and R3.6, not
+# from R3.1's own EARS text). This is a plain `if`, not a command left to trip `set -e`.
+validation_failed=0
+if [[ "$WORK_DIR" != /* ]]; then
+    err "WORK_DIR '$WORK_DIR' is not an absolute path — not acting"
+    validation_failed=1
+elif [[ "$WORK_DIR" != */_work ]]; then
+    err "WORK_DIR '$WORK_DIR' does not end in '/_work' — not acting"
+    validation_failed=1
+elif [[ ! -d "$WORK_DIR" ]]; then
+    err "WORK_DIR '$WORK_DIR' does not exist as a directory — not acting"
+    validation_failed=1
+fi
+
+if [[ "$validation_failed" -eq 1 ]]; then
+    exit 0
+fi
+
+# --- R3.6: scope is this WORK_DIR only, nothing else ------------------------------------------
+# (Enforced structurally: every find/chown below is rooted at $WORK_DIR, which validation above
+# has already confirmed is this agent's own `_work/` — self-location naturally scopes to "this
+# agent's own tree" since each agent has its own installed copy of this script at its own path.)
+
+RUNNER_USER="$(id -un)"
+
+# --- D2 short-circuit: read-only, must stay fast on a clean tree ------------------------------
+# First entry NOT owned by $RUNNER_USER, or empty if the tree is already clean. `|| true` so a
+# `find` error (e.g. permission denied descending into some subdirectory) can't trip anything
+# below into treating an error as "clean" silently — it still results in an empty FOUND, which
+# is the same "nothing to do" outcome R3.4 asks for on a clean tree; find's own diagnostics (if
+# any) still reach stderr since they are not redirected.
+FOUND="$(find "$WORK_DIR" ! -user "$RUNNER_USER" -print -quit || true)"
+
+if [[ -z "$FOUND" ]]; then
+    log "$WORK_DIR is already clean (every entry owned by $RUNNER_USER) — nothing to do"
+    exit 0
+fi
+
+# Sanitize $FOUND before it ever reaches a log line. $WORK_DIR is populated by `actions/checkout`
+# of repository content, which can include attacker-influenced filenames (e.g. from a fork PR) —
+# an unsanitized path here would let a maliciously-named entry inject ANSI/terminal escape
+# sequences or embedded newlines that spoof/fabricate fake log lines in this hook's own output
+# (log/terminal injection). Replace every ASCII control character (0x00-0x1F, including ESC/
+# `\x1b`, and 0x7F) with `?` — this also neutralizes embedded CR/LF, so one `find` result can't
+# masquerade as multiple log lines. Kept dependency-free (`tr`, no repo Python tooling here).
+FOUND_SAFE="$(printf '%s' "$FOUND" | tr '\000-\037\177' '?')"
+
+# --- D1 fix: chown -R the OWN _work/ back to the agent user (never destructive) ---------------
+log "found foreign-owned entry under $WORK_DIR (e.g. '$FOUND_SAFE', not owned by $RUNNER_USER) — chown -R to $RUNNER_USER"
+
+# `-n` (non-interactive): the pool's sudoers grant (`%ci-agents ALL=(ALL) NOPASSWD:ALL`, see
+# runner-bootstrap.sh) already makes this passwordless in real usage, so `-n` changes nothing
+# there — it exists so a mis-provisioned host (sudo unexpectedly asking for a password) fails
+# fast into the R3.5 branch below instead of hanging with no timeout (see the contract note
+# above) waiting on a prompt nobody can answer.
+if sudo -n chown -R "$RUNNER_USER" "$WORK_DIR"; then
+    log "chown -R $WORK_DIR to $RUNNER_USER succeeded"
+    exit 0
+else
+    rc=$?
+    err "chown -R $WORK_DIR to $RUNNER_USER FAILED (rc=$rc) for RUNNER_HOME=$RUNNER_HOME — job will fail"
+    exit 1
+fi

@@ -1,0 +1,247 @@
+"""Suite of `runner-job-started.sh` (`ci-runner-workspace-pollution` R3).
+
+The script is bash, installed standalone on the CI VM outside any checkout (see the script's own
+header comment), so it is driven here via `subprocess.run` against real temporary directories —
+not imported or mocked — using its override-argument mechanism (an optional first positional
+argument, `WORK_DIR_OVERRIDE`) instead of self-location, exactly as the script's own docstring
+says a test harness should.
+
+Privileged-fixture limitation (read this before extending these tests): R3.3/D1's fix is a real
+`chown -R` of root-owned files back to the agent user. Constructing a genuinely foreign-owned
+(e.g. root-owned) fixture file requires privileges this sandboxed test environment does not have
+— an unprivileged process cannot `chown` a file to a *different* owner. Two of the cases below
+(`test_detected_and_chown_succeeds`, `test_chown_genuinely_fails`) therefore stub the external
+`find`/`sudo` commands (via a `PATH` override, never by mocking the script itself) to force the
+script's "something was found" branch deterministically and portably, and to pin the chown
+outcome. This exercises the real control flow — detection message, chown invocation, logging,
+exit code, `$RUNNER_HOME` naming — honestly, but NOT a genuine permission failure/success against
+an actually-root-owned file. Running that genuine case requires a host where this test process
+can actually create root-owned files under the target directory (e.g. running as root in a
+container, or with real passwordless sudo) — not assumed here. `test_clean_tree_needs_no_action`
+and the invalid-path cases use no stubs at all: they are fully genuine.
+"""
+
+import os
+import stat
+import subprocess
+import textwrap
+from pathlib import Path
+
+import pytest
+
+HOOK = Path(__file__).with_name("runner-job-started.sh")
+RUNNER_USER = os.environ.get("USER") or os.environ.get("LOGNAME") or "root"
+
+
+def run_hook(work_dir, *, env=None):
+    """Run the hook with an explicit override argument (never self-locating)."""
+    full_env = dict(os.environ)
+    if env:
+        full_env.update(env)
+    return subprocess.run(
+        ["bash", str(HOOK), str(work_dir)],
+        capture_output=True,
+        text=True,
+        env=full_env,
+        timeout=30,
+    )
+
+
+def snapshot(tree: Path):
+    """(relative path, uid, mode, mtime_ns) for every entry, to prove "nothing was modified"."""
+    out = {}
+    for p in sorted(tree.rglob("*")):
+        st = p.lstat()
+        out[str(p.relative_to(tree))] = (st.st_uid, stat.S_IMODE(st.st_mode), st.st_mtime_ns)
+    return out
+
+
+def make_stub_bin(tmp_path: Path, *, find_reports_foreign: bool, sudo_exit: int) -> Path:
+    """A directory with stub `find`/`sudo` executables, to prepend onto PATH.
+
+    `find` unconditionally reports one fake foreign-owned entry under its target (or nothing, if
+    `find_reports_foreign` is False — not used by the current cases but kept honest/symmetric).
+    `sudo` ignores its arguments and exits with `sudo_exit`, printing what it would have run —
+    this is the injectable override the module docstring documents: it pins the chown outcome
+    without needing real root, so the branch (not the privileged syscall) is what gets tested.
+    """
+    bindir = tmp_path / "stubbin"
+    bindir.mkdir()
+    find_body = (
+        'echo "$1/FAKE_FOREIGN_FILE"\nexit 0\n'
+        if find_reports_foreign
+        else 'exit 0\n'
+    )
+    (bindir / "find").write_text(f"#!/usr/bin/env bash\n{find_body}")
+    (bindir / "sudo").write_text(
+        textwrap.dedent(f"""\
+            #!/usr/bin/env bash
+            echo "stub-sudo: $*" >&2
+            exit {sudo_exit}
+            """)
+    )
+    (bindir / "find").chmod(0o755)
+    (bindir / "sudo").chmod(0o755)
+    return bindir
+
+
+# ── Clean tree: no writes, exit 0 (R3.4) ────────────────────────────────────────────────────
+
+
+def test_clean_tree_needs_no_action(tmp_path):
+    work = tmp_path / "_work"
+    work.mkdir()
+    (work / "checkout").mkdir()
+    (work / "checkout" / "app.py").write_text("print('hi')\n")
+
+    before = snapshot(work)
+    result = run_hook(work)
+    after = snapshot(work)
+
+    assert result.returncode == 0, result.stderr
+    assert after == before, "clean tree must not be modified at all"
+    assert "clean" in result.stdout.lower() or "nothing to do" in result.stdout.lower()
+    assert "chown" not in result.stdout.lower()
+
+
+# ── Invalid paths: R3.1 — validated, "no actúa", exit 0 -------------------------------------
+
+
+def test_relative_path_does_not_act():
+    result = run_hook("relative/_work")
+    assert result.returncode == 0
+    combined = (result.stdout + result.stderr).lower()
+    assert "absolute" in combined
+
+
+def test_nonexistent_path_does_not_act(tmp_path):
+    ghost = tmp_path / "does-not-exist" / "_work"
+    result = run_hook(ghost)
+    assert result.returncode == 0
+    combined = (result.stdout + result.stderr).lower()
+    assert "not exist" in combined or "no exist" in combined
+
+
+def test_path_not_ending_in_work_does_not_act(tmp_path):
+    not_work = tmp_path / "some_other_dir"
+    not_work.mkdir()
+    before = snapshot(not_work)
+    result = run_hook(not_work)
+    after = snapshot(not_work)
+
+    assert result.returncode == 0
+    assert after == before
+    combined = (result.stdout + result.stderr).lower()
+    assert "_work" in combined
+
+
+# ── Detection + chown, via stubbed find/sudo (see module docstring) -------------------------
+
+
+def test_detected_and_chown_succeeds(tmp_path):
+    work = tmp_path / "_work"
+    work.mkdir()
+    (work / "some_file.txt").write_text("owned by us for real, but 'find' is stubbed\n")
+
+    stubbin = make_stub_bin(tmp_path, find_reports_foreign=True, sudo_exit=0)
+    env = {"PATH": f"{stubbin}:{os.environ['PATH']}"}
+
+    result = run_hook(work, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert "found" in result.stdout.lower()
+    assert "chown" in result.stdout.lower()
+    assert "succeeded" in result.stdout.lower()
+
+
+def test_chown_genuinely_fails_names_runner_home(tmp_path):
+    runner_home = tmp_path / "actions-runner-9"
+    work = runner_home / "_work"
+    work.mkdir(parents=True)
+    (work / "some_file.txt").write_text("content\n")
+
+    stubbin = make_stub_bin(tmp_path, find_reports_foreign=True, sudo_exit=1)
+    env = {"PATH": f"{stubbin}:{os.environ['PATH']}"}
+
+    result = run_hook(work, env=env)
+
+    assert result.returncode != 0
+    combined = result.stdout + result.stderr
+    # Assert on the exact failure-message marker the script emits (`err`, ~line 143:
+    # "... for RUNNER_HOME=$RUNNER_HOME — job will fail"), not just "runner_home appears somewhere
+    # in the output". The D2 detection log line earlier ALWAYS prints $WORK_DIR (which contains
+    # runner_home as a prefix), so a bare substring check on the whole combined output would pass
+    # even if the actual chown-failure message dropped RUNNER_HOME entirely — proven by mutation:
+    # removing "for RUNNER_HOME=$RUNNER_HOME" from the script's failure message left a naive
+    # `str(runner_home) in combined` check green.
+    assert f"for RUNNER_HOME={runner_home}" in combined, (
+        "R3.5 requires the RUNNER_HOME to be named explicitly in the failure message"
+    )
+
+
+@pytest.mark.skipif(
+    subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode == 0,
+    reason=(
+        "this host has real passwordless sudo for the test user — the unstubbed case below "
+        "would then unexpectedly succeed (sudo can chown regardless of current ownership), "
+        "which is a different, genuinely-privileged scenario this suite does not assume"
+    ),
+)
+def test_chown_genuinely_fails_without_stubs_when_sudo_has_no_password(tmp_path):
+    """Same failure branch as above, but with a REAL (unstubbed) `sudo -n`.
+
+    On a host without passwordless sudo configured for the test user (true for this sandbox,
+    verified with `sudo -n true` during implementation: "sudo: a password is required"), the
+    hook's real `sudo -n chown -R ...` call fails genuinely — not because the fixture file is
+    foreign-owned (it isn't, `find` is still stubbed to force the "something to do" branch, per
+    the module docstring), but because privilege escalation itself fails, which is a real
+    instance of "the chown itself fails" (R3.5's premise), independent of any stub for `sudo`.
+    """
+    runner_home = tmp_path / "actions-runner-3"
+    work = runner_home / "_work"
+    work.mkdir(parents=True)
+    (work / "some_file.txt").write_text("content\n")
+
+    stubbin = make_stub_bin(tmp_path, find_reports_foreign=True, sudo_exit=0)  # sudo stub unused
+    # Only override `find`; let the real `sudo` on PATH run.
+    real_path = os.environ["PATH"]
+    env = {"PATH": f"{stubbin.parent / 'find_only'}:{real_path}"}
+    find_only = stubbin.parent / "find_only"
+    find_only.mkdir()
+    (find_only / "find").write_text((stubbin / "find").read_text())
+    (find_only / "find").chmod(0o755)
+
+    result = run_hook(work, env=env)
+
+    assert result.returncode != 0
+    combined = result.stdout + result.stderr
+    # Same specific marker as test_chown_genuinely_fails_names_runner_home — see that test's
+    # comment for why a bare `str(runner_home) in combined` is vacuous here.
+    assert f"for RUNNER_HOME={runner_home}" in combined
+
+
+# ── Self-location sanity (no override argument) ----------------------------------------------
+
+
+def test_self_locates_two_dirs_up_from_hooks(tmp_path):
+    """Installed layout: $RUNNER_HOME/hooks/runner-job-started.sh, targets $RUNNER_HOME/_work."""
+    runner_home = tmp_path / "actions-runner-7"
+    hooks_dir = runner_home / "hooks"
+    hooks_dir.mkdir(parents=True)
+    work = runner_home / "_work"
+    work.mkdir()
+    (work / "f.txt").write_text("x\n")
+
+    installed = hooks_dir / "runner-job-started.sh"
+    installed.write_text(HOOK.read_text())
+    installed.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(installed)],  # no override argument: must self-locate
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert str(work) in result.stdout
