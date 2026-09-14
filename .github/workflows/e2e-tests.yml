@@ -232,6 +232,34 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # Hallazgo real de CI (PR #197, 2026-09-14), no anticipado por el diseño: sin desplazamiento,
+      # `make up` publica backend/frontend en 127.0.0.1:8000/3000 — los MISMOS puertos que
+      # `docker-compose.deploy.yml` mantiene publicados de forma PERMANENTE en este mismo runner
+      # (RUNBOOK §7.4, para depuración por túnel SSH). Es la app de dev desplegada, no un job de CI:
+      # está arriba siempre, así que `make up` sin desplazar falla el 100% de las veces con
+      # "port is already allocated" — no es un riesgo de colisión ocasional entre corridas
+      # concurrentes (ese es un problema aparte, el que `COMPOSE_PROJECT_NAME` de abajo cubre para
+      # los volúmenes). El `PORT_OFFSET` de este proyecto (`sdd/project.md` §Worktree bootstrap) es
+      # el mecanismo que ya existe para "más de un stack en la misma máquina"; aquí se deriva del
+      # propio agente del runner (`RUNNER_NAME`, patrón `autohostai-dev-vm-<i>`, RUNBOOK §6.2) en
+      # vez de un valor fijo, porque cada agente ejecuta un job a la vez pero los 4 son
+      # concurrentes entre sí — un offset fijo compartido por los 4 reproduciría la misma colisión
+      # un nivel más abajo. Fail-closed: si `RUNNER_NAME` no encaja el patrón esperado, aborta en
+      # vez de adivinar un offset que podría chocar con el stack desplegado o con otro agente.
+      - name: Calcular PORT_OFFSET a partir del agente del runner
+        id: port-offset
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_NAME" =~ ^autohostai-dev-vm-([0-9]+)$ ]]; then
+            agent="${BASH_REMATCH[1]}"
+          else
+            echo "::error::RUNNER_NAME '${RUNNER_NAME}' no coincide con el patrón autohostai-dev-vm-<i>; no se deriva un PORT_OFFSET sin adivinar (evita chocar con el stack desplegado en 8000/3000)."
+            exit 1
+          fi
+          offset=$(( agent * 10 ))
+          echo "PORT_OFFSET=${offset}" >> "$GITHUB_ENV"
+          echo "::notice::PORT_OFFSET=${offset} (agente ${agent} de ${RUNNER_NAME})"
+
       # El stack de `make up` vive en volúmenes con nombre (postgres_data, entre otros) que
       # sobreviven al borrado de los contenedores — a diferencia de los `services:` efímeros de
       # `backend-tests.yml`. Con el `COMPOSE_PROJECT_NAME` único por corrida de arriba, el caso
@@ -297,11 +325,9 @@ jobs:
 
           chmod 600 .env
 
-      # Sin `PORT_OFFSET`: el runner self-hosted es el checkout normal del workflow, no un
-      # worktree enlazado (`git worktree add`), así que `make up` corre en su modo "principal" y
-      # publica postgres/redis/backend/frontend en sus puertos por defecto (design D2).
+      # `PORT_OFFSET` calculado en el paso de arriba — obligatorio aquí, ver su comentario.
       - name: make up
-        run: make up
+        run: make up PORT_OFFSET=$PORT_OFFSET
 
       # `frontend/e2e/global-setup.ts` (task 1.3) hace UNA sola petición a `/health` y aborta si
       # falla — correcto para un humano que ya esperó a que `make up` terminara, pero
@@ -313,14 +339,15 @@ jobs:
       - name: Esperar a que el backend responda en /health
         run: |
           set -uo pipefail
+          backend_port=$(( 8000 + PORT_OFFSET ))
           for i in $(seq 1 60); do
-            if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
-              echo "::notice::backend saludable tras ${i} intento(s) (~$(( i * 5 ))s)"
+            if curl -fsS "http://localhost:${backend_port}/health" >/dev/null 2>&1; then
+              echo "::notice::backend saludable tras ${i} intento(s) (~$(( i * 5 ))s), puerto ${backend_port}"
               exit 0
             fi
             sleep 5
           done
-          echo "::error::el backend no respondió 200 en /health tras 5 minutos"
+          echo "::error::el backend no respondió 200 en /health (puerto ${backend_port}) tras 5 minutos"
           docker compose logs backend --tail=200 || true
           exit 1
 
@@ -365,6 +392,8 @@ jobs:
         # `suite` de `backend-tests.yml`.
         run: |
           set -uo pipefail
+          export BASE_URL="http://localhost:$(( 3000 + PORT_OFFSET ))"
+          export BACKEND_HEALTH_URL="http://localhost:$(( 8000 + PORT_OFFSET ))/health"
           started=$(date +%s)
           set +e
           npm run test:e2e

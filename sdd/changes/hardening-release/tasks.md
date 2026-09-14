@@ -963,3 +963,49 @@ not new task work.
   BACKEND_HEALTH_URL=http://localhost:8077/health npx playwright test e2e/login.spec.ts` live → all
   3 tests passed, including the `must_change_password` case exercising the new random password end
   to end; brought the stack back down (`make down PORT_OFFSET=77`) afterward.
+
+### Post-ship CI fix (PR #197, 2026-09-14)
+
+**All four non-trivial PR gates failed on first push.** Investigated each independently rather than
+assuming they shared one cause — they didn't, fully:
+
+1. **`e2e-tests-suite` — real bug, 100% reproducible, not a rare concurrent-run collision.**
+   `make up` without `PORT_OFFSET` publishes `127.0.0.1:8000`/`127.0.0.1:3000`, and
+   `docker-compose.deploy.yml` keeps those exact addresses published **permanently** on the same
+   self-hosted runner VM (RUNBOOK §7.4, for SSH-tunnel debugging of the deployed dev app) — it's
+   always up, not another CI job. Design D2's own "Rejected: per-runner ports" paragraph reasoned
+   about a different, weaker risk (two concurrent `e2e-tests-suite` runs colliding with each other,
+   the same class `backend-tests.yml` already accepts) and missed this stronger, always-on
+   collision entirely — neither the implementer, the three review rounds, nor the seven-reviewer
+   final panel caught it, because nothing in the diff or the design conversation ever cross-checked
+   against `docker-compose.deploy.yml`'s bind addresses. Fixed: derive `PORT_OFFSET = 10 × <i>` from
+   `RUNNER_NAME` (pattern `autohostai-dev-vm-<i>`, RUNBOOK §6.2), fail-closed if it doesn't match;
+   pass it to `make up`/`make bootstrap` and shift the health-check/E2E `BASE_URL`/
+   `BACKEND_HEALTH_URL` ports accordingly. Verified locally end to end: `make up PORT_OFFSET=90` →
+   backend/frontend published on `8090`/`3090`, `curl http://localhost:8090/health` → `200`,
+   `BASE_URL=http://localhost:3090 BACKEND_HEALTH_URL=http://localhost:8090/health npx playwright
+   test e2e/login.spec.ts` → 3 passed, `make down PORT_OFFSET=90` cleaned up. `design.md` D2 amended
+   to record the corrected reasoning — see its own text for why the original rejection was wrong,
+   not just incomplete.
+2. **`compose-ports-suite` + `rule11-ownership-suite` — same real cause, one accidental vocabulary
+   collision in `docs/dod-audit.md`.** Both jobs run `scripts/test_rule11_ownership.py` (the second
+   as part of `pytest scripts/ -q`), which asserts the rule-11 "meta-only offenders" set is exactly
+   `["sdd/specs/rule11-ownership-guard.md:11"]` — any other file matching its meta-vocabulary
+   pattern (`censo`/`regla 11`/`rule 11`/etc. combined with an ownership-declaration phrase like
+   "tienen escritor", with no real sink-column term nearby) is flagged, because that combination is
+   reserved for the guard's own canonical documentation. `docs/dod-audit.md`'s §28.17 table row
+   (line 47) said "censo del catálogo ... 16 de los 53 tipos **no tienen escritor**" — nothing to do
+   with rule 11's cleartext-sink ownership at all, but "censo" + "tienen escritor" in the same
+   markdown block (the whole 20-row table is one contiguous block, no blank lines between rows)
+   matched the guard's pattern anyway. Fixed by rewording only the trigger phrase ("no tienen
+   escritor" → "carecen de escritor"), leaving "censo" and the paragraph's meaning untouched — not
+   a guard workaround, since this was never a real rule-11 case. Verified: `uv run --no-project
+   --with 'pytest==9.1.1' python -m pytest scripts/test_rule11_ownership.py -q` → 24 passed (was 1
+   failed); `pytest scripts/ -q` (what `compose-ports-suite` actually runs) → 272 passed.
+3. **`frontend-tests-suite` — transient, not a code issue.** Failed with `npm error code ECONNRESET`
+   / `npm error network aborted` during `npm ci` — a network blip on the runner fetching packages,
+   unrelated to this change's diff (no `package.json`/lockfile content problem). No fix needed;
+   re-running the job is the correct response to this one.
+
+Files touched by this fix: `.github/workflows/e2e-tests.yml`, `docs/dod-audit.md`,
+`sdd/changes/hardening-release/design.md`.
