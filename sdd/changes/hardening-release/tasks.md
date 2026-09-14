@@ -1006,6 +1006,30 @@ assuming they shared one cause — they didn't, fully:
    / `npm error network aborted` during `npm ci` — a network blip on the runner fetching packages,
    unrelated to this change's diff (no `package.json`/lockfile content problem). No fix needed;
    re-running the job is the correct response to this one.
+4. **Self-hosted runner pool corruption (agents 2, 3, 4) — infra fault, not a code issue, but
+   masked a second real bug underneath.** After the fixes above, a later push showed 11 of 19 gates
+   failing in 5-8s with `actions/checkout` errors (`fatal: not a git repository`, and separately
+   `EACCES: permission denied, unlink ... backend/alembic/__pycache__/env.cpython-312.pyc`) on
+   agents 2, 3 and 4 — every self-hosted job failed, while the 3 jobs on GitHub-hosted runners
+   (`build-backend`, `build-frontend`, `version-parity`) stayed green throughout, pinpointing the
+   fault to the runner pool's persistent `_work` workspaces, not the PR content. The operator (Jose)
+   connected by SSH (RUNBOOK §1) and ran, per agent: `sudo rm -rf
+   /opt/actions-runner-<i>/_work/AutoHostAI/AutoHostAI && (cd /opt/actions-runner-<i> && sudo
+   ./svc.sh stop && sudo ./svc.sh start)` — `svc.sh` needs to run from the runner's own root
+   directory, not by absolute path, or it reports "Must run from runner root or install is corrupt".
+   All three agents came back healthy; a full rerun of the failed jobs then passed 17/19, leaving
+   only `e2e-tests-suite` red on a **second, unrelated bug this corruption had been masking**:
+   `npm ci` on the host failed with `EACCES` on `frontend/node_modules/@adobe` while the `frontend`
+   dev container (`docker-compose.yml`, `./frontend:/app` bind mount + `frontend_node_modules:
+   /app/node_modules` named volume meant to shadow it) was still running — the named volume's
+   isolation didn't hold in practice on this runner, and since `make up` ran before the host's
+   `npm ci`, the two raced to write the same host path while the container was live. Root cause not
+   fully isolated without deeper access to the runner's Docker setup; fixed by removing the
+   opportunity for the race instead: moved the whole "install frontend deps for Playwright" block
+   (node_modules cleanup, `npm ci`, Chromium install/cache) to run right after `actions/checkout`/
+   `actions/setup-node`, before `make up` starts the `frontend` container at all — the host install
+   has no dependency on the Docker stack, so there is no longer any window where both processes can
+   write to `frontend/node_modules` at the same time, regardless of the exact cause of the leak.
 
 Files touched by this fix: `.github/workflows/e2e-tests.yml`, `docs/dod-audit.md`,
 `sdd/changes/hardening-release/design.md`.

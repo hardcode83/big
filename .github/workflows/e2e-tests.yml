@@ -232,6 +232,58 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # Hallazgo real de CI (PR #197, 2026-09-14, reproducido en tres agentes distintos del pool):
+      # `npm ci` fallaba con EACCES creando `frontend/node_modules/@adobe` cuando este bloque corría
+      # DESPUÉS de `make up`. `frontend_node_modules` es un volumen con nombre (`docker-compose.yml`)
+      # que en teoría solapa `/app/node_modules` DENTRO del contenedor — pero el residuo aparecía
+      # igual mientras el contenedor `frontend` seguía vivo (no se baja hasta el final del job),
+      # consistente con una escritura concurrente de ese contenedor sobre el mismo path del host
+      # que la teoría del volumen con nombre no explica del todo. En vez de perseguir la causa exacta
+      # sin acceso al runner, este bloque se mueve ANTES de `make up`: el `npm ci`/instalación de
+      # Playwright del host no depende del stack de Docker para nada, así que corriendo antes no hay
+      # ningún proceso del contenedor `frontend` vivo con el que competir por el mismo directorio.
+      - name: Limpiar node_modules residual antes de instalar
+        working-directory: frontend
+        run: |
+          set -uo pipefail
+          if [ -e node_modules ]; then
+            if rm -rf node_modules 2>/tmp/rm-node-modules.err; then
+              echo "::notice::frontend/node_modules residual eliminado antes de npm ci"
+            else
+              echo "::error::frontend/node_modules existe y no se pudo borrar (¿propiedad de otro usuario, p. ej. root de un contenedor? necesita intervención en el runner):"
+              cat /tmp/rm-node-modules.err
+              ls -la node_modules | head -5
+              exit 1
+            fi
+          fi
+
+      - name: Instalar dependencias del frontend (Playwright corre en el host)
+        working-directory: frontend
+        run: npm ci
+
+      # `npm exec --no --` y no `npx` (mismo motivo que `frontend-tests.yml`): con `npx`, un
+      # paquete ausente de `node_modules` se descarga del registro y se ejecuta — y
+      # `package.json` es contenido que controla el Pull Request, sobre un disparador
+      # `pull_request:` sin filtros de rutas. `--no` se niega a instalar nada: usa el binario que
+      # `npm ci` dejó desde el lockfile, o falla.
+      - name: Restaurar caché del navegador de Playwright
+        id: cache-restore
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Instalar el navegador Chromium de Playwright
+        working-directory: frontend
+        run: npm exec --no -- playwright install --with-deps chromium
+
+      - name: Guardar caché del navegador de Playwright
+        if: steps.cache-restore.outputs.cache-hit != 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
+
       # Hallazgo real de CI (PR #197, 2026-09-14), no anticipado por el diseño: sin desplazamiento,
       # `make up` publica backend/frontend en 127.0.0.1:8000/3000 — los MISMOS puertos que
       # `docker-compose.deploy.yml` mantiene publicados de forma PERMANENTE en este mismo runner
@@ -356,58 +408,6 @@ jobs:
 
       - name: make seed-demo
         run: make seed-demo
-
-      # Hallazgo real de CI (PR #197, 2026-09-14, reproducido en dos agentes distintos del pool):
-      # `npm ci` falla con EACCES creando `frontend/node_modules/@adobe` en un workspace de este
-      # runner persistente. `frontend_node_modules` es un volumen con nombre (`docker-compose.yml`)
-      # que solapa `/app/node_modules` DENTRO del contenedor, así que `make up` no debería tocar el
-      # `frontend/node_modules` del host — pero el residuo aparece igual, en más de un agente, sin
-      # avisos de limpieza de `actions/checkout` antes. Sin acceso SSH al runner para diagnosticar
-      # la causa de raíz, este paso se defiende del síntoma: si el directorio existe y no es
-      # propiedad del usuario del runner (`sudo` no disponible aquí, así que un `rm -rf` normal
-      # fallaría igual), lo dice explícitamente en vez de dejar que `npm ci` falle con un EACCES
-      # que no nombra la causa.
-      - name: Limpiar node_modules residual antes de instalar
-        working-directory: frontend
-        run: |
-          set -uo pipefail
-          if [ -e node_modules ]; then
-            if rm -rf node_modules 2>/tmp/rm-node-modules.err; then
-              echo "::notice::frontend/node_modules residual eliminado antes de npm ci"
-            else
-              echo "::error::frontend/node_modules existe y no se pudo borrar (¿propiedad de otro usuario, p. ej. root de un contenedor? necesita intervención en el runner):"
-              cat /tmp/rm-node-modules.err
-              ls -la node_modules | head -5
-              exit 1
-            fi
-          fi
-
-      - name: Instalar dependencias del frontend (Playwright corre en el host)
-        working-directory: frontend
-        run: npm ci
-
-      # `npm exec --no --` y no `npx` (mismo motivo que `frontend-tests.yml`): con `npx`, un
-      # paquete ausente de `node_modules` se descarga del registro y se ejecuta — y
-      # `package.json` es contenido que controla el Pull Request, sobre un disparador
-      # `pull_request:` sin filtros de rutas. `--no` se niega a instalar nada: usa el binario que
-      # `npm ci` dejó desde el lockfile, o falla.
-      - name: Restaurar caché del navegador de Playwright
-        id: cache-restore
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
-
-      - name: Instalar el navegador Chromium de Playwright
-        working-directory: frontend
-        run: npm exec --no -- playwright install --with-deps chromium
-
-      - name: Guardar caché del navegador de Playwright
-        if: steps.cache-restore.outputs.cache-hit != 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
 
       - name: Ejecutar la suite E2E (Playwright)
         id: e2e
