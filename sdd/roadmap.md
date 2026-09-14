@@ -279,7 +279,7 @@ Categorías:
   needs: · size: S · kind: fix
 - [x] tenant-settings-web — [FE] **`/settings`, hoy `RoutePlaceholder` … → changes/archive/2026-09-12-tenant-settings-web/
   needs: user-management, frontend-auth-session, frontend-auth-role-routing · size: M · kind: feature
-- [ ] hardening-release — [CROSS] suite E2E Playwright, docker + README, DoD §28 completo (PRD §26.25-28). …
+- [x] hardening-release — [CROSS] suite E2E Playwright, docker + README, DoD §28 completo (PRD §26.25-28). … → changes/archive/2026-09-14-hardening-release/
   needs: incident-triage-web, approvals-web, reservation-create-web, cleaning-task-manage-web, sim-advance · size: L · kind: tech
 - [x] super-admin-identity — [BE] **el modelo de identidad del `SUPER_ADMIN` … → changes/archive/2026-09-02-super-admin-identity/
   needs: auth-tenancy · size: S · kind: feature
