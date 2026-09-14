@@ -32,6 +32,15 @@ Dos hechos fijan la forma de la solución:
 Verificado empíricamente durante el diagnóstico: un contenedor sobre un bind mount genera el `.pyc`,
 y con `PYTHONDONTWRITEBYTECODE=1` no genera ninguno.
 
+Y el journal de `actions-runner-2` fecha la cadena causal dentro de un mismo agente, que es la
+evidencia más directa de quién contamina a quién: `api-contract` (10:19:33) y `backend-tests`
+(10:19:57) **pasan**; a las 10:20:05 corre `e2e-tests-suite`, que es el workflow que levanta el
+stack con `make up`; y a partir de ahí **falla todo lo que aterriza en ese agente**, sea del
+workflow que sea — `e2e-tests` (10:21:42), `compose-ports-detect` (10:23:52), `compose-ports`
+(10:24:06), `rule11-ownership-detect` (10:30:44), `frontend-api-contract` (10:30:53),
+`e2e-tests-detect` (10:31:02) y `compose-ports-suite` (10:31:09). El sembrador es el workflow que
+levanta el stack; la víctima es cualquier job posterior del agente.
+
 ## What changes
 
 Después de este change, el stack local deja de escribir ficheros en el árbol del repositorio, y el
@@ -122,9 +131,10 @@ Acceptance criteria:
   insuficientes porque aparece otro escritor, su sitio es una entrada propia de roadmap.
 - **El `EACCES` de `frontend/node_modules`.** Ya lo trató `hardening-release` (PR #197) con un paso
   dentro del job de `e2e-tests`. Este change no lo revisa ni lo reescribe.
-- **Levantar `autohostai-dev-vm-2`, que estaba `offline` durante el incidente.** Es un hecho
-  observado y anotado, pero su causa no se investigó aquí y no tiene relación demostrada con esta
-  contaminación.
+- **`autohostai-dev-vm-2`, que estaba `offline` durante el incidente.** Investigado el 2026-09-14 y
+  **descartado como parte de esta causa**: el agente no se cayó, lo pararon limpiamente
+  (`Stopping…` → `Deactivated successfully`, `status=0/SUCCESS`) a las 10:44:05 UTC, con el servicio
+  `enabled`, el disco al 22 % y los inodos al 5 %. Se volvió a arrancar como operación aparte.
 - **La limpieza manual ya aplicada por SSH el 2026-09-14.** Fue la mitigación del incidente, no el
   entregable; este change la sustituye por código y no la documenta como procedimiento.
 - **El recuento de tareas del scheduler en `README.md`**, que el merge del PR #196 dejó diciendo
