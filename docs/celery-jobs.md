@@ -4,7 +4,7 @@ Cómo se opera el scheduler que mueve el estado operacional de las viviendas con
 El *qué hace* está en [`sdd/specs/celery-jobs.md`](../sdd/specs/celery-jobs.md); esta página
 es el *cómo se usa y se diagnostica*.
 
-## Los trece jobs
+## Los dieciséis jobs
 
 | Job | Cadencia | Qué hace |
 |---|---|---|
@@ -19,6 +19,9 @@ es el *cómo se usa y se diagnostica*.
 | `reconcile_owner_approvals_for_expenses` | cada 5 min | Aplica las respuestas de aprobación del owner a los gastos pendientes de la liquidación (change `revenue-statements`) — ver [`revenue-statements.md`](revenue-statements.md) |
 | `classify_reviews` | cada 5 min | Pasa por el pipeline de análisis toda reseña `NEW` (change `revenue-reviews`) — ver [`reviews.md`](reviews.md) |
 | `sync_pms_reservations` | cada 6 h | Barre el portfolio completo de cada tenant contra su PMS —todos los proveedores que resuelva, `MOCK` incluido— con la misma vía que `pms_sync` (change `pms-sync-schedule`) |
+| `send_checkin_reminders` | cada 15 min | Reserva confirmada con check-in a 24h/2h vista → email de recordatorio a `Guest.email` en `Guest.preferred_language`, una vez por reserva y umbral (change `guest-scheduled-comms`) — ver [`access-notifications.md`](access-notifications.md) |
+| `send_checkout_reminders` | cada 15 min | Reserva confirmada con check-out a 2h vista → email de recordatorio, misma vía que el de check-in (change `guest-scheduled-comms`) — ver [`access-notifications.md`](access-notifications.md) |
+| `deliver_access_instructions` | cada 15 min | `AccessRecord` en `MANUAL_ADDED`/`CREATED_EXTERNAL` con código enmascarado → email al huésped con **solo** la forma `****XX` (primer escritor real de la excepción 1 de la regla 11), sin tocar `AccessRecord.status` (change `guest-scheduled-comms`) — ver [`access-notifications.md`](access-notifications.md) |
 | `generate_price_recommendations` | **diario, 06:00 UTC** | Recalcula el horizonte de 60 días de precio recomendado de cada vivienda activa con regla aplicable (change `revenue-pricing`) — ver [`pricing.md`](pricing.md) |
 | `generate_owner_statements` | **mensual, día 1, 02:00 UTC** | Genera la liquidación mensual de cada vivienda activa (change `revenue-statements`) — ver [`revenue-statements.md`](revenue-statements.md) |
 
@@ -33,17 +36,19 @@ uno mensual no hay cadencia de la que partir, de modo que `DAILY_JOBS` y `MONTHL
 el suyo escrito (tres horas y seis horas).
 
 **Seis son de PRD §8.3, con sus números: los cuatro primeros, el diario y el mensual. Los otros
-siete no están en el PRD**, y es una divergencia declarada (`access-notifications` design D2 y
-D3, `reservations-webhooks` design D10, `maintenance` D2, `revenue-statements` D4,
-`revenue-reviews` D2, `pms-sync-schedule` D1): el PRD dice *qué* tiene que pasar —§14 entrega
-notificaciones, §15 le da un registro de acceso a cada reserva confirmada, §16 recibe los
-avisos del PMS, §12 pide que una incidencia llegue clasificada, §18 declara el pipeline de
-reseñas, R5.7 exige la aprobación del owner sobre gastos y §5.5 (la afirmación de que el PMS es
-la fuente de verdad) requiere un barrido que la sostenga aunque falle un webhook— y no dice qué
-lo dispara. Los siete son idempotentes y dependen del reloj, así que beat es su sitio; los
-nombres del PRD no se han tocado. `test_schedule.py` los separa (`PRD_8_3`, `PRD_8_3_DAILY` y
-`PRD_8_3_MONTHLY` frente a `BEYOND_PRD_8_3`) para que nadie invoque «lo dice el PRD» sobre un
-número que el PRD no ha visto nunca.
+diez no están en el PRD con su cadencia**, y es una divergencia declarada (`access-notifications`
+design D2 y D3, `reservations-webhooks` design D10, `maintenance` D2, `revenue-statements` D4,
+`revenue-reviews` D2, `pms-sync-schedule` D1, `guest-scheduled-comms` design D1/D2/D9): el PRD
+dice *qué* tiene que pasar —§14 entrega notificaciones, §15 le da un registro de acceso a cada
+reserva confirmada, §16 recibe los avisos del PMS, §12 pide que una incidencia llegue
+clasificada, §18 declara el pipeline de reseñas, R5.7 exige la aprobación del owner sobre gastos
+y §5.5 (la afirmación de que el PMS es la fuente de verdad) requiere un barrido que la sostenga
+aunque falle un webhook— y no dice qué lo dispara, o (`send_checkin_reminders`) lo nombra con una
+cadencia distinta a la implementada ("cada hora" en el PRD, 15 min aquí — `guest-scheduled-comms`
+D1). Los diez son idempotentes y dependen del reloj, así que beat es su sitio; los nombres del
+PRD no se han tocado. `test_schedule.py` los separa (`PRD_8_3`, `PRD_8_3_DAILY` y
+`PRD_8_3_MONTHLY` frente a `BEYOND_PRD_8_3`) para que nadie invoque «lo dice el PRD» sobre una
+cadencia que el PRD no ha fijado.
 
 **`sync_pms_reservations` reemplaza una ausencia documentada, no añade una capacidad nueva**:
 `celery-jobs` design D16 (2026-08-04) decidió explícitamente no programarlo porque su único
@@ -73,9 +78,11 @@ deriva (`revenue-pricing`, 2026-08-18). Lleva su TTL de lock explícito —tres 
 derivarlo de la cadencia como los demás, porque `lock_ttl_for` devuelve cadencia × 3 y para un
 job diario eso serían tres días de bloqueo tras un worker muerto.
 
-**El único job de PRD §8.3 que sigue sin estar aquí es `send_checkin_reminders`**, y no por
-falta de reloj: es un mensaje al huésped, así que lo que le falta es el adaptador de canal y la
-plantilla que traen `messaging-ai` / `access-notifications`.
+**`send_checkin_reminders` cerró su propia deuda** (`guest-scheduled-comms`, 2026-09-14): PRD §8.3
+lo nombraba sin código porque le faltaba el adaptador de canal y la plantilla que trajeron
+`messaging-ai` / `access-notifications`. El mismo change añadió `send_checkout_reminders` (sin
+nombre en el PRD) y `deliver_access_instructions`, el primer escritor real de la excepción 1 de
+la regla 11 — ver [`access-notifications.md`](access-notifications.md).
 
 ## Arrancar y mirar
 

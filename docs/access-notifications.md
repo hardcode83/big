@@ -53,9 +53,12 @@ escriben con `NULL` a propósito, para que `check_sla_breaches` no duplique el e
 
 ### Qué llega a la bandeja hoy, y qué no
 
-De los diecisiete `NotificationType`, **trece los escribe alguien y cuatro no los escribe nadie**.
-Vale la pena tenerlo a mano al mirar una bandeja vacía: puede que no haya pasado nada, o puede que
-el tipo que esperabas sea de los cuatro.
+De los diecisiete `NotificationType` que cubría esta tabla, **dieciséis los escribe alguien y
+uno no lo escribe nadie**. `guest-scheduled-comms` (2026-09-14) cerró los tres huérfanos que
+quedaban —los recordatorios al huésped— y añadió un tipo nuevo, `ACCESS_INSTRUCTIONS_SENT`, el
+primer escritor real de la excepción 1 de la regla 11 (el código de acceso enmascarado,
+`****XX`). Vale la pena tenerlo a mano al mirar una bandeja vacía: puede que no haya pasado
+nada, o puede que el tipo que esperabas sea el único que sigue sin escritor.
 
 | Qué ocurre | Tipo | A quién |
 |---|---|---|
@@ -72,10 +75,18 @@ el tipo que esperabas sea de los cuatro.
 | La IA escala una conversación de huésped | `GUEST_ESCALATION` | Managers, o el owner si no hay |
 | Una ejecución crea recomendaciones de precio | `PRICE_RECOMMENDATION` | Managers **y** owners |
 | Alguien pide recuperar su contraseña | `PASSWORD_RESET_REQUESTED` | A quien lo pidió, por email |
+| Check-in a 24h/2h vista (una fila por umbral) | `CHECKIN_REMINDER_24H` / `CHECKIN_REMINDER_2H` | Al huésped, por email, en su idioma preferido (`guest-scheduled-comms`) |
+| Check-out a 2h vista | `CHECKOUT_REMINDER` | Al huésped, por email, en su idioma preferido (`guest-scheduled-comms`) |
+| Un `AccessRecord` `MANUAL_ADDED`/`CREATED_EXTERNAL` tiene código enmascarado | `ACCESS_INSTRUCTIONS_SENT` | Al huésped, por email — **solo** la forma `****XX`, nunca el código ni las `notes` (`guest-scheduled-comms`) |
 
-**Los cuatro que nadie escribe**: `LOCK_ALERT` —espera una superficie de importación de cerraduras
-que no existe— y los tres recordatorios al huésped, `CHECKIN_REMINDER_24H`, `CHECKIN_REMINDER_2H`
-y `CHECKOUT_REMINDER`, que son de `guest-scheduled-comms` y no tienen canal al huésped todavía.
+**El único que nadie escribe**: `LOCK_ALERT` —espera una superficie de importación de cerraduras
+que no existe.
+
+Los tres recordatorios y `ACCESS_INSTRUCTIONS_SENT` los escriben tres jobs de beat nuevos —
+`send_checkin_reminders`, `send_checkout_reminders`, `deliver_access_instructions`, cada 15
+minutos— ver [`celery-jobs.md`](celery-jobs.md). Ninguno de los tres toca `AccessRecord.status`
+ni `mark_delivered`: la entrega automática del código es independiente de la confirmación manual
+del operador en `POST /access-records/{id}/delivered`.
 
 Hay además dos tipos de **texto libre** que no son miembros del enum y sí se escriben:
 `INCIDENT_REJECTED` (el técnico rechaza) y `LEGAL_REGISTRATION_FAILED`. La columna es un
