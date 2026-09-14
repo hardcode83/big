@@ -122,6 +122,21 @@ Acceptance criteria:
 3. THE SYSTEM SHALL registrar el incidente del 2026-09-14 con sus identificadores de run como
    evidencia de la regla, no como relato.
 
+### R5 — La regla tiene un guard que la sostiene
+
+**As a** quien mantenga el stack, **I want** que añadir un servicio que monte el árbol sin el ajuste
+falle en CI, **so that** la regla de R1 no dependa de que cada persona la recuerde.
+
+Acceptance criteria:
+
+1. THE SYSTEM SHALL verificar en CI que todo servicio que monta el árbol del repositorio por bind
+   mount declara `PYTHONDONTWRITEBYTECODE`.
+2. WHERE el guard determina qué servicios están en alcance, THE SYSTEM SHALL derivarlos de la
+   composición resuelta, y NOT de una lista de nombres de servicio fijada en el propio guard.
+3. WHEN un servicio con bind mount del árbol no declara el ajuste, THE SYSTEM SHALL fallar el check
+   nombrando el servicio.
+4. WHEN todos los servicios en alcance lo declaran, THE SYSTEM SHALL pasar sin intervención.
+
 ## Out of scope
 
 - **Hacer que los contenedores corran con el UID/GID del host (`user:`).** Sería la defensa completa
@@ -145,5 +160,6 @@ Acceptance criteria:
 
 - `sdd/specs/ci-runner-self-hosted.md` — contrato del pool: añade el hook y la regla de que el paso 0
   no es mitigable desde el workflow.
-- `sdd/specs/local-environment.md` — el stack local no escribe en el árbol del repositorio.
+- `sdd/specs/local-environment.md` — el stack local no escribe en el árbol del repositorio, y el
+  guard de CI que lo sostiene (R5), junto a los checks de composición que esa spec ya describe.
 - `sdd/specs/infra-dev-terraform.md` — `runner-bootstrap.sh` instala y declara el hook por agente.
