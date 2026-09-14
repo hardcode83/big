@@ -113,13 +113,22 @@ del propio `main.tf`.
 
 **Chosen:** un check nuevo, en la línea de los que el repo ya tiene (`make check-compose-ports`,
 `scripts/check-detect-surface.py`, `make check-rule11-ownership`), que lee la composición **resuelta**
-y exige `PYTHONDONTWRITEBYTECODE` en todo servicio que monte el árbol del repositorio por bind mount.
-Decidido con la usuaria; materializa R5.
+y exige `PYTHONDONTWRITEBYTECODE` en todo servicio **Python** que monte el árbol del repositorio por
+bind mount en escritura. Decidido con la usuaria; materializa R5.
+
+**Enmendado el 2026-09-14, durante la implementación de la sección 2, antes de escribir el guard**:
+la redacción original no llevaba el calificador «Python» (R1/R5 originales tampoco lo distinguían de
+forma pareja) y, comprobado contra el modelo resuelto real, `frontend` también monta su árbol en
+escritura (`./frontend:/app`, `read_only` ausente) — la habría metido en el guard para una variable
+que en un contenedor Node no hace nada, y habría exigido reabrir la sección 1, ya con panel PASS.
+Verificado con la usuaria (ver Open questions original de esta fase); R1.1 sí llevaba el calificador
+Python desde el principio, y esta enmienda solo iguala R5 con él.
 
 Lo que lo hace un guard y no un adorno es **qué lee**: la forma que se sortea sola es comprobar los
-cuatro nombres de hoy, porque un quinto servicio con bind mount no la dispara. Al derivar la lista de
-servicios en alcance del propio `docker-compose.yml`, un servicio nuevo entra en el guard sin que
-nadie lo añada.
+cuatro nombres de hoy, porque un quinto servicio Python con bind mount no la dispara. La señal
+estructural para «es un servicio Python» es el `build.context` resuelto: apunta a `backend/` para
+los cuatro de hoy y a `frontend/` para el único que no lo es — la misma distinción que ya existe en
+`docker-compose.yml`, y no una lista de nombres de servicio en el guard.
 
 **Dónde corre**: como paso del workflow `compose-ports` existente, que ya es el gate de
 `docker-compose.yml` y ya paga el patrón detect/suite/gate. No se crea un décimo workflow: sería

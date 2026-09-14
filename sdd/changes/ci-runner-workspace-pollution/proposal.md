@@ -129,12 +129,18 @@ falle en CI, **so that** la regla de R1 no dependa de que cada persona la recuer
 
 Acceptance criteria:
 
-1. THE SYSTEM SHALL verificar en CI que todo servicio que monta el árbol del repositorio por bind
-   mount declara `PYTHONDONTWRITEBYTECODE`.
-2. WHERE el guard determina qué servicios están en alcance, THE SYSTEM SHALL derivarlos de la
-   composición resuelta, y NOT de una lista de nombres de servicio fijada en el propio guard.
-3. WHEN un servicio con bind mount del árbol no declara el ajuste, THE SYSTEM SHALL fallar el check
-   nombrando el servicio.
+1. THE SYSTEM SHALL verificar en CI que todo servicio Python que monta el árbol del repositorio
+   por bind mount en escritura declara `PYTHONDONTWRITEBYTECODE`. **Enmendado el 2026-09-14,
+   verificación previa a 2.1**: el texto original no llevaba el calificador «Python» y así habría
+   alcanzado a `frontend` (Node), que también monta su árbol en escritura pero para quien la
+   variable no significa nada — habría exigido tocar la sección 1, ya con panel PASS, para un
+   no-op. R1.1 sí llevaba ese calificador; esta enmienda lo iguala.
+2. WHERE el guard determina qué servicios Python están en alcance, THE SYSTEM SHALL derivarlos de
+   la composición resuelta — el `build.context` del servicio apunta a `backend/`, la misma señal
+   estructural que ya distingue en `docker-compose.yml` a los cuatro servicios Python de
+   `frontend` — y NOT de una lista de nombres de servicio fijada en el propio guard.
+3. WHEN un servicio Python con bind mount en escritura del árbol no declara el ajuste, THE SYSTEM
+   SHALL fallar el check nombrando el servicio.
 4. WHEN todos los servicios en alcance lo declaran, THE SYSTEM SHALL pasar sin intervención.
 
 ## Out of scope
