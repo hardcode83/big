@@ -225,3 +225,34 @@ getent group docker | grep -c actions-runner-<i>   # esperado: 0
 ```
 
 `runner_count = 1` es estado de rollback válido (R5.2): el reaprovisionamiento deja un único agente funcional (`autohostai-${ENV}-vm-1`). El legado `autohostai-${ENV}-vm` (sin sufijo) se retira en la primera reaplicación tras este change y no vuelve a aparecer — antes de aceptar `runner_count = 1` como rollback a `ci-runner-oci`, ten en cuenta que el nombre del agente **cambia** (de `autohostai-${ENV}-vm` a `autohostai-${ENV}-vm-1`); el comportamiento del pool (un agente online, label `dev`, sin paralelismo) sí es idéntico.
+
+## 9. Desactivar el hook `ACTIONS_RUNNER_HOOK_JOB_STARTED` sin desaprovisionar el pool
+
+Esto es **distinto** de §6 (Rotación / retirada del runner): §6 retira un agente entero — usuario Linux, registro ante GitHub, `RUNNER_HOME` — y aquí no se toca nada de eso, ni `config.sh`, ni la identidad del agente ante GitHub. Solo se apaga una variable de entorno y se reinicia el proceso; el agente sigue registrado, `online` y con el mismo label `dev`, y `runner_count` no cambia. Úsalo si el hook (change `ci-runner-workspace-pollution`, `infra/environments/dev/runner-job-started.sh`) resulta defectuoso o hay que descartarlo como sospechoso mientras se diagnostica un fallo — no para bajar N ni para rotar un agente.
+
+El mecanismo es el mismo que activa el hook, a la inversa: GitHub solo relee `/opt/actions-runner-<i>/.env` al arrancar el proceso del runner (`RUNBOOK.md §6.2`), así que retirar la línea del `.env` no surte efecto hasta el siguiente reinicio del servicio.
+
+```bash
+# Sustituir <i> por el número de agente a desactivar (repetir por cada agente, o por los cuatro):
+sudo sed -i '/^ACTIONS_RUNNER_HOOK_JOB_STARTED=/d' /opt/actions-runner-<i>/.env
+
+# `sed -i` como root no garantiza conservar el propietario del fichero editado (reescribe
+# con un temporal y lo renombra encima) — sin esto el .env puede quedar root:root y el
+# proceso del runner, que corre sin privilegios, se queda sin poder leerlo:
+sudo chown actions-runner-<i>:actions-runner-<i> /opt/actions-runner-<i>/.env
+sudo chmod 0600 /opt/actions-runner-<i>/.env
+
+# El agente ya estaba `active`: sin reinicio sigue ejecutando el hook (con la variable
+# retirada del disco pero aún presente en su entorno vivo). Comprobar antes que no tiene
+# un job en vuelo (Settings → Actions → Runners, o `systemctl status`), y solo entonces:
+sudo systemctl restart actions.runner.autohostai-labs-AutoHostAI.autohostai-dev-vm-<i>.service
+```
+
+Verificar que quedó desactivado en el proceso vivo, no solo en el `.env` (mismo comando que usa `RUNBOOK.md §6.2` para lo contrario):
+
+```bash
+PID="$(systemctl show -p MainPID --value "actions.runner.autohostai-labs-AutoHostAI.autohostai-dev-vm-<i>.service")"
+tr '\0' '\n' < /proc/"$PID"/environ | grep ACTIONS_RUNNER_HOOK_JOB_STARTED   # sin salida = desactivado
+```
+
+El fichero `runner-job-started.sh` en `$RUNNER_HOME/hooks/` se puede dejar instalado — sin la declaración en `.env`, GitHub nunca lo invoca; no hace falta borrarlo del disco para desactivarlo. Para reactivarlo, `RUNBOOK.md §6.2` documenta el paso a paso completo (copiar el hook, declarar la línea, reiniciar); reaplicar el bootstrap (`sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"`) también lo reactiva para todos los agentes cuyo `.env` no lo declare ya, porque vuelve a escribir la línea y reinicia el servicio si el `.env` cambió y el agente está ocioso (design D4) — así que un `runner-bootstrap.sh` reaplicado después de este procedimiento reactiva el hook sin avisar, salvo que también se retire del código fuente.

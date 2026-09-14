@@ -33,6 +33,7 @@ make openapi           # regenera el contrato de API (ver abajo)
 make check-version-parity # comprueba VERSION, backend y frontend
 make compose-stacks    # lista los stacks de Compose de la máquina y marca los huérfanos (ver abajo)
 make check-compose-ports # comprueba la postura de red del compose local (ver abajo)
+make check-compose-bytecode # comprueba que ningún servicio Python con bind mount del árbol se salta PYTHONDONTWRITEBYTECODE
 make check-rule11-ownership # comprueba que la propiedad de un sumidero de la regla 11 se declara en un solo sitio
 make check-detect-surface # comprueba que la superficie de detección de cada gate condicional cubre su superficie de dependencias
 make down              # para y elimina los contenedores del stack

@@ -128,6 +128,7 @@ POSTGRES_USER=autohostai
 EOF
 sudo install -m0755 runner-bootstrap.sh /opt/bootstrap-runner.sh
 sudo install -m0755 gh-app-install-token.py /opt/gh-app-install-token.py
+sudo install -m0755 runner-job-started.sh /opt/runner-job-started.sh
 export RUNNER_COUNT=4   # el valor de `runner_count` del apply (variables.tf/dev.tfvars) — NO copiar literal
 sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"
 ```
@@ -135,6 +136,49 @@ sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"
 `$RUNNER_COUNT` debe coincidir con la variable `runner_count` del apply (`variables.tf` o `dev.tfvars`, validación 1..4; default 4 — change `ci-runner-pool-oci`). **El `export` de arriba es obligatorio**: sin él, `"$RUNNER_COUNT"` se expande vacío en esta misma línea de comando (una asignación-prefijo tipo `VAR=x cmd "$VAR"` no hace visible `VAR` a la expansión de argumentos de ese mismo comando — solo entra en el entorno del proceso ejecutado) y el script cae en silencio al `RUNNER_COUNT=4` interno de `runner-bootstrap.sh`, que puede no coincidir con el valor real del apply (hallazgo del panel de `/sdd:review`, `sdd-qa`/`sdd-review-cicd`, 2026-09-04). El `runcmd` del cloud-init no tiene este problema: pasa el valor de Terraform ya sustituido en tiempo de render, como argumento literal. Subir/bajar N: `docs/ci-runner-rollback.md §7–§8`.
 
 Verificar: **Settings → Actions → Runners** muestra **N entradas `autohostai-dev-vm-<i>`** (i ∈ [1..N]) **Idle** con label `dev`, y ningún principal local sobrante — `getent group docker` no debe listar usuarios `actions-runner-<i>` de agentes ya retirados (`id actions-runner-<i>` debe fallar). Recuperación de un agente puntual: `sudo /opt/actions-runner-<i>/svc.sh start`; si se desregistra, re-ejecutar el bootstrap (`--replace`, idempotente).
+
+**Por qué existe `runner-job-started.sh`**: un `.pyc` root-owned dejado en el `_work/` de un agente hace que `actions/checkout` falle con `EACCES` **en su paso 0**, antes de que exista ningún paso propio del workflow — no hay YAML que lo mitigue, porque no hay ningún paso del job donde reaccionar a él. Por eso la defensa vive en el hook del agente, no en el workflow. Evidencia, no relato — el incidente del 2026-09-14: runs `34836602502`, `34840316768` y `34824905559` (ver `sdd/changes/ci-runner-workspace-pollution/proposal.md` §Why).
+
+**El `.env` de un agente no surte efecto hasta que su proceso se reinicia** (`ACTIONS_RUNNER_HOOK_JOB_STARTED`, change `ci-runner-workspace-pollution`). GitHub, verbatim: *"any change to the .env file will require restarting the runner."* Escribir la variable en `/opt/actions-runner-<i>/.env` sobre un agente ya `active` no activa el hook hasta que ese proceso se reinicia — el bootstrap de arriba ya lo automatiza (design D4): si el `.env` de un agente cambió respecto al anterior y el agente está ocioso, lo reinicia solo; si tiene un job en vuelo, difiere el reinicio y lo imprime en un resumen al final de su ejecución (`[hook] N agente(s) ... PENDIENTES de reinicio`, con el `systemctl restart <svc>` exacto de cada agente afectado) — no reintenta solo; hace falta reaplicar el bootstrap, o el `systemctl restart` manual de ese servicio, una vez el agente quede ocioso.
+
+**Verificar que la variable está en el proceso vivo, no solo en disco**: leer el entorno real del PID del runner desde `/proc`, no fiarse de que el `.env` en disco sea correcto.
+
+```bash
+# Sustituir <i> por el número de agente (p. ej. 2):
+PID="$(systemctl show -p MainPID --value "actions.runner.autohostai-labs-AutoHostAI.autohostai-dev-vm-<i>.service")"
+tr '\0' '\n' < /proc/"$PID"/environ | grep ACTIONS_RUNNER_HOOK_JOB_STARTED
+```
+
+Si el `grep` no encuentra nada con un `.env` en disco correcto, el proceso no se ha reiniciado desde que se escribió — repetir el `systemctl restart` de arriba una vez el agente esté ocioso.
+
+**Despliegue escalonado del hook (D9), la primera vez que se instala en la VM viva**: no se aplica a los cuatro agentes en la misma pasada. El contrato del hook con GitHub hace que un código de salida distinto de cero falle el job — con los cuatro agentes a la vez, un hook mal calibrado deja la CI entera inoperativa, incluidos los workflows del propio Pull Request que lo arreglaría. Primero se aplica a mano solo a `actions-runner-2` (los mismos tres pasos que el bloque de arriba automatiza para todos), se observan varios jobs reales, y solo entonces se ejecuta el bootstrap completo para el resto:
+
+```bash
+# 1. Copiar el hook al agente 2 (el bloque de arriba ya dejó /opt/runner-job-started.sh listo):
+sudo install -o actions-runner-2 -g actions-runner-2 -m0755 \
+  /opt/runner-job-started.sh /opt/actions-runner-2/hooks/runner-job-started.sh
+
+# 2. Declarar el hook en su .env (retira cualquier declaración previa y añade la actual).
+#    `sed -i` como root NO garantiza conservar el propietario del fichero que edita —
+#    reescribe con un temporal y lo renombra encima (comportamiento documentado de GNU
+#    sed): sin el chown/chmod de después, el .env puede quedar root:root y el proceso del
+#    runner, que corre como `actions-runner-2` sin privilegios, se queda sin poder leerlo
+#    — justo lo que `write_runner_env()` de `runner-bootstrap.sh` evita con su propio
+#    mktemp+chown+chmod+mv atómico (sección 4 de este change). Este paso a mano reproduce
+#    esa misma garantía explícitamente:
+sudo sed -i '/^ACTIONS_RUNNER_HOOK_JOB_STARTED=/d' /opt/actions-runner-2/.env
+echo 'ACTIONS_RUNNER_HOOK_JOB_STARTED=/opt/actions-runner-2/hooks/runner-job-started.sh' \
+  | sudo tee -a /opt/actions-runner-2/.env >/dev/null
+sudo chown actions-runner-2:actions-runner-2 /opt/actions-runner-2/.env
+sudo chmod 0600 /opt/actions-runner-2/.env
+
+# 3. El agente ya estaba `active`: sin reinicio no lee el .env nuevo (ver nota de arriba).
+#    Comprobar antes que no tiene un job en vuelo (Settings → Actions → Runners, o
+#    `systemctl status`), y solo entonces:
+sudo systemctl restart actions.runner.autohostai-labs-AutoHostAI.autohostai-dev-vm-2.service
+```
+
+Verificar con el comando de `/proc` de arriba (`<i>=2`) que la variable ya está en el proceso vivo, y dejar pasar varios jobs reales por ese agente sin que fallen. Solo entonces ejecutar el bloque completo del principio de esta sección (`sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"`): ya no tocará `actions-runner-2` (su `.env` estará "unchanged") y instalará y declarará el hook en los otros tres, reiniciándolos si están ociosos.
 
 ### 6.3 Arranque en frío (primer deploy sobre VM sin app)
 
