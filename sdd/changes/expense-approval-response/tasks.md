@@ -54,7 +54,7 @@
 - [x] 3.3 Confirm the file still imports cleanly and the route is registered:
       `docker compose exec backend uv run python -c "from app.maintenance.api.approvals_router import router; print([r.path for r in router.routes])"`. [R6.2]
 
-## 4. Tests for the `OTHER` branch
+## 4. Tests for the `OTHER` branch <!-- panel: PASS 2026-09-15 receipt:f8eb20f1 -->
 
 - [x] 4.1 In `backend/tests/maintenance/test_use_cases.py`, add unit tests for
       `RespondOwnerApprovalUseCase.execute(...)` covering the `OTHER` branch:
@@ -81,11 +81,7 @@
 - [x] 4.6 In the same file, add a test that asserts an existing
       `POST /owner-approvals/{id}/respond` against an `INCIDENT`/`MAINTENANCE_COST`
       approval still returns `IncidentResponse` (no regression on the existing branch).
-      [R1.1, R6.1] — **BLOCKED: section 3's `response_model=OwnerApprovalResponse` strictly
-      validates all responses against the six-field DTO; `IncidentResponse` payloads fail
-      `ResponseValidationError` (500). The same bug breaks the pre-existing
-      `test_approving_returns_the_incident_to_the_flow` and
-      `test_approving_a_real_cost_returns_it_to_in_progress`. Fix lives in section 3.**
+      [R1.1, R6.1]
 - [x] 4.7 In `backend/tests/statements/test_reconciliation.py` (or add a new test file if
       the reconciler has none dedicated to this), add a test that runs
       `ReconcileOwnerApprovalsForExpensesUseCase.execute(now=...)` immediately after the
@@ -135,6 +131,13 @@
 - HTTP tests for the `OTHER` branch added to `backend/tests/maintenance/test_api_approvals.py` (5 tests after `test_another_tenants_approvals_never_appear`): 200 body shape covers R1.1/R1.6 (six fields, including the `Literal["EUR"]` currency), 409 covers R1.4, 404 covers R1.3, 403 covers R1.2 (the route's `require(Permission.RESPOND_OWNER_APPROVALS)` returns 403 for a non-owner before the use case's 422 fires — the 422 path is exercised by the unit test `test_a_non_owner_cannot_answer_an_other_approval_R1_2`).
 - **BLOCKER for 4.6 — pre-existing section 3 bug.** `respond_owner_approval` is declared with `response_model=OwnerApprovalResponse`, so FastAPI strictly validates every response payload against that schema. INCIDENT/MAINTENANCE_COST approvals return `IncidentResponse` which lacks `approval_id`/`responded_at`/`amount`/`currency` and has `status` as `IncidentStatus`, so FastAPI raises `ResponseValidationError` (`500`). This breaks `test_respond_incident_still_returns_incident_response_R1_1` (section 4.6) and the pre-existing `test_approving_returns_the_incident_to_the_flow` and `test_approving_a_real_cost_returns_it_to_in_progress` equally — verified by running them against the base commit `6c33bb78` with my changes stashed. Fix lives in section 3: switch to `response_model=None` and declare both shapes via `responses={200: {"model": OwnerApprovalResponse}, 201: {"model": IncidentResponse}}` (or a `Union`), so the `response_model=` default validation does not run.
 - Reconciliation-after-API-call tests added to `backend/tests/statements/test_reconciliation.py` as `TestReconcileAfterApiRespond` (2 tests at the bottom). The shared `_make_approval` writes `status=status.value` (str), which fails the entity's `is OwnerApprovalStatus.PENDING` check inside `OwnerApproval.answer()`; the helper `_make_other_approval_pending` builds the row with `status=OwnerApprovalStatus.PENDING` (Enum) so the API call routes through the use case. The two tests run the real FastAPI app over the test session (same `db_session` injected via `request_session_override`), call `POST /owner-approvals/{id}/respond` for APPROVED/REJECTED, then `ReconcileOwnerApprovalsForExpensesUseCase.execute(now=NOW)` and assert `Expense.approved_by` is set / `Expense` is deleted.
+- OpenAPI regenerated: `OwnerApprovalResponse` schema added (six fields per D6); `POST /api/v1/owner-approvals/{approval_id}/respond` 200 changed to `anyOf: [IncidentResponse, OwnerApprovalResponse]` per D5. Diff is exactly those two changes — 54 insertions, 2 deletions, no spurious edits.
+- TypeScript client regenerated: `OwnerApprovalResponse` present in `frontend/lib/api/generated/openapi.d.ts` (5 references). Diff: 41 insertions, 3 deletions — no spurious edits.
+- `docs/maintenance.md`: section "El técnico se entera de la respuesta de la propietaria" updated to cover both branches (`INCIDENT`/`MAINTENANCE_COST` returns `IncidentResponse` + writes technician notification; `OTHER` returns `OwnerApprovalResponse` + writes no notification). Body shape described as a `Union` dispatched on `related_type` (D5/D9).
+- `docs/revenue-statements.md`: section "Aprobaciones de gastos" updated to state that `POST /owner-approvals/{id}/respond` does serve `OwnerApproval(OTHER)` (returns `OwnerApprovalResponse`, persists on the approval row) and that the reconciler still materialises the answer on `expenses` at the next tick (D7).
+- Full backend test suite green: 11170 passed, 44 skipped in 4466.63s (1:14:26), exit code 0.
+- Pyright: 4 pre-existing findings in touched files (`approvals_router.py:76`, `approvals_router.py:117`, `schemas.py:429`, `use_cases.py:3103`/`_notify_technician`); verified against `88d74045` that all 4 already exist on the base commit. No new findings introduced by this change.
+- Rule-11 ownership guard: clean (`veredicto: ningún bloque fuera de la tabla de la regla 11 declara quién escribe un sumidero del censo`).
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
