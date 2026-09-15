@@ -248,11 +248,20 @@ sudo chmod 0600 /opt/actions-runner-<i>/.env
 sudo systemctl restart actions.runner.autohostai-labs-AutoHostAI.autohostai-dev-vm-<i>.service
 ```
 
-Verificar que quedó desactivado en el proceso vivo, no solo en el `.env` (mismo comando que usa `RUNBOOK.md §6.2` para lo contrario):
+Verificar que quedó desactivado en el proceso vivo, no solo en el `.env`. **No uses
+`/proc/<pid>/environ`**: probado en la VM viva (2026-09-15,
+`sdd/changes/ci-runner-workspace-pollution/tasks.md` 6.4) que esa variable nunca aparece ahí,
+activa o no — `runsvc.sh` solo hace `source` de `.path`, nunca de `.env`, así que un `grep` vacío
+no distingue "desactivado" de "activo pero el reinicio quedó diferido" (agente ocupado): un
+operador que confíe en él puede creer que un hook defectuoso ya no corre cuando en realidad sigue
+ejecutando `sudo -n chown -R` antes de cada job. La comprobación real es sobre un job que ya haya
+corrido en ese agente tras el reinicio, mismo método que `RUNBOOK.md §6.2` usa para lo contrario:
 
 ```bash
-PID="$(systemctl show -p MainPID --value "actions.runner.autohostai-labs-AutoHostAI.autohostai-dev-vm-<i>.service")"
-tr '\0' '\n' < /proc/"$PID"/environ | grep ACTIONS_RUNNER_HOOK_JOB_STARTED   # sin salida = desactivado
+sudo grep -n "Pre Job Hook\|runner-job-started.sh" \
+  "$(sudo ls -t /opt/actions-runner-<i>/_diag/Worker_*.log | head -1)"
+# sin coincidencias en el job MÁS RECIENTE = desactivado; una línea "Pre Job Hook" con
+# "result": "succeeded" = todavía activo (reinicio pendiente o .env no se retiró de verdad)
 ```
 
 El fichero `runner-job-started.sh` en `$RUNNER_HOME/hooks/` se puede dejar instalado — sin la declaración en `.env`, GitHub nunca lo invoca; no hace falta borrarlo del disco para desactivarlo. Para reactivarlo, `RUNBOOK.md §6.2` documenta el paso a paso completo (copiar el hook, declarar la línea, reiniciar); reaplicar el bootstrap (`sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"`) también lo reactiva para todos los agentes cuyo `.env` no lo declare ya, porque vuelve a escribir la línea y reinicia el servicio si el `.env` cambió y el agente está ocioso (design D4) — así que un `runner-bootstrap.sh` reaplicado después de este procedimiento reactiva el hook sin avisar, salvo que también se retire del código fuente.

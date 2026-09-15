@@ -127,8 +127,16 @@ aceptado" más abajo, que enumera explícitamente este radio.
 
 - WHEN el operador reaplica `runner-bootstrap.sh` sobre la VM viva (procedimiento documentado
   en `infra/environments/dev/RUNBOOK.md §6.2`) con un `RUNNER_COUNT` dado, THE SYSTEM SHALL
-  crear los agentes que falten para alcanzar el valor y SHALL NOT tocar los que ya están
-  registrados correctamente — `./config.sh --replace` por nombre es idempotente (R3).
+  crear los agentes que falten para alcanzar el valor y SHALL NOT dar de baja a los que ya
+  están registrados. **Matiz confirmado en la VM viva (2026-09-15, change
+  `ci-runner-workspace-pollution`, `tasks.md` 6.4-6.6): `./config.sh --replace` NO es idempotente
+  contra un agente ya registrado con ese mismo nombre en la versión del runner desplegada —
+  falla con `Cannot configure the runner because it is already configured`.** El agente
+  preexistente no se pierde (`register_named_agent` tolera el fallo por agente y sigue con los
+  demás, R3.3) pero tampoco se toca: `install_job_started_hook`/`write_runner_env` nunca corren
+  para él, así que un `runner-bootstrap.sh` reaplicado no actualiza el hook de un agente
+  preexistente, solo lo instala en agentes que registra por primera vez en esa misma pasada
+  (`RUNBOOK.md §6.2` documenta el paso a paso manual para el caso que sí hace falta actualizar).
 - WHEN `RUNNER_COUNT` baja entre reaprovisionamientos, THE SYSTEM SHALL dar de baja
   explícitamente los agentes sobrantes (`./config.sh remove --token ... && ./svc.sh
   uninstall`) y SHALL NOT recolectar automáticamente: lo opuesto a `--replace` no es

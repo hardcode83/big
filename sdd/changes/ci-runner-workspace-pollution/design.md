@@ -172,6 +172,37 @@ cambiar el `user_data` **no** re-ejecuta cloud-init sobre la instancia viva. For
 VM, con pérdida de datos y ruleta de capacidad de OCI — explícitamente descartado por el comentario
 del propio `main.tf`.
 
+**Enmienda 2026-09-15** (ejecución real de D7 contra la VM `dev`, sesión separada respondiendo a
+los checks rojos de PR #198; ver `tasks.md` 6.4-6.6): el paso manual se ejecutó de verdad, y dos
+supuestos que el diseño daba por buenos resultaron falsos contra la versión del runner desplegada.
+
+1. **La verificación de §6.2 vía `/proc/<pid>/environ` nunca funciona.** `runsvc.sh` solo hace
+   `source` de `.path`, jamás de `.env` — GitHub lee `.env` como fichero de configuración interno
+   del proceso `Runner.Listener`, no vía herencia de entorno de `execve`, así que la variable no
+   aparece en `/proc/<pid>/environ` de ningún proceso de la cadena, con el hook activo o no. La
+   comprobación real, la única que se pudo confirmar en la VM, es leer el `_diag/Worker_*.log` del
+   propio runner tras un job real: aparece una línea `"action": "Pre Job Hook"` con `"result":
+   "succeeded"` justo antes del paso `actions/checkout`. Corregido en `RUNBOOK.md §6.2` y
+   `docs/ci-runner-rollback.md §9` (que compartía el mismo método para el sentido inverso).
+2. **`config.sh --replace` no es idempotente contra un agente ya registrado con ese mismo nombre**
+   en esta versión del runner — falla con `Cannot configure the runner because it is already
+   configured`. `register_named_agent` tolera el fallo por agente (R3.3) y sigue con los demás,
+   pero para NINGÚN agente preexistente llega a `install_job_started_hook`/`write_runner_env`: el
+   bootstrap completo (`sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"`) solo instala el hook
+   en agentes que registra por primera vez en esa misma pasada, nunca en uno que ya estaba
+   registrado — que es precisamente el caso normal de este change (una VM con un pool en marcha al
+   que se le añade el hook). Corregido en `RUNBOOK.md §6.2` y `sdd/specs/ci-runner-self-hosted.md`
+   para describir el fallo real y el rodeo manual (aplicar los pasos de instalación del hook
+   directamente, agente por agente, sin pasar por `config.sh`).
+
+**Decisión sobre si arreglar el mecanismo o solo la documentación**: se corrigió la documentación
+(1 y 2 arriba) porque ambos hallazgos describen un comportamiento **observado**, no una hipótesis —
+arreglarlos de verdad en código (por ejemplo, que `register_named_agent` detecte "ya configurado,
+mismo nombre" como éxito en vez de fallo) es un cambio de mecanismo no trivial que esta ronda de
+`/sdd:review` no amplía sin una decisión explícita; queda para un fix round futuro si alguien lo
+retoma. Mismo criterio que la ronda 11 de D4: aceptar y documentar el hallazgo en vez de ampliar el
+alcance sin decidirlo con la usuaria primero.
+
 ### D8 — Un guard de CI lee la composición resuelta, no una lista de servicios
 
 **Chosen:** un check nuevo, en la línea de los que el repo ya tiene (`make check-compose-ports`,

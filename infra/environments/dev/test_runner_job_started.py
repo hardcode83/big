@@ -162,9 +162,18 @@ def test_find_failure_is_not_treated_as_clean(tmp_path):
 
 
 def test_empty_runner_user_does_not_act(tmp_path):
-    """Round 6: `id -un` returning empty must not reach `find`'s `! -user` predicate at all."""
-    work = tmp_path / "_work"
-    work.mkdir()
+    """Round 6: `id -un` returning empty must not reach `find`'s `! -user` predicate at all.
+
+    Round 14 (`/sdd:review`, `sdd-qa`, 2026-09-15): this failure path did not name `RUNNER_HOME`
+    in its message, unlike the chown/mode-fix failure paths (R3.5) — reproduced empirically on a
+    throwaway probe before the fix. Asserts the same exact marker those two use, for the same
+    reason their own tests do: a bare `str(runner_home) in combined` would pass vacuously
+    because the D2 detection line always prints `$WORK_DIR` (a superstring of `runner_home`)
+    regardless of what this specific failure message says.
+    """
+    runner_home = tmp_path / "actions-runner-9"
+    work = runner_home / "_work"
+    work.mkdir(parents=True)
 
     stubbin = make_stub_bin(tmp_path, find_reports_foreign=False, sudo_exit=0, stub_id=True)
     env = {"PATH": f"{stubbin}:{os.environ['PATH']}"}
@@ -175,6 +184,10 @@ def test_empty_runner_user_does_not_act(tmp_path):
 
     assert result.returncode != 0, "an undetermined agent user must not silently proceed"
     assert after == before, "must not touch the tree without a confirmed owner to chown to"
+    combined = result.stdout + result.stderr
+    assert f"for RUNNER_HOME={runner_home}" in combined, (
+        "R3.5 requires the RUNNER_HOME to be named explicitly in the failure message"
+    )
 
 
 # ── Invalid paths: R3.1 — validated, "no actúa", exit 0 -------------------------------------

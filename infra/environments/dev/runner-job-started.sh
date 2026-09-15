@@ -115,7 +115,7 @@ if [[ -z "$RUNNER_USER" ]]; then
     # `id -un` returning empty would make `! -user ""` an invalid `find` predicate below — fail
     # loudly rather than let that reach `find` and be misread as some other outcome (round 6,
     # panel de `/sdd:review`, `sdd-security`, 2026-09-15).
-    err "id -un returned empty — cannot determine the agent's own user, not acting"
+    err "id -un returned empty for RUNNER_HOME=$RUNNER_HOME — cannot determine the agent's own user, not acting"
     exit 1
 fi
 
