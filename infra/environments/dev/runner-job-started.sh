@@ -99,9 +99,16 @@ if [[ "$validation_failed" -eq 1 ]]; then
 fi
 
 # --- R3.6: scope is this WORK_DIR only, nothing else ------------------------------------------
-# (Enforced structurally: every find/chown below is rooted at $WORK_DIR, which validation above
-# has already confirmed is this agent's own `_work/` — self-location naturally scopes to "this
-# agent's own tree" since each agent has its own installed copy of this script at its own path.)
+# (Enforced structurally: every find/chown below is rooted at $WORK_DIR. In REAL usage — no
+# arguments, GitHub's own invocation contract — self-location guarantees $WORK_DIR is this
+# agent's own `_work/`, since each agent has its own installed copy of this script at its own
+# path. The one-argument WORK_DIR_OVERRIDE form (test-only, see the header comment) does NOT
+# carry that guarantee: validation above only checks the path is absolute, exists, and ends in
+# `/_work` — not that it belongs to the caller. This is not a privilege escalation as written
+# (anyone who can invoke this script with an argument is already the agent user with the pool's
+# NOPASSWD sudo grant), but it means "self" only holds for the self-located branch, not the
+# override — corrected here after the previous version of this comment overclaimed it for both,
+# round 7, panel de `/sdd:review`, `sdd-security`, 2026-09-15.)
 
 RUNNER_USER="$(id -un)"
 if [[ -z "$RUNNER_USER" ]]; then

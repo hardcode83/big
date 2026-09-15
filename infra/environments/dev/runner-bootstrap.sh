@@ -163,16 +163,21 @@ if link and 'rel="next"' in link:
     # Más de 100 runs in-progress a la vez: no podemos afirmar que ninguno tiene el job del
     # agente sin leer la página siguiente. Desconocido, no "no hay" — sale !=0.
     sys.exit(1)
-runs = body.get("workflow_runs", [])
+if not isinstance(body, dict) or "workflow_runs" not in body:
+    # Una respuesta 200 sin `workflow_runs` es tan malformada como una que la API rechazó
+    # directamente — `.get(..., [])` aquí habría leído "sin runs" de un cuerpo que en realidad
+    # no dice nada (round 7, panel de `/sdd:review`, `sdd-security`, 2026-09-15).
+    sys.exit(1)
+runs = body["workflow_runs"]
 
 for r in runs:
     rid = r.get("id")
     if not rid:
         # Un run in-progress sin `id` es una respuesta malformada, no "este run no cuenta": no
         # podemos enumerar sus jobs sin `id`, así que no podemos confirmar que no tiene el del
-        # agente. Desconocido, no "no está aquí" — mismo motivo que las dos ramas de abajo
-        # (round 6, panel de `/sdd:review`, `sdd-security`, 2026-09-15: un `continue` aquí era
-        # el último borde fail-open que sobrevivía a los rounds 3-5).
+        # agente. Desconocido, no "no está aquí" — mismo motivo que las demás ramas de esta
+        # función (round 6, panel de `/sdd:review`, `sdd-security`, 2026-09-15: un `continue`
+        # aquí dejaba pasar exactamente esta incertidumbre).
         sys.exit(1)
     try:
         jobs_body, jobs_link = gh_get(f"https://api.github.com/repos/{repo}/actions/runs/{rid}/jobs?per_page=100")
@@ -184,7 +189,11 @@ for r in runs:
         # Más de 100 jobs en ESTE run (matrix grande): el nuestro podría estar en la página 2.
         # Mismo motivo que la paginación de la lista de runs — desconocido, no "no está aquí".
         sys.exit(1)
-    for j in jobs_body.get("jobs", []):
+    if not isinstance(jobs_body, dict) or "jobs" not in jobs_body:
+        # Misma razón que la lista de runs de arriba: una respuesta sin `jobs` no confirma que
+        # ESTE run no tiene el del agente, solo que no pudimos leerlo.
+        sys.exit(1)
+    for j in jobs_body["jobs"]:
         if j.get("status") == "in_progress" and j.get("runner_name") == target:
             # El verdicto "encontrado" lo lleva el código de salida (0), no el contenido
             # impreso — un `html_url` ausente no debe leerse como "no encontrado" en el

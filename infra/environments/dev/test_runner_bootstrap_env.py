@@ -522,6 +522,7 @@ def test_registration_loop_extraction_is_anchored_on_the_real_script():
     assert body.startswith(LOOP_START)
     assert 'start_named_agent "$i" "$env_changed"' in body
     assert "deferred_restart+=" in body
+    assert "deferred_restart_unknown+=" in body
     assert "had_failure=1" in body
 
 
@@ -542,6 +543,7 @@ def run_registration_loop(rc_by_agent: dict) -> subprocess.CompletedProcess:
         'RUNNER_COUNT="3"',
         "had_failure=0",
         "deferred_restart=()",
+        "deferred_restart_unknown=()",
         f"registered_idx=({' '.join(str(i) for i in indices)})",
         f"env_changed_idx=({' '.join(str(i) for i in indices)})",
         "start_named_agent() {",
@@ -553,6 +555,8 @@ def run_registration_loop(rc_by_agent: dict) -> subprocess.CompletedProcess:
         'printf "had_failure=%s\\n" "$had_failure"',
         'printf "deferred_count=%s\\n" "${#deferred_restart[@]}"',
         'for d in "${deferred_restart[@]+"${deferred_restart[@]}"}"; do printf "deferred:%s\\n" "$d"; done',
+        'printf "deferred_unknown_count=%s\\n" "${#deferred_restart_unknown[@]}"',
+        'for d in "${deferred_restart_unknown[@]+"${deferred_restart_unknown[@]}"}"; do printf "deferred_unknown:%s\\n" "$d"; done',
     ])
     return subprocess.run(["bash", "-c", program], capture_output=True, text=True, timeout=30)
 
@@ -563,13 +567,29 @@ def test_deferred_restart_rc2_alone_does_not_count_as_had_failure():
     assert "had_failure=0" in result.stdout, "a deferred restart is not a failure"
     assert "deferred_count=1" in result.stdout
     assert "deferred:autohostai-test-vm-2" in result.stdout
+    assert "deferred_unknown_count=0" in result.stdout, "a CONFIRMED-busy defer must not land in the UNKNOWN array"
 
 
-def test_real_failure_rc_other_than_2_does_count_as_had_failure():
+def test_deferred_restart_unknown_rc3_alone_does_not_count_as_had_failure():
+    """Round 7 (`sdd-qa`, 2026-09-15): rc=3 ("API didn't respond") is exercised directly by
+    `start_named_agent`'s own tests, but the outer loop's classification of it into
+    `deferred_restart_unknown` — as opposed to `deferred_restart` or `had_failure` — had no test
+    of its own, the one gap left in this file's otherwise-symmetric rc=0/1/2 coverage.
+    """
+    result = run_registration_loop({1: 0, 2: 3})
+    assert result.returncode == 0, f"stdout={result.stdout} stderr={result.stderr}"
+    assert "had_failure=0" in result.stdout, "a deferred restart is not a failure, confirmed or not"
+    assert "deferred_count=0" in result.stdout, "rc=3 must NOT land in the CONFIRMED-busy array"
+    assert "deferred_unknown_count=1" in result.stdout
+    assert "deferred_unknown:autohostai-test-vm-2" in result.stdout
+
+
+def test_real_failure_rc_other_than_2_or_3_does_count_as_had_failure():
     result = run_registration_loop({3: 1})
     assert result.returncode == 0, f"stdout={result.stdout} stderr={result.stderr}"
     assert "had_failure=1" in result.stdout, "a genuine start failure must still be reported"
     assert "deferred_count=0" in result.stdout
+    assert "deferred_unknown_count=0" in result.stdout
 
 
 # --- `gh_in_progress_url_for_runner`'s own Python heredoc: fail-closed internals (round 5) -----
@@ -723,6 +743,24 @@ def test_gh_helper_a_run_without_an_id_is_unknown_not_idle():
     runs = {"workflow_runs": [{"html_url": "https://x/no-id"}]}  # no "id" key at all
     code, out = run_gh_helper("agent-2", {RUNS_URL: (runs, None)})
     assert code != 0, "a run with no id must never report as 'confirmed idle'"
+
+
+def test_gh_helper_runs_response_missing_the_workflow_runs_key_is_unknown_not_idle():
+    """Round 7 (`sdd-security`, 2026-09-15): a 200 response body without `workflow_runs` at all
+    is as malformed as an outright API rejection — `.get(..., [])` used to read it as "no runs".
+    """
+    code, out = run_gh_helper("agent-2", {RUNS_URL: ({"unexpected": "shape"}, None)})
+    assert code != 0, "a malformed runs-list body must never report as 'confirmed idle'"
+
+
+def test_gh_helper_jobs_response_missing_the_jobs_key_is_unknown_not_idle():
+    """Round 7 (`sdd-security`, 2026-09-15): same class, for a single run's jobs response."""
+    runs = {"workflow_runs": [{"id": 9, "html_url": "https://x/9"}]}
+    code, out = run_gh_helper("agent-2", {
+        RUNS_URL: (runs, None),
+        "actions/runs/9/jobs": ({"unexpected": "shape"}, None),
+    })
+    assert code != 0, "a malformed per-run jobs body must never report as 'confirmed idle'"
 
 
 def test_gh_helper_runs_list_api_failure_is_unknown_not_idle():
