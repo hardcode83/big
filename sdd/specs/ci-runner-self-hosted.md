@@ -109,6 +109,21 @@ aceptado" más abajo, que enumera explícitamente este radio.
   miembros de `ci-agents`) pueda crearlo, leerlo y sobrescribirlo — esto no amplía el radio de
   confianza descrito más abajo ("Riesgo aceptado"), porque `ci-agents` ya tiene sudo NOPASSWD
   sobre toda la VM.
+- **Corregido** (fix rápido 2026-09-15, fuera del flujo SDD): `demo-reset.yml` moría a los 10 s
+  con `EACCES: unlink .../__pycache__/.../*.pyc` en su primer paso (`actions/checkout clean: true`
+  corre como `actions-runner-N`). La causa es polución root-owned en el workspace del runner: los
+  runs de `e2e-tests-suite` levantan el stack de dev con `docker-compose.yml`, que bind-mountea
+  `./backend:/app`; el `Dockerfile` del backend no fija `USER` (corre como root) y Python escribe
+  bytecode al importar módulos, dejando los `.pyc` en `/opt/actions-runner-<i>/_work/AutoHostAI/
+  AutoHostAI/backend/**/__pycache__/` como root (runs 34824905559 — `actions-runner-2`, 14 sept
+  08:52— y 34948065967 — `actions-runner-3`, 15 sept 08:38—). THE SYSTEM SHALL preceder
+  `actions/checkout` en `demo-reset.yml` (y en cualquier workflow del pool que toque al
+  workspace) de un paso que borre los `__pycache__/` root-owned vía `sudo find -name __pycache__
+  -type d -exec rm -rf -- {} +` sobre `$GITHUB_WORKSPACE`, apoyándose en el mismo `sudo NOPASSWD`
+  del grupo `ci-agents` que ya está justificado arriba. La fix de fondo (que la polución no se
+  genere — `PYTHONDONTWRITEBYTECODE` en `docker-compose.yml`, o `USER` no-root en el Dockerfile—)
+  queda para el change `ci-runner-workspace-pollution`, sin fusionar a la hora de anotar esto; el
+  paso defensivo aquí es válido mientras esa fix no esté en main.
 - THE SYSTEM SHALL publicar los puertos de los `services` de `backend-tests.yml`
   (`postgres`/`redis`) únicamente en `127.0.0.1` (`127.0.0.1:5432:5432`,
   `127.0.0.1:6379:6379`): en un agente con IP pública, publicar a `0.0.0.0` expondría esos

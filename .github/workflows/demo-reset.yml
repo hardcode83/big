@@ -43,6 +43,30 @@ jobs:
       # que reflejarse en `deploy-dev.yml`.
       RUNTIME_ENV_FILE: /opt/autohostai-dev-runtime/dev-runtime.env
     steps:
+      # Pre-checkout cleanup: el workspace del runner self-hosted se reutiliza entre jobs (spec
+      # §"Convivencia entre workflows en un pool persistente"), y los runs de `e2e-tests-suite`
+      # que levantan el stack de dev con `docker-compose.yml` bind-mountean `./backend:/app` y, como
+      # el `Dockerfile` del backend no fija `USER`, los `__pycache__/*.pyc` que Python escribe al
+      # importar módulos aparecen en `/opt/actions-runner-N/_work/AutoHostAI/AutoHostAI/...` como
+      # root-owned. `actions/checkout` corre como `actions-runner-N`, intenta borrarlos al iniciar
+      # y muere con EACCES en el primer paso, antes de cualquier precondición (runs 34824905559 —
+      # `actions-runner-2`, 14 sept 08:52— y 34948065967 — `actions-runner-3`, 15 sept 08:38—).
+      #
+      # El runner user es miembro del grupo `ci-agents`, que tiene `NOPASSWD: ALL` (runner-bootstrap.sh
+      # línea 77, `sudoers.d/91-actions-runner-pool`); por eso el `sudo find` aquí es legítimo y no
+      # amplifica el radio de confianza descrito en la spec. Una vez borrados los `__pycache__/`,
+      # `actions/checkout clean: true` ya no encuentra nada root-owned y vuelve a su camino normal.
+      #
+      # Fix rápido 2026-09-15 fuera del flujo SDD — la fix de fondo (evitar la polución en el
+      # productor, `docker-compose.yml`/`backend/devops/Dockerfile`) vive en el change
+      # `ci-runner-workspace-pollution` (worktree compañero, 13 rondas, sin fusionar a la hora de
+      # abrir esto). Anotado en `sdd/specs/ci-runner-self-hosted.md` §"Convivencia…" para no dejar
+      # drift, mismo cuidado que el "Corregido" del 2026-09-05 que documenta el fix PR #167.
+      - name: Limpiar __pycache__ root-owned de runs previos en el workspace
+        run: |
+          set -euo pipefail
+          sudo find "$GITHUB_WORKSPACE" -name __pycache__ -type d -exec rm -rf -- {} +
+
       # Checkout por defecto (`clean: true`): desde ci-runner-oci el `.env` que `deploy` renderiza
       # NO vive en el workspace del checkout — vive en `$RUNTIME_ENV_FILE` (fuera de `$HOME`, ver el
       # `env:` del job), fuera de todo lo que `actions/checkout`/`git clean` gestiona (hallazgo del
