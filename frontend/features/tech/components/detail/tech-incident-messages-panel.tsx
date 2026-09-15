@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -62,9 +62,17 @@ const MAX_CONTENT = 2000;
  * query loads lazily (only once the Messages tab is opened), an incident that
  * looked fine when the other two reads ran can vanish by the time this one
  * does. `onNotFound` tells the parent detail view so it can fold this 404
- * into its own whole-screen not-found branch, on top of (not instead of) the
- * panel-local `EmptyState` below, which stays as the immediate rendering for
- * this panel.
+ * into its own whole-screen not-found branch, which *replaces* the panel-local
+ * `EmptyState` below rather than layering on top of it.
+ *
+ * When `onNotFound` is supplied the panel renders nothing at all for the 404:
+ * the callback fires in a `useLayoutEffect` (synchronously after render, before
+ * the browser paints), so the parent's whole-screen swap lands in the same
+ * frame. Rendering the panel-local `EmptyState` here instead would paint a
+ * weaker, tab-confined not-found surface for exactly one frame before the
+ * correct whole-screen one replaced it — a visible flash. The panel-local
+ * `EmptyState` therefore survives only as the standalone fallback, for a caller
+ * that passes no `onNotFound` and would otherwise get a silently blank panel.
  */
 export interface TechIncidentMessagesPanelProps {
   incidentId: string;
@@ -204,9 +212,11 @@ export function TechIncidentMessagesPanel({
   const readState = mapIncidentsError(query);
 
   // Propagate the 404 up so the parent detail view can replace the whole
-  // screen, the same as it already does for the other two parallel reads —
-  // see the doc comment above `onNotFound`.
-  useEffect(() => {
+  // screen, the same as it already does for the other two parallel reads.
+  // `useLayoutEffect`, not `useEffect`: it runs before the browser paints, so
+  // the parent's swap is the first thing the technician sees — see the doc
+  // comment above `onNotFound`.
+  useLayoutEffect(() => {
     if (readState.kind === "not-found") {
       onNotFound?.();
     }
@@ -215,7 +225,12 @@ export function TechIncidentMessagesPanel({
   // R4.2 vs R2.6: a 404 means the incident itself is gone, not that the thread
   // is empty — there is nowhere left to send a draft, so the composer goes
   // with it. Same convention every parallel read of this screen follows.
+  // With a parent listening, render nothing: the whole-screen EmptyState is
+  // already on its way in and a panel-local one would only flash first.
   if (readState.kind === "not-found") {
+    if (onNotFound) {
+      return null;
+    }
     return (
       <div className="flex flex-col gap-4">
         <EmptyState

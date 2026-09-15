@@ -256,9 +256,9 @@ describe("CleanerTaskDetailView (R2.1, R2.8)", () => {
     // The whole detail screen — tabs included — is replaced by the same
     // "tarea no disponible" EmptyState the other five parallel reads already
     // produce: no tablist, no leftover content tab underneath. Waiting on the
-    // tablist's disappearance (rather than just the title text, which the
-    // messages panel's own interim not-found EmptyState also renders for one
-    // render pass) is what pins this to the whole-screen swap.
+    // tablist's disappearance (rather than just the title text) is what pins
+    // this to the whole-screen swap. The panel itself renders nothing while a
+    // parent is listening, so this title only ever comes from the swap.
     await waitFor(() => {
       expect(screen.queryByRole("tablist")).toBeNull();
     });

@@ -99,7 +99,10 @@ function page(
   };
 }
 
-function renderPanel(enabled = true) {
+// `onNotFound` is left off by default on purpose: that is the standalone
+// fallback path, where the panel owns its own not-found rendering. The tests
+// that care about the parent-driven path pass it explicitly.
+function renderPanel(enabled = true, onNotFound?: () => void) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -111,7 +114,11 @@ function renderPanel(enabled = true) {
     );
   }
   return render(
-    <CleanerTaskMessagesPanel taskId="task-1" enabled={enabled} />,
+    <CleanerTaskMessagesPanel
+      taskId="task-1"
+      enabled={enabled}
+      onNotFound={onNotFound}
+    />,
     { wrapper: Wrapper },
   );
 }
@@ -174,7 +181,9 @@ describe("CleanerTaskMessagesPanel — list states (R4)", () => {
     expect(screen.queryByText(/boom/)).toBeNull();
   });
 
-  it("shows the task-unavailable empty state on a 404 (R4.3)", async () => {
+  // Standalone fallback: with no parent listening, the panel still has to say
+  // something rather than go silently blank with no way out.
+  it("shows the task-unavailable empty state on a 404 with no onNotFound (R4.3)", async () => {
     getTaskMessages.mockRejectedValue(
       new ApiError({ status: 404, code: "NOT_FOUND", message: "missing" }),
     );
@@ -183,6 +192,29 @@ describe("CleanerTaskMessagesPanel — list states (R4)", () => {
       expect(screen.getByText("Tarea no disponible")).toBeInTheDocument(),
     );
     expect(screen.queryByLabelText("Escribe un mensaje")).toBeNull();
+  });
+
+  // Parent-driven: the detail view is about to replace the entire screen with
+  // its own not-found EmptyState (the one with the back button). Painting the
+  // weaker, tab-confined panel-local EmptyState first would flash for a frame,
+  // so the panel renders nothing at all and lets the parent's swap be the only
+  // thing the cleaner ever sees.
+  it("renders nothing and notifies the parent on a 404 when onNotFound is given (R4.3)", async () => {
+    getTaskMessages.mockRejectedValue(
+      new ApiError({ status: 404, code: "NOT_FOUND", message: "missing" }),
+    );
+    const onNotFound = vi.fn();
+    const { container } = renderPanel(true, onNotFound);
+
+    await waitFor(() => expect(onNotFound).toHaveBeenCalled());
+
+    // `useLayoutEffect` fires within the same commit as the render that
+    // detected the 404, so by the time the callback has run there is nothing
+    // of the panel left in the DOM — no competing EmptyState to flash.
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByText("Tarea no disponible")).toBeNull();
+    expect(screen.queryByLabelText("Escribe un mensaje")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("replaces the whole panel, typed draft included, when a 404 arrives after the thread loaded (R4.3)", async () => {

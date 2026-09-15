@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -53,8 +53,17 @@ const MAX_CONTENT = 2000;
  * Messages tab is opened), a task that looked fine when the other five reads
  * ran can vanish by the time this one does. `onNotFound` tells the parent
  * detail view so it can fold this 404 into its own whole-screen not-found
- * branch, on top of (not instead of) the panel-local `EmptyState` below,
- * which stays as the immediate rendering for this panel.
+ * branch, which *replaces* the panel-local `EmptyState` below rather than
+ * layering on top of it.
+ *
+ * When `onNotFound` is supplied the panel renders nothing at all for the 404:
+ * the callback fires in a `useLayoutEffect` (synchronously after render, before
+ * the browser paints), so the parent's whole-screen swap lands in the same
+ * frame. Rendering the panel-local `EmptyState` here instead would paint a
+ * weaker, tab-confined not-found surface for exactly one frame before the
+ * correct whole-screen one replaced it — a visible flash. The panel-local
+ * `EmptyState` therefore survives only as the standalone fallback, for a caller
+ * that passes no `onNotFound` and would otherwise get a silently blank panel.
  */
 export interface CleanerTaskMessagesPanelProps {
   taskId: string;
@@ -194,9 +203,11 @@ export function CleanerTaskMessagesPanel({
     : null;
 
   // Propagate the 404 up so the parent detail view can replace the whole
-  // screen, the same as it already does for the other five parallel reads —
-  // see the doc comment above `onNotFound`.
-  useEffect(() => {
+  // screen, the same as it already does for the other five parallel reads.
+  // `useLayoutEffect`, not `useEffect`: it runs before the browser paints, so
+  // the parent's swap is the first thing the cleaner sees — see the doc
+  // comment above `onNotFound`.
+  useLayoutEffect(() => {
     if (errorMap?.state === "not-found") {
       onNotFound?.();
     }
@@ -204,7 +215,12 @@ export function CleanerTaskMessagesPanel({
 
   // R4.2 vs R2.8: a 404 means the task itself is gone, not that the thread is
   // empty — there is nothing to compose against, so the composer goes with it.
+  // With a parent listening, render nothing: the whole-screen EmptyState is
+  // already on its way in and a panel-local one would only flash first.
   if (errorMap?.state === "not-found") {
+    if (onNotFound) {
+      return null;
+    }
     return (
       <div className="flex flex-col gap-4">
         <EmptyState
