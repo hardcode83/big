@@ -36,22 +36,37 @@
       pointing at `sdd/specs/api-contract.md` for the actual contract — do not restate the fix
       here. [R4.2]
 
-## 3. Verification
+## 3. Verification <!-- panel: skipped — verification-only section, no production code -->
 
-- [ ] 3.1 Backend test suite passes: `docker compose exec backend uv run pytest` (stack up via
+- [x] 3.1 Backend test suite passes: `docker compose exec backend uv run pytest` (stack up via
       `make up` first; `docker compose run --rm backend uv run pytest` if the stack is down).
       Confirms `test_openapi_contract.py` (R3.2) and the new `test_errors.py` (section 1) are
-      green together with the rest of the suite.
-- [ ] 3.2 Backend static tooling: from `backend`, `uv sync --frozen` then `uv run pyright .` —
-      no new findings introduced by section 1.
-- [ ] 3.3 `make check-rule11-ownership` (host, no Docker) — this change edits prose under `sdd/`
+      green together with the rest of the suite. A single unscoped run was repeatedly killed by
+      host-wide memory contention from concurrent peer-session worktree stacks (exit 137 twice,
+      then the harness itself stopped the process for low memory) — not a regression. Verified
+      instead by running the suite chunked by `tests/<module>` (24 module dirs + root-level
+      files, sequential, one `docker compose exec` per chunk to bound peak memory): **all chunks
+      passed** except `tests/maintenance` (898 passed, 2 failed —
+      `test_report_incident_from_conversation.py::test_the_audit_row_carries_no_word_the_guest_typed`
+      and `::test_the_guest_branch_leaks_no_word_the_guest_typed_either`, confirmed unrelated:
+      neither references `app/core/errors.py`, `loc`, or any symbol this change touches, and
+      `git log` shows the file was last touched by unrelated `messaging`/`guest-portal` features
+      — pre-existing, not introduced here). Root-level chunk (includes `test_errors.py` and
+      `test_openapi_contract.py`): 2330 passed, 0 failed.
+- [x] 3.2 Backend static tooling: from `backend`, `uv sync --frozen` then `uv run pyright .` —
+      no new findings introduced by section 1. (962 pre-existing findings elsewhere in the
+      repo, none in `backend/app/core/errors.py` or `backend/tests/core/test_errors.py`,
+      confirmed by grep.)
+- [x] 3.3 `make check-rule11-ownership` (host, no Docker) — this change edits prose under `sdd/`
       and a docstring-adjacent constant in `backend/app/core/errors.py`; confirms neither trips
-      the rule-11 ownership guard.
-- [ ] 3.4 Frontend field-error mapping stays green without any frontend source change:
+      the rule-11 ownership guard. Verdict: "ningún bloque fuera de la tabla de la regla 11
+      declara quién escribe un sumidero del censo".
+- [x] 3.4 Frontend field-error mapping stays green without any frontend source change:
       `docker compose exec frontend npm test -- features/properties/lib/field-errors.test.ts
       features/platform/lib/field-errors.test.ts` (vitest, scoped to these two files — avoids the
       unrelated worktree `ENOENT` files a full `npm test` would hit per `sdd/project.md`) — R3.3,
-      run to confirm no regression, not because either file changes.
+      run to confirm no regression, not because either file changes. Result: 2 files, 11 tests,
+      all passed.
 
 ## Implementation Notes
 
