@@ -55,10 +55,11 @@ escriben con `NULL` a propósito, para que `check_sla_breaches` no duplique el e
 
 De los diecisiete `NotificationType` que cubría esta tabla, **dieciséis los escribe alguien y
 uno no lo escribe nadie**. `guest-scheduled-comms` (2026-09-14) cerró los tres huérfanos que
-quedaban —los recordatorios al huésped— y añadió un tipo nuevo, `ACCESS_INSTRUCTIONS_SENT`, el
-primer escritor real de la excepción 1 de la regla 11 (el código de acceso enmascarado,
-`****XX`). Vale la pena tenerlo a mano al mirar una bandeja vacía: puede que no haya pasado
-nada, o puede que el tipo que esperabas sea el único que sigue sin escritor.
+quedaban —los recordatorios al huésped— y añadió un tipo nuevo, `ACCESS_INSTRUCTIONS_SENT`, que
+envía el código de acceso enmascarado (`****XX`) bajo la excepción 1 de la regla 11 (ownership
+en la tabla de `sdd/steering/security.md`). Vale la pena tenerlo a mano al mirar una bandeja
+vacía: puede que no haya pasado nada, o puede que el tipo que esperabas sea el único que sigue
+sin escritor.
 
 | Qué ocurre | Tipo | A quién |
 |---|---|---|
