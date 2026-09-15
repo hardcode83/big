@@ -129,6 +129,15 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
 - THE SYSTEM SHALL mantener esa exención **estrecha**: un `content` ausente o vacío no la
   satisface y sigue fallando la guarda, comprobado con rutas de prueba que declaran una cosa y
   la otra.
+- THE SYSTEM SHALL acotar, en el handler compartido de `app/core/errors.py`, únicamente el
+  último segmento de `loc` de un error de tipo `extra_forbidden` —el único caller-controlled,
+  porque Pydantic lo rellena con la clave desconocida literal que envió el llamante— a 100
+  caracteres totales, incluida la marca de truncado `...(truncated)`. Todo otro segmento de
+  `loc` y todo error de cualquier otro `type` (`missing`, `string_too_long`, `value_error`,
+  …) queda sin tocar, porque son schema-derived y acotarlos cortaría un nombre de campo
+  legítimo. Se aplica una sola vez para todo módulo con `extra="forbid"`, no por router. Medido:
+  una clave desconocida de 5.000 caracteres pasa de un cuerpo `422` de 5.182 bytes a uno de 282
+  bytes para la misma prueba. Entrada `validation-error-loc-redaction` del roadmap.
 
 ### Verificación estructural sin vacuidad
 

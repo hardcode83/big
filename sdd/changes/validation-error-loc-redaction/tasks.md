@@ -25,13 +25,13 @@
         dropped, no type change). [R3.1]
       [R1, R2, R3.1]
 
-## 2. Update the documented contract
+## 2. Update the documented contract <!-- panel: skipped — docs-only section (sdd/specs/ prose edits, no production code) -->
 
-- [ ] 2.1 `sdd/specs/api-contract.md`, section "Lo que el documento declara sobre los errores":
+- [x] 2.1 `sdd/specs/api-contract.md`, section "Lo que el documento declara sobre los errores":
       add a bullet documenting the bound — which error `type` it applies to
       (`extra_forbidden`), the cap length, that every other segment/type is untouched, and the
       measured before/after body size for the original probe (5,182 bytes → bounded). [R4.1]
-- [ ] 2.2 `sdd/specs/revenue-pricing.md`, the residual bullet "El `422` de validación devuelve el
+- [x] 2.2 `sdd/specs/revenue-pricing.md`, the residual bullet "El `422` de validación devuelve el
       `loc` de Pydantic sin acotar…": update it to say the gap is fixed by this change (name it),
       pointing at `sdd/specs/api-contract.md` for the actual contract — do not restate the fix
       here. [R4.2]
@@ -79,3 +79,11 @@
   `backend/tests/...`) — the task's verification command as literally written
   (`backend/tests/core/test_errors.py`) 404s inside the container; drop the `backend/`
   prefix when running it there.
+- Section 2 (2026-09-15): added one bullet to `sdd/specs/api-contract.md`'s "Lo que el
+  documento declara sobre los errores" (after the `content` exemption bullet, before
+  "### Verificación estructural sin vacuidad") documenting the `extra_forbidden`-only,
+  100-char-total cap and the 5,182 → 282 byte measurement, citing
+  `validation-error-loc-redaction`. Rewrote `sdd/specs/revenue-pricing.md`'s residual
+  bullet (Residual section, "El `422` de validación devolvía...") to past tense, stated
+  the gap is closed by `validation-error-loc-redaction`, and pointed at
+  `sdd/specs/api-contract.md` for the mechanism instead of restating it.
