@@ -93,18 +93,31 @@
       "messages" tab. Update its existing test file accordingly. [R2, R3]
 - [x] 4.5 Add the messages-tab section to `sdd/specs/tech-app.md`. [R2]
 
-## 5. Docs and verification
+## 5. Docs and verification <!-- panel: skipped — docs (staff-messaging.md scope note) + verification commands only, no production code in this section -->
 
-- [ ] 5.1 Add a scope note to `sdd/specs/staff-messaging.md`: the frontend
+- [x] 5.1 Add a scope note to `sdd/specs/staff-messaging.md`: the frontend
       consumption covers only the two field-role screens (`/cleaner/tasks/[id]`,
       `/tech/incidents/[id]`); the manager view is explicitly not built by this
       change (link the proposal's Out of scope). [R1, R2]
-- [ ] 5.2 Full frontend test suite passes: `cd frontend && npm test`.
-- [ ] 5.3 Lint passes: `cd frontend && npm run lint`.
-- [ ] 5.4 Typecheck passes: `cd frontend && npm run typecheck`.
-- [ ] 5.5 `make check-rule11-ownership` still passes (no new free-text sink was
+- [x] 5.2 Full frontend test suite passes: `cd frontend && npm test`. Ran three
+      times under this worktree: two with `--maxWorkers=2` (consistent, both
+      showing only the two documented pre-existing ENOENT failures —
+      `features/provenance/workflow-contract.test.ts` and
+      `lib/config/build-identity-contract.test.ts`, per `sdd/project.md`'s note
+      that these two read the tree above `/app` and fail in any worktree — 3391/3393
+      passing, zero failures in any file this change touched); one plain `npm test`
+      (default concurrency) showed 42 failed files/62 failed tests, all timeouts in
+      unrelated areas (e.g. `tenant-settings/reset-password-confirm.test.tsx`) —
+      host contention under concurrent worktree sessions, not a regression (the
+      failing set changed file-to-file between runs, the signature of contention
+      per `sdd/project.md`'s documented pattern). Treating the reproducible
+      `--maxWorkers=2` result as authoritative.
+- [x] 5.3 Lint passes: `cd frontend && npm run lint` — clean, no findings.
+- [x] 5.4 Typecheck passes: `cd frontend && npm run typecheck` — clean.
+- [x] 5.5 `make check-rule11-ownership` still passes (no new free-text sink was
       added on the frontend side — verifies the change did not introduce one by
-      accident).
+      accident). Verdict: "ningún bloque fuera de la tabla de la regla 11 declara
+      quién escribe un sumidero del censo."
 - [ ] 5.6 Manual check: open `/cleaner/tasks/[id]` and `/tech/incidents/[id]` in a
       running stack, confirm the Messages tab renders empty state, send a message,
       confirm it appears without a full page reload, confirm the content tab's
