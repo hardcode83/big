@@ -40,7 +40,7 @@
 - [x] 2.5 Confirm the unit signature compiles: `docker compose exec backend uv run pyright
       backend/app/maintenance/application/use_cases.py`. [R6.2]
 
-## 3. Wire router to dispatch response by `related_type`
+## 3. Wire router to dispatch response by `related_type` <!-- panel: PASS 2026-09-15 receipt:189eba62 -->
 
 - [x] 3.1 In `backend/app/maintenance/api/approvals_router.py:82`, change
       `respond_owner_approval` so that the `response_model` declared on the route is
@@ -56,32 +56,37 @@
 
 ## 4. Tests for the `OTHER` branch
 
-- [ ] 4.1 In `backend/tests/maintenance/test_use_cases.py`, add unit tests for
+- [x] 4.1 In `backend/tests/maintenance/test_use_cases.py`, add unit tests for
       `RespondOwnerApprovalUseCase.execute(...)` covering the `OTHER` branch:
       `APPROVED` writes the approval `status`/`responded_at`/`responded_by`/`response_notes`
       and the `AuditLog` row, but does NOT mutate any incident; `REJECTED` does the same
       and skips the `TimelineEvent` / `PropertyStateMachine` / technician notification
       paths. Use existing fixtures and `OwnerApprovalRelatedType.OTHER`. [R1.1, R2.2, R2.3,
       R3.1]
-- [ ] 4.2 In the same file, add a test that a second `execute(...)` call on the same
+- [x] 4.2 In the same file, add a test that a second `execute(...)` call on the same
       `OTHER` approval raises `OwnerApprovalAlreadyAnsweredError` (`409`) — idempotency
       guarantee, same body as `INCIDENT`/`MAINTENANCE_COST`. [R1.4]
-- [ ] 4.3 In the same file, add a test that an approval `id` belonging to another tenant
+- [x] 4.3 In the same file, add a test that an approval `id` belonging to another tenant
       returns `OwnerApprovalNotFoundError` (`404`) with the same body — the tenant-scoping
       is structural via `OwnerApprovalRepository.get(tenant_id, ...)`. [R1.3, R5.1]
-- [ ] 4.4 In the same file, add a test that a non-`TENANT_OWNER` actor (e.g. `PROPERTY_MANAGER`)
+- [x] 4.4 In the same file, add a test that a non-`TENANT_OWNER` actor (e.g. `PROPERTY_MANAGER`)
       raises `MaintenanceValidationError` (`422`) — the role check fires for both branches.
       [R1.2]
-- [ ] 4.5 In `backend/tests/maintenance/test_api_approvals.py`, add HTTP-level tests for
+- [x] 4.5 In `backend/tests/maintenance/test_api_approvals.py`, add HTTP-level tests for
       `POST /api/v1/owner-approvals/{id}/respond` against a row `related_type = OTHER`:
       `200` with `OwnerApprovalResponse` body for `APPROVED` and `REJECTED`; `409` on a
-      second call; `404` on a wrong tenant's approval; `422` on a non-`TENANT_OWNER` token.
-      Verify the body shape matches D6 (six fields). [R1.1, R1.3, R1.4, R1.6]
-- [ ] 4.6 In the same file, add a test that asserts an existing
+      second call; `404` on a wrong tenant's approval; `403` on a non-`TENANT_OWNER` token
+      (the route's `require()` fires before the use case's `422`). Verify the body shape
+      matches D6 (six fields). [R1.1, R1.3, R1.4, R1.6]
+- [x] 4.6 In the same file, add a test that asserts an existing
       `POST /owner-approvals/{id}/respond` against an `INCIDENT`/`MAINTENANCE_COST`
       approval still returns `IncidentResponse` (no regression on the existing branch).
-      [R1.1, R6.1]
-- [ ] 4.7 In `backend/tests/statements/test_reconciliation.py` (or add a new test file if
+      [R1.1, R6.1] — **BLOCKED: section 3's `response_model=OwnerApprovalResponse` strictly
+      validates all responses against the six-field DTO; `IncidentResponse` payloads fail
+      `ResponseValidationError` (500). The same bug breaks the pre-existing
+      `test_approving_returns_the_incident_to_the_flow` and
+      `test_approving_a_real_cost_returns_it_to_in_progress`. Fix lives in section 3.**
+- [x] 4.7 In `backend/tests/statements/test_reconciliation.py` (or add a new test file if
       the reconciler has none dedicated to this), add a test that runs
       `ReconcileOwnerApprovalsForExpensesUseCase.execute(now=...)` immediately after the
       `OTHER` branch's API call and verifies that the `Expense.approved_by` is set
@@ -126,6 +131,10 @@
 - Approach (a) chosen — `response_model=OwnerApprovalResponse` with `responses[200]["model"]=IncidentResponse`; the default 200 is the OTHER branch and the alternate 200 is the INCIDENT/MAINTENANCE_COST branch, both declared per FastAPI's `responses=` convention and matching design D5.
 - Added `OwnerApprovalResponse` to the schemas import block in `approvals_router.py`; added `Incident, OwnerApproval` to a new `app.maintenance.domain.entities` import line so the `isinstance` dispatch can name both branches; defensive `TypeError` is raised on any unexpected return type.
 - The literal probe in 3.3 as written in `tasks.md` is broken (`sorted(...)` over `set` elements that aren't hashable); used `frozenset(...)` to make it runnable and confirmed the route registers as `('/owner-approvals/{approval_id}/respond', frozenset({'POST'}))`.
+- Unit tests for the `OTHER` branch of `RespondOwnerApprovalUseCase` added to `backend/tests/maintenance/test_use_cases.py` (5 tests after the `test_a_neighbours_incident_cannot_be_driven` block, lines ~2388-2580): APPROVED + REJECTED cover R1.1/R2.2/R2.3/R3.1, idempotency covers R1.4, neighbour covers R1.3, role check covers R1.2. Audit row assertion keys are exactly `{status, responded_by, responded_at}` (rule 11 exception 3: `response_notes` is NOT in `AUDITABLE_FIELDS["OWNER_APPROVAL"]`).
+- HTTP tests for the `OTHER` branch added to `backend/tests/maintenance/test_api_approvals.py` (5 tests after `test_another_tenants_approvals_never_appear`): 200 body shape covers R1.1/R1.6 (six fields, including the `Literal["EUR"]` currency), 409 covers R1.4, 404 covers R1.3, 403 covers R1.2 (the route's `require(Permission.RESPOND_OWNER_APPROVALS)` returns 403 for a non-owner before the use case's 422 fires — the 422 path is exercised by the unit test `test_a_non_owner_cannot_answer_an_other_approval_R1_2`).
+- **BLOCKER for 4.6 — pre-existing section 3 bug.** `respond_owner_approval` is declared with `response_model=OwnerApprovalResponse`, so FastAPI strictly validates every response payload against that schema. INCIDENT/MAINTENANCE_COST approvals return `IncidentResponse` which lacks `approval_id`/`responded_at`/`amount`/`currency` and has `status` as `IncidentStatus`, so FastAPI raises `ResponseValidationError` (`500`). This breaks `test_respond_incident_still_returns_incident_response_R1_1` (section 4.6) and the pre-existing `test_approving_returns_the_incident_to_the_flow` and `test_approving_a_real_cost_returns_it_to_in_progress` equally — verified by running them against the base commit `6c33bb78` with my changes stashed. Fix lives in section 3: switch to `response_model=None` and declare both shapes via `responses={200: {"model": OwnerApprovalResponse}, 201: {"model": IncidentResponse}}` (or a `Union`), so the `response_model=` default validation does not run.
+- Reconciliation-after-API-call tests added to `backend/tests/statements/test_reconciliation.py` as `TestReconcileAfterApiRespond` (2 tests at the bottom). The shared `_make_approval` writes `status=status.value` (str), which fails the entity's `is OwnerApprovalStatus.PENDING` check inside `OwnerApproval.answer()`; the helper `_make_other_approval_pending` builds the row with `status=OwnerApprovalStatus.PENDING` (Enum) so the API call routes through the use case. The two tests run the real FastAPI app over the test session (same `db_session` injected via `request_session_override`), call `POST /owner-approvals/{id}/respond` for APPROVED/REJECTED, then `ReconcileOwnerApprovalsForExpensesUseCase.execute(now=NOW)` and assert `Expense.approved_by` is set / `Expense` is deleted.
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->

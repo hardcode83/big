@@ -299,3 +299,157 @@ async def test_another_tenants_approvals_never_appear(api, world, db_session) ->
     body = response.json()
     assert [item["id"] for item in body["items"]] == [str(mine.id)]
     assert body["total"] == 1
+
+
+# --- `OTHER` branch over HTTP (`expense-approval-response` R1.1, R1.3, R1.4, R1.6, R6.1)
+
+
+@pytest.mark.parametrize(
+    "answer,response_notes",
+    [
+        (OwnerApprovalStatus.APPROVED, "Adelante."),
+        (OwnerApprovalStatus.REJECTED, "Demasiado caro."),
+    ],
+)
+async def test_respond_other_returns_owner_approval_response_body_R1_1(
+    api, world, db_session, answer: OwnerApprovalStatus, response_notes: str
+) -> None:
+    """R1.1 / R1.6 — for a row `related_type = OTHER`, the route returns the smaller
+    `OwnerApprovalResponse` body, with the six fields of design D6. The same body shape
+    serves APPROVED and REJECTED, only `status` flips."""
+    approval = await make_approval(
+        db_session, world, uuid.uuid4(), related_type=OwnerApprovalRelatedType.OTHER
+    )
+
+    response = await api.post(
+        f"{APPROVALS}/{approval.id}/respond",
+        json={"status": answer.value, "response_notes": response_notes},
+        headers=auth_header(api, world.owner),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body.keys()) == {
+        "approval_id",
+        "status",
+        "responded_at",
+        "property_id",
+        "amount",
+        "currency",
+    }
+    assert body["approval_id"] == str(approval.id)
+    assert body["status"] == answer.value
+    assert body["responded_at"] is not None
+    assert body["property_id"] == str(world.property.id)
+    assert body["amount"] == "450.00"
+    assert body["currency"] == "EUR"
+
+
+async def test_respond_other_a_second_call_is_a_409_R1_4(api, world, db_session) -> None:
+    """R1.4 — the same idempotency guarantee the INCIDENT/MAINTENANCE_COST branch carries:
+    a second `POST` against the same `OTHER` row is a `409 CONFLICT`."""
+    approval = await make_approval(
+        db_session, world, uuid.uuid4(), related_type=OwnerApprovalRelatedType.OTHER
+    )
+    payload = {"status": OwnerApprovalStatus.APPROVED.value}
+
+    first = await api.post(
+        f"{APPROVALS}/{approval.id}/respond",
+        json=payload,
+        headers=auth_header(api, world.owner),
+    )
+    second = await api.post(
+        f"{APPROVALS}/{approval.id}/respond",
+        json=payload,
+        headers=auth_header(api, world.owner),
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["error"]["code"] == "CONFLICT"
+
+
+async def test_respond_other_for_a_neighbours_approval_is_a_404_R1_3(
+    api, world, db_session
+) -> None:
+    """R1.3 — the tenant scoping is structural: a `POST` against another tenant's `OTHER`
+    approval is a `404`, just as for `INCIDENT`/`MAINTENANCE_COST`."""
+    from app.properties.infrastructure.models import PropertyModel
+    from app.tenants.infrastructure.models import TenantModel
+    from tests.maintenance.conftest import World, _user
+
+    neighbour_tenant = TenantModel(name="TenantB", billing_email="b@example.com")
+    db_session.add(neighbour_tenant)
+    await db_session.flush()
+    neighbour_prop = PropertyModel(
+        tenant_id=neighbour_tenant.id, name="Theirs", internal_code="THEIRS"
+    )
+    db_session.add(neighbour_prop)
+    await db_session.flush()
+    neighbour = World(
+        neighbour_tenant,
+        neighbour_prop,
+        await _user(db_session, neighbour_tenant, "TENANT_OWNER"),
+        await _user(db_session, neighbour_tenant, "PROPERTY_MANAGER"),
+        await _user(db_session, neighbour_tenant, "TECHNICIAN"),
+        await _user(db_session, neighbour_tenant, "TECHNICIAN"),
+    )
+    theirs = await make_approval(
+        db_session, neighbour, uuid.uuid4(), related_type=OwnerApprovalRelatedType.OTHER
+    )
+
+    response = await api.post(
+        f"{APPROVALS}/{theirs.id}/respond",
+        json={"status": OwnerApprovalStatus.APPROVED.value},
+        headers=auth_header(api, world.owner),
+    )
+
+    assert response.status_code == 404
+
+
+async def test_respond_other_with_a_non_owner_token_is_a_403_R1_2(
+    api, world, db_session
+) -> None:
+    """R1.2 — the role check fires for both branches: a non-`TENANT_OWNER` token gets
+    refused. The route's `require(Permission.RESPOND_OWNER_APPROVALS)` returns `403` for
+    the manager; the use case's own role check (which raises `MaintenanceValidationError`
+    / `422`) is exercised by `test_a_non_owner_cannot_answer_an_other_approval_R1_2` in
+    `test_use_cases.py` over the same code path on the OTHER branch."""
+    approval = await make_approval(
+        db_session, world, uuid.uuid4(), related_type=OwnerApprovalRelatedType.OTHER
+    )
+
+    response = await api.post(
+        f"{APPROVALS}/{approval.id}/respond",
+        json={"status": OwnerApprovalStatus.APPROVED.value},
+        headers=auth_header(api, world.manager),
+    )
+
+    assert response.status_code == 403
+
+
+async def test_respond_incident_still_returns_incident_response_R1_1(
+    api, world, db_session
+) -> None:
+    """R1.1 / R6.1 — the existing branch is unchanged: a row `related_type = INCIDENT` still
+    returns the `IncidentResponse` body, not the `OwnerApprovalResponse` body. The
+    regression gate that keeps the `OTHER` route addition from clobbering the old shape."""
+    incident = await make_incident(
+        db_session, world, status=IncidentStatus.AWAITING_OWNER_APPROVAL
+    )
+    approval = await make_approval(db_session, world, incident.id)
+
+    response = await api.post(
+        f"{APPROVALS}/{approval.id}/respond",
+        json={"status": OwnerApprovalStatus.APPROVED.value},
+        headers=auth_header(api, world.owner),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    # `IncidentResponse` keys (subset, asserted by shape rather than enumeration):
+    # it has `id`/`status` and no `approval_id`. The other branch has `approval_id` and no
+    # `id`. The test reads it as a discriminator.
+    assert "approval_id" not in body
+    assert body["id"] == str(incident.id)
+    assert body["status"] == IncidentStatus.CLASSIFIED.value

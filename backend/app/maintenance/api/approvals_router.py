@@ -12,7 +12,7 @@ real-cost gate.
 """
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Union
 
 from fastapi import APIRouter, Depends, Query
 
@@ -83,20 +83,15 @@ async def list_owner_approvals(
 
 @router.post(
     "/{approval_id}/respond",
-    response_model=OwnerApprovalResponse,
-    responses={
-        200: {
-            "model": IncidentResponse,
-            "description": (
-                "Returned when the approval's `related_type` is `INCIDENT` or "
-                "`MAINTENANCE_COST` — the caller's next step depends on where the incident "
-                "ended up (R1.6, D5)."
-            ),
-        },
-        # The 200 default shape (`response_model=OwnerApprovalResponse`, the smallest of the
-        # two bodies) is returned when `related_type` is `OTHER`: no incident to hand back,
-        # so the six-field DTO is the answer.
-    },
+    # D5: the route's response body depends on the approval's `related_type`. Declaring a
+    # `Union` of the two response schemas lets FastAPI's response_model validation pass
+    # through the runtime payload (an `IncidentResponse` instance is valid against
+    # `IncidentResponse`; an `OwnerApprovalResponse` instance is valid against itself),
+    # and the OpenAPI schema records both as `oneOf`. Declaring only the smallest body
+    # (e.g. `OwnerApprovalResponse`) makes FastAPI reject `IncidentResponse` payloads
+    # because they lack fields like `approval_id`/`amount`/`currency` — the regression
+    # Section 4's test 4.6 caught.
+    response_model=Union[IncidentResponse, OwnerApprovalResponse],
     summary="The owner answers a pending approval",
     description=(
         "`TENANT_OWNER` only (R2.6), once only, and only within their own tenant. An "

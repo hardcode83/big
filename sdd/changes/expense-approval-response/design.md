@@ -82,21 +82,30 @@ Rejected: **añadir `OWNER_APPROVAL_EXPENSE_ANSWERED` como acción nueva** —
 nueva acción tendría que reescribir la guarda o duplicarla, y los tres campos que se
 auditan son los mismos. El cambio no aporta información útil para auditoría.
 
-### D5 — Respuesta HTTP: dos DTOs según la rama, mismo `200`
+### D5 — Respuesta HTTP: `Union` de los dos DTOs, mismo `200`
 
-**Chosen:** la ruta declara un único `response_model=OwnerApprovalResponse` (DTO nuevo)
-en `maintenance/api/schemas.py`. Para la rama `INCIDENT`/`MAINTENANCE_COST`, la respuesta
-sigue siendo `IncidentResponse` — esa parte del contrato no cambia; el handler elige el
-DTO en función de `related_type` y devuelve uno u otro con `status_code=200`. La
-documentación OpenAPI declara ambos en el `responses={...}` (FastAPI lo permite y
-`api-contract.md` ya documenta la forma).
+**Chosen:** la ruta declara `response_model=Union[IncidentResponse, OwnerApprovalResponse]`.
+FastAPI serializa la respuesta a través del `Union` y el cliente TypeScript recibe un
+`oneOf` con ambos cuerpos documentados. Para la rama `INCIDENT`/`MAINTENANCE_COST`,
+la respuesta sigue siendo `IncidentResponse`; para la rama `OTHER`, `OwnerApprovalResponse`.
+El handler elige el DTO en función de `related_type` y devuelve uno u otro con
+`status_code=200`. La documentación OpenAPI declara ambos como un `oneOf`.
 
-Rejected: **un único `Union[IncidentResponse, OwnerApprovalResponse]` declarado en
-`response_model`** — la pantalla `/approvals` y la pantalla de detalle de propiedad
-consumen `IncidentResponse` hoy y la mantenibilidad de un `Union` en FastAPI es pobre:
-los generadores de cliente TypeScript generan un `oneOf` sin discriminador útil, y
-la ruta devolvería un cuerpo distinto según la rama, pero con el mismo esquema
-declarado. Una rama explícita con dos respuestas declaradas es más legible.
+Rejected: **`response_model=OwnerApprovalResponse` con el otro cuerpo vía
+`responses={200: {"model": IncidentResponse, ...}}`** — era la primera idea y el
+diseño original la nombró como la forma preferida. **No funciona**: FastAPI valida
+el payload runtime contra `response_model=`, no contra los `responses=`, y un
+`IncidentResponse` no satisface `OwnerApprovalResponse` (le faltan
+`approval_id`/`amount`/`currency`, y `status` es de tipo distinto). El test 4.6 de
+Sección 4 cazó la regresión — la rama `INCIDENT` quedó inalcanzable por HTTP. La
+solución correcta es `Union` (la presente aquí), no `response_model=` con un cuerpo
+único.
+
+Rejected: **`response_model=None` y ambos cuerpos vía `responses={}`** — desactiva la
+validación pero deja el `oneOf` mal documentado en OpenAPI (no se genera un esquema
+para el `200` por defecto, sólo se documenta el alternativo). Pierde la coherencia
+con el resto del módulo, donde cada ruta declara un `response_model` aunque su
+esquema sea trivial.
 
 Rejected: **devolver `IncidentResponse` siempre, con la incidencia del
 `related_id` poblada por la materialización del job** — el job corre cada 5 minutos
