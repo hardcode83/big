@@ -129,7 +129,12 @@ for r in data.get("runners", []):
 }
 
 # URL del primer run IN_PROGRESS que tenga un job corriendo en `target` (runner.name).
-# Vacío si no hay ninguno (sale 0 sin imprimir nada). Si la API rechaza, imprime error y sale !=0.
+# Vacío si no hay ninguno **confirmado** (sale 0 sin imprimir nada). Sale !=0 —y el llamador
+# debe tratarlo como "no sé", nunca como "no hay job en vuelo"— ante CUALQUIER incertidumbre:
+# la API rechaza, la lista de runs viene truncada (más de una página), o no se pudo enumerar
+# los jobs de alguno de los runs in-progress (fail-closed, hallazgo del panel de `/sdd:review`,
+# `sdd-security`, 2026-09-15: un `continue` silencioso ahí dejaba que un run realmente dueño
+# del job del agente, si su propia consulta de jobs fallaba, se leyera como "sin job en vuelo").
 gh_in_progress_url_for_runner() {
     local target="$1"
     INSTALL_TOKEN="$INSTALL_TOKEN" GITHUB_REPO="$GITHUB_REPO" \
@@ -148,21 +153,29 @@ def gh_get(url):
             "X-GitHub-Api-Version": "2022-11-28",
         })
     with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read())
+        return json.loads(resp.read()), resp.getheader("Link")
 
 try:
-    runs = gh_get(f"https://api.github.com/repos/{repo}/actions/runs?status=in_progress&per_page=100").get("workflow_runs", [])
+    body, link = gh_get(f"https://api.github.com/repos/{repo}/actions/runs?status=in_progress&per_page=100")
 except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError):
     sys.exit(1)  # API rechazó: que `set -e` aborte y el operador vea el error
+if link and 'rel="next"' in link:
+    # Más de 100 runs in-progress a la vez: no podemos afirmar que ninguno tiene el job del
+    # agente sin leer la página siguiente. Desconocido, no "no hay" — sale !=0.
+    sys.exit(1)
+runs = body.get("workflow_runs", [])
 
 for r in runs:
     rid = r.get("id")
     if not rid:
         continue
     try:
-        jobs = gh_get(f"https://api.github.com/repos/{repo}/actions/runs/{rid}/jobs?per_page=100").get("jobs", [])
+        jobs, _ = gh_get(f"https://api.github.com/repos/{repo}/actions/runs/{rid}/jobs?per_page=100")
+        jobs = jobs.get("jobs", [])
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError):
-        continue
+        # No pudimos leer los jobs de ESTE run in-progress: puede ser el que tiene el job del
+        # agente. Desconocido, no "este run no lo tiene" — sale !=0 en vez de `continue`.
+        sys.exit(1)
     for j in jobs:
         if j.get("status") == "in_progress" and j.get("runner_name") == target:
             print(r.get("html_url", ""))
@@ -462,8 +475,16 @@ if printf '%s\n' "$legacy_listed" | grep -Fxq "$LEGACY_NAME"; then
             fi
             ;;
         active)
-            url="$(gh_in_progress_url_for_runner "$LEGACY_NAME" || true)"
-            if [[ -n "$url" ]]; then
+            # Este bloque ya bloquea (`exit 1`) sea cual sea el resultado de la API — el `api_rc`
+            # solo cambia el mensaje, no la decisión, así que un `|| true` aquí es seguro. Pero
+            # sin distinguirlo el mensaje afirmaba un hecho que la API nunca confirmó (hallazgo
+            # del panel de `/sdd:review`, `sdd-security`, 2026-09-15): un fallo de API no es lo
+            # mismo que "la API confirmó que no hay job en vuelo".
+            api_rc=0
+            url="$(gh_in_progress_url_for_runner "$LEGACY_NAME")" || api_rc=$?
+            if [[ "$api_rc" -ne 0 ]]; then
+                echo "ERROR: agente legado $LEGACY_NAME activo — la API de GitHub no respondió, estado del job desconocido" >&2
+            elif [[ -n "$url" ]]; then
                 echo "ERROR: agente legado $LEGACY_NAME activo con job en vuelo: $url" >&2
             else
                 echo "ERROR: agente legado $LEGACY_NAME activo pero sin job en vuelo en la API" >&2
@@ -529,8 +550,13 @@ for name in "${surplus[@]+"${surplus[@]}"}"; do
             retire_named_agent "$name"
             ;;
         active)
-            url="$(gh_in_progress_url_for_runner "$name" || true)"
-            if [[ -n "$url" ]]; then
+            # Mismo motivo que la Fase 0: este bloque ya bloquea (nunca retira) pase lo que pase
+            # con la API — el `api_rc` solo cambia qué le decimos al operador, no la decisión.
+            api_rc=0
+            url="$(gh_in_progress_url_for_runner "$name")" || api_rc=$?
+            if [[ "$api_rc" -ne 0 ]]; then
+                blocked+=("$name activo — la API de GitHub no respondió, estado del job desconocido")
+            elif [[ -n "$url" ]]; then
                 blocked+=("$name activo con job en vuelo: $url")
             else
                 blocked+=("$name activo pero sin job en vuelo en la API — cancelar el job en GitHub y reaplicar")
