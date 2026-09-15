@@ -82,4 +82,38 @@ describe("mapIncidentsError (R5.4)", () => {
       kind: "error",
     });
   });
+
+  /**
+   * R2.1/R4.3 (task 3.4): a 404 on the incident staff-thread read must map to
+   * `not-found`, the same "task/incident not available" branch every other
+   * read uses. Unlike `mapCleanerError`, `mapIncidentsError` has no `kind`
+   * discriminator parameter — it is generic over the *status code* alone, so
+   * "messages" needs no dedicated branch: the existing 404 rule already
+   * covers it (see Implementation Notes, section 3).
+   */
+  it("a 404 on the messages read maps to not-found — the generic rule, no dedicated 'messages' branch needed", () => {
+    const err = new ApiError({
+      code: "NOT_FOUND",
+      message: "no such incident",
+      status: 404,
+    });
+    expect(mapIncidentsError(errored(err))).toEqual({ kind: "not-found" });
+  });
+
+  /**
+   * R2.2/R2.3 (task 3.4): a 422 on the send-message mutation maps to
+   * `validation` — same generic rule. `mapIncidentsError`'s input type (`Pick<
+   * UseQueryResult, "isPending" | "isError" | "error" | "data">`) is
+   * structurally satisfied by `UseMutationResult` too (both expose the same
+   * four fields in TanStack Query v5), so the mutation hook can reuse this
+   * mapper unchanged — no dedicated "sendMessage" branch needed either.
+   */
+  it("a 422 on the send-message mutation maps to validation — mapIncidentsError works for a mutation result shape too", () => {
+    const err = new ApiError({
+      code: "validation_error",
+      message: "content too long",
+      status: 422,
+    });
+    expect(mapIncidentsError(errored(err))).toEqual({ kind: "validation" });
+  });
 });

@@ -53,22 +53,22 @@
       `cleaner-task-detail-view.test.tsx` accordingly. [R1, R3]
 - [x] 2.5 Add the messages-tab section to `sdd/specs/cleaner-app.md`. [R1]
 
-## 3. Incident messages — data layer (shared `incidents` module)
+## 3. Incident messages — data layer (shared `incidents` module) <!-- panel: PASS 2026-09-15 receipt:2e08ad55 -->
 
-- [ ] 3.1 Add `IncidentMessage` and `SendIncidentMessageInput` types to
+- [x] 3.1 Add `IncidentMessage` and `SendIncidentMessageInput` types to
       `frontend/features/incidents/data/dto.ts` (same shape as task 1.1). [R2]
-- [ ] 3.2 Add `getIncidentMessages(tenantId, incidentId, page)` and
+- [x] 3.2 Add `getIncidentMessages(tenantId, incidentId, page)` and
       `sendIncidentMessage(tenantId, incidentId, content)` to the incidents data
       source interface and `HttpIncidentsSource`
       (`frontend/features/incidents/data/http/http-incidents-source.ts`). Add
       coverage in its existing test file. [R2]
-- [ ] 3.3 Add `messages(tenantId, incidentId, page)` and
+- [x] 3.3 Add `messages(tenantId, incidentId, page)` and
       `messagesPrefix(tenantId, incidentId)` to `incidentsKeys`
       (`frontend/features/incidents/hooks/query-keys.ts`), same shape as `photos`. [R2]
-- [ ] 3.4 Add `"messages"` and `"sendMessage"` kinds and branches to
+- [x] 3.4 Add `"messages"` and `"sendMessage"` kinds and branches to
       `mapIncidentsError` (`frontend/features/incidents/lib/error-mapping.ts`),
       mirroring task 1.4. [R2, R4]
-- [ ] 3.5 Add `useIncidentMessages(incidentId, page)` and
+- [x] 3.5 Add `useIncidentMessages(incidentId, page)` and
       `useSendIncidentMessage(incidentId)` in a new
       `frontend/features/incidents/hooks/use-incident-messages.ts`, same contract as
       task 1.5. **Export only the hooks/types from `features/incidents/index.ts`, do
@@ -136,3 +136,15 @@
 - **Test gotcha:** the hooks keep `retry: retryPolicy`, which the test QueryClient's `retry: false` does **not** override — a 5xx fixture retries twice and times the test out. Use a 4xx (e.g. `403`) to exercise the generic ErrorState branch.
 - The incident-report trigger only renders while the task is `IN_PROGRESS` (it lives inside `cleaner-task-action-bar.tsx`), so the detail-view test that proves the content panel survives a tab round trip has to set that status first.
 - `sdd/specs/cleaner-app.md` gained `### R9` plus corrected Key-files counts: `CleanerDataSource` is now **15** methods (7 reads + 8 mutations, was described as "once") and `cleanerKeys` **9** keys (was "siete") — section 3 should expect the same drift in `sdd/specs/tech-app.md`.
+
+### Section 3 (incidents data layer) — what section 4 must mirror
+
+- **No separate `IncidentsSource` interface file.** Unlike `cleaner` (`CleanerDataSource` interface + `HttpCleanerSource` implementation, two files), `features/incidents/data/` has always had only the concrete `HttpIncidentsSource` class (`frontend/features/incidents/data/http/http-incidents-source.ts`) — UI/hooks depend on it directly through `getIncidentsDataSource()`. `getIncidentMessages`/`sendIncidentMessage` were added straight to that class; there was no interface to extend.
+- **New methods added:** `getIncidentMessages(tenantId, incidentId, page): Promise<PaginatedResponse<IncidentMessage>>` and `sendIncidentMessage(tenantId, incidentId, content): Promise<IncidentMessage>`, both on `HttpIncidentsSource`. `MESSAGES_PER_PAGE = 20` added in `http-incidents-source.ts` (own constant, not imported from `cleaner`, same reasoning as task 1.2's `MESSAGES_PER_PAGE`). `PaginatedResponse<T>` (identical shape to `cleaner`'s) is a **new type added to `features/incidents/data/dto.ts`** — it did not exist there before (incidents' only prior envelope, `IncidentList`, has no `totalPages`). `mapPage()` was copied into `http-incidents-source.ts` (not imported from `cleaner`, per the modules-stay-separate precedent D2/D7 already established in this file).
+- **`/api/v1/incidents/{incident_id}/messages` has both GET and POST**, so `getIncidentMessages` needs the explicit `<Path, "GET">` type args on `client.request(...)` when passing a `query` object — exactly task 1's gotcha, mirrored here.
+- **New DTO:** `IncidentMessage` (`{id, authorId, authorRole, content, createdAt}`, `authorRole: components["schemas"]["UserRole"]`) and `SendIncidentMessageInput` (`{content: string}`) in `frontend/features/incidents/data/dto.ts`. Both already flow through the barrel via the existing `export type * from "./data"` in `features/incidents/index.ts` — no separate export line was needed for the types.
+- **Query keys** (`frontend/features/incidents/hooks/query-keys.ts`): `incidentsKeys.messages(tenantId, incidentId, page)` → tag `"incidents-messages"` (matches this module's existing tag convention — `"incidents-photos"`, `"incidents-context"` — **not** `cleaner`'s `"cleaner-task-messages"` style which folds the id into the tag name itself). `incidentsKeys.messagesPrefix(tenantId, incidentId)` is the same tag without `page`.
+- **`mapIncidentsError` needed NO new kinds/branches — this is a deliberate deviation from the task list's literal wording**, verified against the actual code, not guessed: `mapIncidentsError` (`frontend/features/incidents/lib/error-mapping.ts`) has always been a **generic, status-code-only** mapper — `mapIncidentsError<TData, TError>(queryResult)` — with no `kind` input parameter at all (unlike `mapCleanerError(error, kind)`). It already maps any 404 → `{kind: "not-found"}` and any 422 → `{kind: "validation"}`, regardless of which resource asked. Its input type (`Pick<UseQueryResult, "isPending" | "isError" | "error" | "data">`) is structurally satisfied by `UseMutationResult` too (TanStack Query v5), so section 4's send-message composer can call `mapIncidentsError(sendMutationResult)` directly to get `{kind: "validation"}` on a stale-client 422, exactly like a read. Two documenting tests were added to `error-mapping.test.ts` proving both cases; **do not add a `kind` parameter to this function** — it would be a breaking signature change touching `incident-detail-view.tsx` and `incidents-view.tsx`, which is out of this section's (and section 4's) scope. Section 4's tech-side composer picks its i18n copy (e.g. `messages.errors.tooLong`) directly from `kind === "validation"` in the mutation result — there is no per-resource "sendMessage" message key resolved by this shared module, unlike `cleaner`'s `messages.errors.tooLong` resolved inside `mapCleanerError`.
+- **New hooks file:** `frontend/features/incidents/hooks/use-incident-messages.ts` — `useIncidentMessages(incidentId, page, enabled)` (query, third positional `enabled` param exactly like task 1.5, sticky `hasOpenedMessagesTab` flag from `TechIncidentTabs` goes here) and `useSendIncidentMessage(incidentId): UseMutationResult<IncidentMessage, Error, SendIncidentMessageVariables>` (mutation, `{content: string}` variable shape, invalidates `incidentsKeys.messagesPrefix(tenantId, incidentId)` in `onSettled` on both success and failure, never optimistic). Both hooks define their own local `useTenantId`/`useOptionalTenantId` helpers in this file (mirroring `use-incident-cycle.ts`'s pattern of per-file helpers rather than a shared one).
+- **Barrel exports (`frontend/features/incidents/index.ts`):** only `useIncidentMessages`, `useSendIncidentMessage` and `SendIncidentMessageVariables` were added, with a comment explaining why no UI component is exported from here (D2). `IncidentMessage`/`SendIncidentMessageInput` types are already reachable through the pre-existing `export type * from "./data"` line — nothing to add there. **`IncidentDetailView` (the manager's view) was not touched and does not import these hooks.**
+- **Verification run:** `docker compose exec frontend npx vitest run features/incidents` → 18 files, 255 tests, all passing (includes the pre-existing route-allowlist test in `http-incidents-source.test.ts`, `"declares exactly the routes these screens are allowed to reach"`, which had to be updated to include the new `/api/v1/incidents/{incident_id}/messages` route — a structural guard, same pattern as `cleaner`'s equivalent if one exists). `docker compose exec frontend npm run typecheck` → clean. `npx eslint` on every touched file → clean.

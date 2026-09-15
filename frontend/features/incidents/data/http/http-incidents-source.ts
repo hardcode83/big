@@ -7,11 +7,13 @@ import type {
   IncidentDetailDto,
   IncidentFilters,
   IncidentList,
+  IncidentMessage,
   IncidentPhotoDto,
   IncidentPhotoStage,
   IncidentSeverity,
   IncidentSummaryDto,
   CloseIncidentInput,
+  PaginatedResponse,
   TechnicianSummary,
 } from "../dto";
 
@@ -22,6 +24,9 @@ type IncidentPhotoResponse = components["schemas"]["IncidentPhotoResponse"];
 type IncidentPhotoListResponse = components["schemas"]["IncidentPhotoListResponse"];
 type UserPageResponse = components["schemas"]["UserPageResponse"];
 type UserResponse = components["schemas"]["UserResponse"];
+type IncidentMessagePageResponse =
+  components["schemas"]["IncidentMessagePageResponse"];
+type IncidentMessageResponse = components["schemas"]["IncidentMessageResponse"];
 
 /**
  * Page size of the technician roster catalog call (R2.1, D7). Mirrors
@@ -30,6 +35,43 @@ type UserResponse = components["schemas"]["UserResponse"];
  * over a shared `features/users` module).
  */
 const CATALOG_PER_PAGE = 100;
+/**
+ * Page size of the staff-thread listing (proposal R2.1, design D4). Same
+ * value as `features/cleaner/data/http-cleaner-source.ts`'s
+ * `MESSAGES_PER_PAGE` — kept as its own name, not imported, since D4 ties the
+ * two by value, not by identity (mirrors task 1.2's note).
+ */
+const MESSAGES_PER_PAGE = 20;
+
+function mapPage<T, U>(
+  page: {
+    data: T[];
+    total: number;
+    page: number;
+    per_page: number;
+    total_pages: number;
+  },
+  mapItem: (item: T) => U,
+): PaginatedResponse<U> {
+  return {
+    data: page.data.map(mapItem),
+    total: page.total,
+    page: page.page,
+    perPage: page.per_page,
+    totalPages: page.total_pages,
+  };
+}
+
+/** Wire → UI for one staff-thread message (R2.1, R2.2, D3). */
+function mapMessage(value: IncidentMessageResponse): IncidentMessage {
+  return {
+    id: value.id,
+    authorId: value.author_id,
+    authorRole: value.author_role,
+    content: value.content,
+    createdAt: value.created_at,
+  };
+}
 
 /** Triage input (R3.2): only the keys the caller actually sets are sent. */
 export interface TriageIncidentInput {
@@ -217,6 +259,54 @@ export class HttpIncidentsSource {
       { pathParams: { incident_id: incidentId } },
     );
     return (response as IncidentPhotoListResponse).items.map(mapIncidentPhoto);
+  }
+
+  /**
+   * One page of the incident's staff thread, oldest first (proposal R2.1,
+   * design D4). Mirrors `getTaskMessages` in
+   * `features/cleaner/data/http-cleaner-source.ts`: `pathParams` + `query`
+   * only, the page envelope mapped through `mapPage`.
+   *
+   * The `/messages` path has both `GET` and `POST` operations, so
+   * `client.request(...)` needs explicit `<Path, "GET">` type args when
+   * passing a `query` object — mirrors `listTechnicians`'s explicit-generics
+   * pattern above (task 1's Implementation Notes).
+   */
+  async getIncidentMessages(
+    _tenantId: string,
+    incidentId: string,
+    page: number,
+  ): Promise<PaginatedResponse<IncidentMessage>> {
+    const response = await this.client.request<
+      "/api/v1/incidents/{incident_id}/messages",
+      "GET"
+    >("/api/v1/incidents/{incident_id}/messages", {
+      pathParams: { incident_id: incidentId },
+      query: { page, per_page: MESSAGES_PER_PAGE },
+    });
+    return mapPage(response as IncidentMessagePageResponse, mapMessage);
+  }
+
+  /**
+   * Sends one message on the incident's staff thread (R2.2). `content` is the
+   * only field the request admits — length validation (1-2000 chars) is the
+   * backend's `SendIncidentMessageRequest`, mirrored client-side by design D6,
+   * never re-derived here.
+   */
+  async sendIncidentMessage(
+    _tenantId: string,
+    incidentId: string,
+    content: string,
+  ): Promise<IncidentMessage> {
+    const response = await this.client.request(
+      "/api/v1/incidents/{incident_id}/messages",
+      {
+        method: "POST",
+        pathParams: { incident_id: incidentId },
+        body: { content },
+      },
+    );
+    return mapMessage(response as IncidentMessageResponse);
   }
 
   /**
