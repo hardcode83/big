@@ -104,15 +104,20 @@ Rejected: **devolver `IncidentResponse` siempre, con la incidencia del
 `Incident` mentiría sobre el resultado de la petición. La pantalla del cliente no sabe
 qué hacer con eso sin un discriminador explícito.
 
-### D6 — DTO `OwnerApprovalResponse` con cinco campos
+### D6 — DTO `OwnerApprovalResponse` con seis campos
 
-**Chosen:** `id`, `status`, `responded_at`, `property_id`, `amount`, `currency` (siempre
-`"EUR"`). `currency` se incluye por simetría con `OwnerApprovalListItemResponse`, aunque la
-constante de hoy es única (`OWNER_APPROVAL_CURRENCY = "EUR"`,
-`backend/app/maintenance/domain/read_models.py`); si un día cambia, este campo ya está
-preparado. `related_type` se omite — la pantalla que sepa distinguir `OTHER` no consume
-este endpoint (`approvals-web` R4 dice que oculta los controles en `OTHER`); un cliente
-que llame a este endpoint para una `OTHER` recibe un `200` y la pantalla que sea, decide.
+**Chosen:** `approval_id`, `status`, `responded_at`, `property_id`, `amount`, `currency`
+(constante `"EUR"`). Los nombres siguen literalmente la lista de R5.3 de la propuesta
+(`approval_id, status, responded_at, property_id, amount, currency`): se llama
+`approval_id` y no `id` para que la pantalla cliente distinga este id del id de
+incidencia que ya devuelve `IncidentResponse` en la rama `INCIDENT` /
+`MAINTENANCE_COST`. `currency` se incluye por simetría con
+`OwnerApprovalListItemResponse`, aunque la constante de hoy es única
+(`OWNER_APPROVAL_CURRENCY = "EUR"`, `backend/app/maintenance/domain/read_models.py`);
+si un día cambia, este campo ya está preparado. `related_type` se omite — la pantalla
+que sepa distinguir `OTHER` no consume este endpoint (`approvals-web` R4 dice que
+oculta los controles en `OTHER`); un cliente que llame a este endpoint para una `OTHER`
+recibe un `200` y la pantalla que sea, decide.
 
 Rejected: **devolver `OwnerApprovalListItemResponse`** — incluiría `requested_at` y el
 `OwnerApprovalPropertyRefResponse` con `name` + `internal_code`, que son nombres
@@ -173,7 +178,7 @@ de segregación de interfaces (`steering/backend-architecture.md`) lo prohíbe.
 | Domain entity | `backend/app/maintenance/domain/entities.py` | sin cambios — `OwnerApproval.answer()` ya cubre la rama `OTHER` |
 | Domain repository | `backend/app/maintenance/domain/repositories.py` | sin cambios — `get`/`save` ya cubren la rama |
 | Application | `backend/app/maintenance/application/use_cases.py` | `RespondOwnerApprovalUseCase.execute(...)` ramifica por `related_type`: la rama `OTHER` omite `IncidentRepository.get`, la mutación de la incidencia, el `TimelineEvent`, `PropertyStateMachine` y la notificación al técnico. Audit log idéntico. |
-| API schemas | `backend/app/maintenance/api/schemas.py` | nueva clase `OwnerApprovalResponse` (cinco campos: `id`, `status`, `responded_at`, `property_id`, `amount`, `currency`); `RespondOwnerApprovalRequest` sin cambios |
+| API schemas | `backend/app/maintenance/api/schemas.py` | nueva clase `OwnerApprovalResponse` (seis campos: `approval_id`, `status`, `responded_at`, `property_id`, `amount`, `currency`); `RespondOwnerApprovalRequest` sin cambios |
 | API router | `backend/app/maintenance/api/approvals_router.py` | `respond_owner_approval` elige `response_model` por `related_type` (`IncidentResponse` para `INCIDENT`/`MAINTENANCE_COST`, `OwnerApprovalResponse` para `OTHER`); `status_code` y ruta sin cambios |
 | Errors | `backend/app/maintenance/api/errors.py` | sin cambios — los códigos `404`/`409`/`422`/`403` ya están mapeados |
 | Scheduler | `backend/app/scheduler/tasks.py`, `backend/app/scheduler/schedule.py` | sin cambios — el job de reconciliación sigue intacto |
@@ -183,6 +188,9 @@ de segregación de interfaces (`steering/backend-architecture.md`) lo prohíbe.
 | Tests | `backend/tests/maintenance/test_api.py` (o donde esté hoy el test de `POST /owner-approvals/{id}/respond`) | añadir tests de integración HTTP: la ruta devuelve `200` con `OwnerApprovalResponse` para `OTHER`; el `AuditLog` `OWNER_APPROVAL_ANSWERED` se escribe; la reconciliación (en el siguiente tick del job en CI, vía `ReconcileOwnerApprovalsForExpensesUseCase.execute`) materializa `expenses.approved_by` |
 | Docs | `docs/maintenance.md` | sección sobre `/owner-approvals/{id}/respond` actualizada para indicar que también sirve `OTHER`; el bloque "la ruta resuelve por incidencia" se sustituye por "depende de `related_type`" |
 | Docs | `docs/revenue-statements.md` | sección "Permisos, aislamiento, auditoría" actualizada para indicar que `POST /owner-approvals/{id}/respond` sí sirve las `OTHER` y que la materialización sigue siendo del reconciliador |
+| Spec | `sdd/specs/maintenance.md` | sustituido el párrafo final de R4 ("`OwnerApprovalRelatedType.OTHER` no puede responderse por esta ruta", hoy cerrado por el bug medido) por la afirmación de que la ruta sí la sirve; R8 (párrafo de exposición de la ruta de respuesta, la 404 actual) sustituido por la forma "responde `OwnerApprovalResponse` para `OTHER`, `IncidentResponse` para las demás" |
+| Spec | `sdd/specs/revenue-statements.md` | el párrafo "Permisos, aislamiento, auditoría" (corrección de `approvals-web` D11) que hoy dice "hoy no hay ninguna ruta que responda una `OwnerApproval(OTHER)`" se sustituye por la afirmación de que `POST /owner-approvals/{id}/respond` sí la sirve, con el límite de que la materialización sobre `expenses` la hace el job de reconciliación |
+| Spec | `sdd/specs/approvals-web.md` | sólo nota explicativa: el cambio de backend queda invisible hasta que un change de FE habilite los controles de decisión en filas `OTHER` (R4 sigue diciendo "NEVER SHALL ofrecer los controles de decisión en una fila `relatedType = OTHER`", intacto) |
 
 ## Data & interfaces
 
