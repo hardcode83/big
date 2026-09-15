@@ -198,7 +198,7 @@ la validación de forma exacta en el cliente es solo UX (bloquear antes del
 | `incidents` hooks | `frontend/features/incidents/hooks/query-keys.ts` | + `messages`, `messagesPrefix` |
 | `incidents` hooks | `frontend/features/incidents/hooks/use-incidents.ts` | + `useIncidentMessages(incidentId, page)` |
 | `incidents` hooks | nuevo `frontend/features/incidents/hooks/use-send-incident-message.ts` | + `useSendIncidentMessage(incidentId)` |
-| `incidents` lib | `frontend/features/incidents/lib/error-mapping.ts` | + kinds `"messages"`, `"sendMessage"` |
+| `incidents` lib | `frontend/features/incidents/lib/error-mapping.ts` | no change — `mapIncidentsError` stays the pre-existing generic, status-only mapper (no `kind` input, no `messageKey`); the `kind`→copy translation for `messages`/`sendMessage` lives in `tech-incident-messages-panel.tsx`'s own `sendErrorKeyFor()` helper instead (documented deviation, tasks.md Section 3/4 notes) |
 | `tech` components | nuevo `frontend/features/tech/components/detail/tech-incident-messages-panel.tsx` | lista + composer, reutiliza los hooks de `incidents` |
 | `tech` components | nuevo `frontend/features/tech/components/detail/tech-incident-tabs.tsx` | D1 |
 | `tech` components | `tech-incident-detail-view.tsx` | envuelve el contenido actual + el panel de mensajes en `TechIncidentTabs` |

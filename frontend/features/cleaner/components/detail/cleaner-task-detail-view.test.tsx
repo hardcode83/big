@@ -242,6 +242,33 @@ describe("CleanerTaskDetailView (R2.1, R2.8)", () => {
     ).toBeInTheDocument();
   });
 
+  it("replaces the whole screen with the not-found EmptyState when the messages read 404s (R4.3)", async () => {
+    getTaskMessages.mockRejectedValue(
+      new ApiError({ status: 404, code: "NOT_FOUND", message: "missing" }),
+    );
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByText("REDES11")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Mensajes" }));
+
+    // The whole detail screen — tabs included — is replaced by the same
+    // "tarea no disponible" EmptyState the other five parallel reads already
+    // produce: no tablist, no leftover content tab underneath. Waiting on the
+    // tablist's disappearance (rather than just the title text, which the
+    // messages panel's own interim not-found EmptyState also renders for one
+    // render pass) is what pins this to the whole-screen swap.
+    await waitFor(() => {
+      expect(screen.queryByRole("tablist")).toBeNull();
+    });
+    expect(screen.getByText("Tarea no disponible")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Volver a mis tareas" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("REDES11")).toBeNull();
+  });
+
   it("opens on the content tab and does not request the thread yet (R3.1, D1)", async () => {
     renderView();
     await waitFor(() =>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 
@@ -38,6 +38,12 @@ import { CleanerTaskTabs } from "./cleaner-task-tabs";
  * «Volver a mis tareas»; loading → `LoadingState`; error → `ErrorState`
  * without retry on `4xx`.
  *
+ * The messages query (lazy, mounted inside `CleanerTaskMessagesPanel`) is not
+ * one of these five parallel reads, but a 404 on it means the same thing — the
+ * task is gone — so `CleanerTaskMessagesPanel`'s `onNotFound` callback feeds
+ * `messagesNotFound` here, which folds into the same whole-screen not-found
+ * branch as the other five (R4.3, proposal amendment).
+ *
  * Composition: `ContextBlock` → `Checklist` → `PhotoRequirements` (with the
  * upload buttons inline) → `Gallery` → `ActionBar`. The completion panel
  * overlays the action bar only after a successful close. That whole stack is
@@ -58,6 +64,11 @@ export function CleanerTaskDetailView({ taskId }: CleanerTaskDetailViewProps) {
   const { t } = useTranslation(["cleaner", "states"]);
   const router = useRouter();
   const [hasClosed, setHasClosed] = useState(false);
+  // Sticky, mirroring `hasOpenedMessagesTab` in the tabs: once the messages
+  // read 404s the task is gone, and it does not come back by refetching the
+  // other five reads (R4.3, proposal amendment).
+  const [messagesNotFound, setMessagesNotFound] = useState(false);
+  const onMessagesNotFound = useCallback(() => setMessagesNotFound(true), []);
 
   const { user } = useAuth();
   const tenantId = user?.tenant_id ?? "";
@@ -101,30 +112,29 @@ export function CleanerTaskDetailView({ taskId }: CleanerTaskDetailViewProps) {
       </div>
     );
   }
-  if (errorMap) {
-    if (errorMap.state === "not-found") {
-      return (
-        <div className="mx-auto w-full max-w-md p-4">
-          <EmptyState
-            title={t(`cleaner:${errorMap.messageKey}`)}
-            description={t("cleaner:detail.unavailable.description")}
-            action={
-              <Button
-                type="button"
-                onClick={() => router.replace("/cleaner")}
-              >
-                {t("cleaner:detail.back")}
-              </Button>
-            }
-          />
-        </div>
-      );
-    }
+  if (errorMap && errorMap.state !== "not-found" && !messagesNotFound) {
     return (
       <div className="mx-auto w-full max-w-md p-4">
         <ErrorState
           title={t(`cleaner:${errorMap.messageKey}`)}
           description={t("cleaner:detail.error.description")}
+        />
+      </div>
+    );
+  }
+  if (errorMap?.state === "not-found" || messagesNotFound) {
+    return (
+      <div className="mx-auto w-full max-w-md p-4">
+        <EmptyState
+          title={t(
+            `cleaner:${errorMap?.messageKey ?? "detail.unavailable.title"}`,
+          )}
+          description={t("cleaner:detail.unavailable.description")}
+          action={
+            <Button type="button" onClick={() => router.replace("/cleaner")}>
+              {t("cleaner:detail.back")}
+            </Button>
+          }
         />
       </div>
     );
@@ -192,7 +202,11 @@ export function CleanerTaskDetailView({ taskId }: CleanerTaskDetailViewProps) {
           </div>
         }
         renderMessages={(enabled) => (
-          <CleanerTaskMessagesPanel taskId={taskData.id} enabled={enabled} />
+          <CleanerTaskMessagesPanel
+            taskId={taskData.id}
+            enabled={enabled}
+            onNotFound={onMessagesNotFound}
+          />
         )}
       />
     </div>

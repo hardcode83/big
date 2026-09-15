@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -45,16 +45,29 @@ const MAX_CONTENT = 2000;
  * The query is lazy: `enabled` is the sticky `hasOpenedMessagesTab` flag that
  * `CleanerTaskTabs` owns (D1), so nothing is requested until the cleaner opens
  * the Messages tab.
+ *
+ * **404 propagation (R4.3, proposal amendment).** A 404 on this query means
+ * the task itself is gone — the same fact `task`/`context`/`checklist`/
+ * `photoRequirements`/`photos` already detect and react to by replacing the
+ * *whole* detail screen. Because this query loads lazily (only once the
+ * Messages tab is opened), a task that looked fine when the other five reads
+ * ran can vanish by the time this one does. `onNotFound` tells the parent
+ * detail view so it can fold this 404 into its own whole-screen not-found
+ * branch, on top of (not instead of) the panel-local `EmptyState` below,
+ * which stays as the immediate rendering for this panel.
  */
 export interface CleanerTaskMessagesPanelProps {
   taskId: string;
   /** The tabs' sticky "messages tab has been opened" flag (design D1). */
   enabled: boolean;
+  /** Called (repeatably) whenever the messages read 404s. */
+  onNotFound?: () => void;
 }
 
 export function CleanerTaskMessagesPanel({
   taskId,
   enabled,
+  onNotFound,
 }: CleanerTaskMessagesPanelProps) {
   const { t, i18n } = useTranslation("cleaner");
   const locale = i18n.language;
@@ -179,6 +192,15 @@ export function CleanerTaskMessagesPanel({
   const errorMap = query.isError
     ? mapCleanerError(query.error, "messages")
     : null;
+
+  // Propagate the 404 up so the parent detail view can replace the whole
+  // screen, the same as it already does for the other five parallel reads —
+  // see the doc comment above `onNotFound`.
+  useEffect(() => {
+    if (errorMap?.state === "not-found") {
+      onNotFound?.();
+    }
+  }, [errorMap?.state, onNotFound]);
 
   // R4.2 vs R2.8: a 404 means the task itself is gone, not that the thread is
   // empty — there is nothing to compose against, so the composer goes with it.

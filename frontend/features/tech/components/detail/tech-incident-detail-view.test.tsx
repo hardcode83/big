@@ -710,6 +710,30 @@ describe("TechIncidentDetailView (R2–R5)", () => {
       // And the close was never sent just because the tabs moved.
       expect(resolve).not.toHaveBeenCalled();
     });
+
+    it("replaces the whole screen with the not-found EmptyState when the messages read 404s (R4.3)", async () => {
+      getIncidentMessages.mockRejectedValue(
+        new ApiError({ status: 404, code: "NOT_FOUND", message: "x" }),
+      );
+      renderDetail();
+      await screen.findByText("Fuga en el baño");
+
+      fireEvent.click(messagesTab());
+
+      // The whole detail screen — tabs included — is replaced by the same
+      // "not available" EmptyState the incident/context reads already
+      // produce: no tablist, no leftover content tab underneath. Waiting on
+      // the tablist's disappearance (rather than just the title text, which
+      // the messages panel's own interim not-found EmptyState also renders
+      // for one render pass) is what pins this to the whole-screen swap.
+      await waitFor(() => {
+        expect(screen.queryByRole("tablist")).toBeNull();
+      });
+      expect(
+        screen.getByText(esTech.detail.unavailable.title),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Fuga en el baño")).toBeNull();
+    });
   });
 
   it("calls no /api/v1/properties route from this screen (R2.5)", async () => {

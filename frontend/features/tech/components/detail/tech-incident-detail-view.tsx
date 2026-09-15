@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
@@ -43,6 +44,13 @@ import { TechPhotoUpload } from "./tech-photo-upload";
  * explicitly that the close has not been accepted, keeps `finalCost` visible and
  * does not invent a `resolvedAt` that arrives `null`. The threshold is never
  * computed, shown or anticipated (R4.4).
+ *
+ * The messages query (lazy, mounted inside `TechIncidentMessagesPanel`) is not
+ * one of the two reads above, but a 404 on it means the same thing — the
+ * incident is gone — so `TechIncidentMessagesPanel`'s `onNotFound` callback
+ * feeds `messagesNotFound` here, which folds into the same whole-screen
+ * not-found branch as `incidentState`/`contextState` (R4.3, proposal
+ * amendment).
  */
 export function TechIncidentDetailView({
   incidentId,
@@ -52,6 +60,10 @@ export function TechIncidentDetailView({
   const { t } = useTranslation("tech");
   const incidentQuery = useIncident(incidentId);
   const contextQuery = useIncidentContext(incidentId);
+  // Sticky: once the messages read 404s the incident is gone, and it does not
+  // come back by refetching the incident/context queries.
+  const [messagesNotFound, setMessagesNotFound] = useState(false);
+  const onMessagesNotFound = useCallback(() => setMessagesNotFound(true), []);
 
   const incidentState = mapIncidentsError(incidentQuery);
   const contextState = mapIncidentsError(contextQuery);
@@ -78,7 +90,8 @@ export function TechIncidentDetailView({
 
   if (
     incidentState.kind === "not-found" ||
-    contextState.kind === "not-found"
+    contextState.kind === "not-found" ||
+    messagesNotFound
   ) {
     return shell(
       <EmptyState
@@ -158,6 +171,7 @@ export function TechIncidentDetailView({
         <TechIncidentMessagesPanel
           incidentId={incident.id}
           enabled={enabled}
+          onNotFound={onMessagesNotFound}
         />
       )}
     />,
