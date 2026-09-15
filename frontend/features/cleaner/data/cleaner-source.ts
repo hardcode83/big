@@ -8,6 +8,7 @@ import type {
   CleaningTask,
   CleaningTaskContext,
   CleaningTaskListItem,
+  CleaningTaskMessage,
   PaginatedResponse,
   PhotoRequirementsResponse,
 } from "./dto";
@@ -67,6 +68,17 @@ export interface CleanerDataSource {
   /** The uploaded photos, oldest first, each with a signed URL (R2.5). */
   getTaskPhotos(tenantId: string, taskId: string): Promise<CleaningPhoto[]>;
 
+  /**
+   * One page of the task's staff thread, chronologically ascending (R1.1,
+   * design D4). Page 1 is the oldest messages; `page + 1` moves forward in
+   * time, never backward.
+   */
+  getTaskMessages(
+    tenantId: string,
+    taskId: string,
+    page: number,
+  ): Promise<PaginatedResponse<CleaningTaskMessage>>;
+
   // ── Mutations ───────────────────────────────────────────────────────────
 
   /** Accepts an `ASSIGNED` task (R3.1). */
@@ -115,4 +127,15 @@ export interface CleanerDataSource {
     taskId: string,
     input: CleaningIncidentReportInput,
   ): Promise<CleaningIncidentReportAck>;
+
+  /**
+   * Sends one message on the task's staff thread (R1.2). `content` is
+   * 1-2000 chars server-side; the client validates the same bound before
+   * calling (D6) but this method never re-derives it.
+   */
+  sendTaskMessage(
+    tenantId: string,
+    taskId: string,
+    content: string,
+  ): Promise<CleaningTaskMessage>;
 }

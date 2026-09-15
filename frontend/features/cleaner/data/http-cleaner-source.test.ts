@@ -406,6 +406,105 @@ describe("HttpCleanerSource.reportIncident (R6.1)", () => {
   });
 });
 
+describe("HttpCleanerSource.getTaskMessages (R1.1)", () => {
+  function messagePage(items: unknown[]) {
+    return {
+      data: items,
+      total: items.length,
+      page: 1,
+      per_page: 20,
+      total_pages: 1,
+    };
+  }
+
+  it("sends page + per_page and maps the envelope to camelCase", async () => {
+    const { source, request } = sourceWith(
+      messagePage([
+        {
+          id: "message-1",
+          author_id: "cleaner-1",
+          author_role: "CLEANER",
+          content: "Ya he llegado",
+          created_at: "2026-08-20T10:00:00Z",
+        },
+      ]),
+    );
+
+    const page = await source.getTaskMessages("tenant-1", "task-1", 1);
+
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/cleaning-tasks/{task_id}/messages",
+      {
+        pathParams: { task_id: "task-1" },
+        query: { page: 1, per_page: 20 },
+      },
+    );
+    expect(page).toEqual({
+      data: [
+        {
+          id: "message-1",
+          authorId: "cleaner-1",
+          authorRole: "CLEANER",
+          content: "Ya he llegado",
+          createdAt: "2026-08-20T10:00:00Z",
+        },
+      ],
+      total: 1,
+      page: 1,
+      perPage: 20,
+      totalPages: 1,
+    });
+  });
+
+  it("requests page 2 when asked", async () => {
+    const { source, request } = sourceWith(messagePage([]));
+
+    await source.getTaskMessages("tenant-1", "task-1", 2);
+
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/cleaning-tasks/{task_id}/messages",
+      {
+        pathParams: { task_id: "task-1" },
+        query: { page: 2, per_page: 20 },
+      },
+    );
+  });
+});
+
+describe("HttpCleanerSource.sendTaskMessage (R1.2)", () => {
+  it("POSTs content and maps the created message", async () => {
+    const { source, request } = sourceWith({
+      id: "message-2",
+      author_id: "cleaner-1",
+      author_role: "CLEANER",
+      content: "Todo listo",
+      created_at: "2026-08-20T10:05:00Z",
+    });
+
+    const message = await source.sendTaskMessage(
+      "tenant-1",
+      "task-1",
+      "Todo listo",
+    );
+
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/cleaning-tasks/{task_id}/messages",
+      {
+        method: "POST",
+        pathParams: { task_id: "task-1" },
+        body: { content: "Todo listo" },
+      },
+    );
+    expect(message).toEqual({
+      id: "message-2",
+      authorId: "cleaner-1",
+      authorRole: "CLEANER",
+      content: "Todo listo",
+      createdAt: "2026-08-20T10:05:00Z",
+    });
+  });
+});
+
 describe("HttpCleanerSource error mapping (R2.8, R5.5)", () => {
   it("propagates ApiError from the transport unchanged — no fallback", async () => {
     const request = vi.fn().mockRejectedValue(

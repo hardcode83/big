@@ -29,6 +29,8 @@ const completeTask = vi.hoisted(() => vi.fn());
 const completeChecklistItem = vi.hoisted(() => vi.fn());
 const uploadPhoto = vi.hoisted(() => vi.fn());
 const reportIncident = vi.hoisted(() => vi.fn());
+const getTaskMessages = vi.hoisted(() => vi.fn());
+const sendTaskMessage = vi.hoisted(() => vi.fn());
 
 const tenantId = vi.hoisted(() => ({ current: "tenant-1" }));
 const routerReplace = vi.hoisted(() => vi.fn());
@@ -66,6 +68,8 @@ vi.mock("../../data", async (importOriginal) => ({
     completeChecklistItem,
     uploadPhoto,
     reportIncident,
+    getTaskMessages,
+    sendTaskMessage,
   }),
 }));
 
@@ -162,6 +166,8 @@ beforeEach(() => {
     completeChecklistItem,
     uploadPhoto,
     reportIncident,
+    getTaskMessages,
+    sendTaskMessage,
   ]) {
     mock.mockReset();
   }

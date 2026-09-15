@@ -15,13 +15,15 @@ export type CleanerErrorKind =
   | "checklist"
   | "photoRequirements"
   | "photos"
+  | "messages"
   | "accept"
   | "reject"
   | "start"
   | "complete"
   | "completeChecklistItem"
   | "uploadPhoto"
-  | "reportIncident";
+  | "reportIncident"
+  | "sendMessage";
 
 export type CleanerViewState = "loading" | "empty" | "error" | "not-found";
 
@@ -65,7 +67,8 @@ export function mapCleanerError(
       kind === "context" ||
       kind === "checklist" ||
       kind === "photoRequirements" ||
-      kind === "photos"
+      kind === "photos" ||
+      kind === "messages"
     ) {
       return {
         state: "not-found",
@@ -104,6 +107,15 @@ export function mapCleanerError(
       return {
         state: "error",
         messageKey: "incidentReport.errors.titleTooLong",
+      };
+    }
+    // Length validation on send (R1.3): the same 1-2000 char bound the
+    // composer already blocks client-side (D6) — the 422 is the backend
+    // catching what a stale client sent anyway.
+    if (kind === "sendMessage") {
+      return {
+        state: "error",
+        messageKey: "messages.errors.tooLong",
       };
     }
     return genericError(kind);
@@ -163,6 +175,7 @@ function genericError(kind: CleanerErrorKind): CleanerErrorMap {
     case "checklist":
     case "photoRequirements":
     case "photos":
+    case "messages":
       return {
         state: "error",
         messageKey: "detail.error.title",

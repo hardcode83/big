@@ -1,25 +1,25 @@
 # Tasks: staff-messaging-web
 
-## 1. Cleaning task messages — data layer
+## 1. Cleaning task messages — data layer <!-- panel: PASS 2026-09-15 receipt:d82a2105 -->
 
-- [ ] 1.1 Add `CleaningTaskMessage` and `SendCleaningTaskMessageInput` types to
+- [x] 1.1 Add `CleaningTaskMessage` and `SendCleaningTaskMessageInput` types to
       `frontend/features/cleaner/data/dto.ts` (`{id, authorId, authorRole, content,
       createdAt}`, camelCase per D3). [R1]
-- [ ] 1.2 Add `getTaskMessages(tenantId, taskId, page)` and
+- [x] 1.2 Add `getTaskMessages(tenantId, taskId, page)` and
       `sendTaskMessage(tenantId, taskId, content)` to `CleanerDataSource`
       (`frontend/features/cleaner/data/cleaner-source.ts`) and implement both in
       `HttpCleanerSource` (`frontend/features/cleaner/data/http-cleaner-source.ts`),
       mapping the backend's snake_case envelope to the camelCase DTO — mirror the
       existing methods' shape (`getTaskPhotos`, `uploadPhoto`). Add coverage in
       `http-cleaner-source.test.ts`. [R1]
-- [ ] 1.3 Add `messages(tenantId, taskId, page)` and
+- [x] 1.3 Add `messages(tenantId, taskId, page)` and
       `messagesPrefix(tenantId, taskId)` to `cleanerKeys`
       (`frontend/features/cleaner/hooks/query-keys.ts`), same shape as `photos`. [R1]
-- [ ] 1.4 Add `"messages"` and `"sendMessage"` to `CleanerErrorKind` and their
+- [x] 1.4 Add `"messages"` and `"sendMessage"` to `CleanerErrorKind` and their
       branches in `mapCleanerError` (`frontend/features/cleaner/lib/error-mapping.ts`):
       404 on `messages` → `not-found` state (same as other reads); 422 on
       `sendMessage` → the length-validation copy. [R1, R4]
-- [ ] 1.5 Add `useCleanerTaskMessages(taskId, page)` (read, `retryPolicy`, enabled
+- [x] 1.5 Add `useCleanerTaskMessages(taskId, page)` (read, `retryPolicy`, enabled
       only once a tab-open flag is true — see task 2.3) and
       `useSendCleanerTaskMessage(taskId)` (mutation, invalidates
       `cleanerKeys.messagesPrefix` in `onSettled`, per D5) in a new
@@ -112,3 +112,13 @@
       viewport. <!-- manual -->
 
 ## Implementation Notes
+
+- Backend envelope for `GET .../messages`: `CleaningTaskMessagePageResponse` = `{data: CleaningTaskMessageResponse[], page, per_page, total, total_pages}` (identical shape to `CleaningTaskPageResponse`); one row = `{id, author_id, author_role, content, created_at}` — `author_role` is the `UserRole` enum, not a free string.
+- Backend body for `POST .../messages`: `SendCleaningTaskMessageRequest = {content: string}`; response on `201` is the created `CleaningTaskMessageResponse` (same row shape as the list).
+- `PaginatedResponse<T>` mapping used: `mapPage()` in `http-cleaner-source.ts` (already existed) — `{data, total, page, perPage, totalPages}` camelCase, reused unchanged for messages.
+- `MESSAGES_PER_PAGE = 20` constant added in `http-cleaner-source.ts`, separate from `TASKS_PER_PAGE` (same value, kept as its own name since design D4 ties it to the list's constant by value, not by identity).
+- The `/messages` path has both `GET` and `POST` operations, so `client.request(...)` needs explicit `<Path, "GET">` type args when passing a `query` object (unlike `getTaskPhotos`, which omits `query` and infers fine) — mirror `listTasks`'s explicit-generics pattern for any sibling `incidents` implementation (task 3.2).
+- `mapCleanerError` 422 `sendMessage` copy uses i18n key `messages.errors.tooLong` — section 2's `cleaner.json`/`en.json` (task 2.1) must define this exact key.
+- Extending `CleanerDataSource` required adding `getTaskMessages`/`sendTaskMessage` mocks to six pre-existing component test fakes (`cleaner-incident-report-panel.test.tsx`, `cleaner-task-action-bar.test.tsx`, `cleaner-task-checklist-item.test.tsx`, `cleaner-task-detail-view.test.tsx`, `cleaner-task-photo-upload-button.test.tsx`, `cleaner-task-list-view.test.tsx`) so `npm run typecheck` stays green — no behavioral change to those tests, just interface conformance.
+- `useCleanerTaskMessages(taskId, page, enabled)` takes `enabled` as a plain third parameter (not an options object) — section 2's `CleanerTaskTabs` passes its sticky `hasOpenedMessagesTab` flag there directly.
+- `mapCleanerError` has no pre-existing dedicated unit test file (`error-mapping.test.ts` does not exist in this module); its branches are exercised only through component tests today. The new `"messages"`/`"sendMessage"` branches are verified by code review + typecheck here; section 2's `cleaner-task-messages-panel.test.tsx` (task 2.2) should exercise the error/not-found states end to end.
