@@ -19,7 +19,7 @@
 - [x] 1.3 Verify `backend/app/maintenance/api/schemas.py` imports cleanly:
       `docker compose exec backend uv run python -c "from app.maintenance.api.schemas import OwnerApprovalResponse"` [R6.2]
 
-## 2. Widen `RespondOwnerApprovalUseCase` for `OTHER` approvals
+## 2. Widen `RespondOwnerApprovalUseCase` for `OTHER` approvals <!-- panel: PASS 2026-09-15 receipt:780e8e9a -->
 
 - [x] 2.1 Modify `RespondOwnerApprovalUseCase.execute(...)` in
       `backend/app/maintenance/application/use_cases.py:1652` to branch on
@@ -42,16 +42,16 @@
 
 ## 3. Wire router to dispatch response by `related_type`
 
-- [ ] 3.1 In `backend/app/maintenance/api/approvals_router.py:82`, change
+- [x] 3.1 In `backend/app/maintenance/api/approvals_router.py:82`, change
       `respond_owner_approval` so that the `response_model` declared on the route is
       `OwnerApprovalResponse` (the smallest of the two bodies), and `responses={...}` lists
       both `IncidentResponse` and `OwnerApprovalResponse` as the two valid `200` shapes,
       documented per FastAPI's `responses=` convention. [R1.6, R6.1]
-- [ ] 3.2 Inside the handler, dispatch on the returned object type: if it is an `Incident`,
+- [x] 3.2 Inside the handler, dispatch on the returned object type: if it is an `Incident`,
       build `IncidentResponse.from_domain(...)`; if it is an `OwnerApproval`, build
       `OwnerApprovalResponse.from_domain(...)`. The `status_code=200` and the route prefix
       stay unchanged. [R1.6, R6.1, R9]
-- [ ] 3.3 Confirm the file still imports cleanly and the route is registered:
+- [x] 3.3 Confirm the file still imports cleanly and the route is registered:
       `docker compose exec backend uv run python -c "from app.maintenance.api.approvals_router import router; print([r.path for r in router.routes])"`. [R6.2]
 
 ## 4. Tests for the `OTHER` branch
@@ -123,6 +123,9 @@
 - `OwnerApproval` and `OwnerApprovalRelatedType` were already imported in `use_cases.py`; no new imports needed. Restructured `RespondOwnerApprovalUseCase.execute()` so `previous_status = approval.status`, `approval.answer(...)`, and `await self._approvals.save(...)` all run BEFORE `IncidentRepository.get(...)`, then the `OTHER` branch returns the approval with just the `OWNER_APPROVAL_ANSWERED` audit row and `commit()`. The `IncidentNotFoundError` for `INCIDENT`/`MAINTENANCE_COST` approvals now fires after `answer()`/`save()` — the UoW still rolls back on the raise, so the approval is never persisted without the incident update (or vice-versa).
 - Return annotation is `Incident | OwnerApproval`; the role check at the top of `execute()` sits before the `related_type` branch, so a non-`TENANT_OWNER` gets `MaintenanceValidationError` (`422`) for both `OTHER` and `INCIDENT`/`MAINTENANCE_COST` approvals.
 - Pyright on the file shows 1 pre-existing error in `_notify_technician` (`UUID | None` passed to `get_active_by_id`); confirmed it exists on the base commit and was not introduced by this section.
+- Approach (a) chosen — `response_model=OwnerApprovalResponse` with `responses[200]["model"]=IncidentResponse`; the default 200 is the OTHER branch and the alternate 200 is the INCIDENT/MAINTENANCE_COST branch, both declared per FastAPI's `responses=` convention and matching design D5.
+- Added `OwnerApprovalResponse` to the schemas import block in `approvals_router.py`; added `Incident, OwnerApproval` to a new `app.maintenance.domain.entities` import line so the `isinstance` dispatch can name both branches; defensive `TypeError` is raised on any unexpected return type.
+- The literal probe in 3.3 as written in `tasks.md` is broken (`sorted(...)` over `set` elements that aren't hashable); used `frozenset(...)` to make it runnable and confirmed the route registers as `('/owner-approvals/{approval_id}/respond', frozenset({'POST'}))`.
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
