@@ -781,6 +781,46 @@ def test_gh_helper_in_progress_job_with_null_runner_name_is_unknown_not_idle():
     assert code != 0, "a null runner_name on an in-progress job must never report as 'confirmed idle'"
 
 
+def test_gh_helper_a_job_already_assigned_to_us_with_a_non_terminal_status_is_busy():
+    """Round 9 (`sdd-security`, 2026-09-15): filtering on `status == "in_progress"` BEFORE
+    looking at `runner_name` (rounds 6-8's shape) let a job already assigned to THIS agent, but
+    reported with any other non-terminal status (queued/waiting/pending/requested, or a
+    malformed response missing `status` altogether), fall through as "not ours" — the identical
+    outcome to the `runner_name: null` edge round 8 closed, just triggered from the other field.
+    A job whose `runner_name` matches us and isn't `completed` must always report busy, whatever
+    its `status` says.
+    """
+    runs = {"workflow_runs": [{"id": 1, "html_url": "https://x/1"}]}
+    for status in ("queued", "waiting", "pending", "requested", None):
+        job = {"runner_name": "agent-2"}
+        if status is not None:
+            job["status"] = status
+        jobs = {"jobs": [job]}
+        code, out = run_gh_helper("agent-2", {
+            RUNS_URL: (runs, None),
+            "actions/runs/1/jobs": (jobs, None),
+        })
+        assert code == 0, f"status={status!r}: expected a CONFIRMED match, got rc={code}"
+        assert out.strip() != "", f"status={status!r}: a job assigned to us must report busy"
+
+
+def test_gh_helper_a_completed_job_for_us_does_not_block_a_later_real_match():
+    """A genuinely finished job assigned to us must not itself count as "busy" — only a job that
+    is still open in some way (including malformed/ambiguous states) should.
+    """
+    runs = {"workflow_runs": [{"id": 1, "html_url": "https://x/1"}]}
+    jobs = {"jobs": [
+        {"status": "completed", "runner_name": "agent-2"},
+        {"status": "in_progress", "runner_name": "some-other-agent"},
+    ]}
+    code, out = run_gh_helper("agent-2", {
+        RUNS_URL: (runs, None),
+        "actions/runs/1/jobs": (jobs, None),
+    })
+    assert code == 0
+    assert out == "", "a completed job of ours, with no other match, must read as confirmed idle"
+
+
 def test_gh_helper_a_run_without_an_id_is_unknown_not_idle():
     """Round 6 (`sdd-security`, 2026-09-15): the last fail-open edge to survive rounds 3-5 — a
     malformed run object with no `id` can't have its jobs enumerated, so it can't be confirmed

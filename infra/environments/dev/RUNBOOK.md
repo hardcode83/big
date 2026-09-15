@@ -190,9 +190,15 @@ sudo chmod 0600 /opt/actions-runner-2/.env
 #    Comprobar antes que no tiene un job en vuelo (Settings → Actions → Runners, o
 #    `systemctl status`), y solo entonces:
 sudo systemctl restart actions.runner.autohostai-labs-AutoHostAI.autohostai-dev-vm-2.service
+
+# 4. Marcar el reinicio como confirmado — sin esto, `start_named_agent()` (sección 4 de este
+#    change, marcador `.hook_confirmed`, D4 segunda enmienda) no tiene forma de saber que este
+#    paso a mano ya lo confirmó, y el siguiente `bootstrap-runner.sh` reiniciaría este agente
+#    OTRA VEZ (seguro — misma comprobación de job en vuelo — pero innecesario):
+sudo touch /opt/actions-runner-2/.hook_confirmed
 ```
 
-Verificar con el comando de `/proc` de arriba (`<i>=2`) que la variable ya está en el proceso vivo, y dejar pasar varios jobs reales por ese agente sin que fallen. Solo entonces ejecutar el bloque completo del principio de esta sección (`sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"`): ya no tocará `actions-runner-2` (su `.env` estará "unchanged") y instalará y declarará el hook en los otros tres, reiniciándolos si están ociosos.
+Verificar con el comando de `/proc` de arriba (`<i>=2`) que la variable ya está en el proceso vivo, y dejar pasar varios jobs reales por ese agente sin que fallen. Solo entonces ejecutar el bloque completo del principio de esta sección (`sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"`): con el marcador del paso 4 ya en disco, ya no tocará `actions-runner-2` (su `.env` estará "unchanged" y su hook "confirmado") y instalará y declarará el hook en los otros tres, reiniciándolos si están ociosos.
 
 ### 6.3 Arranque en frío (primer deploy sobre VM sin app)
 

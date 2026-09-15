@@ -186,6 +186,17 @@ sustituye por código versionado (change `ci-runner-workspace-pollution`).
   (`write_runner_env`), reiniciando el servicio de ese agente cuando el `.env` cambió y no tiene un
   job en vuelo — GitHub solo relee la variable al arrancar el proceso, así que instalar el hook sin
   reiniciar lo deja sin efecto.
+- THE SYSTEM SHALL reintentar ese reinicio en cada reaprovisionamiento hasta que quede confirmado,
+  no solo cuando el `.env` cambió **en esa pasada**: un reinicio diferido por job en vuelo dejaba
+  el `.env` ya correcto en disco, así que la pasada siguiente lo veía "unchanged" y no volvía a
+  intentarlo — un callejón sin salida silencioso, contradiciendo el propio mensaje de diferimiento
+  y `RUNBOOK.md §6.2` (enmienda 2026-09-15, panel de `/sdd:review`, `sdd-security`). La condición
+  real de reinicio es "`.env` cambió en esta pasada **o** el marcador `$RUNNER_HOME/.hook_confirmed`
+  está ausente" — ese marcador se crea solo cuando el proceso vivo queda confirmado leyendo el
+  `.env` correcto (reinicio con éxito, o arranque de cero, que ya nace leyéndolo), nunca al
+  diferir. Instalar el hook a mano sobre la VM viva (`RUNBOOK.md §6.2`, D9) también debe crear ese
+  marcador — si no, el siguiente reaprovisionamiento automático reinicia ese agente otra vez
+  (seguro, misma comprobación de job en vuelo, pero innecesario).
 - THE SYSTEM SHALL entregar el mismo script a una VM nueva vía `cloud-init` (`main.tf` lo pasa como
   `file("${path.module}/runner-job-started.sh")` a `templatefile()`; `cloud-init.yaml.tftpl` lo
   escribe en `/opt/runner-job-started.sh` por `write_files`), para que el aprovisionamiento inicial

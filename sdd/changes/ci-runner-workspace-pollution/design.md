@@ -110,7 +110,17 @@ la misma guardia de liveness de siempre (nunca toca un agente con job en vuelo o
 desconocido). Coste aceptado del despliegue de esta propia enmienda: la primera vez que se aplique
 sobre agentes ya activos y correctamente configurados mucho antes de este fix, ninguno tendrá el
 marcador todavía, así que la primera pasada los reinicia una vez más de lo estrictamente
-necesario — seguro (pasa por el mismo busy-check) y de una sola vez, no recurrente.
+necesario — seguro (pasa por el mismo busy-check) y de una sola vez, no recurrente. El
+procedimiento manual de `RUNBOOK.md §6.2` (D9) también crea el marcador tras su propio reinicio,
+por el mismo motivo.
+
+El mismo commit del round 8 cierra además un borde fail-open independiente en
+`gh_in_progress_url_for_runner`: `runner_name` es un campo **nullable** del schema de jobs de
+GitHub, y un job `in_progress` con `runner_name: null` no coincidía con ningún nombre de agente —
+el bucle seguía buscando y, si no había otro job, terminaba leyéndose como "confirmado ocioso"
+igual que los bordes de `id`/`workflow_runs`/`jobs` que los rounds 6-7 ya cerraron. Corregido con
+el mismo criterio: un `in_progress` sin `runner_name` sale `!=0` (desconocido), nunca se lee como
+"no es el nuestro".
 
 ### D5 — `PYTHONDONTWRITEBYTECODE` en el compose, no en el Dockerfile
 

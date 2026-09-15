@@ -194,13 +194,22 @@ for r in runs:
         # ESTE run no tiene el del agente, solo que no pudimos leerlo.
         sys.exit(1)
     for j in jobs_body["jobs"]:
-        if j.get("status") != "in_progress":
+        if j.get("status") == "completed":
+            # Terminado: no puede estar bloqueando nada, sea cual sea su `runner_name` — el
+            # único estado que de verdad descarta un job sin más comprobación.
             continue
+        # Cualquier otro estado (`in_progress`, `queued`, `waiting`, `pending`, `requested`, o
+        # ausente en una respuesta malformada) significa que el job puede seguir en marcha o
+        # llegar a este agente — filtrar por `status == "in_progress"` ANTES de mirar
+        # `runner_name` (versión rounds 6-8) dejaba pasar exactamente eso: un job YA asignado a
+        # este agente con cualquier otro estado no-terminal se leía como "no es el nuestro" en
+        # vez de "no puedo descartarlo" (round 9, panel de `/sdd:review`, `sdd-security`,
+        # 2026-09-15 — mismo borde fail-open que rounds 6-8, en el campo que faltaba).
         runner_name = j.get("runner_name")
         if runner_name is None:
-            # `runner_name` es un campo nullable en el schema de GitHub. Un job in-progress sin
-            # él no es "seguro que no es el nuestro" — es que no podemos saberlo. Desconocido,
-            # no "no coincide" (round 8, panel de `/sdd:review`, `sdd-security`, 2026-09-15).
+            # `runner_name` es nullable en el schema de GitHub (p. ej. un job `queued` que
+            # todavía no se ha asignado a ningún agente). No podemos descartarlo sin saber a
+            # quién pertenece. Desconocido, no "no coincide" (round 8).
             sys.exit(1)
         if runner_name == target:
             # El verdicto "encontrado" lo lleva el código de salida (0), no el contenido
@@ -208,6 +217,8 @@ for r in runs:
             # llamador, que solo mira si la salida está vacía.
             print(r.get("html_url") or f"(run {rid}, sin html_url)")
             sys.exit(0)
+        # `runner_name` es un nombre real y distinto del nuestro: sí podemos descartar este job
+        # concreto y seguir mirando los demás.
 PY
 }
 
