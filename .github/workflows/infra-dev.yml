@@ -26,6 +26,13 @@ defaults:
   run:
     working-directory: infra/environments/dev
 
+# Mínimo privilegio explícito (round 6, panel de `/sdd:review`, `sdd-security`, 2026-09-15): este
+# workflow no declaraba `permissions:`, a diferencia de sus hermanos (`compose-ports.yml`,
+# `backend-tests.yml`, `rule11-ownership.yml`), así que sus tres jobs corrían con el default del
+# token del repo en vez de uno acotado. Ninguno de los tres necesita más que leer el checkout.
+permissions:
+  contents: read
+
 jobs:
   # PR que toca infra/environments/dev/**: sin credenciales de OCI (init -backend=false). [R3.3]
   check:

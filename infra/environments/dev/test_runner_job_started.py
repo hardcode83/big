@@ -56,21 +56,33 @@ def snapshot(tree: Path):
     return out
 
 
-def make_stub_bin(tmp_path: Path, *, find_reports_foreign: bool, sudo_exit: int) -> Path:
-    """A directory with stub `find`/`sudo` executables, to prepend onto PATH.
+def make_stub_bin(
+    tmp_path: Path,
+    *,
+    find_reports_foreign: bool,
+    sudo_exit: int,
+    find_exit: int = 0,
+    stub_id: bool = False,
+) -> Path:
+    """A directory with stub `find`/`sudo`(/`id`) executables, to prepend onto PATH.
 
     `find` unconditionally reports one fake foreign-owned entry under its target (or nothing, if
-    `find_reports_foreign` is False — not used by the current cases but kept honest/symmetric).
+    `find_reports_foreign` is False), and exits with `find_exit` (round 6: a non-zero `find_exit`
+    with `find_reports_foreign=False` simulates a genuine `find` failure — as opposed to a
+    genuine "nothing foreign, and find itself succeeded" clean tree, which the unstubbed
+    `test_clean_tree_needs_no_action` already covers for real).
     `sudo` ignores its arguments and exits with `sudo_exit`, printing what it would have run —
     this is the injectable override the module docstring documents: it pins the chown outcome
     without needing real root, so the branch (not the privileged syscall) is what gets tested.
+    `id` is stubbed only if `stub_id` is True, and always prints an empty line for `-un` — round
+    6's guard against an empty `$(id -un)` reaching `find`'s `! -user` predicate.
     """
     bindir = tmp_path / "stubbin"
     bindir.mkdir()
     find_body = (
-        'echo "$1/FAKE_FOREIGN_FILE"\nexit 0\n'
+        f'echo "$1/FAKE_FOREIGN_FILE"\nexit {find_exit}\n'
         if find_reports_foreign
-        else 'exit 0\n'
+        else f'exit {find_exit}\n'
     )
     (bindir / "find").write_text(f"#!/usr/bin/env bash\n{find_body}")
     (bindir / "sudo").write_text(
@@ -82,6 +94,9 @@ def make_stub_bin(tmp_path: Path, *, find_reports_foreign: bool, sudo_exit: int)
     )
     (bindir / "find").chmod(0o755)
     (bindir / "sudo").chmod(0o755)
+    if stub_id:
+        (bindir / "id").write_text("#!/usr/bin/env bash\necho ''\n")
+        (bindir / "id").chmod(0o755)
     return bindir
 
 
@@ -102,6 +117,48 @@ def test_clean_tree_needs_no_action(tmp_path):
     assert after == before, "clean tree must not be modified at all"
     assert "clean" in result.stdout.lower() or "nothing to do" in result.stdout.lower()
     assert "chown" not in result.stdout.lower()
+
+
+# ── Round 6 (`sdd-security`, 2026-09-15): a `find` failure must NOT be read as "clean" -------
+
+
+def test_find_failure_is_not_treated_as_clean(tmp_path):
+    """Before this fix, `FOUND="$(find ... || true)"` collapsed a genuine `find` error (e.g.
+    permission denied descending into a subdirectory) into the same empty output as "nothing
+    foreign" — silently skipping the chown and letting the job proceed into the EACCES this hook
+    exists to prevent. Now: empty output is only "clean" when `find` itself also exited 0; a
+    non-zero `find` with empty output must still trigger the chown.
+    """
+    work = tmp_path / "_work"
+    work.mkdir()
+    (work / "some_file.txt").write_text("content\n")
+
+    stubbin = make_stub_bin(tmp_path, find_reports_foreign=False, find_exit=1, sudo_exit=0)
+    env = {"PATH": f"{stubbin}:{os.environ['PATH']}"}
+
+    result = run_hook(work, env=env)
+
+    assert result.returncode == 0, result.stderr
+    assert "already clean" not in result.stdout.lower(), (
+        "an unconfirmed tree must never be logged with the genuine-clean message"
+    )
+    assert "chown" in result.stdout.lower(), "an unconfirmed tree must still be chowned, not skipped"
+
+
+def test_empty_runner_user_does_not_act(tmp_path):
+    """Round 6: `id -un` returning empty must not reach `find`'s `! -user` predicate at all."""
+    work = tmp_path / "_work"
+    work.mkdir()
+
+    stubbin = make_stub_bin(tmp_path, find_reports_foreign=False, sudo_exit=0, stub_id=True)
+    env = {"PATH": f"{stubbin}:{os.environ['PATH']}"}
+
+    before = snapshot(work)
+    result = run_hook(work, env=env)
+    after = snapshot(work)
+
+    assert result.returncode != 0, "an undetermined agent user must not silently proceed"
+    assert after == before, "must not touch the tree without a confirmed owner to chown to"
 
 
 # ── Invalid paths: R3.1 — validated, "no actúa", exit 0 -------------------------------------

@@ -168,7 +168,12 @@ runs = body.get("workflow_runs", [])
 for r in runs:
     rid = r.get("id")
     if not rid:
-        continue
+        # Un run in-progress sin `id` es una respuesta malformada, no "este run no cuenta": no
+        # podemos enumerar sus jobs sin `id`, así que no podemos confirmar que no tiene el del
+        # agente. Desconocido, no "no está aquí" — mismo motivo que las dos ramas de abajo
+        # (round 6, panel de `/sdd:review`, `sdd-security`, 2026-09-15: un `continue` aquí era
+        # el último borde fail-open que sobrevivía a los rounds 3-5).
+        sys.exit(1)
     try:
         jobs_body, jobs_link = gh_get(f"https://api.github.com/repos/{repo}/actions/runs/{rid}/jobs?per_page=100")
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError):

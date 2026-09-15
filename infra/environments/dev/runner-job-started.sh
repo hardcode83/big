@@ -104,31 +104,47 @@ fi
 # agent's own tree" since each agent has its own installed copy of this script at its own path.)
 
 RUNNER_USER="$(id -un)"
+if [[ -z "$RUNNER_USER" ]]; then
+    # `id -un` returning empty would make `! -user ""` an invalid `find` predicate below — fail
+    # loudly rather than let that reach `find` and be misread as some other outcome (round 6,
+    # panel de `/sdd:review`, `sdd-security`, 2026-09-15).
+    err "id -un returned empty — cannot determine the agent's own user, not acting"
+    exit 1
+fi
 
 # --- D2 short-circuit: read-only, must stay fast on a clean tree ------------------------------
-# First entry NOT owned by $RUNNER_USER, or empty if the tree is already clean. `|| true` so a
-# `find` error (e.g. permission denied descending into some subdirectory) can't trip anything
-# below into treating an error as "clean" silently — it still results in an empty FOUND, which
-# is the same "nothing to do" outcome R3.4 asks for on a clean tree; find's own diagnostics (if
-# any) still reach stderr since they are not redirected.
-FOUND="$(find "$WORK_DIR" ! -user "$RUNNER_USER" -print -quit || true)"
+# First entry NOT owned by $RUNNER_USER, or empty if the tree is already clean. `find`'s own
+# exit status is captured SEPARATELY from its output (round 6 fix): before this, `|| true`
+# collapsed "find genuinely failed partway through" (e.g. permission denied descending into some
+# subdirectory) into the exact same empty `$FOUND` as "genuinely nothing foreign" — so a real
+# find error would have been logged and treated as "already clean" and let the job proceed into
+# the EACCES this hook exists to prevent. Now: empty output AND rc=0 is the only "clean" verdict;
+# empty output with rc!=0 is NOT confirmed clean and falls through to chown anyway (still bounded
+# and non-destructive, and the only action that actually satisfies R3.3 without a positive
+# confirmation). find's own diagnostics (if any) still reach stderr since they are not redirected.
+find_rc=0
+FOUND="$(find "$WORK_DIR" ! -user "$RUNNER_USER" -print -quit)" || find_rc=$?
 
-if [[ -z "$FOUND" ]]; then
+if [[ -z "$FOUND" && "$find_rc" -eq 0 ]]; then
     log "$WORK_DIR is already clean (every entry owned by $RUNNER_USER) — nothing to do"
     exit 0
 fi
 
-# Sanitize $FOUND before it ever reaches a log line. $WORK_DIR is populated by `actions/checkout`
-# of repository content, which can include attacker-influenced filenames (e.g. from a fork PR) —
-# an unsanitized path here would let a maliciously-named entry inject ANSI/terminal escape
-# sequences or embedded newlines that spoof/fabricate fake log lines in this hook's own output
-# (log/terminal injection). Replace every ASCII control character (0x00-0x1F, including ESC/
-# `\x1b`, and 0x7F) with `?` — this also neutralizes embedded CR/LF, so one `find` result can't
-# masquerade as multiple log lines. Kept dependency-free (`tr`, no repo Python tooling here).
-FOUND_SAFE="$(printf '%s' "$FOUND" | tr '\000-\037\177' '?')"
-
 # --- D1 fix: chown -R the OWN _work/ back to the agent user (never destructive) ---------------
-log "found foreign-owned entry under $WORK_DIR (e.g. '$FOUND_SAFE', not owned by $RUNNER_USER) — chown -R to $RUNNER_USER"
+if [[ -n "$FOUND" ]]; then
+    # Sanitize $FOUND before it ever reaches a log line. $WORK_DIR is populated by
+    # `actions/checkout` of repository content, which can include attacker-influenced filenames
+    # (e.g. from a fork PR) — an unsanitized path here would let a maliciously-named entry inject
+    # ANSI/terminal escape sequences or embedded newlines that spoof/fabricate fake log lines in
+    # this hook's own output (log/terminal injection). Replace every ASCII control character
+    # (0x00-0x1F, including ESC/`\x1b`, and 0x7F) with `?` — this also neutralizes embedded
+    # CR/LF, so one `find` result can't masquerade as multiple log lines. Kept dependency-free
+    # (`tr`, no repo Python tooling here).
+    FOUND_SAFE="$(printf '%s' "$FOUND" | tr '\000-\037\177' '?')"
+    log "found foreign-owned entry under $WORK_DIR (e.g. '$FOUND_SAFE', not owned by $RUNNER_USER) — chown -R to $RUNNER_USER"
+else
+    log "find over $WORK_DIR exited non-zero (rc=$find_rc) before confirming ownership — NOT treating as clean, chown -R anyway"
+fi
 
 # `-n` (non-interactive): the pool's sudoers grant (`%ci-agents ALL=(ALL) NOPASSWD:ALL`, see
 # runner-bootstrap.sh) already makes this passwordless in real usage, so `-n` changes nothing

@@ -715,6 +715,16 @@ def test_gh_helper_no_matching_job_among_real_runs_is_confirmed_idle():
     assert out == ""
 
 
+def test_gh_helper_a_run_without_an_id_is_unknown_not_idle():
+    """Round 6 (`sdd-security`, 2026-09-15): the last fail-open edge to survive rounds 3-5 — a
+    malformed run object with no `id` can't have its jobs enumerated, so it can't be confirmed
+    NOT to own the agent's job. Must defer (non-zero), never silently `continue` past it.
+    """
+    runs = {"workflow_runs": [{"html_url": "https://x/no-id"}]}  # no "id" key at all
+    code, out = run_gh_helper("agent-2", {RUNS_URL: (runs, None)})
+    assert code != 0, "a run with no id must never report as 'confirmed idle'"
+
+
 def test_gh_helper_runs_list_api_failure_is_unknown_not_idle():
     code, out = run_gh_helper("agent-2", {RUNS_URL: urllib.error.URLError("boom")})
     assert code != 0, "an unreachable API must never report as 'confirmed idle'"

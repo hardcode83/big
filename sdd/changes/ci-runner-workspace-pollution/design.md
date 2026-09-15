@@ -78,6 +78,24 @@ procedimiento de operación normal.
 Rejected: no reiniciar y documentar que el operador lo haga — convierte en manual justo el paso del
 que depende que todo lo demás funcione.
 
+**Enmienda 2026-09-15** (panel de `/sdd:review`, feature-scale, rounds 3-5: `sdd-security` ×2,
+`sdd-qa`, `sdd-review-cicd`): la "guardia de liveness" de arriba resultó tener un fallo propio —
+`gh_in_progress_url_for_runner`, la consulta a la API de GitHub que confirma si el agente tiene un
+job en vuelo, fallaba **abierto**: un `|| true` sobre un rechazo de la API, una lista de runs (o de
+jobs de un run) truncada por paginación, o un `html_url` ausente en la respuesta, todos colapsaban
+al mismo "no hay job en vuelo" que el caso genuinamente ocioso — y el D4 original habría reiniciado
+(`systemctl restart`) un agente con un job real en marcha ante cualquiera de esos fallos, matándolo
+en silencio. Corregido para fallar **cerrado**: cualquier incertidumbre de la API (rechazo,
+paginación truncada en cualquiera de las dos llamadas, un job encontrado sin `html_url`) hace que
+el helper salga `!=0`, tratado como "no sé" y nunca como "confirmado ocioso". Como consecuencia,
+`start_named_agent()` distingue ahora **dos** motivos de diferimiento con dos códigos de salida —
+2 = job en vuelo CONFIRMADO por la API, 3 = la API no respondió (estado DESCONOCIDO) — y el bucle
+de la Fase 2 los clasifica en dos arrays separados (`deferred_restart` / `deferred_restart_unknown`)
+para que el resumen final le diga al operador qué investigar en cada caso (esperar al job vs.
+revisar el token/la API), en vez del mismo mensaje "job en vuelo" para los dos. Ningún cambio de
+alcance: sigue siendo el mismo "no reiniciar si no estamos seguros" de la decisión original, solo
+que "seguros" ahora exige una confirmación positiva de la API, no la ausencia de una negativa.
+
 ### D5 — `PYTHONDONTWRITEBYTECODE` en el compose, no en el Dockerfile
 
 **Chosen:** se declara en el `environment:` de los cuatro servicios de `docker-compose.yml`. El
@@ -166,12 +184,12 @@ rápido, pero sin vía de recuperación si el hook falla.
 | Stack local | `docker-compose.yml` | `PYTHONDONTWRITEBYTECODE: "1"` en `environment:` de `migrate`, `backend`, `worker`, `beat` (R1.1) |
 | Backend | `backend/pyproject.toml` | Nueva sección `[tool.pytest.ini_options]` con `cache_dir` fuera del árbol (R2.1) |
 | Infra dev | `infra/environments/dev/runner-job-started.sh` | **Nuevo.** El hook: short-circuit si no hay ficheros ajenos, si no `chown -R` acotado al `_work/` propio (R3.1, R3.3, R3.4, R3.6) |
-| Infra dev | `infra/environments/dev/runner-bootstrap.sh` | Instala el hook en `$RUNNER_HOME/hooks/`, escribe `$RUNNER_HOME/.env`, y reinicia el agente si el `.env` cambió y está ocioso (R3.2, D4) |
+| Infra dev | `infra/environments/dev/runner-bootstrap.sh` | Instala el hook en `$RUNNER_HOME/hooks/`, escribe `$RUNNER_HOME/.env`, y reinicia el agente si el `.env` cambió y está ocioso (R3.2, D4). **Enmienda 2026-09-15**: la comprobación de liveness contra la API de GitHub (`gh_in_progress_url_for_runner`) falla cerrada ante cualquier incertidumbre, y el reinicio diferido distingue "job confirmado" (rc=2) de "API no respondió" (rc=3) — ver D4 |
 | Infra dev | `infra/environments/dev/cloud-init.yaml.tftpl`, `main.tf` | El hook viaja a la VM nueva igual que el bootstrap: `file()` en `main.tf` + `write_files` en el cloud-init |
 | Infra dev | `infra/environments/dev/RUNBOOK.md` | §6.2 gana el paso de copiar el hook y la nota del reinicio (D7) |
 | CI | `scripts/` + `Makefile` + workflow de gates | **Nuevo.** Guard que lee la composición resuelta y exige la variable en todo servicio con bind mount del árbol (R5, D8) |
 | Docs | `docs/ci-runner-rollback.md` | Cómo desactivar el hook sin desaprovisionar el pool |
-| Infra dev / CI | `.github/workflows/infra-dev.yml` | **Enmienda 2026-09-15** (panel de `/sdd:review`, `sdd-security` + `sdd-review-cicd`, feature-scale): el job `check` gana un paso `astral-sh/setup-uv` + `pytest` sobre `infra/environments/dev/`, para que las suites de las secciones 3-4 (792 líneas: `test_runner_job_started.py`, `test_runner_bootstrap_env.py`) no corran solo a mano — mismo patrón/SHA que el paso equivalente de `compose-ports.yml` para `scripts/`. Sin tocar `on:`/`concurrency`/`permissions`/`timeout-minutes`; el `check` job ya corría sin credenciales de OCI. |
+| Infra dev / CI | `.github/workflows/infra-dev.yml` | **Enmienda 2026-09-15** (panel de `/sdd:review`, `sdd-security` + `sdd-review-cicd`, feature-scale): el job `check` gana un paso `astral-sh/setup-uv` + `pytest` sobre `infra/environments/dev/`, para que las suites de las secciones 3-4 (792 líneas: `test_runner_job_started.py`, `test_runner_bootstrap_env.py`) no corran solo a mano — mismo patrón/SHA que el paso equivalente de `compose-ports.yml` para `scripts/`. Sin tocar `on:`/`concurrency`/`timeout-minutes`. **Segunda enmienda, misma fecha** (`sdd-security`, feature-scale, round 6): la frase original de esta fila ("el `check` job ya corría sin credenciales de OCI") describe el *entorno* del job, no el *host* — el pool ya es root-equivalente vía `%ci-agents ALL=(ALL) NOPASSWD:ALL` y alcanza el Vault por instance principal, así que este paso hereda la postura de aceptar código de PR que el pool ya tenía (ver `ci-runner-self-hosted.md` §«Riesgo aceptado»), no una excepción credential-free nueva. Añadido `permissions: contents: read` a nivel de workflow (el fichero no declaraba ninguno; mismo patrón que `compose-ports.yml`/`backend-tests.yml`/`rule11-ownership.yml`) — mínimo privilegio explícito en vez del default del token del repo. |
 
 ## Data & interfaces
 
