@@ -1,0 +1,141 @@
+"""The `extra_forbidden` `loc` bound (R1, R2, R3.1).
+
+Every case drives a real `RequestValidationError` through a throwaway `extra="forbid"`
+model and the actual `register_error_handlers` wiring — a hand-built dict would not
+prove the fix survives Pydantic's real error shape.
+"""
+
+import httpx
+import pytest
+from fastapi import FastAPI
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.core.errors import (
+    _EXTRA_FORBIDDEN_LOC_MAX_LENGTH,
+    _EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER,
+    register_error_handlers,
+)
+
+
+class _LeafModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=5)
+
+
+class _NestedModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    leaf: _LeafModel
+
+
+def _build_app() -> FastAPI:
+    app = FastAPI()
+    register_error_handlers(app)
+
+    @app.post("/leaf")
+    async def _leaf(payload: _LeafModel) -> dict:
+        return {}
+
+    @app.post("/nested")
+    async def _nested(payload: _NestedModel) -> dict:
+        return {}
+
+    return app
+
+
+async def _post(app: FastAPI, path: str, json: dict) -> httpx.Response:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.post(path, json=json)
+
+
+def _extra_forbidden_errors(response: httpx.Response) -> list[dict]:
+    errors = response.json()["error"]["details"]["errors"]
+    return [error for error in errors if error["type"] == "extra_forbidden"]
+
+
+@pytest.mark.asyncio
+async def test_a_5000_character_unknown_key_is_capped_with_the_marker() -> None:
+    """The original probe: a 5,000-char unknown key must no longer size the body."""
+    app = _build_app()
+    long_key = "x" * 5000
+
+    response = await _post(app, "/leaf", {"name": "ok", long_key: "value"})
+
+    assert response.status_code == 422
+    extra_forbidden = _extra_forbidden_errors(response)
+    assert len(extra_forbidden) == 1
+    last_segment = extra_forbidden[0]["loc"][-1]
+    assert len(last_segment) == _EXTRA_FORBIDDEN_LOC_MAX_LENGTH
+    assert last_segment.endswith(_EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER)
+    # The original unbounded probe produced a 5,182-byte body for a 5,000-char key; a
+    # bounded body must stay small regardless of how large the caller-sent key is.
+    assert len(response.content) < 1000
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_key_at_the_cap_is_returned_unchanged() -> None:
+    app = _build_app()
+    key_at_cap = "y" * _EXTRA_FORBIDDEN_LOC_MAX_LENGTH
+
+    response = await _post(app, "/leaf", {"name": "ok", key_at_cap: "value"})
+
+    extra_forbidden = _extra_forbidden_errors(response)
+    assert len(extra_forbidden) == 1
+    assert extra_forbidden[0]["loc"][-1] == key_at_cap
+    assert not extra_forbidden[0]["loc"][-1].endswith(_EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER)
+
+
+@pytest.mark.asyncio
+async def test_string_too_long_loc_is_left_completely_unmodified() -> None:
+    app = _build_app()
+    long_value = "z" * 5000
+
+    response = await _post(app, "/leaf", {"name": long_value})
+
+    errors = response.json()["error"]["details"]["errors"]
+    string_too_long = [error for error in errors if error["type"] == "string_too_long"]
+    assert len(string_too_long) == 1
+    assert string_too_long[0]["loc"] == ["body", "name"]
+
+
+@pytest.mark.asyncio
+async def test_missing_field_loc_is_left_completely_unmodified() -> None:
+    app = _build_app()
+
+    response = await _post(app, "/leaf", {})
+
+    errors = response.json()["error"]["details"]["errors"]
+    missing = [error for error in errors if error["type"] == "missing"]
+    assert len(missing) == 1
+    assert missing[0]["loc"] == ["body", "name"]
+
+
+@pytest.mark.asyncio
+async def test_nested_extra_forbidden_caps_only_the_final_segment() -> None:
+    app = _build_app()
+    long_key = "n" * 5000
+
+    response = await _post(app, "/nested", {"leaf": {"name": "ok", long_key: "value"}})
+
+    extra_forbidden = _extra_forbidden_errors(response)
+    assert len(extra_forbidden) == 1
+    loc = extra_forbidden[0]["loc"]
+    assert loc[:-1] == ["body", "leaf"]
+    assert len(loc[-1]) == _EXTRA_FORBIDDEN_LOC_MAX_LENGTH
+    assert loc[-1].endswith(_EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER)
+
+
+@pytest.mark.asyncio
+async def test_loc_stays_a_list_of_str_of_the_same_length() -> None:
+    app = _build_app()
+    long_key = "m" * 5000
+
+    response = await _post(app, "/leaf", {"name": "ok", long_key: "value"})
+
+    extra_forbidden = _extra_forbidden_errors(response)
+    loc = extra_forbidden[0]["loc"]
+    assert isinstance(loc, list)
+    assert len(loc) == 2  # ["body", "<key>"]
+    assert all(isinstance(part, str) for part in loc)

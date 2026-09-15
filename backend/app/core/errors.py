@@ -104,12 +104,33 @@ def register_error_handlers(app: FastAPI) -> None:
         )
 
 
+# Every module in this codebase declares `extra="forbid"` on its request schemas, and
+# Pydantic's `extra_forbidden` error puts the literal unknown key the caller sent as the
+# last `loc` segment — the one caller-controlled value in an otherwise schema-derived
+# list. 100 is an arbitrary but generous bound: no real field name is anywhere close to
+# it, so it never clips a legitimate `loc`.
+_EXTRA_FORBIDDEN_LOC_MAX_LENGTH = 100
+_EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER = "...(truncated)"
+
+
+def _bound_extra_forbidden_segment(segment: str) -> str:
+    if len(segment) <= _EXTRA_FORBIDDEN_LOC_MAX_LENGTH:
+        return segment
+    cutoff = _EXTRA_FORBIDDEN_LOC_MAX_LENGTH - len(_EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER)
+    return segment[:cutoff] + _EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER
+
+
 def _serialisable_validation_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
     serialisable: list[dict[str, Any]] = []
     for error in exc.errors():
+        loc = [str(part) for part in error.get("loc", ())]
+        # Only `extra_forbidden` echoes raw caller input; every other error type's `loc`
+        # is entirely schema-derived (real field names) and must never be touched.
+        if error.get("type") == "extra_forbidden" and loc:
+            loc[-1] = _bound_extra_forbidden_segment(loc[-1])
         serialisable.append(
             {
-                "loc": [str(part) for part in error.get("loc", ())],
+                "loc": loc,
                 "type": str(error.get("type", "")),
                 "msg": str(error.get("msg", "")),
             }

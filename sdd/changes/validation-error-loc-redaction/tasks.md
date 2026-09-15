@@ -1,14 +1,14 @@
 # Tasks: validation-error-loc-redaction
 
-## 1. Bound the caller-controlled `loc` segment
+## 1. Bound the caller-controlled `loc` segment <!-- panel: PASS 2026-09-15 receipt:05b73c22 -->
 
-- [ ] 1.1 In `backend/app/core/errors.py`, add a module-level cap (e.g.
+- [x] 1.1 In `backend/app/core/errors.py`, add a module-level cap (e.g.
       `_EXTRA_FORBIDDEN_LOC_MAX_LENGTH = 100`) and a truncation marker constant, and change
       `_serialisable_validation_errors` so that, WHEN `error.get("type") == "extra_forbidden"`,
       the **last** element of the `loc` list is capped to that length (appending the marker when
       cut) — every other segment of that `loc`, and the whole `loc` of every other error `type`,
       is left exactly as Pydantic produced it. [R1.1, R1.2, R1.3, R2.1, R2.2, R3.1]
-- [ ] 1.2 New file `backend/tests/core/test_errors.py`. Cover, against a real
+- [x] 1.2 New file `backend/tests/core/test_errors.py`. Cover, against a real
       `RequestValidationError` raised by a throwaway `extra="forbid"` model (not a hand-built
       dict — the fix has to survive Pydantic's actual error shape):
       - An unknown key of 5,000 characters (the original probe) produces a `loc` last segment
@@ -57,3 +57,25 @@
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
+
+- Section 1 (2026-09-15): constant is `_EXTRA_FORBIDDEN_LOC_MAX_LENGTH = 100` in
+  `backend/app/core/errors.py`, meaning the capped segment's TOTAL length (including the
+  marker) is 100, not 100 + marker.
+- Truncation marker: `_EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER = "...(truncated)"` (15
+  chars), appended after slicing the segment to `100 - len(marker)` characters.
+- Only `error.get("type") == "extra_forbidden"` is touched; the cap applies to `loc[-1]`
+  only (nested models keep every preceding schema-derived segment untouched).
+- Measured with a throwaway `extra="forbid"` FastAPI model + `httpx.ASGITransport` (same
+  pattern as `test_openapi_contract.py`): a 5,000-char unknown key now produces a 282-byte
+  `422` body (vs. the 5,182-byte body measured pre-fix for the same probe in the
+  proposal). Body size no longer scales with the caller's key length.
+- Test file: `backend/tests/core/test_errors.py` (6 tests, all passing). Uses two
+  throwaway models, `_LeafModel` (top-level `extra="forbid"`) and `_NestedModel` (wraps
+  `_LeafModel`), both mounted on a local `FastAPI()` app via `register_error_handlers`.
+- Verification run: `docker compose exec backend uv run pytest tests/core/test_errors.py
+  tests/test_openapi_contract.py -q` → `21 passed` (6 new + 15 pre-existing in
+  `test_openapi_contract.py`). Note: inside the backend container the working directory
+  is `/app` and paths are relative to `backend/` (i.e. `tests/...`, not
+  `backend/tests/...`) — the task's verification command as literally written
+  (`backend/tests/core/test_errors.py`) 404s inside the container; drop the `backend/`
+  prefix when running it there.

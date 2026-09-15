@@ -111,7 +111,8 @@ Acceptance criteria:
    other test in `backend/tests/test_openapi_contract.py` passing unchanged: `details` is already
    published as `dict[str, Any]`, so no OpenAPI schema edit is needed or permitted for this
    change.
-3. WHEN `mapPropertyFieldErrors` or `mapPlatformFieldErrors` (frontend) process a `422` produced
+3. WHEN `mapPropertyFieldErrors` (`frontend/features/properties/lib/field-errors.ts`) or
+   `mapFieldErrors` (`frontend/features/platform/lib/field-errors.ts`) process a `422` produced
    after this change, THE SYSTEM SHALL keep mapping every real (schema-derived) field error
    exactly as before — verified by the existing frontend tests for both modules staying green
    without modification.
