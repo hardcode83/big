@@ -160,6 +160,18 @@ fi
 # above) waiting on a prompt nobody can answer.
 if sudo -n chown -R "$RUNNER_USER" "$WORK_DIR"; then
     log "chown -R $WORK_DIR to $RUNNER_USER succeeded"
+    # R3.3 covers more than ownership: a directory whose MODE lacks owner-write blocks
+    # `actions/checkout`'s `git clean -ffdx` just as surely as wrong ownership does — chown alone
+    # doesn't fix a 0555/0500 directory a container process left behind (round 11, panel de
+    # `/sdd:review`, `sdd-security`, 2026-09-15). Safe to run without `sudo`: chown above just
+    # made `$RUNNER_USER` the owner, and a file's owner can always chmod their own file
+    # regardless of its current mode. Bounded to `$WORK_DIR`; directories only (files need no
+    # execute bit to be deleted, and touching an unrelated regular file's mode could change
+    # behavior a job expects unmodified). Best-effort: this is additional hardening beyond the
+    # ownership fix that is this hook's primary job, so a `find`/`chmod` hiccup here does not
+    # fail the whole hook — the chown above already succeeded and is what the original incident
+    # (root-owned, normal-mode `.pyc` files) needed.
+    find "$WORK_DIR" -type d ! -perm -u+w -exec chmod u+rwx {} + 2>/dev/null || true
     exit 0
 else
     rc=$?

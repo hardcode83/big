@@ -122,6 +122,25 @@ igual que los bordes de `id`/`workflow_runs`/`jobs` que los rounds 6-7 ya cerrar
 el mismo criterio: un `in_progress` sin `runner_name` sale `!=0` (desconocido), nunca se lee como
 "no es el nuestro".
 
+**Round 9** cerró la ordenación equivalente a nivel de job: filtrar por `status == "in_progress"`
+antes de mirar `runner_name` dejaba pasar un job YA asignado al agente pero con cualquier otro
+estado no-terminal. **Round 11** (`sdd-security`) planteó la misma pregunta un nivel más arriba: la
+consulta inicial filtra los *runs* por `status=in_progress`, así que si el job de este agente
+estuviera "en marcha" bajo un run que la API todavía reportara como `queued`/`waiting`/`pending`,
+el helper nunca llegaría a verlo. **Evaluado y aceptado, no corregido** — a diferencia de todos los
+bordes anteriores (6-9), este no es un caso alcanzable por construcción, no solo poco frecuente:
+GitHub deriva el `status` del *run* a partir del de sus *jobs* — un run pasa a `in_progress`
+precisamente, y solo, cuando alguno de sus jobs empieza a ejecutarse — así que un job `in_progress`
+bajo un run que la misma respuesta de la API reporte como no-`in_progress` sería una violación de
+un invariante que GitHub documenta y computa server-side, no una condición de carrera entre dos
+llamadas nuestras. La alternativa que el panel propuso — leer `busy` directamente de
+`GET /actions/runners` en vez de reconstruirlo cruzando runs y jobs — sería más simple, pero
+cambiaría el mecanismo entero (3 puntos de llamada, ~15 tests) por una ganancia de robustez que no
+se puede medir frente a este invariante: cualquier consulta a la API, incluida esa, sigue sujeta a
+la misma latencia de consistencia eventual inherente a "el estado real cambió entre que ocurrió y
+que lo leímos" — mover el punto de lectura no la elimina. Decidido con la usuaria tras el panel de
+`/sdd:review` del 2026-09-15 (ronda 11): no reescribir el mecanismo por esta razón.
+
 ### D5 — `PYTHONDONTWRITEBYTECODE` en el compose, no en el Dockerfile
 
 **Chosen:** se declara en el `environment:` de los cuatro servicios de `docker-compose.yml`. El
@@ -209,8 +228,8 @@ rápido, pero sin vía de recuperación si el hook falla.
 |---|---|---|
 | Stack local | `docker-compose.yml` | `PYTHONDONTWRITEBYTECODE: "1"` en `environment:` de `migrate`, `backend`, `worker`, `beat` (R1.1) |
 | Backend | `backend/pyproject.toml` | Nueva sección `[tool.pytest.ini_options]` con `cache_dir` fuera del árbol (R2.1) |
-| Infra dev | `infra/environments/dev/runner-job-started.sh` | **Nuevo.** El hook: short-circuit si no hay ficheros ajenos, si no `chown -R` acotado al `_work/` propio (R3.1, R3.3, R3.4, R3.6) |
-| Infra dev | `infra/environments/dev/runner-bootstrap.sh` | Instala el hook en `$RUNNER_HOME/hooks/`, escribe `$RUNNER_HOME/.env`, y reinicia el agente si el `.env` cambió y está ocioso (R3.2, D4). **Enmienda 2026-09-15**: la comprobación de liveness contra la API de GitHub (`gh_in_progress_url_for_runner`) falla cerrada ante cualquier incertidumbre, y el reinicio diferido distingue "job confirmado" (rc=2) de "API no respondió" (rc=3) — ver D4. **Segunda enmienda, misma fecha (round 8)**: marcador `.hook_confirmed` por agente para que un reinicio diferido no quede sin reintentar — ver D4 |
+| Infra dev | `infra/environments/dev/runner-job-started.sh` | **Nuevo.** El hook: short-circuit si no hay ficheros ajenos, si no `chown -R` acotado al `_work/` propio (R3.1, R3.3, R3.4, R3.6). **Enmienda 2026-09-15 (round 11)**: tras un `chown` con éxito, restaura también `u+rwx` en directorios cuyo modo (no solo su dueño) bloqueaba `git clean` — best-effort, acotado a `$WORK_DIR` |
+| Infra dev | `infra/environments/dev/runner-bootstrap.sh` | Instala el hook en `$RUNNER_HOME/hooks/`, escribe `$RUNNER_HOME/.env`, y reinicia el agente si el `.env` cambió y está ocioso (R3.2, D4). **Enmienda 2026-09-15**: la comprobación de liveness contra la API de GitHub (`gh_in_progress_url_for_runner`) falla cerrada ante cualquier incertidumbre, y el reinicio diferido distingue "job confirmado" (rc=2) de "API no respondió" (rc=3) — ver D4. **Segunda enmienda, misma fecha (round 8)**: marcador `.hook_confirmed` por agente para que un reinicio diferido no quede sin reintentar — ver D4. **Tercera enmienda, misma fecha (round 11)**: el diferimiento ahora borra un marcador previo (`rm -f`) en vez de dejarlo intacto, para que un `.env` que cambia y difiere sobre un agente ya confirmado antes no reabra el mismo callejón sin salida por otra vía — ver D4 |
 | Infra dev | `infra/environments/dev/cloud-init.yaml.tftpl`, `main.tf` | El hook viaja a la VM nueva igual que el bootstrap: `file()` en `main.tf` + `write_files` en el cloud-init |
 | Infra dev | `infra/environments/dev/RUNBOOK.md` | §6.2 gana el paso de copiar el hook y la nota del reinicio (D7) |
 | CI | `scripts/` + `Makefile` + workflow de gates | **Nuevo.** Guard que lee la composición resuelta y exige la variable en todo servicio con bind mount del árbol (R5, D8) |

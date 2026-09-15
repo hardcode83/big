@@ -22,6 +22,7 @@ and the invalid-path cases use no stubs at all: they are fully genuine.
 """
 
 import os
+import shutil
 import stat
 import subprocess
 import textwrap
@@ -76,15 +77,30 @@ def make_stub_bin(
     without needing real root, so the branch (not the privileged syscall) is what gets tested.
     `id` is stubbed only if `stub_id` is True, and always prints an empty line for `-un` — round
     6's guard against an empty `$(id -un)` reaching `find`'s `! -user` predicate.
+
+    Round 11: `find` is stubbed for the D2 short-circuit call ONLY (its unique signature is the
+    `-print -quit` it always carries) — the hook's second `find` invocation, that restores
+    owner-write on restrictive directories after a successful chown, is left to run for REAL
+    (delegated to the actual `find` binary, resolved before this directory is prepended onto
+    PATH), so tests can exercise its genuine behavior instead of it silently no-op'ing under the
+    same blanket stub.
     """
     bindir = tmp_path / "stubbin"
     bindir.mkdir()
-    find_body = (
-        f'echo "$1/FAKE_FOREIGN_FILE"\nexit {find_exit}\n'
-        if find_reports_foreign
-        else f'exit {find_exit}\n'
-    )
-    (bindir / "find").write_text(f"#!/usr/bin/env bash\n{find_body}")
+    real_find = shutil.which("find")
+    assert real_find, "no real `find` on PATH to delegate to"
+    fake_output = 'echo "$1/FAKE_FOREIGN_FILE"' if find_reports_foreign else ""
+    find_body = textwrap.dedent(f"""\
+        #!/usr/bin/env bash
+        for arg in "$@"; do
+            if [[ "$arg" == "-quit" ]]; then
+                {fake_output}
+                exit {find_exit}
+            fi
+        done
+        exec {real_find} "$@"
+        """)
+    (bindir / "find").write_text(find_body)
     (bindir / "sudo").write_text(
         textwrap.dedent(f"""\
             #!/usr/bin/env bash
@@ -209,6 +225,31 @@ def test_detected_and_chown_succeeds(tmp_path):
     assert "found" in result.stdout.lower()
     assert "chown" in result.stdout.lower()
     assert "succeeded" in result.stdout.lower()
+
+
+def test_chown_success_also_restores_owner_write_on_restrictive_directories(tmp_path):
+    """Round 11 (`sdd-security`, 2026-09-15): chown alone doesn't fix a directory whose MODE
+    lacks owner-write (e.g. a `0555` a container process left behind) — `git clean -ffdx` still
+    can't delete into it. `sudo`/`find` are stubbed the same way as the test above (chown itself
+    can't be exercised unprivileged), but the mode-restoring `chmod` that now follows a
+    successful chown is REAL, un-stubbed — this test constructs a genuinely restrictive,
+    self-owned directory and confirms the hook actually flips its mode.
+    """
+    work = tmp_path / "_work"
+    work.mkdir()
+    restrictive = work / "readonly_dir"
+    restrictive.mkdir(mode=0o555)
+    assert not os.access(restrictive, os.W_OK), "fixture setup: must start genuinely unwritable"
+
+    stubbin = make_stub_bin(tmp_path, find_reports_foreign=True, sudo_exit=0)
+    env = {"PATH": f"{stubbin}:{os.environ['PATH']}"}
+
+    result = run_hook(work, env=env)
+
+    assert result.returncode == 0, result.stderr
+    mode_after = stat.S_IMODE(restrictive.stat().st_mode)
+    assert mode_after & stat.S_IWUSR, f"owner-write must be restored, mode is {oct(mode_after)}"
+    restrictive.chmod(0o755)  # restore before pytest's own tmp_path cleanup tries to rmtree it
 
 
 def test_chown_genuinely_fails_names_runner_home(tmp_path):

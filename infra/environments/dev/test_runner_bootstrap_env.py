@@ -514,6 +514,21 @@ def test_env_changed_active_busy_agent_is_deferred_not_restarted(tmp_path):
     assert not result.marker_exists, "a deferred restart must not be marked confirmed"
 
 
+def test_deferred_restart_clears_a_stale_marker_from_an_earlier_confirmation(tmp_path):
+    """Round 11 (`sdd-security`, 2026-09-15): a marker left over from an EARLIER confirmed
+    restart (a different `.env` value) must not survive a defer on a later pass with a NEW
+    value. Before this fix, only "never created" was covered — a stale, already-present marker
+    was left untouched on defer, so the next pass would see `env_changed=0` (this pass's `.env`
+    write already landed) AND the marker present (stale, from the old value), and skip the retry
+    entirely: the same round-8 dead end, reopened through the "already confirmed once" path.
+    """
+    url = "https://github.com/acme/repo/actions/runs/456"
+    result = start_named_agent(2, 1, tmp_path, service_state="active", in_progress_url=url, marker_present=True)
+    assert result.returncode == 2, f"stdout={result.stdout} stderr={result.stderr}"
+    assert result.restart_log == "", "must NOT restart an agent with a job in flight (D4)"
+    assert not result.marker_exists, "a defer must invalidate even a pre-existing marker"
+
+
 def test_env_changed_active_agent_gh_api_failure_defers_not_restarted(tmp_path):
     """Fix round (`sdd-security`, 2026-09-15): a GitHub API failure (expired token, 403/429,
     timeout — `gh_in_progress_url_for_runner` exits non-zero) must NOT be treated the same as

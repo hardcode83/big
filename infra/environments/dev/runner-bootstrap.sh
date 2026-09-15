@@ -477,12 +477,21 @@ start_named_agent() {
                     api_rc=0
                     url="$(gh_in_progress_url_for_runner "$agent_name")" || api_rc=$?
                     if [[ "$api_rc" -ne 0 ]]; then
+                        # `rm -f "$marker"` (round 11, `sdd-security`, 2026-09-15): si este agente
+                        # ya llevaba un marcador de una confirmación ANTERIOR (a un `.env` ya
+                        # distinto de este), dejarlo intacto aquí reabriría el callejón sin salida
+                        # que round 8 cerró — la pasada siguiente vería `env_changed=0` (el `.env`
+                        # de ESTA pasada ya quedó escrito) Y el marcador presente (viejo, de otro
+                        # valor), y no reintentaría nunca. Diferir invalida cualquier confirmación
+                        # previa, siempre.
+                        rm -f "$marker"
                         echo "[hook] agent $i/$RUNNER_COUNT: $svc activo, .env cambiado — la API de GitHub no respondió; no se reinicia por precaución."
                         echo "[hook]   El .env ya declara ACTIONS_RUNNER_HOOK_JOB_STARTED en disco, pero el proceso vivo aún no lo ha leído."
                         echo "[hook]   Comprobar a mano si tiene un job en vuelo y ejecutar 'systemctl restart $svc' cuando esté ocioso (o reaplicar este bootstrap entonces)."
                         exit 3
                     fi
                     if [[ -n "$url" ]]; then
+                        rm -f "$marker"  # mismo motivo que arriba
                         echo "[hook] agent $i/$RUNNER_COUNT: $svc activo CON job en vuelo ($url) — no se reinicia."
                         echo "[hook]   El .env ya declara ACTIONS_RUNNER_HOOK_JOB_STARTED en disco, pero el proceso vivo aún no lo ha leído."
                         echo "[hook]   Ejecutar 'systemctl restart $svc' cuando el agente quede ocioso (o reaplicar este bootstrap entonces)."
