@@ -5,7 +5,7 @@
      `related_type`; section 4 covers tests for both layers; section 5 covers the OpenAPI
      regeneration, docs and the verification gates. -->
 
-## 1. Add `OwnerApprovalResponse` DTO
+## 1. Add `OwnerApprovalResponse` DTO <!-- panel: PASS 2026-09-15 receipt:9b6b2a1f -->
 
 - [x] 1.1 Add `OwnerApprovalResponse(BaseModel)` to `backend/app/maintenance/api/schemas.py`
       with the six fields declared in design D6: `approval_id`, `status`, `responded_at`,
@@ -21,23 +21,23 @@
 
 ## 2. Widen `RespondOwnerApprovalUseCase` for `OTHER` approvals
 
-- [ ] 2.1 Modify `RespondOwnerApprovalUseCase.execute(...)` in
+- [x] 2.1 Modify `RespondOwnerApprovalUseCase.execute(...)` in
       `backend/app/maintenance/application/use_cases.py:1652` to branch on
       `approval.related_type` after the existing `OwnerApprovalRepository.get(...)` and the
       `OwnerApprovalAlreadyAnsweredError` check. The branch for `OTHER` MUST run before the
       `IncidentRepository.get(...)` line and skip every step that touches an incident.
       [R1.1, R2.1, R2.2, R2.3]
-- [ ] 2.2 Change the return type annotation from `-> Incident` to `-> Incident | OwnerApproval`
+- [x] 2.2 Change the return type annotation from `-> Incident` to `-> Incident | OwnerApproval`
       and return `incident` for `INCIDENT`/`MAINTENANCE_COST` and `approval` for `OTHER`. The
       router will dispatch on the concrete type. [R1.1, R1.6, R2.2, R9]
-- [ ] 2.3 In the `OTHER` branch: write `AuditLog OWNER_APPROVAL_ANSWERED` with the same
+- [x] 2.3 In the `OTHER` branch: write `AuditLog OWNER_APPROVAL_ANSWERED` with the same
       `ChangeSet(OWNER_APPROVAL)` shape as the existing branch — `status`, `responded_by`,
       `responded_at` — and skip the `TimelineEvent` write, the `PropertyStateMachine`
       trigger and the technician notification (`_notify_answer`). [R2.3, R2.4, R3.1, R3.2]
-- [ ] 2.4 Validate in the existing role check (`actor.role is UserRole.TENANT_OWNER`,
+- [x] 2.4 Validate in the existing role check (`actor.role is UserRole.TENANT_OWNER`,
       line 1692) that it fires for both branches — a non-`TENANT_OWNER` actor gets
       `MaintenanceValidationError` (`422`) regardless of `related_type`. [R1.2]
-- [ ] 2.5 Confirm the unit signature compiles: `docker compose exec backend uv run pyright
+- [x] 2.5 Confirm the unit signature compiles: `docker compose exec backend uv run pyright
       backend/app/maintenance/application/use_cases.py`. [R6.2]
 
 ## 3. Wire router to dispatch response by `related_type`
@@ -120,6 +120,9 @@
 ## Implementation Notes
 
 - Imported `Literal` from `typing` in `backend/app/maintenance/api/schemas.py`; added `OwnerApproval` to the existing `app.maintenance.domain.entities` import block; placed `OwnerApprovalResponse` between `OwnerApprovalPageResponse` and `IncidentPhotoResponse`.
+- `OwnerApproval` and `OwnerApprovalRelatedType` were already imported in `use_cases.py`; no new imports needed. Restructured `RespondOwnerApprovalUseCase.execute()` so `previous_status = approval.status`, `approval.answer(...)`, and `await self._approvals.save(...)` all run BEFORE `IncidentRepository.get(...)`, then the `OTHER` branch returns the approval with just the `OWNER_APPROVAL_ANSWERED` audit row and `commit()`. The `IncidentNotFoundError` for `INCIDENT`/`MAINTENANCE_COST` approvals now fires after `answer()`/`save()` — the UoW still rolls back on the raise, so the approval is never persisted without the incident update (or vice-versa).
+- Return annotation is `Incident | OwnerApproval`; the role check at the top of `execute()` sits before the `related_type` branch, so a non-`TENANT_OWNER` gets `MaintenanceValidationError` (`422`) for both `OTHER` and `INCIDENT`/`MAINTENANCE_COST` approvals.
+- Pyright on the file shows 1 pre-existing error in `_notify_technician` (`UUID | None` passed to `get_active_by_id`); confirmed it exists on the base commit and was not introduced by this section.
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
