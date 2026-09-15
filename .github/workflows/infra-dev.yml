@@ -44,6 +44,19 @@ jobs:
       - name: terraform validate
         run: terraform validate
 
+      # Solo para la suite del paso siguiente: los tests son stdlib+pytest, van con el `python3`
+      # del runner. Misma acción y mismo SHA que `compose-ports.yml`/`api-contract.yml`.
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Tests del hook y del bootstrap (runner-job-started.sh, write_runner_env)
+        # `ci-runner-workspace-pollution` sección 3-4: hasta este change ningún workflow recogía
+        # `infra/environments/dev/test_*.py` — solo corrían a mano —, así que una regresión en la
+        # decisión de reinicio condicional (D4) o en la validación/saneamiento del hook solo se
+        # habría detectado si alguien se acordaba de correrlos. `--no-project` por el mismo motivo
+        # que `compose-ports.yml`; `working-directory: infra/environments/dev` (default del job)
+        # recoge los dos ficheros de test sin necesidad de nombrarlos.
+        run: uv run --no-project --with 'pytest==9.1.1' python -m pytest -q
+
   # workflow_dispatch: plan (siempre) para revisión por logs — NO usa -out ni sube artifact
   # (el plan contendría secrets desde app-deploy-dev); el apply re-planifica en su propio job.
   plan:

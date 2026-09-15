@@ -122,7 +122,7 @@ COMPOSE_ARGS := $(if $(OFFSET),-f docker-compose.yml -f $(OFFSET_FILE),$(if $(IS
 COMPOSE := $(strip docker compose $(COMPOSE_ARGS))
 
 
-.PHONY: up down logs ps sh ports bootstrap seed-demo demo-reset sim-advance pms-sync openapi check-version-parity check-frontend-build compose-stacks check-compose-ports check-rule11-ownership check-detect-surface db-clean-test
+.PHONY: up down logs ps sh ports bootstrap seed-demo demo-reset sim-advance pms-sync openapi check-version-parity check-frontend-build compose-stacks check-compose-ports check-compose-bytecode check-rule11-ownership check-detect-surface db-clean-test
 
 # El guard del overlay de worktree queda acotado a la rama SIN desplazamiento, y no por higiene:
 # con desplazamiento ese fichero no se carga (lo sustituye el overlay generado, ver COMPOSE_ARGS),

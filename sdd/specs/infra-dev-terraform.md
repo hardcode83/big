@@ -61,7 +61,12 @@ Aprovisionado por `object-storage-provisioning`. Su comportamiento de aplicació
   del runner en `ci-runner-self-hosted.md`). `plan`/`apply` mueven `terraform apply` real al mismo
   host que aloja el deploy de la aplicación desplegada; ese riesgo de contorno de confianza está
   documentado y aceptado en `ci-runner-self-hosted.md`, no repetido aquí.
-- WHEN se abre/actualiza un PR que toca `infra/environments/dev/**`, THE SYSTEM SHALL ejecutar el job `check` (`terraform fmt -check`, `init -backend=false`, `validate`) sin ningún secret.
+- WHEN se abre/actualiza un PR que toca `infra/environments/dev/**`, THE SYSTEM SHALL ejecutar el
+  job `check` (`terraform fmt -check`, `init -backend=false`, `validate`, y — desde
+  `ci-runner-workspace-pollution`, enmienda 2026-09-15 — la suite de `pytest` de
+  `infra/environments/dev/test_runner_job_started.py` y `test_runner_bootstrap_env.py`, vía
+  `astral-sh/setup-uv` y `uv run --no-project`, mismo patrón que el paso equivalente de
+  `compose-ports.yml` para `scripts/`) sin ningún secret.
 - THE SYSTEM SHALL exponer un único camino a recursos reales: `workflow_dispatch` con input `action` (`plan`|`apply`), en dos jobs — `plan` (init→validate→plan, para revisión por logs) y `apply` (re-planifica y aplica en el mismo job). El `plan` **no** usa `-out` ni sube el `tfplan` como artifact: desde `app-deploy-dev` el plan contiene secrets (clave de la App + secrets generados) y un artifact es descargable por cualquiera con read del repo.
 - THE SYSTEM SHALL ejecutar los jobs `plan` **y** `apply` **solo desde `main`** (`if: github.ref == 'refs/heads/main'`), con `concurrency` (serializa applies sobre el mismo state) y `timeout-minutes`; todas las GitHub Actions fijadas por **SHA de commit**. El gating de `plan` se añadió en `ingress-https-dev`: desde ese change el job recibe un API token con control del DNS y del TLS de toda una zona, y `sensitive = true` no impide desredactarlo desde código de una rama no revisada. Consecuencia operativa: no se puede planificar desde una rama de feature, así que el `plan`/`apply` de un change de infra ocurre tras el merge.
 - El gate de aprobación es **convención** (review de PR + `apply` manual desde `main`): en repo privado + plan Free NO hay Environments con required reviewers ni branch protection/rulesets (la API devuelve 403). Lo forzado técnicamente es que el `apply` solo corre contra `main`; el "PR revisado antes de merge" es un modelo de confianza de operadores. Enforcement real requeriría GitHub Pro/Team o repo público.

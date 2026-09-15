@@ -171,6 +171,7 @@ rápido, pero sin vía de recuperación si el hook falla.
 | Infra dev | `infra/environments/dev/RUNBOOK.md` | §6.2 gana el paso de copiar el hook y la nota del reinicio (D7) |
 | CI | `scripts/` + `Makefile` + workflow de gates | **Nuevo.** Guard que lee la composición resuelta y exige la variable en todo servicio con bind mount del árbol (R5, D8) |
 | Docs | `docs/ci-runner-rollback.md` | Cómo desactivar el hook sin desaprovisionar el pool |
+| Infra dev / CI | `.github/workflows/infra-dev.yml` | **Enmienda 2026-09-15** (panel de `/sdd:review`, `sdd-security` + `sdd-review-cicd`, feature-scale): el job `check` gana un paso `astral-sh/setup-uv` + `pytest` sobre `infra/environments/dev/`, para que las suites de las secciones 3-4 (792 líneas: `test_runner_job_started.py`, `test_runner_bootstrap_env.py`) no corran solo a mano — mismo patrón/SHA que el paso equivalente de `compose-ports.yml` para `scripts/`. Sin tocar `on:`/`concurrency`/`permissions`/`timeout-minutes`; el `check` job ya corría sin credenciales de OCI. |
 
 ## Data & interfaces
 

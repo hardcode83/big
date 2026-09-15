@@ -125,6 +125,26 @@ def test_a_service_without_build_like_postgres_is_never_in_scope():
     assert scope(model(postgres=svc)) == {}
 
 
+# ── Limitación conocida y documentada (docstring del guard + local-environment.md §«Guardia de
+# bytecode»): un servicio Python vía `image:`, sin `build.context`, escapa el alcance ───────
+
+
+def test_a_python_image_based_service_without_build_context_escapes_scope_as_documented():
+    """El hueco exacto que documentan el docstring del guard y la spec: `image: python:...`,
+    sin `build`, monta el árbol en escritura y no declara la variable — y aun así queda fuera
+    de alcance, porque la señal (1) es `build.context`, no el lenguaje real del proceso. Este
+    test no verifica que el guard esté bien: fija el hueco documentado contra un ensanche o
+    estrechamiento silencioso de la señal, para que quien la toque lo haga a sabiendas."""
+    svc = {
+        "image": "python:3.12-slim",
+        "volumes": [{"type": "bind", "source": BACKEND, "target": "/app"}],
+    }
+    m = model(**{"mailer-worker-2": svc})
+    scoped = scope(m)
+    assert scoped == {}
+    assert module.violations(scoped) == []
+
+
 # ── La variable: presente y no vacía, nada más (semántica real de CPython) ─────────────────
 
 

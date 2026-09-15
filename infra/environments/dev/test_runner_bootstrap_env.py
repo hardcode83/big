@@ -358,6 +358,7 @@ def start_named_agent(
     *,
     service_state: str,
     in_progress_url: str = "",
+    api_fails: bool = False,
 ):
     """Run the real `start_named_agent` from the script against a fake `/opt/actions-runner-<i>`.
 
@@ -404,6 +405,9 @@ def start_named_agent(
         "}",
         "gh_in_progress_url_for_runner() {",
         '    printf "%s\\n" "$1" >> "$GH_CALL_LOG"',
+        '    if [[ "$GH_API_FAILS" == "1" ]]; then',
+        "        return 1",
+        "    fi",
         '    printf "%s" "$GH_URL"',
         "}",
         extract_function("start_named_agent"),
@@ -415,6 +419,7 @@ def start_named_agent(
     env["FAKE_HOME"] = str(fake_home)
     env["GH_CALL_LOG"] = str(gh_call_log)
     env["GH_URL"] = in_progress_url
+    env["GH_API_FAILS"] = "1" if api_fails else "0"
     result = subprocess.run(
         ["bash", "-c", program, "_", str(i), str(env_changed)],
         capture_output=True,
@@ -470,6 +475,20 @@ def test_env_changed_active_busy_agent_is_deferred_not_restarted(tmp_path):
     svc = f"{AGENT_SERVICE_PREFIX}-2.service"
     assert svc in result.stdout, "the deferred message must name the service"
     assert url in result.stdout, "the deferred message must name the in-progress run"
+
+
+def test_env_changed_active_agent_gh_api_failure_defers_not_restarted(tmp_path):
+    """Fix round (`sdd-security`, 2026-09-15): a GitHub API failure (expired token, 403/429,
+    timeout — `gh_in_progress_url_for_runner` exits non-zero) must NOT be treated the same as
+    "no job in flight". Before the fix, `|| true` collapsed both to an empty `url` and this case
+    would have restarted a possibly-live agent; now it must defer (rc=2) exactly like the
+    confirmed-busy case, never touching `systemctl restart`.
+    """
+    result = start_named_agent(2, 1, tmp_path, service_state="active", api_fails=True)
+    assert result.returncode == 2, f"stdout={result.stdout} stderr={result.stderr}"
+    assert result.restart_log == "", "an API failure must never be treated as 'idle'"
+    svc = f"{AGENT_SERVICE_PREFIX}-2.service"
+    assert svc in result.stdout, "the deferred message must name the service"
 
 
 def test_env_changed_inactive_agent_goes_through_install_start_not_restart(tmp_path):

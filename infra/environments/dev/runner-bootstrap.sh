@@ -393,7 +393,22 @@ start_named_agent() {
                 # guardia de liveness que la Fase 1 (`systemctl is-active` + la API de GitHub).
                 if [[ "$env_changed" -eq 1 ]]; then
                     step="restart $svc (.env cambiado)"
-                    url="$(gh_in_progress_url_for_runner "$agent_name" || true)"
+                    # api_rc por separado de `url`, y NUNCA `|| true`: un fallo de la API (token
+                    # expirado, 403/429, timeout) no es lo mismo que "sin job en vuelo" — antes de
+                    # esta corrección los dos colapsaban al mismo `url` vacío, y un `systemctl
+                    # restart` sobre un agente con un job real en marcha lo mataría en silencio
+                    # (hallazgo del panel de `/sdd:review`, `sdd-security`, 2026-09-15). El resto
+                    # de llamadas a `gh_in_progress_url_for_runner` en este script no necesitan
+                    # esta distinción: sus dos ramas (fallo de API vs. job en vuelo confirmado)
+                    # ya bloquean por igual sin ejecutar nada destructivo.
+                    api_rc=0
+                    url="$(gh_in_progress_url_for_runner "$agent_name")" || api_rc=$?
+                    if [[ "$api_rc" -ne 0 ]]; then
+                        echo "[hook] agent $i/$RUNNER_COUNT: $svc activo, .env cambiado — la API de GitHub no respondió; no se reinicia por precaución."
+                        echo "[hook]   El .env ya declara ACTIONS_RUNNER_HOOK_JOB_STARTED en disco, pero el proceso vivo aún no lo ha leído."
+                        echo "[hook]   Comprobar a mano si tiene un job en vuelo y ejecutar 'systemctl restart $svc' cuando esté ocioso (o reaplicar este bootstrap entonces)."
+                        exit 2
+                    fi
                     if [[ -n "$url" ]]; then
                         echo "[hook] agent $i/$RUNNER_COUNT: $svc activo CON job en vuelo ($url) — no se reinicia."
                         echo "[hook]   El .env ya declara ACTIONS_RUNNER_HOOK_JOB_STARTED en disco, pero el proceso vivo aún no lo ha leído."
