@@ -120,20 +120,29 @@ if [[ -z "$RUNNER_USER" ]]; then
 fi
 
 # --- D2 short-circuit: read-only, must stay fast on a clean tree ------------------------------
-# First entry NOT owned by $RUNNER_USER, or empty if the tree is already clean. `find`'s own
-# exit status is captured SEPARATELY from its output (round 6 fix): before this, `|| true`
-# collapsed "find genuinely failed partway through" (e.g. permission denied descending into some
-# subdirectory) into the exact same empty `$FOUND` as "genuinely nothing foreign" — so a real
-# find error would have been logged and treated as "already clean" and let the job proceed into
-# the EACCES this hook exists to prevent. Now: empty output AND rc=0 is the only "clean" verdict;
-# empty output with rc!=0 is NOT confirmed clean and falls through to chown anyway (still bounded
-# and non-destructive, and the only action that actually satisfies R3.3 without a positive
-# confirmation). find's own diagnostics (if any) still reach stderr since they are not redirected.
+# First entry that is EITHER not owned by $RUNNER_USER OR a directory lacking owner-write, or
+# empty if the tree is already clean by both measures. Round 11 added the mode-restoring chmod
+# below (a directory a container left `0555`/`0500` blocks `git clean` exactly like wrong
+# ownership does) but only wired it behind the ownership probe — a tree fully owned by
+# $RUNNER_USER yet still holding a restrictive-mode directory took this "already clean" branch
+# and never reached the fix, contradicting the very claim this log line makes (round 12, panel de
+# `/sdd:review`, `sdd-security`, 2026-09-15: "ya lo está" tested ownership, not "borrable" — the
+# spec's actual promise). The two conditions share one `-print -quit` probe, not two `find`
+# calls, to keep the fast path fast (this hook has no timeout — see the header comment).
+# `find`'s own exit status is captured SEPARATELY from its output (round 6 fix): before that,
+# `|| true` collapsed "find genuinely failed partway through" (e.g. permission denied descending
+# into some subdirectory) into the exact same empty `$FOUND` as "genuinely nothing to flag" — so
+# a real find error would have been logged and treated as "already clean" and let the job proceed
+# into the EACCES this hook exists to prevent. Now: empty output AND rc=0 is the only "clean"
+# verdict; empty output with rc!=0 is NOT confirmed clean and falls through to chown anyway
+# (still bounded and non-destructive, and the only action that actually satisfies R3.3 without a
+# positive confirmation). find's own diagnostics (if any) still reach stderr since they are not
+# redirected.
 find_rc=0
-FOUND="$(find "$WORK_DIR" ! -user "$RUNNER_USER" -print -quit)" || find_rc=$?
+FOUND="$(find "$WORK_DIR" \( ! -user "$RUNNER_USER" -o \( -type d ! -perm -u+w \) \) -print -quit)" || find_rc=$?
 
 if [[ -z "$FOUND" && "$find_rc" -eq 0 ]]; then
-    log "$WORK_DIR is already clean (every entry owned by $RUNNER_USER) — nothing to do"
+    log "$WORK_DIR is already clean (every entry owned by $RUNNER_USER, every directory owner-writable) — nothing to do"
     exit 0
 fi
 
@@ -148,9 +157,9 @@ if [[ -n "$FOUND" ]]; then
     # CR/LF, so one `find` result can't masquerade as multiple log lines. Kept dependency-free
     # (`tr`, no repo Python tooling here).
     FOUND_SAFE="$(printf '%s' "$FOUND" | tr '\000-\037\177' '?')"
-    log "found foreign-owned entry under $WORK_DIR (e.g. '$FOUND_SAFE', not owned by $RUNNER_USER) — chown -R to $RUNNER_USER"
+    log "found a non-deletable entry under $WORK_DIR (e.g. '$FOUND_SAFE', foreign-owned or a restrictive-mode directory) — chown -R to $RUNNER_USER and restoring directory permissions"
 else
-    log "find over $WORK_DIR exited non-zero (rc=$find_rc) before confirming ownership — NOT treating as clean, chown -R anyway"
+    log "find over $WORK_DIR exited non-zero (rc=$find_rc) before confirming the tree is deletable — NOT treating as clean, chown -R and permission restore anyway"
 fi
 
 # `-n` (non-interactive): the pool's sudoers grant (`%ci-agents ALL=(ALL) NOPASSWD:ALL`, see
@@ -167,11 +176,24 @@ if sudo -n chown -R "$RUNNER_USER" "$WORK_DIR"; then
     # made `$RUNNER_USER` the owner, and a file's owner can always chmod their own file
     # regardless of its current mode. Bounded to `$WORK_DIR`; directories only (files need no
     # execute bit to be deleted, and touching an unrelated regular file's mode could change
-    # behavior a job expects unmodified). Best-effort: this is additional hardening beyond the
-    # ownership fix that is this hook's primary job, so a `find`/`chmod` hiccup here does not
-    # fail the whole hook — the chown above already succeeded and is what the original incident
-    # (root-owned, normal-mode `.pyc` files) needed.
-    find "$WORK_DIR" -type d ! -perm -u+w -exec chmod u+rwx {} + 2>/dev/null || true
+    # behavior a job expects unmodified).
+    #
+    # Its own exit status and stderr are captured, NOT `2>/dev/null || true` (round 12, panel de
+    # `/sdd:review`, `sdd-security`, 2026-09-15: the round-11 version reintroduced the exact
+    # fail-open shape the D2 fix above exists to prevent — a directory `find` can't even
+    # `opendir()` into, e.g. mode `0000`, makes the whole subtree below it unreachable and unfixed,
+    # `find` exits non-zero, and `2>/dev/null || true` swallowed both the status and the
+    # diagnostic, so the hook printed "succeeded" and exited 0 over a tree that was still not
+    # actually deletable). A genuine failure here is treated exactly like a genuine chown failure:
+    # exit non-zero, name RUNNER_HOME, let the job fail loudly instead of proceeding into the
+    # EACCES this hook exists to prevent.
+    mode_fix_err="$(find "$WORK_DIR" -type d ! -perm -u+w -exec chmod u+rwx {} + 2>&1)"
+    mode_fix_rc=$?
+    if [[ "$mode_fix_rc" -ne 0 ]]; then
+        mode_fix_err_safe="$(printf '%s' "$mode_fix_err" | tr '\000-\037\177' '?')"
+        err "restoring directory permissions under $WORK_DIR FAILED (rc=$mode_fix_rc) for RUNNER_HOME=$RUNNER_HOME: $mode_fix_err_safe — job will fail"
+        exit 1
+    fi
     exit 0
 else
     rc=$?

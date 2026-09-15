@@ -249,7 +249,55 @@ def test_chown_success_also_restores_owner_write_on_restrictive_directories(tmp_
     assert result.returncode == 0, result.stderr
     mode_after = stat.S_IMODE(restrictive.stat().st_mode)
     assert mode_after & stat.S_IWUSR, f"owner-write must be restored, mode is {oct(mode_after)}"
-    restrictive.chmod(0o755)  # restore before pytest's own tmp_path cleanup tries to rmtree it
+
+
+def test_restrictive_self_owned_directory_alone_is_not_reported_as_already_clean(tmp_path):
+    """Round 12 (`sdd-security`, 2026-09-15): round 11's D2 short-circuit tested ownership only,
+    so a `_work/` fully owned by the agent user but holding a self-owned `0555` directory took
+    the "already clean" fast path and never reached the mode-restoring fix — a genuine bug in
+    round 11's own fix, not a hypothetical. Fully genuine, no stubs at all: only ownership is
+    already correct (this test process owns everything), so D2's OWN unstubbed `find` must be
+    the one to catch the mode problem.
+    """
+    work = tmp_path / "_work"
+    work.mkdir()
+    restrictive = work / "readonly_dir"
+    restrictive.mkdir(mode=0o555)
+    try:
+        result = run_hook(work)
+        assert "already clean" not in result.stdout.lower(), (
+            "a self-owned but mode-restrictive directory must not be reported as already clean"
+        )
+    finally:
+        restrictive.chmod(0o755)  # restore before pytest's own tmp_path cleanup tries to rmtree it
+
+
+def test_mode_fix_failure_fails_the_hook_instead_of_claiming_success(tmp_path):
+    """Round 12 (`sdd-security`, 2026-09-15): the round-11 mode-restoring `find` piped its exit
+    status and stderr to `2>/dev/null || true` — the exact fail-open shape the D2 fix (round 6)
+    exists to prevent, just 40 lines later. A directory `find` cannot even `opendir()` into
+    (mode `0000`) makes its own subtree unreachable and unfixed, and `find` reports that as a
+    non-zero exit — which must now fail the whole hook loudly (like a genuine `chown` failure),
+    not get swallowed into "chown ... succeeded". `find`/`sudo` are stubbed only for the D2 probe
+    (to force entry into remediation deterministically); the mode-restoring `find` is real.
+    """
+    work = tmp_path / "_work"
+    work.mkdir()
+    unreadable = work / "unreadable_dir"
+    unreadable.mkdir(mode=0o000)
+    try:
+        stubbin = make_stub_bin(tmp_path, find_reports_foreign=True, sudo_exit=0)
+        env = {"PATH": f"{stubbin}:{os.environ['PATH']}"}
+
+        result = run_hook(work, env=env)
+
+        assert result.returncode != 0, (
+            "an unconfirmed mode fix must fail the hook, not silently succeed: "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert str(work) in (result.stdout + result.stderr), "the failure must name the affected tree"
+    finally:
+        unreadable.chmod(0o755)
 
 
 def test_chown_genuinely_fails_names_runner_home(tmp_path):
