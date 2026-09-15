@@ -43,3 +43,53 @@ One entry per pending item (shared rule 5): `decision` needs a human before the 
 - **type**: deferred
 - **what & why**: El reviewer obligatorio sdd-qa no pudo completar el review porque el workspace se quedó sin créditos. El gate fail-closed no puede certificarse con una colección incompleta; no se sustituyó el reviewer.
 - **exact resume command**: /sdd:review statements-web
+
+## Reconciliación de certificaciones de secciones 1 y 2
+
+- **phase**: run
+- **type**: deferred
+- **what & why**: Las tareas 1.1-1.4 y 2.1-2.3 están marcadas [x] y tienen verificaciones de implementación documentadas, pero sus secciones no llevan marcador panel: PASS persistido. Debe ejecutarse la revisión de reconciliación correspondiente sin declarar esas secciones certificadas ni repetir su implementación.
+- **exact resume command**: /sdd:review statements-web
+
+## Reset de filtros/page tras cambio de tenant
+
+- **phase**: review
+- **type**: deferred
+- **what & why**: Finding sdd-architect, frontend/features/statements/components/statements-view.tsx:40, referent R1.3/D5: el reset en useEffect ocurre después del render que ya pasa estado del tenant anterior a la query; la primera petición del nuevo tenant puede usar propertyId/page obsoletos.
+- **exact resume command**: /sdd:review statements-web
+
+## Descarga pendiente ante cambio de tenant
+
+- **phase**: review
+- **type**: deferred
+- **what & why**: Finding sdd-security, frontend/features/statements/hooks/use-statement-download.ts:25, referent R1.3/D5 y security rule 1: una exportación iniciada con tenant A puede completarse y entregarse tras logout o cambio a tenant B sin revalidar la identidad.
+- **exact resume command**: /sdd:review statements-web
+
+## Marcador de importe ausente sin i18n
+
+- **phase**: review
+- **type**: deferred
+- **what & why**: Finding sdd-review-i18n, frontend/features/statements/components/reservations-breakdown.tsx:58, referent R5.4 y steering/frontend.md: el valor visible "—" está hardcodeado y no pasa por los catálogos ES/EN.
+- **exact resume command**: /sdd:review statements-web
+
+## Estado de refetch del listado
+
+- **phase**: review
+- **type**: deferred
+- **what & why**: Finding sdd-review-ui-ux, frontend/features/statements/components/statements-list.tsx:61, referent R5.1: al refetchear por filtros/página solo se considera isPending, por lo que la lista puede quedar interactiva mostrando datos stale sin estado explícito de carga.
+- **exact resume command**: /sdd:review statements-web
+
+## Target táctil del retry del listado
+
+- **phase**: review
+- **type**: deferred
+- **what & why**: Finding sdd-review-ui-ux, frontend/features/statements/components/statements-list.tsx:66, referent steering/frontend.md interaction targets: el retry de ErrorState usa el Button de 40px sin tap-target y queda por debajo del mínimo de 44px.
+- **exact resume command**: /sdd:review statements-web
+
+## Verificación 7.3 layout responsive y accesibilidad
+
+- **phase**: run
+- **type**: deferred
+- **tasks**: 7.3
+- **what & why**: Playwright no está instalado en el contenedor de este worktree (mismo problema documentado en sdd/project.md § 'Y npm test tiene el mismo problema'). La auditoría mobile-first de los componentes está cubierta por el panel PASS de la sección 6 (sdd-review-ui-ux) y por getA11yViolations en los tests de componente que sí corren; este test sólo reproduce la verificación contra un viewport real.
+- **exact resume command**: /sdd:run statements-web 7.3
