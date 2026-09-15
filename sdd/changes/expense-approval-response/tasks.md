@@ -91,31 +91,31 @@
 
 ## 5. OpenAPI regeneration, docs and verification
 
-- [ ] 5.1 Regenerate the API contract:
+- [x] 5.1 Regenerate the API contract:
       `docker compose exec backend uv run python -m app.maintenance.api.openapi` (or the
       project's documented command — see `sdd/specs/api-contract.md`); commit
       `backend/openapi.json`. [R6.2]
-- [ ] 5.2 Regenerate the TypeScript client:
+- [x] 5.2 Regenerate the TypeScript client:
       `docker compose exec -T frontend npm run api:generate` (the documented command, with
       the worktree caveats from `sdd/project.md` "Worktree bootstrap"); commit
       `frontend/lib/api/generated/openapi.d.ts`. [R6.2]
-- [ ] 5.3 Update `docs/maintenance.md` to reflect that
+- [x] 5.3 Update `docs/maintenance.md` to reflect that
       `POST /api/v1/owner-approvals/{id}/respond` serves both `INCIDENT` /
       `MAINTENANCE_COST` and `OTHER` approvals, with the `OwnerApprovalResponse` body for
       the latter. Replace the sentence "la ruta resuelve siempre por incidencia" with the
       design's D5/D9 contract. [R5 spec doc, R8 spec doc — `maintenance.md`]
-- [ ] 5.4 Update `docs/revenue-statements.md` to drop the sentence "hoy no hay ninguna ruta
+- [x] 5.4 Update `docs/revenue-statements.md` to drop the sentence "hoy no hay ninguna ruta
       que responda una `OwnerApproval(OTHER)`" (R5.7 of that doc) and replace it with the
       design's D7 statement — the route does serve them, the reconciler still materialises
       the answer on `expenses`. [R5.7 spec doc — `revenue-statements.md`]
-- [ ] 5.5 Run the full backend test suite as documented in `sdd/project.md`:
+- [x] 5.5 Run the full backend test suite as documented in `sdd/project.md`:
       `docker compose exec backend uv run pytest`. Suite must end green and the per-section
       coverage checks for the files touched (`backend/app/maintenance/application/use_cases.py`,
       `backend/app/maintenance/api/approvals_router.py`, `backend/app/maintenance/api/schemas.py`)
       must stay at or above the project baseline. [Verification]
-- [ ] 5.6 Run the static tooling: `docker compose exec backend uv run pyright .`. Reports
+- [x] 5.6 Run the static tooling: `docker compose exec backend uv run pyright .`. Reports
       must be clean (no new findings in files touched by this change). [Verification]
-- [ ] 5.7 Run the rule-11 ownership guard from the host (per `sdd/project.md` "Commands"):
+- [x] 5.7 Run the rule-11 ownership guard from the host (per `sdd/project.md` "Commands"):
       `make check-rule11-ownership`. No new findings in the files touched. [Verification]
 
 ## Implementation Notes
