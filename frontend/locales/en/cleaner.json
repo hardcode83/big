@@ -74,6 +74,41 @@
     },
     "alt": "Cleaning photo"
   },
+  "tabs": {
+    "label": "Task sections",
+    "content": "Task"
+  },
+  "messages": {
+    "tab": "Messages",
+    "title": "Messages about this task",
+    "loading": "Loading the messages…",
+    "loadNewer": "Load newer messages",
+    "empty": {
+      "title": "No messages yet",
+      "description": "When the manager writes to you about this task, it will show up here."
+    },
+    "error": {
+      "description": "We couldn't load the messages. Please try again in a few seconds."
+    },
+    "composer": {
+      "label": "Write a message",
+      "placeholder": "Write your message for the manager…",
+      "counter": "{{current}}/{{max}} characters",
+      "send": "Send message",
+      "sending": "Sending…"
+    },
+    "roles": {
+      "SUPER_ADMIN": "Administration",
+      "TENANT_OWNER": "Owner",
+      "PROPERTY_MANAGER": "Manager",
+      "CLEANER": "Cleaner",
+      "TECHNICIAN": "Technician"
+    },
+    "errors": {
+      "required": "Write a message before sending it.",
+      "tooLong": "The message can't be longer than 2000 characters."
+    }
+  },
   "actions": {
     "title": "What you can do",
     "accept": "Accept",

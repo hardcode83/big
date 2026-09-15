@@ -88,7 +88,14 @@ Acceptance criteria:
    `EmptyState` explícito ("sin mensajes todavía"), nunca un hueco en blanco ni un error.
 3. IF la petición de lista o de envío falla, THEN THE SYSTEM SHALL mostrar `ErrorState`
    (lista) o un error en línea junto al compositor (envío), sin perder el texto ya
-   escrito por el usuario.
+   escrito por el usuario — **excepto** un `404` (la tarea/incidencia ya no está
+   disponible para este usuario), que sustituye toda la pantalla de detalle —
+   compositor incluido — por el mismo `EmptyState` "tarea no disponible" que ya usan
+   `task`/`context`/`checklist`/`photoRequirements`/`photos`: es la convención
+   existente de la pantalla (cualquier `404` de sus lecturas en paralelo ya descarta
+   todo el estado local, incluido cualquier formulario abierto), y no una regla nueva
+   del hilo de mensajes. No hay ningún destino al que conservar el borrador cuando la
+   tarea/incidencia a la que iba dirigido ha dejado de existir para este usuario.
 4. THE SYSTEM SHALL cumplir la línea base de `steering/frontend.md` ("UI/UX baseline"):
    foco visible, orden de tabulación lógico, objetivos táctiles ≥44×44px, contraste AA y
    labels asociados en el compositor.

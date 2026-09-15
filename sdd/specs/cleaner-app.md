@@ -189,6 +189,45 @@ allow={["CLEANER"]}` del layout es el único escudo de UX.
   monta el layout es un escudo de UX, y ninguna decisión de negocio SHALL derivarse del rol en
   el cliente.
 
+### R9 — Hilo de mensajes con el manager, en pestaña
+
+- THE SYSTEM SHALL organizar `/cleaner/tasks/[id]` en dos pestañas (`CleanerTaskTabs`,
+  `role="tablist"` propio — no hay primitivo `Tabs` en `components/ui/`): «Tarea», con el bloque
+  de contexto, el checklist, los requisitos de foto, la galería, la barra de acciones y el panel
+  de cierre, y «Mensajes», con el hilo limpiadora↔manager. La pestaña «Tarea» SHALL estar activa
+  al cargar la pantalla.
+- THE SYSTEM SHALL mantener **los dos paneles montados** y ocultar el inactivo con el atributo
+  `hidden` — SHALL NOT desmontarlo, a diferencia de `reviews-tabs.tsx`/`pricing-tabs.tsx`: el
+  estado local de la pestaña de contenido (el formulario abierto de
+  `cleaner-incident-report-panel.tsx`, el scroll, los datos ya cargados) sobrevive a un viaje de
+  ida y vuelta a «Mensajes».
+- THE SYSTEM SHALL pedir la primera página del hilo solo cuando la limpiadora abre «Mensajes»
+  por primera vez (`hasOpenedMessagesTab`, un flag que pasa a `true` una vez y nunca vuelve a
+  `false`, que viaja como `enabled` hasta la query) — SHALL NOT pedirla al montar el detalle ni
+  volver a deshabilitarla al alternar de pestaña.
+- THE SYSTEM SHALL listar los mensajes de `GET /api/v1/cleaning-tasks/{task_id}/messages` en el
+  orden cronológico ascendente que fija el backend, de 20 en 20: la página 1 son los más
+  antiguos y «Cargar mensajes más recientes» pide `page + 1` y **añade** al final lo que llega,
+  sin reemplazar lo ya mostrado ni duplicar filas (cada página se guarda bajo su propio número).
+- THE SYSTEM SHALL ofrecer un compositor con `<textarea maxLength={2000}>` nativo y label
+  asociado (`htmlFor`), contador de caracteres visible, y SHALL deshabilitar el envío mientras el
+  contenido recortado no esté entre 1 y 2000 caracteres —mostrando la validación en línea— o
+  mientras la mutación esté en vuelo, de modo que ni un envío vacío ni un doble envío lleguen al
+  backend.
+- WHEN el envío responde `201`, THE SYSTEM SHALL limpiar el compositor y reflejar el mensaje al
+  final del hilo por la invalidación de `cleanerKeys.messagesPrefix` que la mutación dispara en
+  `onSettled` —sin recarga de página y sin parcheo optimista—; si ese mensaje estrena página y la
+  limpiadora ya estaba al final del hilo, la vista avanza exactamente una página, la única que un
+  mensaje puede añadir.
+- IF el envío falla, THEN THE SYSTEM SHALL conservar el texto escrito y mostrar la copia
+  localizada que devuelve `mapCleanerError(error, "sendMessage")` (el `422` de longitud usa
+  `messages.errors.tooLong`) — SHALL NOT limpiar el campo ni renderizar el `message` del sobre.
+- IF la lectura del hilo falla, THEN THE SYSTEM SHALL mostrar `ErrorState`; IF responde `404`,
+  THEN SHALL mostrar el vacío «Tarea no disponible» sin compositor; y si el hilo no tiene
+  mensajes, SHALL mostrar un `EmptyState` explícito, nunca un hueco en blanco.
+- THE SYSTEM SHALL etiquetar al autor de cada mensaje con `messages.roles.<UserRole>` del
+  catálogo `cleaner` — SHALL NOT renderizar el valor crudo del enum.
+
 ## Known limitations
 
 - **N+1 de contextos en la lista.** Cada fila pide su propio
@@ -221,15 +260,20 @@ allow={["CLEANER"]}` del layout es el único escudo de UX.
   `cleaner-task-checklist-item.tsx` (R4), `cleaner-task-photo-requirements.tsx` +
   `cleaner-task-photo-upload-button.tsx` (R5), `cleaner-task-photo-gallery.tsx`,
   `cleaner-incident-report-panel.tsx` (R6), `cleaner-task-action-bar.tsx` (R3, R7),
-  `cleaner-completion-panel.tsx` (R7).
-- `frontend/features/cleaner/data/cleaner-source.ts` — la interfaz `CleanerDataSource` (once
-  métodos: seis lecturas, seis mutaciones más el reporte de incidencia).
+  `cleaner-completion-panel.tsx` (R7), `cleaner-task-tabs.tsx` (las dos pestañas, R9) y
+  `cleaner-task-messages-panel.tsx` (el hilo y su compositor, R9).
+- `frontend/features/cleaner/data/cleaner-source.ts` — la interfaz `CleanerDataSource` (quince
+  métodos: siete lecturas —`getTaskMessages` incluida— y ocho mutaciones, entre ellas el reporte
+  de incidencia y `sendTaskMessage`).
 - `frontend/features/cleaner/data/http-cleaner-source.ts` y `data/dto.ts` — la implementación
   sobre `ApiClient` y los DTO, alias de `components["schemas"]`.
 - `frontend/features/cleaner/data/index.ts` — `getCleanerDataSource()` sobre
   `createAuthenticatedClients`, el único punto de composición.
-- `frontend/features/cleaner/hooks/query-keys.ts` — `cleanerKeys`, las siete claves bajo
-  `tenantScopedKey`, con `context()` compartida entre lista y detalle.
+- `frontend/features/cleaner/hooks/query-keys.ts` — `cleanerKeys`, las nueve claves bajo
+  `tenantScopedKey`, con `context()` compartida entre lista y detalle y `messages()`
+  parametrizada por página bajo el prefijo que invalida el envío (R9).
+- `frontend/features/cleaner/hooks/use-cleaner-task-messages.ts` — `useCleanerTaskMessages`
+  (lectura perezosa, con `enabled` como tercer parámetro) y `useSendCleanerTaskMessage` (R9).
 - `frontend/features/cleaner/hooks/use-cleaner-tasks.ts` — las lecturas, con
   `useCleanerTaskContexts` como `useQueries` que degrada por fila.
 - `frontend/features/cleaner/hooks/use-cleaner-cycle.ts` — las siete mutaciones, cada una

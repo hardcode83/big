@@ -25,6 +25,8 @@ import { CleanerCompletionPanel } from "./cleaner-completion-panel";
 import { CleanerTaskPhotoGallery } from "./cleaner-task-photo-gallery";
 import { CleanerTaskPhotoRequirements } from "./cleaner-task-photo-requirements";
 import { CleanerTaskPhotoUploadButton } from "./cleaner-task-photo-upload-button";
+import { CleanerTaskMessagesPanel } from "./cleaner-task-messages-panel";
+import { CleanerTaskTabs } from "./cleaner-task-tabs";
 
 /**
  * The cleaner-app detail view (R2.1, R2.8, R7.2, R8.2, R8.3, design D4, D10,
@@ -38,7 +40,12 @@ import { CleanerTaskPhotoUploadButton } from "./cleaner-task-photo-upload-button
  *
  * Composition: `ContextBlock` → `Checklist` → `PhotoRequirements` (with the
  * upload buttons inline) → `Gallery` → `ActionBar`. The completion panel
- * overlays the action bar only after a successful close.
+ * overlays the action bar only after a successful close. That whole stack is
+ * the **content** tab of `CleanerTaskTabs`, active by default (R3.1,
+ * staff-messaging-web D-mobile); the staff thread lives in the second tab and
+ * only requests its first page once that tab is opened (D1). Both panels stay
+ * mounted, so the checklist ticks, the gallery and the incident-report form's
+ * local state survive a round trip through the messages tab (R3.2).
  *
  * Renders inside `mx-auto w-full max-w-md p-4` to keep it mobile-first at 360
  * px (R8.3): no horizontal scroll.
@@ -149,36 +156,45 @@ export function CleanerTaskDetailView({ taskId }: CleanerTaskDetailViewProps) {
 
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-4 p-4">
-      <CleanerTaskContextBlock task={taskData} context={context.data} />
-      <CleanerTaskChecklist
-        checklist={checklist.data}
-        interactive={isInProgress}
-        renderItemAction={(item) => (
-          <CleanerTaskChecklistItem taskId={taskData.id} item={item} />
+      <CleanerTaskTabs
+        content={
+          <div className="flex flex-col gap-4">
+            <CleanerTaskContextBlock task={taskData} context={context.data} />
+            <CleanerTaskChecklist
+              checklist={checklist.data}
+              interactive={isInProgress}
+              renderItemAction={(item) => (
+                <CleanerTaskChecklistItem taskId={taskData.id} item={item} />
+              )}
+            />
+            <CleanerTaskPhotoRequirements
+              requirements={requirements.data}
+              canUpload={canUploadPhotos}
+              renderUpload={(entry) => (
+                <CleanerTaskPhotoUploadButton
+                  taskId={taskData.id}
+                  entry={entry}
+                />
+              )}
+            />
+            <CleanerTaskPhotoGallery
+              tenantId={tenantId}
+              taskId={taskData.id}
+              photos={photos.data ?? []}
+            />
+            <CleanerTaskActionBar
+              task={taskData}
+              checklist={checklist.data}
+              requirements={requirements.data}
+              onTaskCompleted={() => setHasClosed(true)}
+            />
+            {hasClosed ? <CleanerCompletionPanel /> : null}
+          </div>
+        }
+        renderMessages={(enabled) => (
+          <CleanerTaskMessagesPanel taskId={taskData.id} enabled={enabled} />
         )}
       />
-      <CleanerTaskPhotoRequirements
-        requirements={requirements.data}
-        canUpload={canUploadPhotos}
-        renderUpload={(entry) => (
-          <CleanerTaskPhotoUploadButton
-            taskId={taskData.id}
-            entry={entry}
-          />
-        )}
-      />
-      <CleanerTaskPhotoGallery
-        tenantId={tenantId}
-        taskId={taskData.id}
-        photos={photos.data ?? []}
-      />
-      <CleanerTaskActionBar
-        task={taskData}
-        checklist={checklist.data}
-        requirements={requirements.data}
-        onTaskCompleted={() => setHasClosed(true)}
-      />
-      {hasClosed ? <CleanerCompletionPanel /> : null}
     </div>
   );
 }
