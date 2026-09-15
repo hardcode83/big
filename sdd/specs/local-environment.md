@@ -26,6 +26,15 @@ Scaffold de monorepo y stack de desarrollo local para AutoHostAI: estructura de 
 - IF falta `POSTGRES_DB`, `POSTGRES_USER` o `POSTGRES_PASSWORD` en `.env`, THEN THE SYSTEM SHALL fallar el arranque de `docker compose up` con un mensaje explícito (`${VAR:?mensaje}`) en vez de arrancar mal configurado — defensa en profundidad para quien use `docker compose` directo sin pasar por `make up`.
 - IF falta `JWT_SECRET_KEY`, THEN THE SYSTEM SHALL fallar igual, y en los **tres** servicios que importan la configuración al arrancar: `backend`, `worker` y `migrate`. Omitirla en cualquiera de ellos convertiría un despliegue en un fallo de arranque en cadena, porque `backend` y `worker` dependen de que `migrate` termine con éxito.
 - `REDIS_URL` (backend/worker), `BACKEND_INTERNAL_URL` (frontend) y `DATABASE_URL` (backend/worker/migrate) están fijados directamente en `docker-compose.yml` vía `environment:` — no vienen de `.env`, porque su valor lo determina la topología de la red de compose, no algo que un desarrollador deba decidir.
+- THE SYSTEM SHALL declarar `PYTHONDONTWRITEBYTECODE` con valor verdadero en el `environment:` de
+  `migrate`, `backend`, `worker` y `beat` — los cuatro montan el árbol del repositorio por bind
+  mount y ejecutan Python; sin este ajuste el intérprete escribe `__pycache__/*.pyc` propiedad de
+  `root` sobre el árbol del host, que en la VM `dev` es el `_work/` persistente de un agente de
+  GitHub Actions y ese fichero sobrevive al contenedor sin que el usuario del agente pueda
+  borrarlo (ver `ci-runner-self-hosted` §«Workspace borrable antes de cada job»). `pytest` escribe
+  su caché fuera del árbol (`cache_dir` en `[tool.pytest.ini_options]` de `backend/pyproject.toml`),
+  degradando a advertencia en vez de fallar si esa ruta no es escribible. Sostenido por un guard de
+  CI — ver §«Guardia de bytecode» más abajo.
 
 ### Postura de red del stack local
 
@@ -472,6 +481,41 @@ que ejecuta `scripts/test_*.py`: hasta entonces solo corrían a mano, porque el 
 `backend-tests.yml` va con `working-directory: backend`. En local sigue siendo
 `python3 -m pytest scripts/`.
 
+### Guardia de bytecode: ningún contenedor escribe en el árbol
+
+`make check-compose-bytecode` ejecuta `python3 scripts/compose-bytecode.py`, que comprueba que
+todo servicio Python del compose local que monta el árbol del repositorio por bind mount en
+escritura declara `PYTHONDONTWRITEBYTECODE`. Corre también en cada Pull Request, como paso nuevo
+de `compose-ports-suite` en `.github/workflows/compose-ports.yml` — no como workflow propio, por
+el mismo motivo que fija `specs/backend-ci.md` R1.3: un filtro `paths:` en `on:` no produce check
+alguno en los PR que no lo tocan, y `compose-ports` ya resuelve ese problema con su patrón
+detect/suite/gate (ver §«Guardia de la postura de red»).
+
+- THE SYSTEM SHALL tomar su dato de `docker compose config --no-interpolate --no-env-resolution
+  --format json`, igual que `compose-ports.py` y por el mismo motivo: `config` a secas vuelca el
+  `.env` entero.
+- THE SYSTEM SHALL derivar los servicios Python en alcance de la composición **resuelta**, con dos
+  señales, ambas estructurales y ninguna una lista de nombres fijada en el propio guard: (1) su
+  `build.context` resuelve al mismo directorio que `backend/` — la misma señal que ya distingue en
+  `docker-compose.yml` a los cuatro servicios Python de `frontend` —, y (2) monta el árbol del
+  repositorio en escritura (`volumes` con `type: bind`, sin `read_only`, `source` bajo la raíz del
+  repo).
+- WHEN un servicio en alcance no declara el ajuste, THE SYSTEM SHALL fallar el check nombrando el
+  servicio; WHEN todos lo declaran, THE SYSTEM SHALL pasar sin intervención.
+- **Limitación conocida, deliberada y sin resolver** (a diferencia de las dos de
+  §«Guardia de la postura de red», que sí tienen salida escrita): la señal (1) es `build.context`,
+  así que un servicio que ejecute Python sobre un bind mount en escritura del árbol sin construir
+  con `context: ./backend` — una imagen publicada (`image: python:...`) o un `build:` cuyo
+  `context` por defecto no resuelva a `backend/` — queda fuera de alcance en silencio, y el guard
+  pasa en verde aunque ese servicio sí escriba root-owned sobre el árbol. Señalada por el panel de
+  `/sdd:review` del change `ci-runner-workspace-pollution` (2026-09-14, lente `qa`); ampliar la
+  señal de alcance o fallar cerrado ante un servicio Python no reconocido queda como entrada propia
+  de roadmap.
+
+El script vive en `scripts/compose-bytecode.py` con `scripts/test_compose_bytecode.py` al lado,
+cargado por `importlib` como los demás de `scripts/`. Su suite la recoge el mismo job
+`compose-ports-suite` que ya ejecuta `pytest scripts/ -q`. En local: `python3 -m pytest scripts/`.
+
 ### Makefile como entrypoint único
 
 - WHEN se ejecuta `make up` y no existe `.env`, THE SYSTEM SHALL crearlo automáticamente copiando `.env.example` antes de levantar el stack — cero pasos manuales para arrancar por primera vez.
@@ -536,6 +580,6 @@ que ejecuta `scripts/test_*.py`: hasta entonces solo corrían a mano, porque el 
 ## Key files
 
 - Raíz: `docker-compose.yml`, `docker-compose.worktree.yml`, `Makefile`, `.env.example`, `.gitignore`, `README.md`. `.make/docker-compose.offset.yml` es **generado y gitignorado** (lo escribe `make up PORT_OFFSET=<n>`), y vive fuera de la raíz a propósito para que Compose no lo descubra por sí solo.
-- Herramienta host-side (fuera de `$(COMPOSE)`, ejecutada con el `python3` del host y sin dependencias): `scripts/compose-stacks.py` + `scripts/test_compose_stacks.py` (diagnóstico de stacks huérfanos, `make compose-stacks`); `scripts/check-version-parity.py` + `scripts/test_check_version_parity.py`; `scripts/compose-offset.py` + `scripts/test_compose_offset.py` (desplazamiento de los cuatro puertos publicados, detrás de `make up PORT_OFFSET=<n>` y `make ports`).
+- Herramienta host-side (fuera de `$(COMPOSE)`, ejecutada con el `python3` del host y sin dependencias): `scripts/compose-stacks.py` + `scripts/test_compose_stacks.py` (diagnóstico de stacks huérfanos, `make compose-stacks`); `scripts/check-version-parity.py` + `scripts/test_check_version_parity.py`; `scripts/compose-offset.py` + `scripts/test_compose_offset.py` (desplazamiento de los cuatro puertos publicados, detrás de `make up PORT_OFFSET=<n>` y `make ports`); `scripts/compose-bytecode.py` + `scripts/test_compose_bytecode.py` (guardia de bytecode, `make check-compose-bytecode`, ver §«Guardia de bytecode»).
 - Backend: `backend/devops/Dockerfile`, `backend/app/main.py`, `backend/app/core/config.py`, `backend/app/worker.py`, `backend/pyproject.toml` + `backend/uv.lock`, `backend/tests/test_health.py`.
 - Frontend: `frontend/devops/Dockerfile`, `frontend/devops/docker-entrypoint.sh` (sincroniza `node_modules` con el lockfile en dev), `frontend/devops/test-entrypoint.sh` (test del entrypoint, `npm run test:entrypoint`), `frontend/app/page.tsx` (resuelve la decisión anónimo/autenticado en el servidor: sesión presente redirige `307` a `/dashboard`, sesión ausente sirve la landing pública), `frontend/app/opengraph-image.tsx` (imagen Open Graph de la landing generada en build), `frontend/app/layout.tsx`, `frontend/next.config.ts`, `frontend/app/route-wiring.test.tsx` (verifica el wiring de la ruta raíz).

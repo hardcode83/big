@@ -160,6 +160,46 @@ aceptado" más abajo, que enumera explícitamente este radio.
   (que ya tiene `secret-bundle get` por OCID y por nombre) lo invoca `sudo` desde `ubuntu`
   leyendo `/etc/autohostai-deploy.env` (R3).
 
+### Workspace borrable antes de cada job (hook `ACTIONS_RUNNER_HOOK_JOB_STARTED`)
+
+**El fallo de `actions/checkout` no es mitigable desde ningún paso de ningún workflow.** Ocurre en
+el paso 0 — antes de que exista cualquier paso propio del job —, así que la única defensa posible
+vive fuera del workflow: en el propio agente, ejecutada antes de que Actions invoque `checkout`.
+El 2026-09-14, un fichero root-owned dejado por un contenedor del stack local
+(`backend/alembic/__pycache__/env.cpython-312.pyc`, ver `local-environment` §«Stack local vía
+Docker Compose») tumbó tres de los cuatro agentes con `EACCES` en ese paso: el `deploy-dev` del
+PR #197 (run `34836602502`) y el del PR #196 (run `34840316768`) — dejando `dev` congelado en el
+deploy del PR #194 —, los checks `api-contract`, `e2e-tests` y `backend-tests-detect` del PR #196,
+y el `demo-reset` programado (run `34824905559`). La mitigación que desatascó el incidente fue
+manual (`sudo find … -delete` por SSH sobre los cuatro `RUNNER_HOME`); el hook de esta sección la
+sustituye por código versionado (change `ci-runner-workspace-pollution`).
+
+- THE SYSTEM SHALL versionar `infra/environments/dev/runner-job-started.sh` como el hook
+  `ACTIONS_RUNNER_HOOK_JOB_STARTED` de cada agente: antes de que `actions/checkout` se ejecute,
+  deja el `_work/` propio del agente borrable por su usuario, sin actuar si ya lo está y sin tocar
+  el `_work/` de ningún otro agente — acota su propia actuación validando que la ruta de trabajo es
+  absoluta, existe y termina en `/_work`, y autolocalizando `$RUNNER_HOME` dos directorios por
+  encima de su propia ruta instalada.
+- WHERE `runner-bootstrap.sh` aprovisiona el agente `i`, THE SYSTEM SHALL instalar ese script en
+  `$RUNNER_HOME/hooks/` (`install_job_started_hook`) y declarar
+  `ACTIONS_RUNNER_HOOK_JOB_STARTED=$RUNNER_HOME/hooks/runner-job-started.sh` en su `.env`
+  (`write_runner_env`), reiniciando el servicio de ese agente cuando el `.env` cambió y no tiene un
+  job en vuelo — GitHub solo relee la variable al arrancar el proceso, así que instalar el hook sin
+  reiniciar lo deja sin efecto.
+- THE SYSTEM SHALL entregar el mismo script a una VM nueva vía `cloud-init` (`main.tf` lo pasa como
+  `file("${path.module}/runner-job-started.sh")` a `templatefile()`; `cloud-init.yaml.tftpl` lo
+  escribe en `/opt/runner-job-started.sh` por `write_files`), para que el aprovisionamiento inicial
+  y el reaprovisionamiento de la VM viva instalen el mismo contrato.
+- Este aislamiento **separa workspaces entre agentes; no es un límite de confianza entre ellos**
+  (ver más arriba, §«Aislamiento por usuario Linux y servicio systemd» y su «Riesgo aceptado»): el
+  `chown -R` del hook corre bajo `sudo -n`, el mismo `%ci-agents ALL=(ALL) NOPASSWD:ALL` que ya
+  concede sudo sin contraseña sobre toda la VM a cualquier agente — el hook no amplía ninguna
+  autoridad, solo automatiza algo que ese mismo principal ya podía hacer directamente.
+- La primera instalación del hook sobre la VM viva es **escalonada**, no simultánea en los cuatro
+  agentes (`RUNBOOK.md §6.2`, design D9): un código de salida distinto de cero del hook falla el
+  job de GitHub que lo invoca, así que aplicarlo a los cuatro a la vez arriesgaría dejar la CI
+  entera inoperativa, incluidos los workflows del propio Pull Request que lo arreglaría.
+
 ### Riesgo aceptado: ampliación del radio de confianza
 
 - El pool persistente comparte host entre jobs `pull_request`-triggered (código de un PR no
@@ -244,6 +284,9 @@ aceptado" más abajo, que enumera explícitamente este radio.
 
 - `.github/workflows/*.yml` — los 10 workflows; 9 declaran `runs-on: [self-hosted, dev]`,
   `multiarch-build-check.yml` queda en `ubuntu-latest`.
+- `infra/environments/dev/runner-job-started.sh` — hook `ACTIONS_RUNNER_HOOK_JOB_STARTED`, deja el
+  `_work/` propio del agente borrable antes de `actions/checkout` (con
+  `infra/environments/dev/test_runner_job_started.py` al lado).
 - `backend/.python-version` — ancla de versión de Python para `uv` en el runner.
 - `docs/ci-runner-rollback.md` — runbook de rollback (tabla de workflows, comando `git revert`,
   patch manual de un solo workflow, secciones «Subir N» / «Bajar N»).

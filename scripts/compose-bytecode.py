@@ -34,6 +34,18 @@ redacción de esta regla (R5.1) no llevaba el calificador «servicio Python» qu
 habría exigido la variable también ahí — decisión corregida el 2026-09-14, antes de escribir esta
 guardia (`design.md` D8).
 
+## Limitación conocida, deliberada y sin resolver
+
+La señal (1) de arriba es `build.context`. Un servicio que ejecute Python sobre un bind mount en
+escritura del árbol sin construir con `context: ./backend` — una imagen publicada
+(`image: python:...`) o un `build:` cuyo `context` por defecto no resuelva a `backend/` — queda
+fuera de `in_scope_services` **en silencio**, y esta guardia pasa en verde aunque ese servicio sí
+deje `__pycache__` root-owned sobre el árbol. Es el residual que el panel de `/sdd:review` del
+change `ci-runner-workspace-pollution` señaló (2026-09-14, lente `qa`), documentado aquí y en
+`sdd/specs/local-environment.md` §«Guardia de bytecode» en vez de resuelto: ampliar la señal de
+alcance o fallar cerrado ante un servicio Python no reconocido es entrada propia de roadmap, no
+de este change.
+
 ## La invocación, reutilizada de `scripts/compose-ports.py`
 
 `docker compose config` se invoca **siempre** con `--no-interpolate --no-env-resolution`

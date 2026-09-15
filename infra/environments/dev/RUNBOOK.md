@@ -110,6 +110,16 @@ Los secrets de runtime (`POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`)
 
 La provisión es **IaC**: `cloud-init.yaml.tftpl` + `runner-bootstrap.sh` + `gh-app-install-token.py`, así que una VM nueva arranca con el runner. Como el `metadata` es ForceNew + `ignore_changes`, sobre la **VM viva** se ejecuta **una vez a mano** (tras aplicar Terraform, §5.3, que ya puso la clave de la App y los OCIDs en el Vault):
 
+**Antes de ejecutar el bloque de abajo, si es la primera vez que se instala el hook
+(`runner-job-started.sh`) en esta VM**: no lo apliques a los cuatro agentes en la misma pasada —
+`sudo bash /opt/bootstrap-runner.sh "$RUNNER_COUNT"` instala y declara el hook en todos a la vez, y
+un hook mal calibrado con código de salida distinto de cero falla el job de los cuatro agentes,
+incluidos los workflows del propio Pull Request que lo arreglaría. Sigue primero el despliegue
+escalonado (D9) más abajo sobre `actions-runner-2` solo, y ejecuta el bloque completo únicamente
+después de verificarlo. Si el hook ya está desplegado y esto es un reaprovisionamiento normal del
+pool (alta/baja de agentes, `RUNNER_COUNT` distinto), el bloque de abajo es idempotente y seguro
+tal cual.
+
 ```bash
 # En la VM (por SSH). /etc/autohostai-deploy.env lo escribe el cloud-init en una VM nueva;
 # para la VM viva, replicarlo con los OCIDs reales (los da el apply / la consola del Vault):
@@ -154,7 +164,11 @@ Si el `grep` no encuentra nada con un `.env` en disco correcto, el proceso no se
 **Despliegue escalonado del hook (D9), la primera vez que se instala en la VM viva**: no se aplica a los cuatro agentes en la misma pasada. El contrato del hook con GitHub hace que un código de salida distinto de cero falle el job — con los cuatro agentes a la vez, un hook mal calibrado deja la CI entera inoperativa, incluidos los workflows del propio Pull Request que lo arreglaría. Primero se aplica a mano solo a `actions-runner-2` (los mismos tres pasos que el bloque de arriba automatiza para todos), se observan varios jobs reales, y solo entonces se ejecuta el bootstrap completo para el resto:
 
 ```bash
-# 1. Copiar el hook al agente 2 (el bloque de arriba ya dejó /opt/runner-job-started.sh listo):
+# 1. Copiar el hook al agente 2 (el bloque de arriba ya dejó /opt/runner-job-started.sh listo).
+#    `install -d` primero: en una VM donde el hook nunca se instaló, hooks/ todavía no existe y
+#    el `install` de la copia falla con "No such file or directory" sin él (mismo orden que
+#    install_job_started_hook() en runner-bootstrap.sh, sección 4 de este change).
+sudo install -d -o actions-runner-2 -g actions-runner-2 -m0755 /opt/actions-runner-2/hooks
 sudo install -o actions-runner-2 -g actions-runner-2 -m0755 \
   /opt/runner-job-started.sh /opt/actions-runner-2/hooks/runner-job-started.sh
 
