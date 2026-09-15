@@ -7,16 +7,16 @@
 
 ## 1. Add `OwnerApprovalResponse` DTO
 
-- [ ] 1.1 Add `OwnerApprovalResponse(BaseModel)` to `backend/app/maintenance/api/schemas.py`
+- [x] 1.1 Add `OwnerApprovalResponse(BaseModel)` to `backend/app/maintenance/api/schemas.py`
       with the six fields declared in design D6: `approval_id`, `status`, `responded_at`,
       `property_id`, `amount`, `currency`. `currency` is `Literal["EUR"]` — only value the
       project issues today (`OWNER_APPROVAL_CURRENCY = "EUR"`). [R1.6, R5.3, R6.1]
-- [ ] 1.2 Add a `from_domain(cls, approval: OwnerApproval) -> "OwnerApprovalResponse"`
+- [x] 1.2 Add a `from_domain(cls, approval: OwnerApproval) -> "OwnerApprovalResponse"`
       classmethod that maps `approval.id`, `approval.status`, `approval.responded_at`,
       `approval.property_id`, `approval.amount`, `currency="EUR"`. The Pydantic model has
       `model_config = ConfigDict(extra="forbid")` so any future field added on accident is
       caught. [R1.6, R5.3]
-- [ ] 1.3 Verify `backend/app/maintenance/api/schemas.py` imports cleanly:
+- [x] 1.3 Verify `backend/app/maintenance/api/schemas.py` imports cleanly:
       `docker compose exec backend uv run python -c "from app.maintenance.api.schemas import OwnerApprovalResponse"` [R6.2]
 
 ## 2. Widen `RespondOwnerApprovalUseCase` for `OTHER` approvals
@@ -118,6 +118,8 @@
       `make check-rule11-ownership`. No new findings in the files touched. [Verification]
 
 ## Implementation Notes
+
+- Imported `Literal` from `typing` in `backend/app/maintenance/api/schemas.py`; added `OwnerApproval` to the existing `app.maintenance.domain.entities` import block; placed `OwnerApprovalResponse` between `OwnerApprovalPageResponse` and `IncidentPhotoResponse`.
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
