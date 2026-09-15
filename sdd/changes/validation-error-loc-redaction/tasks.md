@@ -102,3 +102,18 @@
   bullet (Residual section, "El `422` de validación devolvía...") to past tense, stated
   the gap is closed by `validation-error-loc-redaction`, and pointed at
   `sdd/specs/api-contract.md` for the mechanism instead of restating it.
+- Round 1 review fix (2026-09-15), `sdd-security` findings: (1) HIGH — the response could
+  still scale on error-COUNT (many distinct unknown keys); added
+  `_MAX_EXTRA_FORBIDDEN_ERRORS = 20` in `backend/app/core/errors.py`, after which further
+  `extra_forbidden` entries are dropped and one summary entry (`type:
+  "extra_forbidden_omitted"`) is appended noting how many. Removed the now-false "number
+  of errors is out of scope" bullet from `proposal.md`'s Out of scope section and added
+  R1.5 instead. (2) MEDIUM — softened the "every other segment is schema-derived" claim to
+  name the `dict[str, <model>]` exception, in both `sdd/specs/api-contract.md` and the code
+  comment above `_serialisable_validation_errors`; no code change (no such field exists
+  today). (3) LOW — the truncation marker suffix was forgeable by a caller-chosen key at or
+  under the cap; added a sibling `"loc_truncated": true` field, set only when truncation
+  actually happened (additive — both `field-errors.ts` consumers only read `loc`/`type`/
+  `msg` and ignore unknown keys). New R1.6. Tests added to `test_errors.py`: entry-count
+  cap (300 distinct unknown keys, body stays < 3000 bytes) and forged-vs-genuine truncation
+  marker distinguishability. All 6 pre-existing tests kept passing unmodified.

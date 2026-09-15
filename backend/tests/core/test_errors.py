@@ -1,4 +1,4 @@
-"""The `extra_forbidden` `loc` bound (R1, R2, R3.1).
+"""The `extra_forbidden` `loc` bound and entry-count cap (R1, R2, R3.1).
 
 Every case drives a real `RequestValidationError` through a throwaway `extra="forbid"`
 model and the actual `register_error_handlers` wiring — a hand-built dict would not
@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.core.errors import (
     _EXTRA_FORBIDDEN_LOC_MAX_LENGTH,
     _EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER,
+    _MAX_EXTRA_FORBIDDEN_ERRORS,
     register_error_handlers,
 )
 
@@ -139,3 +140,47 @@ async def test_loc_stays_a_list_of_str_of_the_same_length() -> None:
     assert isinstance(loc, list)
     assert len(loc) == 2  # ["body", "<key>"]
     assert all(isinstance(part, str) for part in loc)
+
+
+@pytest.mark.asyncio
+async def test_many_distinct_unknown_keys_do_not_scale_the_response() -> None:
+    """Scaled-down reproduction of the panel's probe: 300 distinct unknown keys must
+    still produce a small, bounded body, not one proportional to the key count."""
+    app = _build_app()
+    payload = {"name": "ok", **{f"unknown_{i}": "value" for i in range(300)}}
+
+    response = await _post(app, "/leaf", payload)
+
+    assert response.status_code == 422
+    extra_forbidden = _extra_forbidden_errors(response)
+    assert len(extra_forbidden) == _MAX_EXTRA_FORBIDDEN_ERRORS
+    errors = response.json()["error"]["details"]["errors"]
+    omitted = [error for error in errors if error["type"] == "extra_forbidden_omitted"]
+    assert len(omitted) == 1
+    assert "280" in omitted[0]["msg"]  # 300 sent - 20 kept = 280 omitted
+    # The original unbounded probe scaled linearly with key count; a bounded body must
+    # stay small regardless of how many distinct unknown keys the caller sends.
+    assert len(response.content) < 3000
+
+
+@pytest.mark.asyncio
+async def test_a_genuinely_truncated_key_is_distinguishable_from_a_forged_one() -> None:
+    """A key ending in the marker string but at/under the cap must not be mistaken for a
+    genuinely truncated one — the ambiguity a caller could otherwise exploit."""
+    app = _build_app()
+    forged_key = "z" * 80 + _EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER  # 94 chars, <= cap
+    assert len(forged_key) <= _EXTRA_FORBIDDEN_LOC_MAX_LENGTH
+    genuinely_long_key = "w" * 5000
+
+    forged_response = await _post(app, "/leaf", {"name": "ok", forged_key: "value"})
+    truncated_response = await _post(app, "/leaf", {"name": "ok", genuinely_long_key: "value"})
+
+    forged_error = _extra_forbidden_errors(forged_response)[0]
+    truncated_error = _extra_forbidden_errors(truncated_response)[0]
+
+    assert forged_error["loc"][-1] == forged_key
+    assert forged_error["loc"][-1].endswith(_EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER)
+    assert "loc_truncated" not in forged_error
+
+    assert truncated_error["loc"][-1].endswith(_EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER)
+    assert truncated_error.get("loc_truncated") is True

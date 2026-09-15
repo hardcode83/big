@@ -75,6 +75,18 @@ Acceptance criteria:
 4. WHEN a request sends a 5,000-character unknown key (the measured probe), THE SYSTEM SHALL
    produce a `422` body whose size no longer scales with the caller's input — verified with a test
    that repeats the original probe and asserts the bound holds.
+5. WHEN a single request produces more than 20 `extra_forbidden` errors (a caller sending that
+   many distinct unknown keys), THE SYSTEM SHALL stop adding further `extra_forbidden` entries to
+   the serialised list beyond that cap and append one summary entry noting how many were omitted,
+   so the `422` body's size no longer scales with the number of distinct unknown keys either —
+   verified with a test that sends hundreds of distinct unknown keys and asserts the body stays
+   small and bounded. Every other error type keeps being added normally: it is already bounded by
+   the schema's own field count, which a caller cannot inflate.
+6. WHEN the last segment of an `extra_forbidden` error's `loc` is actually truncated, THE SYSTEM
+   SHALL add a sibling `"loc_truncated": true` field to that error entry, present only when
+   truncation happened, so a caller-supplied key that merely ends with the truncation marker
+   string (but is itself at or under the cap) is never confused for a genuinely truncated one —
+   verified with a test that compares a forged key against a genuinely long one.
 
 ### R2 — Schema-derived segments are never touched
 
@@ -125,8 +137,9 @@ per module.
 
 Acceptance criteria:
 
-1. THE SYSTEM SHALL document the bound — which error `type` it applies to, the cap length, and the
-   measured before/after body size for the original probe — in `sdd/specs/api-contract.md`'s
+1. THE SYSTEM SHALL document the bound — which error `type` it applies to, the cap length, the
+   entry-count cap, the `loc_truncated` signal, and the measured before/after body size for the
+   original probe — in `sdd/specs/api-contract.md`'s
    section on error responses.
 2. THE SYSTEM SHALL NOT introduce this requirement into `sdd/specs/revenue-pricing.md` or any
    other module spec: the gap is prior and shared, as `sdd/roadmap/validation-error-loc-redaction.md`
@@ -135,10 +148,6 @@ Acceptance criteria:
 
 ## Out of scope
 
-- **Any change to the number of errors a `422` body can carry.** The roadmap entry and the probe
-  are both about the length of one `loc` segment, not the count of errors in the array; the
-  request body itself is already capped by the project's body-size limits (regla 14), which bounds
-  how many extra keys a single request can even carry.
 - **Rewriting `msg` for `extra_forbidden` errors.** Pydantic's message for that error type is a
   fixed string (`"Extra inputs are not permitted"`) that does not interpolate the caller's key —
   the only echo is in `loc`, and only there.

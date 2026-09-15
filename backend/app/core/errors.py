@@ -112,27 +112,67 @@ def register_error_handlers(app: FastAPI) -> None:
 _EXTRA_FORBIDDEN_LOC_MAX_LENGTH = 100
 _EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER = "...(truncated)"
 
+# A caller who sends many distinct unknown keys in one request gets one `extra_forbidden`
+# error per key, and each entry costs a fixed response overhead (`loc`, `type`, the fixed
+# `msg`, JSON punctuation) regardless of how short the key is — so this axis (error COUNT,
+# not `loc` length) can still scale the response well past the request that produced it.
+# 20 is generously above any real accidental-typo scenario (a caller fat-fingering a
+# request sends a handful of wrong keys, never twenty).
+_MAX_EXTRA_FORBIDDEN_ERRORS = 20
 
-def _bound_extra_forbidden_segment(segment: str) -> str:
+
+def _bound_extra_forbidden_segment(segment: str) -> tuple[str, bool]:
+    """Returns the bounded segment and whether it was actually truncated.
+
+    The boolean is the unforgeable truncation signal: a caller-supplied key that merely
+    *ends with* the truncation marker (but is itself <=100 chars) is never touched, so it
+    comes back with `truncated=False` even though its text happens to match the marker.
+    """
     if len(segment) <= _EXTRA_FORBIDDEN_LOC_MAX_LENGTH:
-        return segment
+        return segment, False
     cutoff = _EXTRA_FORBIDDEN_LOC_MAX_LENGTH - len(_EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER)
-    return segment[:cutoff] + _EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER
+    return segment[:cutoff] + _EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER, True
 
 
 def _serialisable_validation_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
     serialisable: list[dict[str, Any]] = []
+    extra_forbidden_seen = 0
+    extra_forbidden_dropped = 0
     for error in exc.errors():
         loc = [str(part) for part in error.get("loc", ())]
-        # Only `extra_forbidden` echoes raw caller input; every other error type's `loc`
-        # is entirely schema-derived (real field names) and must never be touched.
-        if error.get("type") == "extra_forbidden" and loc:
-            loc[-1] = _bound_extra_forbidden_segment(loc[-1])
+        error_type = str(error.get("type", ""))
+        # Only `extra_forbidden` echoes raw caller input. For every schema in this
+        # codebase today (all `extra="forbid"` models with typed, non-dict fields), every
+        # other error type's `loc` is entirely schema-derived (real field names) and must
+        # never be touched. The one caveat: a hypothetical `dict[str, <model>]` request
+        # field would let a caller's dict key surface unbounded under a different error
+        # type (e.g. `string_type`) — this fix does not cover that, because no such field
+        # exists in this codebase today.
+        truncated = False
+        if error_type == "extra_forbidden":
+            if extra_forbidden_seen >= _MAX_EXTRA_FORBIDDEN_ERRORS:
+                extra_forbidden_dropped += 1
+                continue
+            extra_forbidden_seen += 1
+            if loc:
+                loc[-1], truncated = _bound_extra_forbidden_segment(loc[-1])
+        entry: dict[str, Any] = {
+            "loc": loc,
+            "type": error_type,
+            "msg": str(error.get("msg", "")),
+        }
+        if truncated:
+            entry["loc_truncated"] = True
+        serialisable.append(entry)
+    if extra_forbidden_dropped:
         serialisable.append(
             {
-                "loc": loc,
-                "type": str(error.get("type", "")),
-                "msg": str(error.get("msg", "")),
+                "loc": [],
+                "type": "extra_forbidden_omitted",
+                "msg": (
+                    f"{extra_forbidden_dropped} more unknown field error(s) omitted "
+                    f"(cap: {_MAX_EXTRA_FORBIDDEN_ERRORS})"
+                ),
             }
         )
     return serialisable

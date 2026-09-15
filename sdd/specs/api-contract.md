@@ -134,10 +134,21 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
   porque Pydantic lo rellena con la clave desconocida literal que envió el llamante— a 100
   caracteres totales, incluida la marca de truncado `...(truncated)`. Todo otro segmento de
   `loc` y todo error de cualquier otro `type` (`missing`, `string_too_long`, `value_error`,
-  …) queda sin tocar, porque son schema-derived y acotarlos cortaría un nombre de campo
-  legítimo. Se aplica una sola vez para todo módulo con `extra="forbid"`, no por router. Medido:
-  una clave desconocida de 5.000 caracteres pasa de un cuerpo `422` de 5.182 bytes a uno de 282
-  bytes para la misma prueba. Entrada `validation-error-loc-redaction` del roadmap.
+  …) queda sin tocar, porque para todo schema de este código hoy —modelos `extra="forbid"`
+  con campos tipados, no `dict`— son schema-derived y acotarlos cortaría un nombre de campo
+  legítimo. Excepción nombrada: un hipotético campo `dict[str, <modelo>]` dejaría aparecer
+  una clave del llamante sin acotar bajo otro `type` (p. ej. `string_type`); ningún schema de
+  este código tiene hoy esa forma, así que esta corrección no la cubre. Se aplica una sola vez
+  para todo módulo con `extra="forbid"`, no por router. Cuando el segmento se trunca de
+  verdad, el error añade `"loc_truncated": true` junto a `loc`/`type`/`msg` —una señal que el
+  llamante no puede forjar, porque una clave propia de ≤100 caracteres que termine en la
+  marca literal nunca la activa. Medido: una clave desconocida de 5.000 caracteres pasa de un
+  cuerpo `422` de 5.182 bytes a uno de 282 bytes para la misma prueba. Además, THE SYSTEM
+  SHALL acotar a 20 el número de errores `extra_forbidden` serializados por request —el eje
+  de CANTIDAD, no de longitud, que el llamante también controla enviando muchas claves
+  desconocidas distintas—, añadiendo una única entrada resumen de `type`
+  `extra_forbidden_omitted` cuando se supera el tope. Entrada `validation-error-loc-redaction`
+  del roadmap.
 
 ### Verificación estructural sin vacuidad
 
