@@ -123,3 +123,4 @@
 | statements-web | run, review | 5612531 | 1024847 | 149050712 | 119.5945 | 2026-09-14 | — |
 | hardening-release | new, design, tasks, run, review, ship, archive | 558539 | 2008528 | 955794755 | 284.2286 | 2026-09-13 | 2026-09-14 |
 | guest-scheduled-comms | new, design, tasks, run, review, ship, archive | 292874 | 1051392 | 362801808 | 105.9539 | 2026-09-13 | 2026-09-14 |
+| validation-error-loc-redaction | tasks, run, review | 40422 | 491680 | 92338361 | 32.8293 | 2026-09-15 | — |
