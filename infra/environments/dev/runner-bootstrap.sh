@@ -194,7 +194,15 @@ for r in runs:
         # ESTE run no tiene el del agente, solo que no pudimos leerlo.
         sys.exit(1)
     for j in jobs_body["jobs"]:
-        if j.get("status") == "in_progress" and j.get("runner_name") == target:
+        if j.get("status") != "in_progress":
+            continue
+        runner_name = j.get("runner_name")
+        if runner_name is None:
+            # `runner_name` es un campo nullable en el schema de GitHub. Un job in-progress sin
+            # él no es "seguro que no es el nuestro" — es que no podemos saberlo. Desconocido,
+            # no "no coincide" (round 8, panel de `/sdd:review`, `sdd-security`, 2026-09-15).
+            sys.exit(1)
+        if runner_name == target:
             # El verdicto "encontrado" lo lleva el código de salida (0), no el contenido
             # impreso — un `html_url` ausente no debe leerse como "no encontrado" en el
             # llamador, que solo mira si la salida está vacía.
@@ -415,20 +423,37 @@ start_named_agent() {
 
         step="svc.sh install/start $svc"
         cd "$runner_home"
+        # `.hook_confirmed`: hallazgo del panel de `/sdd:review`, `sdd-security`, 2026-09-15
+        # (round 8). Sin este marcador, el reinicio diferido (rc=2/3) es un callejón sin salida:
+        # `write_runner_env` ya dejó el `.env` correcto en disco en la pasada que difirió, así
+        # que la SIGUIENTE pasada lo ve `unchanged` (`env_changed=0`) y la rama `active)` no
+        # vuelve a intentar nada — precisamente lo contrario de lo que el mensaje diferido y
+        # `RUNBOOK.md §6.2` le dicen al operador ("reaplicar este bootstrap" NO reintentaba el
+        # reinicio). El marcador registra si el proceso VIVO ya fue confirmado con el hook
+        # activo: se crea al reiniciar con éxito o al arrancar un agente de cero (su proceso nace
+        # leyendo el `.env` ya correcto), y NO se crea al diferir — así que mientras falte, cada
+        # reaplicación del bootstrap vuelve a intentarlo, con la misma guardia de liveness de
+        # siempre (nunca reinicia un agente con job en vuelo o de estado desconocido).
+        # Relative to cwd (already `cd`'d into `$runner_home` above), NOT `$runner_home/...`:
+        # the test harness redirects `cd "$runner_home"` to a fake directory via a shell-function
+        # override, and a path built from the literal `$runner_home` string would silently bypass
+        # that redirect and touch the real (nonexistent, unprivileged-unwritable) `/opt/...` path.
+        marker=".hook_confirmed"
         state="$(systemctl is-active "$svc" 2>&1 || true)"
         case "$state" in
             active)
                 # Ya activo. Hasta el change ci-runner-workspace-pollution esto era "no tocar", y
-                # sigue siéndolo salvo por UN caso: si el `.env` de este agente cambió en esta
-                # pasada, el proceso vivo arrancó con el entorno ANTERIOR y no tiene
-                # ACTIONS_RUNNER_HOOK_JOB_STARTED — ese fichero no lo carga systemd ni `runsvc.sh`,
-                # lo lee el propio proceso del runner al arrancar (D3; doc de GitHub, literal:
-                # "any change to the .env file will require restarting the runner"). Dejarlo así
-                # instalaría el hook sin que NINGÚN runner lo releyese: el fallo silencioso más
-                # probable de este change (D4).
+                # sigue siéndolo salvo por DOS casos: (1) si el `.env` de este agente cambió en
+                # esta pasada, o (2) si nunca se confirmó un reinicio con el hook activo (marcador
+                # ausente — p. ej. quedó diferido en una pasada anterior). En cualquiera de los
+                # dos, el proceso vivo puede seguir sin `ACTIONS_RUNNER_HOOK_JOB_STARTED` — ese
+                # fichero no lo carga systemd ni `runsvc.sh`, lo lee el propio proceso del runner
+                # al arrancar (D3; doc de GitHub, literal: "any change to the .env file will
+                # require restarting the runner"). Dejarlo así instalaría el hook sin que NINGÚN
+                # runner lo releyese: el fallo silencioso más probable de este change (D4).
                 # El reinicio se condiciona a que el agente no tenga un job en vuelo — misma
                 # guardia de liveness que la Fase 1 (`systemctl is-active` + la API de GitHub).
-                if [[ "$env_changed" -eq 1 ]]; then
+                if [[ "$env_changed" -eq 1 || ! -e "$marker" ]]; then
                     step="restart $svc (.env cambiado)"
                     # api_rc por separado de `url`, y NUNCA `|| true`: un fallo de la API (token
                     # expirado, 403/429, timeout) no es lo mismo que "sin job en vuelo" — antes de
@@ -453,14 +478,16 @@ start_named_agent() {
                         exit 2
                     fi
                     systemctl restart "$svc"
+                    touch "$marker"
                     echo "[hook] agent $i/$RUNNER_COUNT: $svc reiniciado — el runner ya lee ACTIONS_RUNNER_HOOK_JOB_STARTED."
                 fi
                 ;;
             failed|inactive|unknown)
                 # Arranque desde cero: el proceso nace DESPUÉS de escribir el `.env`, así que lo lee
-                # sin más — no hay nada que reiniciar aquí.
+                # sin más — no hay nada que reiniciar aquí. Confirmado por construcción: marcar.
                 ./svc.sh install "$runner_user"
                 ./svc.sh start
+                touch "$marker"
                 ;;
             *)
                 echo "agent $i/$RUNNER_COUNT: estado inesperado '$state' para $svc" >&2

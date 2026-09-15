@@ -96,6 +96,22 @@ revisar el token/la API), en vez del mismo mensaje "job en vuelo" para los dos. 
 alcance: sigue siendo el mismo "no reiniciar si no estamos seguros" de la decisión original, solo
 que "seguros" ahora exige una confirmación positiva de la API, no la ausencia de una negativa.
 
+**Segunda enmienda, misma fecha** (panel de `/sdd:review`, feature-scale, round 8: `sdd-security`):
+un diferimiento (rc=2 o 3) resultaba ser un callejón sin salida. `write_runner_env` ya había dejado
+el `.env` correcto en disco en la pasada que difirió, así que la SIGUIENTE pasada lo veía
+`unchanged` (`env_changed=0`) y la rama `active)` no volvía a intentar nada — exactamente lo
+contrario de lo que el mensaje diferido y `RUNBOOK.md §6.2` le dicen al operador ("reaplicar este
+bootstrap" no reintentaba el reinicio; solo un `systemctl restart` manual directo funcionaba).
+Corregido con un marcador por agente, `$RUNNER_HOME/.hook_confirmed`: se crea solo cuando el
+proceso vivo queda confirmado leyendo el `.env` correcto — tras un reinicio con éxito, o al nacer
+de cero (un arranque desde `failed`/`inactive`/`unknown` ya lee el `.env` ya escrito) — y NUNCA al
+diferir. La rama `active)` ahora reintenta si `env_changed=1` **o** el marcador está ausente, con
+la misma guardia de liveness de siempre (nunca toca un agente con job en vuelo o de estado
+desconocido). Coste aceptado del despliegue de esta propia enmienda: la primera vez que se aplique
+sobre agentes ya activos y correctamente configurados mucho antes de este fix, ninguno tendrá el
+marcador todavía, así que la primera pasada los reinicia una vez más de lo estrictamente
+necesario — seguro (pasa por el mismo busy-check) y de una sola vez, no recurrente.
+
 ### D5 — `PYTHONDONTWRITEBYTECODE` en el compose, no en el Dockerfile
 
 **Chosen:** se declara en el `environment:` de los cuatro servicios de `docker-compose.yml`. El
@@ -184,7 +200,7 @@ rápido, pero sin vía de recuperación si el hook falla.
 | Stack local | `docker-compose.yml` | `PYTHONDONTWRITEBYTECODE: "1"` en `environment:` de `migrate`, `backend`, `worker`, `beat` (R1.1) |
 | Backend | `backend/pyproject.toml` | Nueva sección `[tool.pytest.ini_options]` con `cache_dir` fuera del árbol (R2.1) |
 | Infra dev | `infra/environments/dev/runner-job-started.sh` | **Nuevo.** El hook: short-circuit si no hay ficheros ajenos, si no `chown -R` acotado al `_work/` propio (R3.1, R3.3, R3.4, R3.6) |
-| Infra dev | `infra/environments/dev/runner-bootstrap.sh` | Instala el hook en `$RUNNER_HOME/hooks/`, escribe `$RUNNER_HOME/.env`, y reinicia el agente si el `.env` cambió y está ocioso (R3.2, D4). **Enmienda 2026-09-15**: la comprobación de liveness contra la API de GitHub (`gh_in_progress_url_for_runner`) falla cerrada ante cualquier incertidumbre, y el reinicio diferido distingue "job confirmado" (rc=2) de "API no respondió" (rc=3) — ver D4 |
+| Infra dev | `infra/environments/dev/runner-bootstrap.sh` | Instala el hook en `$RUNNER_HOME/hooks/`, escribe `$RUNNER_HOME/.env`, y reinicia el agente si el `.env` cambió y está ocioso (R3.2, D4). **Enmienda 2026-09-15**: la comprobación de liveness contra la API de GitHub (`gh_in_progress_url_for_runner`) falla cerrada ante cualquier incertidumbre, y el reinicio diferido distingue "job confirmado" (rc=2) de "API no respondió" (rc=3) — ver D4. **Segunda enmienda, misma fecha (round 8)**: marcador `.hook_confirmed` por agente para que un reinicio diferido no quede sin reintentar — ver D4 |
 | Infra dev | `infra/environments/dev/cloud-init.yaml.tftpl`, `main.tf` | El hook viaja a la VM nueva igual que el bootstrap: `file()` en `main.tf` + `write_files` en el cloud-init |
 | Infra dev | `infra/environments/dev/RUNBOOK.md` | §6.2 gana el paso de copiar el hook y la nota del reinicio (D7) |
 | CI | `scripts/` + `Makefile` + workflow de gates | **Nuevo.** Guard que lee la composición resuelta y exige la variable en todo servicio con bind mount del árbol (R5, D8) |

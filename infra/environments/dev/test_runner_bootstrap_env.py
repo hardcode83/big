@@ -365,6 +365,7 @@ def start_named_agent(
     service_state: str,
     in_progress_url: str = "",
     api_fails: bool = False,
+    marker_present: bool = False,
 ):
     """Run the real `start_named_agent` from the script against a fake `/opt/actions-runner-<i>`.
 
@@ -391,6 +392,9 @@ def start_named_agent(
     real_home = f"/opt/actions-runner-{i}"
     fake_home = tmp_path / f"actions-runner-{i}"
     fake_home.mkdir(parents=True, exist_ok=True)
+    marker = fake_home / ".hook_confirmed"
+    if marker_present:
+        marker.write_text("")
     svc_log = tmp_path / "svc.log"
     restart_log = tmp_path / "systemctl-restart.log"
     gh_call_log = tmp_path / "gh-calls.log"
@@ -436,6 +440,7 @@ def start_named_agent(
     result.svc_log = svc_log.read_text() if svc_log.exists() else ""
     result.restart_log = restart_log.read_text() if restart_log.exists() else ""
     result.gh_calls = gh_call_log.read_text() if gh_call_log.exists() else ""
+    result.marker_exists = marker.exists()
     return result
 
 
@@ -449,30 +454,55 @@ def test_start_named_agent_extraction_is_anchored_on_the_real_script():
 
 
 def test_env_unchanged_active_agent_is_left_alone(tmp_path):
-    """Case 1: env_changed=0, service already `active` — no restart, no busy-check, rc=0.
+    """Case 1: env_changed=0, service already `active`, hook already CONFIRMED (marker present)
+    — no restart, no busy-check, rc=0. This is the genuinely-settled steady state; the sibling
+    test below covers the same `env_changed=0` input with the marker absent, which round 8
+    changed the behavior of (see that test's docstring).
 
     `systemctl is-active` itself is still invoked (that is how the function learns the state at
     all — it runs unconditionally before the `case`), so this only asserts that `restart` is never
     reached and the busy-check (`gh_in_progress_url_for_runner`) is never even called.
     """
-    result = start_named_agent(2, 0, tmp_path, service_state="active")
+    result = start_named_agent(2, 0, tmp_path, service_state="active", marker_present=True)
     assert result.returncode == 0, f"stdout={result.stdout} stderr={result.stderr}"
     assert result.restart_log == "", "systemctl restart must not be invoked"
-    assert result.gh_calls == "", "the busy-check must not run when the .env did not change"
+    assert result.gh_calls == "", "the busy-check must not run once the hook is confirmed active"
+    assert result.marker_exists, "an already-confirmed marker must not be removed"
+
+
+def test_env_unchanged_active_agent_without_confirmed_marker_still_retries(tmp_path):
+    """Round 8 (`sdd-security`, 2026-09-15): before this fix, a DEFERRED restart (rc=2/3) was a
+    dead end — `write_runner_env` had already written the correct `.env` in the pass that
+    deferred, so the NEXT pass sees it `unchanged` (`env_changed=0`) and the `active)` branch did
+    nothing at all, contradicting both the deferred message and `RUNBOOK.md §6.2`'s own
+    instruction that reapplying the bootstrap would retry it. The `.hook_confirmed` marker (only
+    written on a successful restart or a fresh install/start) closes this: `env_changed=0` with
+    no marker must still run the busy-check and retry the restart if idle, exactly like
+    `env_changed=1` does.
+    """
+    result = start_named_agent(2, 0, tmp_path, service_state="active", in_progress_url="")
+    assert result.returncode == 0, f"stdout={result.stdout} stderr={result.stderr}"
+    svc = f"{AGENT_SERVICE_PREFIX}-2.service"
+    assert result.restart_log == f"restart {svc}\n", "an unconfirmed agent must still be retried"
+    assert result.gh_calls == "autohostai-test-vm-2\n"
+    assert result.marker_exists, "a successful retry must finally create the marker"
 
 
 def test_env_changed_active_idle_agent_is_restarted(tmp_path):
-    """Case 2: env_changed=1, active, agent IDLE — restart happens, on the right service."""
+    """Case 2: env_changed=1, active, agent IDLE — restart happens, on the right service, and the
+    marker is created so a future pass with `env_changed=0` won't retry it needlessly."""
     result = start_named_agent(2, 1, tmp_path, service_state="active", in_progress_url="")
     assert result.returncode == 0, f"stdout={result.stdout} stderr={result.stderr}"
     svc = f"{AGENT_SERVICE_PREFIX}-2.service"
     assert result.restart_log == f"restart {svc}\n"
     assert result.gh_calls == "autohostai-test-vm-2\n", "busy-check must run before restarting"
+    assert result.marker_exists, "a successful restart must create the confirmation marker"
 
 
 def test_env_changed_active_busy_agent_is_deferred_not_restarted(tmp_path):
     """Case 3: env_changed=1, active, agent BUSY — this is D4's whole point: rc=2, no restart,
-    and the deferred message names the service so an operator can act on it later.
+    and the deferred message names the service so an operator can act on it later. No marker
+    either — that's exactly what makes the NEXT pass retry it (round 8).
     """
     url = "https://github.com/acme/repo/actions/runs/123"
     result = start_named_agent(2, 1, tmp_path, service_state="active", in_progress_url=url)
@@ -481,6 +511,7 @@ def test_env_changed_active_busy_agent_is_deferred_not_restarted(tmp_path):
     svc = f"{AGENT_SERVICE_PREFIX}-2.service"
     assert svc in result.stdout, "the deferred message must name the service"
     assert url in result.stdout, "the deferred message must name the in-progress run"
+    assert not result.marker_exists, "a deferred restart must not be marked confirmed"
 
 
 def test_env_changed_active_agent_gh_api_failure_defers_not_restarted(tmp_path):
@@ -497,11 +528,13 @@ def test_env_changed_active_agent_gh_api_failure_defers_not_restarted(tmp_path):
     assert result.restart_log == "", "an API failure must never be treated as 'idle'"
     svc = f"{AGENT_SERVICE_PREFIX}-2.service"
     assert svc in result.stdout, "the deferred message must name the service"
+    assert not result.marker_exists, "a deferred (unknown) restart must not be marked confirmed"
 
 
 def test_env_changed_inactive_agent_goes_through_install_start_not_restart(tmp_path):
     """Case 4: env_changed=1, `failed`/`inactive` — the PRE-EXISTING install/start path, which
-    this fix round must not have narrowed or broken while adding coverage for the new branch.
+    this fix round must not have narrowed or broken while adding coverage for the new branch. A
+    freshly-started process reads the already-correct `.env`, so it's confirmed immediately.
     """
     result = start_named_agent(2, 1, tmp_path, service_state="failed")
     assert result.returncode == 0, f"stdout={result.stdout} stderr={result.stderr}"
@@ -509,6 +542,7 @@ def test_env_changed_inactive_agent_goes_through_install_start_not_restart(tmp_p
     assert "svc.sh install actions-runner-2" in result.svc_log
     assert "svc.sh start" in result.svc_log
     assert result.gh_calls == "", "the busy-check is restart-only; install/start never needs it"
+    assert result.marker_exists, "a fresh start already reads the correct .env — confirmed"
 
 
 # --- FASE 2 registration-loop wiring: rc=2 is deferred, not a failure --------------------------
@@ -733,6 +767,18 @@ def test_gh_helper_no_matching_job_among_real_runs_is_confirmed_idle():
     })
     assert code == 0
     assert out == ""
+
+
+def test_gh_helper_in_progress_job_with_null_runner_name_is_unknown_not_idle():
+    """Round 8 (`sdd-security`, 2026-09-15): `runner_name` is nullable in GitHub's job schema. An
+    in-progress job with no `runner_name` at all can't be ruled out as the agent's own job."""
+    runs = {"workflow_runs": [{"id": 1, "html_url": "https://x/1"}]}
+    jobs = {"jobs": [{"status": "in_progress", "runner_name": None}]}
+    code, out = run_gh_helper("agent-2", {
+        RUNS_URL: (runs, None),
+        "actions/runs/1/jobs": (jobs, None),
+    })
+    assert code != 0, "a null runner_name on an in-progress job must never report as 'confirmed idle'"
 
 
 def test_gh_helper_a_run_without_an_id_is_unknown_not_idle():
