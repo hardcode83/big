@@ -451,6 +451,24 @@ una fecha de resolución que llega a `null`. El umbral `owner_approval_threshold
 calcula, no se muestra y no se anticipa**: el rol no puede leer la configuración del tenant, y la
 puerta la resuelve el backend al recibir el cierre. La app lo muestra; no lo predice ni lo evita.
 
+**Mensajes con el manager, en pestaña.** `/tech/incidents/[id]` tiene dos pestañas —
+«Incidencia» (activa al cargar) y «Mensajes», el hilo técnico↔manager descrito arriba en
+[«El hilo de mensajes de la incidencia»](#el-hilo-de-mensajes-de-la-incidencia) — en vez de
+una sección más en el flujo vertical: el hilo es infrecuente frente a lo que se mira en cada
+apertura. Cambiar de pestaña no descarta nada de la otra: los dos paneles quedan montados (la
+inactiva se oculta con `hidden`), así que el formulario de cierre, la ETA escrita y el `stage`
+elegido en la subida de fotos sobreviven a un viaje de ida y vuelta a «Mensajes». El hilo se
+pide la primera vez que el técnico toca la pestaña, no al abrir la pantalla, y de ahí en
+adelante queda cargado. Los mensajes salen paginados de 20 en 20, del más antiguo al más
+reciente, con «Cargar mensajes más recientes» para pedir la página siguiente. El compositor
+es un `<textarea>` de 1-2000 caracteres con contador, deshabilitado mientras el texto esté
+fuera de rango o el envío en vuelo; si el envío falla conserva el texto escrito y muestra el
+error junto al compositor, y si responde `201` limpia el compositor y añade el mensaje al
+final sin recargar la página. Un `404` de la incidencia sustituye toda la pantalla —
+compositor incluido— por «Incidencia no disponible», la misma convención que el resto de
+lecturas de la pantalla. El detalle EARS está en
+[`sdd/specs/tech-app.md`](../sdd/specs/tech-app.md) R7.
+
 ## Enterarse de una incidencia grave sin abrir la pantalla
 
 Hasta `notification-writers-gap` una incidencia crítica no avisaba a nadie: se escribía la
