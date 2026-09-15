@@ -123,6 +123,8 @@ Categorías:
   needs: properties-crud · size: M · kind: feature
 - [x] dashboard-web — [FE] **el consumo real del dashboard**: `HttpDashboardSource` y el cambio del mock, que es una línea en un solo fichero. La UI ya existe desde `dashboard-web-frontend` … → changes/archive/2026-08-11-dashboard-web/
   needs: dashboard-api, frontend-auth-session · size: S · kind: feature
+- [ ] dashboard-auto-refresh — [FE] **polling near-real-time del dashboard existente cada 30 s mientras está activo**, para cerrar el gap de PRD §28.2. Change ad-hoc de Marta; sin backend, WebSockets/SSE, activity feed ni CI.
+  needs: dashboard-api, frontend-auth-session, frontend-foundation, visual-restyle-workspace · size: S · kind: feature
 - [x] reservations-web — [FE] **la primera pantalla real de reservas … → changes/archive/2026-08-20-reservations-web/
   needs: reservations, frontend-auth-session · size: S · kind: feature
 - [x] incidents-web — [FE] **la primera pantalla real de incidencias … → changes/archive/2026-08-20-incidents-web/
