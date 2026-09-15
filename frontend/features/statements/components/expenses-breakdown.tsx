@@ -6,40 +6,7 @@ import { EmptyState } from "@/components/states";
 import { Card } from "@/components/ui/card";
 
 import type { OwnerStatementExpense } from "../data";
-
-/**
- * A `YYYY-MM-DD` day as the locale's medium date, UTC-anchored. Deliberate,
- * temporary duplicate — see `reservations-breakdown.tsx`'s identical helper.
- *
- * TODO(section 6.2): replace with the shared `features/statements/lib/format.ts`.
- */
-function fmtDay(isoDay: string, locale: string): string {
-  const date = new Date(isoDay);
-  if (Number.isNaN(date.getTime())) {
-    return isoDay;
-  }
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" }).format(date);
-}
-
-/**
- * A row's own decimal amount formatted with ITS OWN `currency` (R3.6) — see
- * `reservations-breakdown.tsx`'s identical helper for the rationale. Unlike
- * the reservation amounts, `OwnerStatementExpense.amount` is never null, so
- * there is no absent-value branch here (R3.3 lists no nullable field).
- *
- * TODO(section 6.2): replace with the shared `features/statements/lib/format.ts`.
- */
-function fmtCurrency(value: string, currency: string, locale: string): string {
-  const num = Number(value);
-  if (!Number.isFinite(num)) {
-    return value;
-  }
-  try {
-    return new Intl.NumberFormat(locale, { style: "currency", currency }).format(num);
-  } catch {
-    return `${num.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
-  }
-}
+import { fmtCurrency, fmtDay } from "../lib/format";
 
 export interface ExpensesBreakdownProps {
   expenses: OwnerStatementExpense[];
@@ -50,6 +17,13 @@ export interface ExpensesBreakdownProps {
  * Shows only the six contractual fields — no subtotal or other aggregate is
  * computed or displayed (R3.4): an empty collection is a valid, translated
  * empty state, not an error.
+ *
+ * Dates and per-row currencies come from `../lib/format` (task 6.2).
+ * Per-row amounts use `fmtCurrency` so each row carries its own `currency`
+ * — the summary's currency-less `fmtAmount` would be wrong here (R3.6).
+ * Unlike the reservation amounts, `OwnerStatementExpense.amount` is never
+ * null, so there is no absent-value branch here (R3.3 lists no nullable
+ * field).
  */
 export function ExpensesBreakdown({ expenses }: ExpensesBreakdownProps) {
   const { t, i18n } = useTranslation("statements");

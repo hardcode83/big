@@ -9,6 +9,7 @@ import { TONE_BADGE_CLASS, type Tone } from "@/lib/ui/status-tone";
 import { cn } from "@/lib/utils";
 
 import type { OwnerStatement, OwnerStatementStatus } from "../data";
+import { fmtAmount, fmtDay } from "../lib/format";
 
 /**
  * The directory this row resolves `propertyId` against. Shaped like
@@ -32,41 +33,6 @@ export const STATUS_TONE: Record<OwnerStatementStatus, Tone> = {
   READY: "blue",
   SENT: "green",
 };
-
-/**
- * A `YYYY-MM-DD` day as the locale's medium date, UTC-anchored so the day
- * never shifts with the browser's timezone (same discipline as
- * `features/pricing/lib/format.ts:fmtDay` and `features/reviews/lib/format.ts:fmtDay`).
- * An unparseable value degrades to the raw string rather than throwing.
- *
- * TODO(section 6.2): replace with the shared `features/statements/lib/format.ts`
- * once it exists, instead of keeping this local copy.
- */
-function fmtDay(isoDay: string, locale: string): string {
-  const date = new Date(isoDay);
-  if (Number.isNaN(date.getTime())) {
-    return isoDay;
-  }
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" }).format(
-    date,
-  );
-}
-
-/**
- * A contract decimal string rendered with the locale's separator and two
- * decimals. No currency symbol or code: `OwnerStatementResponse` publishes no
- * `currency` field on its summary (R3.6), so inventing one here would be a
- * fabrication the backend never asserted.
- *
- * TODO(section 6.2): replace with the shared `features/statements/lib/format.ts`.
- */
-function fmtAmount(value: string, locale: string): string {
-  const num = Number(value);
-  if (!Number.isFinite(num)) {
-    return value;
-  }
-  return num.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 function Field({
   label,
@@ -102,13 +68,30 @@ function Field({
  * (`periodStart`/`periodEnd`, `status`, `netOwnerResult`) — the eleven-amount
  * breakdown and `reservations[]`/`expenses[]` belong to the detail view
  * (section 4), not this row.
+ *
+ * Dates and amounts use the shared formatters from `../lib/format` (task
+ * 6.2) — UTC-anchored medium dates, locale decimals, and NO currency symbol
+ * (the summary has no `currency` field — R3.6 forbids inventing one).
+ *
+ * **Selection (task 6.3):** when the parent supplies `onSelect`, the row's
+ * inner card becomes a `<button>` so it is keyboard-operable, has a focus
+ * state, and meets the 44x44 tap-target baseline. The `<li>` stays static;
+ * only the card content flips to a button — keyboard tab order is
+ * preserved (the button is the sole focusable element inside the row) and
+ * screen readers keep `aria-labelledby` on the list item.
  */
 export interface StatementRowProps {
   statement: OwnerStatement;
   properties: StatementPropertyDirectory;
+  /**
+   * When provided, the row becomes a keyboard- and pointer-operable trigger
+   * that calls this with `statement.id`. When omitted, the row is purely
+   * informational — used by tests and any future read-only listing.
+   */
+  onSelect?: (statementId: string) => void;
 }
 
-export function StatementRow({ statement, properties }: StatementRowProps) {
+export function StatementRow({ statement, properties, onSelect }: StatementRowProps) {
   const { t, i18n } = useTranslation("statements");
   const locale = i18n.language;
   const headingId = `statement-row-${statement.id}`;
@@ -120,33 +103,53 @@ export function StatementRow({ statement, properties }: StatementRowProps) {
       ? t("identity.loading")
       : t("identity.unavailable");
 
+  const body = (
+    <Card
+      className={cn(
+        "flex min-w-0 flex-col gap-3 p-4 text-left",
+        onSelect ? "tap-target w-full" : null,
+      )}
+    >
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+        <h2
+          id={headingId}
+          className="min-w-0 flex-1 break-words text-body-lg font-semibold text-foreground"
+        >
+          <span className="sr-only">{t("columns.property")}: </span>
+          {propertyLabel}
+        </h2>
+        <Badge variant="outline" className={cn(TONE_BADGE_CLASS[STATUS_TONE[statement.status]])}>
+          <span className="sr-only">{t("columns.status")}: </span>
+          {t(`status.${statement.status}`)}
+        </Badge>
+      </div>
+
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label={t("columns.period")} className="sm:col-span-2">
+          {fmtDay(statement.periodStart, locale)} {t("separator")}{" "}
+          {fmtDay(statement.periodEnd, locale)}
+        </Field>
+        <Field label={t("columns.netOwnerResult")}>
+          {fmtAmount(statement.netOwnerResult, locale)}
+        </Field>
+      </div>
+    </Card>
+  );
+
   return (
     <li aria-labelledby={headingId} className="min-w-0 list-none">
-      <Card className="flex min-w-0 flex-col gap-3 p-4">
-        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-          <h3
-            id={headingId}
-            className="min-w-0 flex-1 break-words text-body-lg font-semibold text-foreground"
-          >
-            <span className="sr-only">{t("columns.property")}: </span>
-            {propertyLabel}
-          </h3>
-          <Badge variant="outline" className={cn(TONE_BADGE_CLASS[STATUS_TONE[statement.status]])}>
-            <span className="sr-only">{t("columns.status")}: </span>
-            {t(`status.${statement.status}`)}
-          </Badge>
-        </div>
-
-        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label={t("columns.period")} className="sm:col-span-2">
-            {fmtDay(statement.periodStart, locale)} {t("separator")}{" "}
-            {fmtDay(statement.periodEnd, locale)}
-          </Field>
-          <Field label={t("columns.netOwnerResult")}>
-            {fmtAmount(statement.netOwnerResult, locale)}
-          </Field>
-        </div>
-      </Card>
+      {onSelect ? (
+        <button
+          type="button"
+          onClick={() => onSelect(statement.id)}
+          aria-labelledby={headingId}
+          className="block min-w-0 cursor-pointer rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {body}
+        </button>
+      ) : (
+        body
+      )}
     </li>
   );
 }

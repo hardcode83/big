@@ -1,17 +1,40 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
 import { I18nProvider } from "@/lib/i18n/client-provider";
-import { fireEvent, getA11yViolations, render, screen } from "@/test/render";
+import { fireEvent, getA11yViolations, render, screen, waitFor } from "@/test/render";
 
-import type { OwnerStatementDetail } from "../data";
+import type { OwnerStatementDetail, StatementsDataSource } from "../data";
 import { StatementDetailState } from "./statement-detail-state";
 
 const useStatementDetail = vi.hoisted(() => vi.fn());
+const exportCsv = vi.hoisted(() => vi.fn());
+const exportPdf = vi.hoisted(() => vi.fn());
 
 vi.mock("../hooks/use-statements-data", () => ({
   useStatementDetail,
 }));
+
+// The success branch now mounts `StatementDownloads`, whose `useStatementDownload`
+// hook reads the tenant from auth and calls the statements data source. Mock both
+// so mounting the detail never hits the real AuthProvider or the network, and so
+// the 5.3 integration tests can assert the exact export endpoints.
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: { tenant_id: "tenant-1" } }) }));
+vi.mock("../data", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../data")>()),
+  getStatementsDataSource: (): StatementsDataSource => ({
+    listStatements: vi.fn(),
+    getStatement: vi.fn(),
+    exportCsv,
+    exportPdf,
+  }),
+}));
+
+afterEach(() => {
+  exportCsv.mockReset();
+  exportPdf.mockReset();
+  vi.unstubAllGlobals();
+});
 
 const DETAIL: OwnerStatementDetail = {
   id: "st-1",
@@ -134,6 +157,80 @@ describe("StatementDetailState — back to list (R1, R3, task 4.4)", () => {
     renderState("st-2");
     expect(screen.getByText("Otra liquidación")).toBeInTheDocument();
     expect(screen.queryByText("st-1")).not.toBeInTheDocument();
+  });
+});
+
+describe("StatementDetailState — export downloads integration (R4, task 5.3)", () => {
+  function stubObjectUrl() {
+    const createObjectURL = vi.fn(() => "blob:statement");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    return { createObjectURL, revokeObjectURL };
+  }
+
+  it("mounts the CSV/PDF controls below the summary on the success branch", () => {
+    useStatementDetail.mockReturnValue({ isPending: false, isError: false, data: DETAIL });
+    renderState();
+    expect(screen.getByTestId("statement-downloads")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Descargar CSV" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Descargar PDF" })).toBeInTheDocument();
+  });
+
+  it("does not render the export controls on non-success states", () => {
+    useStatementDetail.mockReturnValue({
+      isPending: false,
+      isError: true,
+      error: new ApiError({ code: "NOT_FOUND", message: "no", status: 404 }),
+      data: undefined,
+    });
+    renderState();
+    expect(screen.queryByTestId("statement-downloads")).not.toBeInTheDocument();
+  });
+
+  it("downloads via the existing /export.csv endpoint, treating the payload as opaque bytes (R4.1, R4.3)", async () => {
+    const { createObjectURL, revokeObjectURL } = stubObjectUrl();
+    exportCsv.mockResolvedValue({
+      bytes: new Uint8Array([1, 2, 3]),
+      headers: new Headers({ "Content-Disposition": 'attachment; filename="q1.csv"' }),
+    });
+    useStatementDetail.mockReturnValue({ isPending: false, isError: false, data: DETAIL });
+    renderState();
+
+    fireEvent.click(screen.getByRole("button", { name: "Descargar CSV" }));
+
+    await waitFor(() => expect(exportCsv).toHaveBeenCalledWith("tenant-1", "st-1"));
+    expect(exportPdf).not.toHaveBeenCalled();
+    // The bytes are handed to the browser as-is (a Blob + object URL); the
+    // component never parses, validates or re-encodes them.
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+    expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+  });
+
+  it("downloads via the existing /export.pdf endpoint", async () => {
+    stubObjectUrl();
+    exportPdf.mockResolvedValue({ bytes: new Uint8Array([7]), headers: new Headers() });
+    useStatementDetail.mockReturnValue({ isPending: false, isError: false, data: DETAIL });
+    renderState();
+
+    fireEvent.click(screen.getByRole("button", { name: "Descargar PDF" }));
+
+    await waitFor(() => expect(exportPdf).toHaveBeenCalledWith("tenant-1", "st-1"));
+    expect(exportCsv).not.toHaveBeenCalled();
+  });
+
+  it("shows a translated error without inspecting the file when a download fails (R4.4)", async () => {
+    stubObjectUrl();
+    exportCsv.mockRejectedValue(new Error("network"));
+    useStatementDetail.mockReturnValue({ isPending: false, isError: false, data: DETAIL });
+    renderState();
+
+    fireEvent.click(screen.getByRole("button", { name: "Descargar CSV" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "No se pudo descargar el archivo. Vuelve a intentarlo.",
+      ),
+    );
   });
 });
 

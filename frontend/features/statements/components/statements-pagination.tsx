@@ -48,9 +48,9 @@ export function StatementsPagination({
   return (
     <nav
       aria-label={t("pagination.label")}
-      className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3"
+      className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3"
     >
-      <p className="text-body-base text-muted-foreground">
+      <p className="min-w-0 break-words text-body-base text-muted-foreground">
         {t("pagination.pageOfTotal", { page, totalPages })} {t("separator")}{" "}
         {t("pagination.totalItems", { total })}
       </p>

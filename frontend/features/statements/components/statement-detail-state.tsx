@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useStatementDetail } from "../hooks/use-statements-data";
 import { mapStatementDetailState } from "../lib/statements-error";
 import { StatementDetail } from "./statement-detail";
+import { StatementDownloads } from "./statement-downloads";
 
 export interface StatementDetailStateProps {
   /**
@@ -98,10 +99,21 @@ export function StatementDetailState({ statementId, onBack }: StatementDetailSta
   }
 
   // state.kind === "ok"
+  //
+  // The CSV/PDF export controls (task 5.3) mount here, in the state
+  // coordinator, and are handed to `StatementDetail` through its `downloads`
+  // slot. Wiring them here keeps `StatementDetail` purely presentational and
+  // ignorant of the download hook: only this component ever touches
+  // `useStatementDownload` (via `StatementDownloads`), and the controls only
+  // exist on the success branch — never leaking exports onto
+  // loading/forbidden/not-found/error.
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {backLink}
-      <StatementDetail statement={state.data} />
+      <StatementDetail
+        statement={state.data}
+        downloads={<StatementDownloads statementId={state.data.id} />}
+      />
     </div>
   );
 }

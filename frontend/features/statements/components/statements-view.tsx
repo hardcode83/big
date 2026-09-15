@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useAuth } from "@/lib/auth";
@@ -17,33 +17,58 @@ import { StatementsList } from "./statements-list";
  * design D5 and `steering/frontend.md` both rule out.
  *
  * **Tenant-change reset (security.md rule 1, R1.3):** `filters`/`page` are
- * reset to their initial values whenever the authenticated tenant id changes,
- * so a stale filter — including any accidental identifier — never survives
- * into a new tenant's request. The `tenantIdRef` guard is what makes this a
- * reset-on-*change* rather than a reset-on-every-render: the first render
- * (ref seeded to the initial tenant) must NOT clear filters a caller passed
- * via props/tests before the first paint.
+ * reset synchronously during render, BEFORE any child reads them, whenever
+ * the authenticated tenant id changes — so a stale filter — including any
+ * accidental identifier — can never survive into a new tenant's first
+ * request. This uses React's "adjusting state during rendering" pattern
+ * (https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes):
+ * an earlier `useEffect`-based reset ran AFTER the render that already passed
+ * previous-tenant state to `StatementsList`/`useStatementsList`, so the first
+ * query for the new tenant could carry the previous tenant's `propertyId` or
+ * `page`. Doing it inline during render makes React discard the in-flight
+ * render and re-render with the reset state, so no child ever sees stale
+ * values. The `prevTenantId` state guards against resetting on every render
+ * with the same tenant.
  *
  * This component never accepts, stores or forwards a `tenant_id`: the only
  * identifier `StatementsList`/`useStatementsList` ever see is the one
  * `useAuth()` already resolved for the authenticated session.
+ *
+ * `onSelectStatement` (task 6.3) is the bridge from the list to the
+ * detail view. The parent (`StatementsPage`) owns the selection state;
+ * this component only forwards the id up — it never stores it. Optional
+ * with no default, so the existing direct usages (tests, internal mounts)
+ * keep compiling unchanged.
  */
-export function StatementsView() {
+export interface StatementsViewProps {
+  /**
+   * Called when the user activates a row. Receives the contract id of the
+   * statement to open. The parent decides whether to mount the detail
+   * view (e.g. `StatementsPage` flips its `selectedStatementId`).
+   */
+  onSelectStatement?: (statementId: string) => void;
+}
+
+export function StatementsView({ onSelectStatement }: StatementsViewProps = {}) {
   const { t } = useTranslation("statements");
   const { user } = useAuth();
   const tenantId = user?.tenant_id ?? null;
 
   const [filters, setFilters] = useState<OwnerStatementFilters>({});
   const [page, setPage] = useState(1);
-  const tenantIdRef = useRef(tenantId);
+  const [prevTenantId, setPrevTenantId] = useState<string | null>(tenantId);
 
-  useEffect(() => {
-    if (tenantIdRef.current !== tenantId) {
-      tenantIdRef.current = tenantId;
-      setFilters({});
-      setPage(1);
-    }
-  }, [tenantId]);
+  // Adjusting state during rendering: when the authenticated tenant changes,
+  // reset filters/page BEFORE any child reads them. The conditional `setState`
+  // calls here cause React to discard this render and produce a fresh one
+  // with the reset state — no `useEffect`, no intermediate render with stale
+  // data, no possibility of the previous tenant's `propertyId` or `page`
+  // reaching `useStatementsList`.
+  if (prevTenantId !== tenantId) {
+    setPrevTenantId(tenantId);
+    setFilters({});
+    setPage(1);
+  }
 
   // Any filter change moves navigation back to page 1 (R2.3, task 3.2): a
   // filter narrowing the results must not leave the view stranded on a page
@@ -77,6 +102,7 @@ export function StatementsView() {
           updateFilters({ status: value })
         }
         onPageChange={setPage}
+        onSelectStatement={onSelectStatement}
       />
     </div>
   );

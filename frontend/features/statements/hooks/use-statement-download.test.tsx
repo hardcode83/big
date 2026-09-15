@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { StatementsDataSource } from "../data";
@@ -10,8 +10,13 @@ const exportCsv = vi.hoisted(() => vi.fn());
 const exportPdf = vi.hoisted(() => vi.fn());
 const createObjectURL = vi.hoisted(() => vi.fn(() => "blob:statement"));
 const revokeObjectURL = vi.hoisted(() => vi.fn());
+const authUser = vi.hoisted(() => ({
+  current: { tenant_id: "tenant-1" } as { tenant_id: string } | null,
+}));
 
-vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: { tenant_id: "tenant-1" } }) }));
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ user: authUser.current }),
+}));
 vi.mock("../data", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../data")>()),
   getStatementsDataSource: (): StatementsDataSource => ({
@@ -32,6 +37,7 @@ beforeEach(() => {
   createObjectURL.mockClear();
   revokeObjectURL.mockClear();
   vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+  authUser.current = { tenant_id: "tenant-1" };
 });
 
 describe("useStatementDownload", () => {
@@ -91,5 +97,58 @@ describe("useStatementDownload", () => {
       expect(result.current.csvPending).toBe(false);
       expect(result.current.csvError?.message).toBe("failed");
     });
+  });
+});
+
+describe("useStatementDownload — tenant isolation on identity change (security.md rule 1, R1.3, D5)", () => {
+  it("drops the payload when the authenticated tenant changes while the request is in flight", async () => {
+    let resolveCsv!: (value: unknown) => void;
+    exportCsv.mockReturnValue(new Promise((resolve) => { resolveCsv = resolve; }));
+    const { result, rerender } = renderHook(() => useStatementDownload("statement-1"), { wrapper });
+
+    const csvPromise = result.current.downloadCsv();
+    await waitFor(() => expect(result.current.csvPending).toBe(true));
+
+    // Simulate a tenant switch (or logout-then-login) between request and
+    // response. The bytes that come back belong to the previous session and
+    // must NEVER be delivered to the new session. Production triggers the
+    // same code path: every consumer of `useAuth` re-renders on identity
+    // change, the hook re-runs, and `tenantIdRef.current = tenantId` writes
+    // the NEW identity before the in-flight closure reads it again.
+    authUser.current = { tenant_id: "tenant-2" };
+    act(() => {
+      rerender();
+    });
+
+    resolveCsv({
+      bytes: new Uint8Array([1, 2, 3]),
+      headers: new Headers({ "Content-Disposition": 'attachment; filename="tenant-a.csv"' }),
+    });
+    await csvPromise;
+
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    await waitFor(() => expect(result.current.csvPending).toBe(false));
+    expect(result.current.csvError).toBeNull();
+  });
+
+  it("does not surface a failure when an in-flight download is dropped due to a tenant change", async () => {
+    exportCsv.mockRejectedValue(new Error("network blip"));
+    const { result, rerender } = renderHook(() => useStatementDownload("statement-1"), { wrapper });
+
+    const csvPromise = result.current.downloadCsv();
+
+    // Tenant flips before the rejection settles.
+    authUser.current = { tenant_id: "tenant-2" };
+    act(() => {
+      rerender();
+    });
+
+    // The old-session failure must not reach the new session: no rejection,
+    // no error state, no Blob/URL.
+    await csvPromise;
+    expect(createObjectURL).not.toHaveBeenCalled();
+    await waitFor(() => expect(result.current.csvPending).toBe(false));
+    expect(result.current.csvError).toBeNull();
   });
 });

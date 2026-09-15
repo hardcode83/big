@@ -54,6 +54,13 @@
       "generic": "No se pudieron cargar las liquidaciones. Vuelve a intentarlo."
     }
   },
+  "downloads": {
+    "label": "Exportar liquidación",
+    "csv": "Descargar CSV",
+    "pdf": "Descargar PDF",
+    "pending": "Descargando…",
+    "error": "No se pudo descargar el archivo. Vuelve a intentarlo."
+  },
   "detail": {
     "backToList": "« Volver al listado »",
     "notFound": {
@@ -62,6 +69,9 @@
     "error": {
       "forbidden": "No tienes permiso para ver esta liquidación.",
       "generic": "No se pudo cargar la liquidación. Vuelve a intentarlo."
+    },
+    "absent": {
+      "value": "—"
     },
     "summary": {
       "title": "Resumen",

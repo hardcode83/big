@@ -6,56 +6,23 @@ import { EmptyState } from "@/components/states";
 import { Card } from "@/components/ui/card";
 
 import type { OwnerStatementReservation } from "../data";
-
-/**
- * A `YYYY-MM-DD` day as the locale's medium date, UTC-anchored. Deliberate,
- * temporary duplicate of `statement-row.tsx`/`statement-summary.tsx`'s own
- * copy — this section does not build the shared module (that is task 6.2).
- *
- * TODO(section 6.2): replace with the shared `features/statements/lib/format.ts`.
- */
-function fmtDay(isoDay: string, locale: string): string {
-  const date = new Date(isoDay);
-  if (Number.isNaN(date.getTime())) {
-    return isoDay;
-  }
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" }).format(date);
-}
-
-/**
- * A row's own decimal amount, formatted with ITS OWN `currency` (R3.6): each
- * reservation may carry a different currency, so the summary's currency-less
- * `fmtAmount` would be wrong here. `Intl.NumberFormat`'s `style: "currency"`
- * both localizes the decimals and paints the right symbol/code for that row
- * — no cross-row aggregation and no conversion happen anywhere in this file.
- * A currency code `Intl` cannot resolve (never expected from this API) falls
- * back to a plain decimal + the raw code rather than throwing.
- *
- * TODO(section 6.2): replace with the shared `features/statements/lib/format.ts`.
- */
-function fmtCurrency(value: string, currency: string, locale: string): string {
-  const num = Number(value);
-  if (!Number.isFinite(num)) {
-    return value;
-  }
-  try {
-    return new Intl.NumberFormat(locale, { style: "currency", currency }).format(num);
-  } catch {
-    return `${num.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
-  }
-}
+import { absentAmount, fmtCurrency, fmtDay } from "../lib/format";
 
 /**
  * `null` renders as an explicit absent marker — NEVER as `0` or a computed
- * substitute (R3.5). Same literal-dash convention already used for absent
- * per-row amounts in `features/reservations/components/detail/reservation-detail-sections.tsx`.
+ * substitute (R3.5, R5.4). The marker itself is resolved through the shared
+ * `absentAmount` helper from `../lib/format` so the absence glyph goes
+ * through the ES/EN catalogs (steering/frontend.md: nothing visible is
+ * hardcoded), and it is the same literal-dash convention already used for
+ * absent per-row amounts in
+ * `features/reservations/components/detail/reservation-detail-sections.tsx`.
  */
 function fmtNullableCurrency(
   value: string | null,
   currency: string,
   locale: string,
 ): string {
-  return value === null ? "—" : fmtCurrency(value, currency, locale);
+  return value === null ? absentAmount(locale) : fmtCurrency(value, currency, locale);
 }
 
 export interface ReservationsBreakdownProps {
@@ -67,6 +34,11 @@ export interface ReservationsBreakdownProps {
  * task 4.2). Shows only the six contractual fields plus `currency` — no
  * subtotal, count or other aggregate is computed or displayed (R3.4): an
  * empty collection is a valid, translated empty state, not an error.
+ *
+ * Dates, per-row currencies and absent markers all come from
+ * `../lib/format` (task 6.2). Per-row amounts use `fmtCurrency` so each
+ * row carries its own `currency` — the summary's currency-less `fmtAmount`
+ * would be wrong here (R3.6).
  */
 export function ReservationsBreakdown({ reservations }: ReservationsBreakdownProps) {
   const { t, i18n } = useTranslation("statements");

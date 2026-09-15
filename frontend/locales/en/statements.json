@@ -54,6 +54,13 @@
       "generic": "Statements could not be loaded. Please try again."
     }
   },
+  "downloads": {
+    "label": "Export statement",
+    "csv": "Download CSV",
+    "pdf": "Download PDF",
+    "pending": "Downloading…",
+    "error": "The file could not be downloaded. Please try again."
+  },
   "detail": {
     "backToList": "« Back to list »",
     "notFound": {
@@ -62,6 +69,9 @@
     "error": {
       "forbidden": "You do not have permission to view this statement.",
       "generic": "The statement could not be loaded. Please try again."
+    },
+    "absent": {
+      "value": "—"
     },
     "summary": {
       "title": "Summary",

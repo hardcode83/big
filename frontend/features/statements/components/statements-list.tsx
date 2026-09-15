@@ -36,6 +36,14 @@ export interface StatementsListProps {
   onPeriodStartToChange: (value?: string) => void;
   onStatusChange: (value?: OwnerStatementStatus) => void;
   onPageChange: (page: number) => void;
+  /**
+   * Bridge to the detail view (task 6.3). The parent (`StatementsView`)
+   * forwards this callback from `StatementsPage`, which decides what to do
+   * with the selected id (in our case, swap the page content for the
+   * detail). Optional so direct/internal callers can still mount the list
+   * without wiring a selection handler.
+   */
+  onSelectStatement?: (statementId: string) => void;
 }
 
 export function StatementsList({
@@ -46,6 +54,7 @@ export function StatementsList({
   onPeriodStartToChange,
   onStatusChange,
   onPageChange,
+  onSelectStatement,
 }: StatementsListProps) {
   const { t } = useTranslation("statements");
   const { t: tStates } = useTranslation("states");
@@ -58,7 +67,13 @@ export function StatementsList({
   }));
 
   function body() {
-    if (query.isPending) {
+    // R5.1 / task 3.4 — explicit busy treatment covers BOTH the initial
+    // pending fetch AND background refetches triggered by filter/page changes.
+    // Without this, `isPending` flips false the moment cached data exists,
+    // and subsequent refetches would keep the previous render on screen with
+    // no loading signal — the list would stay interactive while showing stale
+    // data.
+    if (query.isPending || query.isFetching) {
       return <LoadingState label={tStates("loading.label")} />;
     }
     if (query.isError) {
@@ -85,7 +100,12 @@ export function StatementsList({
       <>
         <ul aria-label={t("list.label")} className="flex flex-col gap-3 p-4">
           {items.map((statement) => (
-            <StatementRow key={statement.id} statement={statement} properties={propertyDirectory} />
+            <StatementRow
+              key={statement.id}
+              statement={statement}
+              properties={propertyDirectory}
+              onSelect={onSelectStatement}
+            />
           ))}
         </ul>
         <StatementsPagination

@@ -8,6 +8,7 @@ import { TONE_BADGE_CLASS } from "@/lib/ui/status-tone";
 import { cn } from "@/lib/utils";
 
 import type { OwnerStatementDetail } from "../data";
+import { fmtAmount, fmtDay } from "../lib/format";
 import { STATUS_TONE } from "./statement-row";
 
 /**
@@ -19,39 +20,6 @@ import { STATUS_TONE } from "./statement-row";
  * the public DTO surface (design D1).
  */
 export type StatementSummaryData = Omit<OwnerStatementDetail, "reservations" | "expenses">;
-
-/**
- * A `YYYY-MM-DD` day as the locale's medium date, UTC-anchored so the day
- * never shifts with the browser's timezone. Same discipline as
- * `statement-row.tsx:fmtDay` (and `features/pricing`/`features/reviews`'
- * equivalents) — this is a deliberate, temporary duplicate, not a shared
- * import, per this section's brief.
- *
- * TODO(section 6.2): replace with the shared `features/statements/lib/format.ts`.
- */
-function fmtDay(isoDay: string, locale: string): string {
-  const date = new Date(isoDay);
-  if (Number.isNaN(date.getTime())) {
-    return isoDay;
-  }
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" }).format(date);
-}
-
-/**
- * A contract decimal string rendered with the locale's separator and two
- * decimals. No currency symbol or code: the summary DTO publishes no
- * `currency` field (R3.6) — inventing one here would assert something the
- * backend never did.
- *
- * TODO(section 6.2): replace with the shared `features/statements/lib/format.ts`.
- */
-function fmtAmount(value: string, locale: string): string {
-  const num = Number(value);
-  if (!Number.isFinite(num)) {
-    return value;
-  }
-  return num.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 /**
  * The eleven monetary amounts (R3.1), in the same order the backend/dto keep
@@ -86,6 +54,10 @@ export interface StatementSummaryProps {
  * rendered unconditionally — `notes: null` is shown as an explicit, localized
  * "no notes" state rather than hidden or replaced by any other statement's
  * text (R3.8), and no field is computed, summed or converted here.
+ *
+ * Dates and amounts use the shared formatters from `../lib/format` (task
+ * 6.2) — UTC-anchored medium dates, locale decimals, and NO currency symbol
+ * (the summary has no `currency` field — R3.6 forbids inventing one).
  */
 export function StatementSummary({ statement }: StatementSummaryProps) {
   const { t, i18n } = useTranslation("statements");
