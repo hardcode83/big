@@ -300,6 +300,52 @@ def test_mode_fix_failure_fails_the_hook_instead_of_claiming_success(tmp_path):
         unreadable.chmod(0o755)
 
 
+def test_find_and_chown_stderr_are_sanitized_before_reaching_the_log(tmp_path):
+    """Round 13 (`sdd-security`, 2026-09-15): the D2 `find` probe and `sudo -n chown -R` let
+    their own stderr reach the job log unredirected — an attacker-influenced filename left under
+    `_work/` by repository content (e.g. a fork PR) could surface in one of `find`'s or `chown`'s
+    OWN diagnostic messages (e.g. "Permission denied: <name>") and inject ANSI/terminal escapes
+    or forge a fake `runner-job-started:` log line into a LATER job's log — the same
+    log/terminal-injection class `$FOUND_SAFE` already guards, on the two channels that guard
+    never covered. Drives custom `find`/`sudo` stubs (not `make_stub_bin`, which has no hook for
+    injecting attacker-controlled bytes) that each print a message containing a literal ESC byte
+    to stderr, and confirms it never reaches the hook's own output unsanitized.
+    """
+    work = tmp_path / "_work"
+    work.mkdir()
+
+    stubbin = tmp_path / "stubbin"
+    stubbin.mkdir()
+    (stubbin / "find").write_text(textwrap.dedent("""\
+        #!/usr/bin/env bash
+        for arg in "$@"; do
+            if [[ "$arg" == "-quit" ]]; then
+                printf 'find: malicious \\x1b[31mINJECTED\\x1b[0m entry\\n' >&2
+                echo "$1/FAKE_FOREIGN_FILE"
+                exit 0
+            fi
+        done
+        exec /usr/bin/find "$@"
+        """))
+    (stubbin / "sudo").write_text(textwrap.dedent("""\
+        #!/usr/bin/env bash
+        printf 'chown: malicious \\x1b[31mINJECTED\\x1b[0m entry\\n' >&2
+        exit 0
+        """))
+    (stubbin / "find").chmod(0o755)
+    (stubbin / "sudo").chmod(0o755)
+    env = {"PATH": f"{stubbin}:{os.environ['PATH']}"}
+
+    result = run_hook(work, env=env)
+
+    combined = result.stdout + result.stderr
+    assert "\x1b" not in combined, f"a raw ESC byte reached the log: {combined!r}"
+    # tr replaces each ESC (0x1b) with '?' and leaves the surrounding printable bytes alone —
+    # the exact expected shape, not just "no raw ESC" (which a *deleting* filter would satisfy
+    # too, silently dropping the evidence instead of neutralizing it).
+    assert "?[31mINJECTED?[0m" in combined, f"expected the neutralized-but-visible payload: {combined!r}"
+
+
 def test_chown_genuinely_fails_names_runner_home(tmp_path):
     runner_home = tmp_path / "actions-runner-9"
     work = runner_home / "_work"

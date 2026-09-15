@@ -136,10 +136,21 @@ fi
 # into the EACCES this hook exists to prevent. Now: empty output AND rc=0 is the only "clean"
 # verdict; empty output with rc!=0 is NOT confirmed clean and falls through to chown anyway
 # (still bounded and non-destructive, and the only action that actually satisfies R3.3 without a
-# positive confirmation). find's own diagnostics (if any) still reach stderr since they are not
-# redirected.
+# positive confirmation). find's own diagnostics (if any) are captured and sanitized, NOT left to
+# reach stderr unredirected (round 13, panel de `/sdd:review`, `sdd-security`, 2026-09-15): a
+# diagnostic naming an attacker-influenced path (`checkout`'d repo content, e.g. from a fork PR)
+# could otherwise inject ANSI/terminal escapes or forge fake `runner-job-started:` log lines in
+# THIS job's own log — the same log/terminal-injection class `$FOUND_SAFE` below already guards,
+# extended to the channel that guard didn't cover.
 find_rc=0
-FOUND="$(find "$WORK_DIR" \( ! -user "$RUNNER_USER" -o \( -type d ! -perm -u+w \) \) -print -quit)" || find_rc=$?
+find_err_file="$(mktemp)"
+FOUND="$(find "$WORK_DIR" \( ! -user "$RUNNER_USER" -o \( -type d ! -perm -u+w \) \) -print -quit 2>"$find_err_file")" || find_rc=$?
+find_err="$(cat "$find_err_file")"
+rm -f "$find_err_file"
+if [[ -n "$find_err" ]]; then
+    find_err_safe="$(printf '%s' "$find_err" | tr '\000-\037\177' '?')"
+    err "find over $WORK_DIR reported: $find_err_safe"
+fi
 
 if [[ -z "$FOUND" && "$find_rc" -eq 0 ]]; then
     log "$WORK_DIR is already clean (every entry owned by $RUNNER_USER, every directory owner-writable) — nothing to do"
@@ -167,7 +178,18 @@ fi
 # there — it exists so a mis-provisioned host (sudo unexpectedly asking for a password) fails
 # fast into the R3.5 branch below instead of hanging with no timeout (see the contract note
 # above) waiting on a prompt nobody can answer.
-if sudo -n chown -R "$RUNNER_USER" "$WORK_DIR"; then
+#
+# stderr captured and sanitized, not left to reach the job log unredirected (round 13, same
+# log/terminal-injection motive as the D2 probe above): `chown -R` can print a per-file error
+# line naming an attacker-influenced path even on individual failures within an overall success,
+# and unconditionally on a genuine failure.
+chown_err="$(sudo -n chown -R "$RUNNER_USER" "$WORK_DIR" 2>&1 1>/dev/null)"
+chown_rc=$?
+if [[ -n "$chown_err" ]]; then
+    chown_err_safe="$(printf '%s' "$chown_err" | tr '\000-\037\177' '?')"
+    err "chown -R $WORK_DIR to $RUNNER_USER reported: $chown_err_safe"
+fi
+if [[ "$chown_rc" -eq 0 ]]; then
     log "chown -R $WORK_DIR to $RUNNER_USER succeeded"
     # R3.3 covers more than ownership: a directory whose MODE lacks owner-write blocks
     # `actions/checkout`'s `git clean -ffdx` just as surely as wrong ownership does — chown alone
@@ -196,7 +218,6 @@ if sudo -n chown -R "$RUNNER_USER" "$WORK_DIR"; then
     fi
     exit 0
 else
-    rc=$?
-    err "chown -R $WORK_DIR to $RUNNER_USER FAILED (rc=$rc) for RUNNER_HOME=$RUNNER_HOME — job will fail"
+    err "chown -R $WORK_DIR to $RUNNER_USER FAILED (rc=$chown_rc) for RUNNER_HOME=$RUNNER_HOME — job will fail"
     exit 1
 fi
