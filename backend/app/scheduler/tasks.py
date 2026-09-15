@@ -30,7 +30,10 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.application.use_cases import ProvisionAccessRecordsUseCase
+from app.access.application.use_cases import (
+    DeliverAccessInstructionsUseCase,
+    ProvisionAccessRecordsUseCase,
+)
 from app.access.infrastructure.adapters import ManualAccessAdapter
 from app.access.infrastructure.repositories import SqlAlchemyAccessRecordRepository
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
@@ -85,6 +88,10 @@ from app.properties.domain.transition_enums import PropertyStateTrigger
 from app.properties.infrastructure.repositories import (
     SqlAlchemyPropertyRepository,
     SqlAlchemyPropertyStateTransitionRepository,
+)
+from app.reservations.application.use_cases import (
+    SendCheckinRemindersUseCase,
+    SendCheckoutRemindersUseCase,
 )
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
 from app.scheduler.locks import lock_ttl_for, task_lock
@@ -196,6 +203,28 @@ async def _escalate(session: AsyncSession, tenant_id, now: datetime):
     return await use_case.execute(tenant_id=tenant_id, now=now)
 
 
+async def _send_checkin_reminders(session: AsyncSession, tenant_id, now: datetime):
+    use_case = SendCheckinRemindersUseCase(
+        properties=SqlAlchemyPropertyRepository(session),
+        reservations=SqlAlchemyReservationRepository(session),
+        guests=SqlAlchemyGuestRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+    return await use_case.execute(tenant_id=tenant_id, now=now)
+
+
+async def _send_checkout_reminders(session: AsyncSession, tenant_id, now: datetime):
+    use_case = SendCheckoutRemindersUseCase(
+        properties=SqlAlchemyPropertyRepository(session),
+        reservations=SqlAlchemyReservationRepository(session),
+        guests=SqlAlchemyGuestRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+    return await use_case.execute(tenant_id=tenant_id, now=now)
+
+
 async def _provision_access(session: AsyncSession, tenant_id, now: datetime):
     use_case = ProvisionAccessRecordsUseCase(
         records=SqlAlchemyAccessRecordRepository(session),
@@ -203,6 +232,18 @@ async def _provision_access(session: AsyncSession, tenant_id, now: datetime):
         timeline=SqlAlchemyTimelineEventRepository(session),
         audit=SqlAlchemyAuditLogRepository(session),
         legal=SqlAlchemyLegalRegistrationInitialiser(session),
+        uow=SqlAlchemyUnitOfWork(session),
+        batch_size=settings.notification_batch_size,
+    )
+    return await use_case.execute(tenant_id=tenant_id, now=now)
+
+
+async def _deliver_access_instructions(session: AsyncSession, tenant_id, now: datetime):
+    use_case = DeliverAccessInstructionsUseCase(
+        records=SqlAlchemyAccessRecordRepository(session),
+        reservations=SqlAlchemyReservationRepository(session),
+        guests=SqlAlchemyGuestRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
         batch_size=settings.notification_batch_size,
     )
@@ -466,6 +507,44 @@ def check_checkin_windows() -> dict:
     )
 
 
+@celery_app.task(name="send_checkin_reminders")
+def send_checkin_reminders() -> dict:
+    """PRD §8.3, every 15 min (`guest-scheduled-comms` R1, design D1, D2): a `CONFIRMED`
+    reservation crossing the 24h or 2h check-in reminder threshold.
+
+    Same `_guarded`/`run_for_every_tenant` shape as `check_checkin_windows` above — one
+    difference: this evaluates a threshold crossing plus `exists_for` dedup
+    (`SendCheckinRemindersUseCase`), not a `PropertyStateTrigger`, so it is wired directly
+    rather than through `_clock_task`.
+    """
+    return run_sync(
+        _guarded(
+            "send_checkin_reminders",
+            CADENCES["send_checkin_reminders"],
+            _send_checkin_reminders,
+        )
+    )
+
+
+@celery_app.task(name="send_checkout_reminders")
+def send_checkout_reminders() -> dict:
+    """Every 15 min (`guest-scheduled-comms` R2, design D1, D2): a `CONFIRMED` reservation
+    crossing the 2h checkout reminder threshold.
+
+    Declared divergence — PRD §8.3 names no checkout-reminder job at all. Same
+    `_guarded`/`run_for_every_tenant` shape as `send_checkin_reminders` above, wired directly
+    (not through `_clock_task`) for the same reason: this evaluates a threshold crossing plus
+    `exists_for` dedup (`SendCheckoutRemindersUseCase`), not a `PropertyStateTrigger`.
+    """
+    return run_sync(
+        _guarded(
+            "send_checkout_reminders",
+            CADENCES["send_checkout_reminders"],
+            _send_checkout_reminders,
+        )
+    )
+
+
 @celery_app.task(name="mark_occupied_estimated")
 def mark_occupied_estimated() -> dict:
     """PRD §8.3, every 5 min: the check-in hour has arrived."""
@@ -680,6 +759,30 @@ def provision_access_records() -> dict:
             "provision_access_records",
             CADENCES["provision_access_records"],
             _provision_access,
+        )
+    )
+
+
+@celery_app.task(name="deliver_access_instructions")
+def deliver_access_instructions() -> dict:
+    """`guest-scheduled-comms` R3, every 15 min (design D9): a `MANUAL_ADDED`/`CREATED_EXTERNAL`
+    `AccessRecord` with a masked code gets its guest-facing instructions emailed.
+
+    Its own task, not a step of `provision_access_records` above — design D9 rejects folding it
+    in: that reconciler's docstring and `access-notifications`'s own design scope it tightly to
+    create/revoke/expire, and this is a guest-messaging concern with its own lock and cadence.
+    Same `_guarded`/`run_for_every_tenant` shape as `send_checkin_reminders`/
+    `send_checkout_reminders` — a candidate query plus `exists_for` dedup
+    (`DeliverAccessInstructionsUseCase`), wired directly rather than through `_clock_task`.
+
+    **Never mutates `AccessRecord.status`** (design D9, proposal R3.4): `mark_delivered` stays
+    the operator's own, independent confirmation.
+    """
+    return run_sync(
+        _guarded(
+            "deliver_access_instructions",
+            CADENCES["deliver_access_instructions"],
+            _deliver_access_instructions,
         )
     )
 

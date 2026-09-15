@@ -282,6 +282,23 @@ class SqlAlchemyAccessRecordRepository:
         )
         return [_to_record(model) for model in rows.scalars()]
 
+    async def list_awaiting_instructions(
+        self, tenant_id: uuid.UUID, *, limit: int
+    ) -> Sequence[AccessRecord]:
+        rows = await self._session.execute(
+            select(AccessRecordModel)
+            .where(
+                AccessRecordModel.tenant_id == tenant_id,
+                AccessRecordModel.status.in_(
+                    (AccessRecordStatus.MANUAL_ADDED, AccessRecordStatus.CREATED_EXTERNAL)
+                ),
+                AccessRecordModel.code_masked.is_not(None),
+            )
+            .order_by(AccessRecordModel.created_at, AccessRecordModel.id)
+            .limit(limit)
+        )
+        return [_to_record(model) for model in rows.scalars()]
+
     def _guard(self, tenant_id: uuid.UUID, record: AccessRecord) -> None:
         if record.tenant_id != tenant_id:
             raise CrossTenantWriteError(

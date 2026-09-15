@@ -514,6 +514,14 @@ que ejecuta `scripts/test_*.py`: hasta entonces solo corrían a mano, porque el 
 - `.env.example` (gitignored el propio `.env`, no `.env.example`) trae valores por defecto funcionales para config local sin sensibilidad real (`POSTGRES_*`, `NEXT_PUBLIC_APP_ENV`) — no son secretos, y lo que lo hace aceptable es que `postgres` está publicado **solo en loopback** (ver §Postura de red del stack local), así que ese valor por defecto únicamente es alcanzable desde la propia máquina. La justificación anterior decía «un Postgres solo alcanzable dentro de la red de compose», que era falso mientras el mapeo fue `5432:5432`: sin prefijo de interfaz Docker publica en `0.0.0.0`. Si el mapeo vuelve a publicar fuera de loopback, este default deja de estar justificado (misma condición que la exención de la regla 8 de `steering/security.md`). Los secretos reales siguen la regla de "solo nombre, nunca valor" de `security.md` #8: `JWT_SECRET_KEY` ya está declarada así (nombre, sin valor, generada por `make up`), igual que `CHANNEX_API_KEY` (adapter de validación de Channex, `specs/pms-channex-staging.md`), y las credenciales futuras de WhatsApp/SES.Hospedajes y `ENCRYPTION_KEY` harán lo mismo. `CHANNEX_BASE_URL` es la excepción deliberada: **lleva valor**, comentado como los demás overrides opcionales, porque no es un secreto y ese default apuntando a staging es lo que impide que un descuido de configuración escriba en una cuenta de proveedor viva.
 - `.gitignore` excluye `.env*` con excepciones explícitas para `.env.example` y `.env.deploy.example` — un `.env.local` o `.env.deploy` con valores reales no puede colarse por olvido.
 
+### Verificación del DoD `#28.20`
+
+- El requisito PRD `#28.20` ("un único `docker compose up` levanta todo") lo construyen
+  `local-environment`/`infra-scaffold`; no lo reconstruye ningún change posterior. `hardening-release`
+  lo **verificó** (sin cambiar contrato) como parte de su auditoría del DoD §28: la evidencia es la
+  corrida de la suite E2E completa (`sdd/specs/e2e-testing.md`) contra el stack que arranca `make up`
+  sin pasos adicionales, documentada en `docs/dod-audit.md`.
+
 ### Esqueleto ejecutable mínimo
 
 - El backend expone `GET /health` → `200 {"status": "ok"}`.

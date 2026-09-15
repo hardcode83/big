@@ -52,6 +52,16 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   mismo aislamiento por tenant de `run_for_every_tenant` y por proveedor de `_sync_one_provider`,
   sin que el fallo de uno marque a los demás como `skipped_locked` ni interrumpa el resto del ciclo
   (`pms-sync-schedule` R1.2-R1.4).
+- THE SYSTEM SHALL registrar en `CADENCES`, cada 15 minutos, las tres tareas que trae el change
+  `guest-scheduled-comms` (comportamiento documentado en
+  [`access-notifications.md`](access-notifications.md)) — no derivadas de la cadencia de ninguna otra
+  fila, un `timedelta` literal como el resto de la tabla: `send_checkin_reminders` (PRD §8.3 nombra
+  el job pero no su cadencia; el PRD dice «cada hora», la implementación diverge a 15 min — la misma
+  clase de divergencia declarada que las cadencias de los jobs sin nombre en el PRD), y
+  `send_checkout_reminders`/`deliver_access_instructions`, que PRD §8.3 no nombra en absoluto. Las
+  tres son idempotentes por reserva/tipo (dedup vía `NotificationLog` existente) y toleran el mismo
+  retraso máximo que su cadencia sin coste operativo — un guest reminder no bloquea ninguna
+  transición de estado, a diferencia de `check_checkin_windows` y sus 5 minutos.
 - THE SYSTEM SHALL tratar la cadencia de `process_webhook_events` como un **parámetro de seguridad,
   no de tuning**: ese job coalesce todo un tick en una llamada saliente por destino
   (`specs/reservations-webhooks.md`), así que su cadencia **es** el techo de llamadas al proveedor y
@@ -329,11 +339,13 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   `CHECKOUT_TIME_REACHED` y **antes de su único `commit`**, de modo que la transición y la tarea
   son una escritura o ninguna. Los otros dos jobs de reloj lo reciben a `None` y se comportan
   exactamente igual que antes. `AWAITING_CLEANING` ha dejado de ser terminal en la práctica.
-- **Sólo un job de PRD §8.3 sigue sin estar aquí**: `send_checkin_reminders`
-  (→ `messaging-ai` / `access-notifications`), que es un mensaje al huésped y no estado
-  dependiente del reloj. Lo que le falta no es el reloj —esa es la mitad trivial— sino el
-  adapter de canal y la plantilla; una entrada de beat apuntando a una tarea que nadie ha
-  escrito falla una vez, a las 03:00, en un log de worker que nadie está leyendo.
+- **`send_checkin_reminders` cerró su propia deuda** (`guest-scheduled-comms`, 2026-09-14): lo que
+  le faltaba no era el reloj —esa era la mitad trivial— sino el adapter de canal y la plantilla,
+  que trajeron `messaging-ai` / `access-notifications`. El mismo change añadió
+  `send_checkout_reminders` (sin nombre en PRD §8.3) y `deliver_access_instructions` — el primer
+  escritor real de la excepción 1 de la regla 11 de `sdd/steering/security.md` (el código de acceso
+  enmascarado). Los tres jobs viven en `CADENCES` cada 15 minutos y ninguno toca
+  `AccessRecord.status`. Con esto, todos los jobs de PRD §8.3 tienen código.
   **`generate_price_recommendations` sí está** desde
   [`revenue-pricing`](revenue-pricing.md) (2026-08-18), y es quien estrenó `DAILY_JOBS`: hasta
   entonces el calendario sólo sabía expresar intervalos.

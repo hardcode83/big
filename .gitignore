@@ -62,6 +62,12 @@ infra/environments/dev/apply_loop.sh
 # Artefactos de sesiones de Playwright (capturas, snapshots, logs de consola)
 .playwright-mcp/
 
+# Artefactos de `npm run test:e2e` (change hardening-release): trazas, capturas y el
+# reporte HTML de una corrida de Playwright — locales, no se versionan.
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+
 # Exports del preview de Markdown de VS Code sobre los ADR — artefacto local del visor,
 # la fuente es el .md
 docs/adr/*.html

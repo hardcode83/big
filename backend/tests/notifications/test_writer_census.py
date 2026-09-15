@@ -109,21 +109,31 @@ WITH_WRITER = frozenset(
         # through a `domain/notifications.py` builder — see `CONSTRUCTION_SITES` below, where
         # the module is declared for exactly that reason.
         "GUEST_PORTAL_LINK_DELIVERED",
+        # `guest-scheduled-comms` R1 (section 1) — `SendCheckinRemindersUseCase`
+        # (`reservations/application/use_cases.py`) writes one row per due type, per
+        # candidate reservation, via `render_checkin_reminder_email` in
+        # `reservations/domain/notifications.py`.
+        "CHECKIN_REMINDER_24H",
+        "CHECKIN_REMINDER_2H",
+        # `guest-scheduled-comms` R2 (section 2) — `SendCheckoutRemindersUseCase`
+        # (`reservations/application/use_cases.py`) writes one row per due candidate
+        # reservation, via `render_checkout_reminder_email` in
+        # `reservations/domain/notifications.py`.
+        "CHECKOUT_REMINDER",
+        # `guest-scheduled-comms` R3 (section 3) — `DeliverAccessInstructionsUseCase`
+        # (`access/application/use_cases.py`) writes one row per qualifying `AccessRecord`, via
+        # `render_access_instructions_email` in `access/domain/notifications.py`.
+        "ACCESS_INSTRUCTIONS_SENT",
     }
 )
 
-#: Types nothing writes, and the change that owes each one (R6.2). Four.
+#: Types nothing writes, and the change that owes each one (R6.2). One.
 #:
 #: `LOCK_ALERT` wants a lock-import surface that does not exist
-#: (`maintenance/api/incidents_router.py` says so). The three guest reminders belong to
-#: `guest-scheduled-comms`: `send_checkin_reminders` is one of PRD §8.3's jobs and has no
-#: code, and there is no channel to the guest until it does.
+#: (`maintenance/api/incidents_router.py` says so).
 WITHOUT_WRITER = frozenset(
     {
         "LOCK_ALERT",
-        "CHECKIN_REMINDER_24H",
-        "CHECKIN_REMINDER_2H",
-        "CHECKOUT_REMINDER",
     }
 )
 
@@ -189,20 +199,19 @@ def test_the_two_lists_partition_the_enum() -> None:
     assert not (WITH_WRITER & WITHOUT_WRITER)
 
 
-def test_exactly_four_types_have_no_writer() -> None:
+def test_exactly_one_type_has_no_writer() -> None:
     """R6.2 — the list is literal, so shrinking it requires saying which type gained a writer.
 
-    Four as of `staff-messaging` section 4: both `CLEANING_TASK_MESSAGE` (section 2) and
-    `INCIDENT_MESSAGE` (this section) have now gained their writers
-    (`staff_message_notification` in `cleaning`/`maintenance` and their `dispatch_and_persist`
-    call sites), leaving only the pre-existing four — `LOCK_ALERT` and the three
-    `guest-scheduled-comms` reminders — without one.
+    Down to one as of `guest-scheduled-comms` section 2: `CHECKIN_REMINDER_24H`,
+    `CHECKIN_REMINDER_2H` (section 1) and `CHECKOUT_REMINDER` (section 2,
+    `SendCheckoutRemindersUseCase`) all have their writer, leaving only `LOCK_ALERT`. Section 3
+    adds `ACCESS_INSTRUCTIONS_SENT` (`DeliverAccessInstructionsUseCase`), which does not change
+    this count — it was never in `WITHOUT_WRITER` to begin with, it simply had no writer until
+    now. Retitled from `test_exactly_four_types_have_no_writer`, which had gone stale two
+    sections ago; the assertion itself is measured, not carried forward.
     """
     assert WITHOUT_WRITER == {
         "LOCK_ALERT",
-        "CHECKIN_REMINDER_24H",
-        "CHECKIN_REMINDER_2H",
-        "CHECKOUT_REMINDER",
     }
 
 
@@ -326,6 +335,18 @@ CONSTRUCTION_SITES = {
     # the other modules' builders do — the **content** of what gets written is testable
     # without a session and lives next to the rule that shapes it.
     "reviews/domain/notifications.py",
+    # `guest-scheduled-comms` R1 (design D6) — `render_checkin_reminder_email`'s home, and
+    # `SendCheckinRemindersUseCase`'s own construction site below (it composes the row inline,
+    # the same way `guests/application/portal.py` does, because the recipient is a guest's
+    # email rather than a `User` the channel resolver knows how to fan out to — design D12).
+    "reservations/domain/notifications.py",
+    "reservations/application/use_cases.py",
+    # `guest-scheduled-comms` R3 (section 3) — `render_access_instructions_email`'s home, and
+    # `DeliverAccessInstructionsUseCase`'s own construction site below. Same reasoning as the
+    # two `reservations` entries above: the recipient is a guest's email, not a `User` the
+    # channel resolver knows how to fan out to (design D12), so the row is composed inline.
+    "access/domain/notifications.py",
+    "access/application/use_cases.py",
     # Two writers that predate the builder convention and compose their row inline.
     "auth/application/recovery.py",
     "guests/application/use_cases.py",

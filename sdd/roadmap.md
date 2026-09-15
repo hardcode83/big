@@ -195,7 +195,7 @@ Categorías:
   needs: cleaning, maintenance, access-notifications · size: L · kind: feature
 - [ ] staff-messaging-web — [FE] **el hilo del personal donde ya se trabaja**: `/cleaner/tasks/[id]`, `/tech/incidents/[id]` y la vista del manager. Va detrás de `cleaner-app` y `tech-app`, que son las que estrenan esas páginas — hoy son `RoutePlaceholder` (no está en el plan original, añadida el 2026-08-28) …
   needs: staff-messaging, cleaner-app, tech-app · size: M · kind: feature
-- [ ] guest-scheduled-comms — [BE] **lo que el sistema debe decirle al huésped por su cuenta y hoy no dice** …
+- [x] guest-scheduled-comms — [BE] **lo que el sistema debe decirle al huésped por su cuenta y hoy no dice** … → changes/archive/2026-09-14-guest-scheduled-comms/
   needs: notification-channel-routing, smtp-delivery-adapter, celery-jobs, access-notifications · completes: access-notifications · size: M · kind: feature
 - [x] guest-link-delivery — [BE+FE] **el portal del huésped está entero y nadie le da el enlace** … → changes/archive/2026-09-08-guest-link-delivery/
   needs: guest-portal-api, reservations-web, smtp-delivery-adapter, notification-channel-routing · size: S · kind: feature
@@ -279,7 +279,7 @@ Categorías:
   needs: · size: S · kind: fix
 - [x] tenant-settings-web — [FE] **`/settings`, hoy `RoutePlaceholder` … → changes/archive/2026-09-12-tenant-settings-web/
   needs: user-management, frontend-auth-session, frontend-auth-role-routing · size: M · kind: feature
-- [ ] hardening-release — [CROSS] suite E2E Playwright, docker + README, DoD §28 completo (PRD §26.25-28). …
+- [x] hardening-release — [CROSS] suite E2E Playwright, docker + README, DoD §28 completo (PRD §26.25-28). … → changes/archive/2026-09-14-hardening-release/
   needs: incident-triage-web, approvals-web, reservation-create-web, cleaning-task-manage-web, sim-advance · size: L · kind: tech
 - [x] super-admin-identity — [BE] **el modelo de identidad del `SUPER_ADMIN` … → changes/archive/2026-09-02-super-admin-identity/
   needs: auth-tenancy · size: S · kind: feature
