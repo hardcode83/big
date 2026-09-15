@@ -1,0 +1,137 @@
+{
+  "title": "Statements",
+  "separator": "·",
+  "list": {
+    "label": "Statements list",
+    "loading": "Loading…",
+    "empty": {
+      "title": "No statements",
+      "description": "There are no statements matching the selected filters."
+    }
+  },
+  "columns": {
+    "property": "Property",
+    "period": "Period",
+    "status": "Status",
+    "netOwnerResult": "Net result"
+  },
+  "status": {
+    "DRAFT": "Draft",
+    "READY": "Ready",
+    "SENT": "Sent"
+  },
+  "identity": {
+    "loading": "Loading catalog…",
+    "unavailable": "Property unavailable"
+  },
+  "filters": {
+    "label": "Statement filters",
+    "property": {
+      "label": "Property",
+      "all": "All properties"
+    },
+    "periodFrom": {
+      "label": "Period from"
+    },
+    "periodTo": {
+      "label": "Period to"
+    },
+    "status": {
+      "label": "Status",
+      "all": "All statuses"
+    }
+  },
+  "pagination": {
+    "label": "Statements pagination",
+    "previous": "Previous page",
+    "next": "Next page",
+    "pageOfTotal": "Page {{page}} of {{totalPages}}",
+    "totalItems": "{{total}} total"
+  },
+  "read": {
+    "error": {
+      "forbidden": "You do not have permission to view these statements.",
+      "generic": "Statements could not be loaded. Please try again."
+    }
+  },
+  "downloads": {
+    "label": "Export statement",
+    "csv": "Download CSV",
+    "pdf": "Download PDF",
+    "pending": "Downloading…",
+    "error": "The file could not be downloaded. Please try again."
+  },
+  "detail": {
+    "backToList": "« Back to list »",
+    "notFound": {
+      "title": "Statement not found"
+    },
+    "error": {
+      "forbidden": "You do not have permission to view this statement.",
+      "generic": "The statement could not be loaded. Please try again."
+    },
+    "absent": {
+      "value": "—"
+    },
+    "summary": {
+      "title": "Summary",
+      "notes": {
+        "label": "Notes",
+        "empty": "No notes"
+      },
+      "amounts": {
+        "grossRevenue": "Gross revenue",
+        "otaCommissions": "OTA commissions",
+        "netRevenue": "Net revenue",
+        "cleaningCosts": "Cleaning",
+        "laundryCosts": "Laundry",
+        "amenitiesCosts": "Amenities",
+        "maintenanceCosts": "Maintenance",
+        "specialistCosts": "Specialists",
+        "otherCosts": "Other costs",
+        "platformFee": "Platform fee",
+        "netOwnerResult": "Net owner result"
+      }
+    },
+    "reservations": {
+      "title": "Reservations",
+      "empty": {
+        "title": "No reservations",
+        "description": "This statement does not include any reservations."
+      },
+      "fields": {
+        "id": "Id",
+        "checkIn": "Check-in",
+        "nights": "Nights",
+        "gross": "Gross amount",
+        "ota": "OTA commission",
+        "net": "Net amount",
+        "currency": "Currency"
+      }
+    },
+    "expenses": {
+      "title": "Expenses",
+      "empty": {
+        "title": "No expenses",
+        "description": "This statement does not include any expenses."
+      },
+      "fields": {
+        "id": "Id",
+        "category": "Category",
+        "description": "Description",
+        "amount": "Amount",
+        "currency": "Currency",
+        "date": "Date"
+      },
+      "category": {
+        "CLEANING": "Cleaning",
+        "LAUNDRY": "Laundry",
+        "AMENITIES": "Amenities",
+        "MAINTENANCE": "Maintenance",
+        "SPECIALIST": "Specialist",
+        "PLATFORM_FEE": "Platform fee",
+        "OTHER": "Other"
+      }
+    }
+  }
+}

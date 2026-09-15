@@ -282,6 +282,108 @@ describe("createApiClient (D12)", () => {
     expect(onUnauthorized).toHaveBeenCalledOnce();
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
+
+  it("returns exact opaque bytes and every response header", async () => {
+    const bytes = new Uint8Array([0, 255, 10, 13, 128]);
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(bytes, {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": 'attachment; filename="statement.pdf"',
+          "X-Checksum": "sha256:opaque",
+        },
+      }),
+    );
+    const client = createApiClient({
+      baseUrl: "https://api",
+      fetchImpl,
+      getHeaders: () => ({ Authorization: "Bearer access" }),
+    });
+
+    const response = await client.requestBinary(
+      "/api/v1/owner-statements/{statement_id}/export.pdf",
+      { pathParams: { statement_id: "statement-1" } },
+    );
+
+    expect(response.bytes).toEqual(bytes);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("application/pdf");
+    expect(response.headers.get("Content-Disposition")).toBe(
+      'attachment; filename="statement.pdf"',
+    );
+    expect(response.headers.get("X-Checksum")).toBe("sha256:opaque");
+    const init = fetchImpl.mock.calls[0][1] as RequestInit;
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer access");
+  });
+
+  it("keeps credentials behavior for binary requests", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const client = createApiClient({ baseUrl: "https://api", fetchImpl });
+
+    const response = await client.requestBinary("/api/v1/auth/logout", {
+      method: "POST",
+    });
+
+    expect(response.bytes).toEqual(new Uint8Array());
+    const init = fetchImpl.mock.calls[0][1] as RequestInit;
+    expect(init.credentials).toBe("include");
+  });
+
+  it("recovers a binary request after one authenticated 401", async () => {
+    const onUnauthorized = vi.fn().mockResolvedValue(true);
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: "UNAUTHENTICATED", message: "expired" } },
+          { status: 401 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([37, 80, 68, 70]), {
+          headers: { "Content-Type": "application/pdf" },
+        }),
+      );
+    const client = createApiClient({
+      baseUrl: "https://api",
+      fetchImpl,
+      getHeaders: () => ({ Authorization: "Bearer access" }),
+      onUnauthorized,
+    });
+
+    const response = await client.requestBinary(
+      "/api/v1/owner-statements/{statement_id}/export.pdf",
+      { pathParams: { statement_id: "statement-1" } },
+    );
+
+    expect(response.bytes).toEqual(new Uint8Array([37, 80, 68, 70]));
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("normalizes a failed binary response without exposing bytes", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse(
+        { error: { code: "FORBIDDEN", message: "Not allowed" } },
+        { status: 403 },
+      ),
+    );
+    const client = createApiClient({ baseUrl: "https://api", fetchImpl });
+
+    await expect(
+      client.requestBinary(
+        "/api/v1/owner-statements/{statement_id}/export.csv",
+        { pathParams: { statement_id: "statement-1" } },
+      ),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "Not allowed",
+      status: 403,
+    });
+  });
+
   it("sends a FormData body without a Content-Type of its own (D2)", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, { status: 201 }));
     const client = createApiClient({ baseUrl: "https://api", fetchImpl });

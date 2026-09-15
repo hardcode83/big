@@ -67,3 +67,31 @@ generación.
 
 Ambas rutas requieren `READ_OWNER_STATEMENTS` y respetan el tenant de la sesión. Una descarga
 no genera un `AuditLog`; las mutaciones y transiciones sí.
+
+## Pantalla `/statements` (uso desde el workspace)
+
+Los criterios EARS del frontend viven en `sdd/specs/statements-web.md`; esta sección
+describe cómo se opera la pantalla, no su implementación.
+
+- **Acceso**: la ruta `/statements` vive bajo el Application Shell autenticado
+  (`frontend/app/(workspace)/`) y la sirve `frontend/features/statements/`. Sólo entran
+  usuarios con permiso `READ_OWNER_STATEMENTS`; el resto recibe `403` sin datos
+  financieros en pantalla.
+- **Filtros del listado**: propiedad (`property_id`), período
+  (`period_start_from` / `period_start_to`) y estado (`DRAFT` / `READY` / `SENT`). Cambiar
+  cualquier filtro reinicia la paginación a la primera página.
+- **Listado paginado**: cada página se pide con los filtros activos; los totales de página
+  y los enlaces anterior/siguiente se muestran bajo la tabla.
+- **Detalle**: al abrir una fila se muestra el `statement` con su `summary` (los once
+  importes contractuales), el `breakdown` de `reservations` y el `breakdown` de `expenses`.
+  Los importes se renderizan con la moneda por fila; un importe ausente se representa con
+  el marcador `—` definido en los catálogos i18n.
+- **Descargas CSV/PDF**: la fila de detalle expone dos botones —uno por formato— que
+  disparan `GET /api/v1/owner-statements/{id}/export.{csv,pdf}`. El archivo se entrega
+  opaco (bytes + `Content-Disposition` del backend), sin parseo en cliente; el botón
+  queda deshabilitado mientras la petición está en vuelo y vuelve a quedar disponible al
+  terminar, con éxito o con error.
+- **Estados**: el listado distingue `loading`, `empty` (sin resultados para los filtros)
+  y `error` (reintento mediante el botón de la cabecera). El detalle distingue
+  `loading`, `forbidden` (sin permiso), `not-found` (statement inexistente o de otro
+  tenant) y `error`. Ningún estado no-OK muestra importes.
