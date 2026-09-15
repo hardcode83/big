@@ -21,7 +21,7 @@ es el *cómo se usa y se diagnostica*.
 | `sync_pms_reservations` | cada 6 h | Barre el portfolio completo de cada tenant contra su PMS —todos los proveedores que resuelva, `MOCK` incluido— con la misma vía que `pms_sync` (change `pms-sync-schedule`) |
 | `send_checkin_reminders` | cada 15 min | Reserva confirmada con check-in a 24h/2h vista → email de recordatorio a `Guest.email` en `Guest.preferred_language`, una vez por reserva y umbral (change `guest-scheduled-comms`) — ver [`access-notifications.md`](access-notifications.md) |
 | `send_checkout_reminders` | cada 15 min | Reserva confirmada con check-out a 2h vista → email de recordatorio, misma vía que el de check-in (change `guest-scheduled-comms`) — ver [`access-notifications.md`](access-notifications.md) |
-| `deliver_access_instructions` | cada 15 min | `AccessRecord` en `MANUAL_ADDED`/`CREATED_EXTERNAL` con código enmascarado → email al huésped con **solo** la forma `****XX` (primer escritor real de la excepción 1 de la regla 11), sin tocar `AccessRecord.status` (change `guest-scheduled-comms`) — ver [`access-notifications.md`](access-notifications.md) |
+| `deliver_access_instructions` | cada 15 min | `AccessRecord` en `MANUAL_ADDED`/`CREATED_EXTERNAL` con código enmascarado → email al huésped con **solo** la forma `****XX` (regla 11, excepción 1 — ownership en la tabla de `sdd/steering/security.md`), sin tocar `AccessRecord.status` (change `guest-scheduled-comms`) — ver [`access-notifications.md`](access-notifications.md) |
 | `generate_price_recommendations` | **diario, 06:00 UTC** | Recalcula el horizonte de 60 días de precio recomendado de cada vivienda activa con regla aplicable (change `revenue-pricing`) — ver [`pricing.md`](pricing.md) |
 | `generate_owner_statements` | **mensual, día 1, 02:00 UTC** | Genera la liquidación mensual de cada vivienda activa (change `revenue-statements`) — ver [`revenue-statements.md`](revenue-statements.md) |
 
@@ -81,8 +81,9 @@ job diario eso serían tres días de bloqueo tras un worker muerto.
 **`send_checkin_reminders` cerró su propia deuda** (`guest-scheduled-comms`, 2026-09-14): PRD §8.3
 lo nombraba sin código porque le faltaba el adaptador de canal y la plantilla que trajeron
 `messaging-ai` / `access-notifications`. El mismo change añadió `send_checkout_reminders` (sin
-nombre en el PRD) y `deliver_access_instructions`, el primer escritor real de la excepción 1 de
-la regla 11 — ver [`access-notifications.md`](access-notifications.md).
+nombre en el PRD) y `deliver_access_instructions`, que envía el código de acceso enmascarado bajo
+la excepción 1 de la regla 11 (ownership en la tabla de `sdd/steering/security.md`) — ver
+[`access-notifications.md`](access-notifications.md).
 
 ## Arrancar y mirar
 
