@@ -15,6 +15,8 @@ import { techAcceptsPhotoUpload } from "../../lib/tech-actions";
 import { TechContextBlock } from "./tech-context-block";
 import { TechCycleActions } from "./tech-cycle-actions";
 import { TechIncidentFields } from "./tech-incident-fields";
+import { TechIncidentMessagesPanel } from "./tech-incident-messages-panel";
+import { TechIncidentTabs } from "./tech-incident-tabs";
 import { TechPhotoGallery } from "./tech-photo-gallery";
 import { TechPhotoUpload } from "./tech-photo-upload";
 
@@ -26,6 +28,14 @@ import { TechPhotoUpload } from "./tech-photo-upload";
  * distinguishing non-existent, other tenant or other technician: the backend
  * makes the three deliberately indistinguishable, so telling them apart here
  * would be inventing information (R2.6).
+ *
+ * The whole operational stack — fields, context, status cards, gallery,
+ * upload and cycle actions — is the **content** tab of `TechIncidentTabs`,
+ * active by default (R3.1, design D-mobile); the staff thread lives in the
+ * second tab and only requests its first page once that tab is opened (D1).
+ * Both panels stay mounted, so the close form, the ETA field and the photo
+ * picker keep their local state through a round trip to the messages tab
+ * (R3.2).
  *
  * The owner-approval gate is read from the **response** of `resolve`, which is
  * to say from the refreshed incident: `RESOLVED` presents it as closed with
@@ -95,51 +105,61 @@ export function TechIncidentDetailView({
   const offersUpload = techAcceptsPhotoUpload(incident.status);
 
   return shell(
-    <>
-      <TechIncidentFields incident={incident} />
+    <TechIncidentTabs
+      content={
+        <div className="flex flex-col gap-4">
+          <TechIncidentFields incident={incident} />
 
-      {contextState.kind === "ok" ? (
-        <TechContextBlock context={contextState.data} />
-      ) : (
-        <EmptyState
-          title={t("context.unavailable.title")}
-          description={t("context.unavailable.description")}
+          {contextState.kind === "ok" ? (
+            <TechContextBlock context={contextState.data} />
+          ) : (
+            <EmptyState
+              title={t("context.unavailable.title")}
+              description={t("context.unavailable.description")}
+            />
+          )}
+
+          {incident.status === "AWAITING_OWNER_APPROVAL" ? (
+            <section role="status">
+              <Card className="p-4">
+                <h2 className="text-body-lg font-semibold text-foreground">
+                  {t("resolve.awaitingOwner.title")}
+                </h2>
+                <p className="text-body-base text-muted-foreground">
+                  {t("resolve.awaitingOwner.description")}
+                </p>
+              </Card>
+            </section>
+          ) : null}
+
+          {incident.status === "RESOLVED" ? (
+            <section role="status">
+              <Card className="p-4">
+                <h2 className="text-body-lg font-semibold text-foreground">
+                  {t("resolve.resolved.title")}
+                </h2>
+                <p className="text-body-base text-muted-foreground">
+                  {t("resolve.resolved.description")}
+                </p>
+              </Card>
+            </section>
+          ) : null}
+
+          <TechPhotoGallery incidentId={incident.id} />
+
+          {offersUpload ? (
+            <TechPhotoUpload incidentId={incident.id} />
+          ) : null}
+
+          <TechCycleActions incident={incident} />
+        </div>
+      }
+      renderMessages={(enabled) => (
+        <TechIncidentMessagesPanel
+          incidentId={incident.id}
+          enabled={enabled}
         />
       )}
-
-      {incident.status === "AWAITING_OWNER_APPROVAL" ? (
-        <section role="status">
-          <Card className="p-4">
-            <h2 className="text-body-lg font-semibold text-foreground">
-              {t("resolve.awaitingOwner.title")}
-            </h2>
-            <p className="text-body-base text-muted-foreground">
-              {t("resolve.awaitingOwner.description")}
-            </p>
-          </Card>
-        </section>
-      ) : null}
-
-      {incident.status === "RESOLVED" ? (
-        <section role="status">
-          <Card className="p-4">
-            <h2 className="text-body-lg font-semibold text-foreground">
-              {t("resolve.resolved.title")}
-            </h2>
-            <p className="text-body-base text-muted-foreground">
-              {t("resolve.resolved.description")}
-            </p>
-          </Card>
-        </section>
-      ) : null}
-
-      <TechPhotoGallery incidentId={incident.id} />
-
-      {offersUpload ? (
-        <TechPhotoUpload incidentId={incident.id} />
-      ) : null}
-
-      <TechCycleActions incident={incident} />
-    </>,
+    />,
   );
 }

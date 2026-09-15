@@ -76,22 +76,22 @@
       `IncidentDetailView` must not gain the message tab (D2, proposal Out of
       scope). Unit tests in a sibling `.test.tsx`. [R2]
 
-## 4. Incident messages — Tech UI <!-- hard -->
+## 4. Incident messages — Tech UI <!-- hard --> <!-- panel: PASS 2026-09-15 receipt:5b1e809a -->
 
-- [ ] 4.1 Add the `messages.*` i18n keys to `frontend/locales/es/tech.json` and
+- [x] 4.1 Add the `messages.*` i18n keys to `frontend/locales/es/tech.json` and
       `frontend/locales/en/tech.json` (same key set as task 2.1, own namespace). [R5]
-- [ ] 4.2 New `frontend/features/tech/components/detail/tech-incident-messages-panel.tsx`,
+- [x] 4.2 New `frontend/features/tech/components/detail/tech-incident-messages-panel.tsx`,
       consuming the hooks from `features/incidents` (task 3.5) — same behaviour as
       task 2.2. Component test covering loading/empty/error/disabled/validation
       states. [R2, R4]
-- [ ] 4.3 New `frontend/features/tech/components/detail/tech-incident-tabs.tsx`,
+- [x] 4.3 New `frontend/features/tech/components/detail/tech-incident-tabs.tsx`,
       same contract as task 2.3 (both panels mounted, `hidden` on the inactive one,
       sticky lazy-enable flag for the messages query). Component test mirroring
       task 2.3's. [R3]
-- [ ] 4.4 Wire `TechIncidentTabs` into `tech-incident-detail-view.tsx`: existing
+- [x] 4.4 Wire `TechIncidentTabs` into `tech-incident-detail-view.tsx`: existing
       content becomes the "content" tab, `TechIncidentMessagesPanel` becomes the
       "messages" tab. Update its existing test file accordingly. [R2, R3]
-- [ ] 4.5 Add the messages-tab section to `sdd/specs/tech-app.md`. [R2]
+- [x] 4.5 Add the messages-tab section to `sdd/specs/tech-app.md`. [R2]
 
 ## 5. Docs and verification
 
@@ -148,3 +148,15 @@
 - **New hooks file:** `frontend/features/incidents/hooks/use-incident-messages.ts` — `useIncidentMessages(incidentId, page, enabled)` (query, third positional `enabled` param exactly like task 1.5, sticky `hasOpenedMessagesTab` flag from `TechIncidentTabs` goes here) and `useSendIncidentMessage(incidentId): UseMutationResult<IncidentMessage, Error, SendIncidentMessageVariables>` (mutation, `{content: string}` variable shape, invalidates `incidentsKeys.messagesPrefix(tenantId, incidentId)` in `onSettled` on both success and failure, never optimistic). Both hooks define their own local `useTenantId`/`useOptionalTenantId` helpers in this file (mirroring `use-incident-cycle.ts`'s pattern of per-file helpers rather than a shared one).
 - **Barrel exports (`frontend/features/incidents/index.ts`):** only `useIncidentMessages`, `useSendIncidentMessage` and `SendIncidentMessageVariables` were added, with a comment explaining why no UI component is exported from here (D2). `IncidentMessage`/`SendIncidentMessageInput` types are already reachable through the pre-existing `export type * from "./data"` line — nothing to add there. **`IncidentDetailView` (the manager's view) was not touched and does not import these hooks.**
 - **Verification run:** `docker compose exec frontend npx vitest run features/incidents` → 18 files, 255 tests, all passing (includes the pre-existing route-allowlist test in `http-incidents-source.test.ts`, `"declares exactly the routes these screens are allowed to reach"`, which had to be updated to include the new `/api/v1/incidents/{incident_id}/messages` route — a structural guard, same pattern as `cleaner`'s equivalent if one exists). `docker compose exec frontend npm run typecheck` → clean. `npx eslint` on every touched file → clean.
+
+### Section 4 (tech UI) — what section 5 should know
+
+- **`tech-incident-tabs.tsx` is a literal mirror of `cleaner-task-tabs.tsx`**, only the catalog (`tech`) and the id prefixes differ: tabs `tech-incident-tab-<key>`, panels `tech-incident-panel-<key>`. Same props (`{content, renderMessages(enabled)}`), same sticky `hasOpenedMessagesTab`, same «both panels always rendered, inactive one `hidden`». No abstraction was extracted over the two: the modules stay separate on purpose (D2/D7), and a shared tabs primitive would be the third consumer's problem, not this change's.
+- **The kind→copy table lives in the panel, not in the mapper.** `mapIncidentsError` is generic and status-only (section 3's note): it returns a `kind`, never a `messageKey`. So `tech-incident-messages-panel.tsx` carries a small `sendErrorKeyFor(kind)` helper — `validation` → `messages.errors.tooLong` (the only 422 `POST .../messages` can raise is the length one), `not-found` → `notFound`, `forbidden` → `forbidden`, everything else → `generic`. **`loading` falls into `generic` on purpose**: that branch is the mapper's 401, which for a *read* means "the session refresh is in flight, stay quiet", but a failed send has no second chance and silence would look like success.
+- **The send error is read off the mutation result, not stored in component state** (unlike `cleaner`'s `submitErrorKey`): `mutation.isError ? sendErrorKeyFor(mapIncidentsError(mutation).kind) : null`. TanStack resets `isError` on the next `mutate()`, so there is no second copy of the failure to go stale — and `mapIncidentsError` accepts a `UseMutationResult` unchanged, as section 3 verified.
+- **i18n keys added to `frontend/locales/{es,en}/tech.json`:** `tabs.{label,content}` plus `messages.{tab,title,loading,loadNewer}`, `messages.empty.{title,description}`, `messages.error.{title,description}`, `messages.composer.{label,placeholder,counter,send,sending}`, `messages.roles.{SUPER_ADMIN,TENANT_OWNER,PROPERTY_MANAGER,CLEANER,TECHNICIAN}`, `messages.errors.{required,tooLong,notFound,forbidden,generic}`. Two divergences from `cleaner.json`'s set: `messages.error.title` **does** exist here (cleaner took the ErrorState title from `mapCleanerError`'s `messageKey`, which this module has no equivalent of), and `messages.errors` has three extra kind-mapped entries for the same reason. The counter interpolates `{{current}}/{{max}}` — not `{{count}}`, which i18next would read as a plural selector. `lib/i18n/catalog-parity.test.ts` covers the es/en parity.
+- **The 404 convention was applied to the thread too:** a 404 from the messages read replaces the whole panel (composer, draft and already-appended rows) with the `detail.unavailable.*` EmptyState, matching what the two parallel reads of this screen already do and the amendment recorded in R4.3.
+- **`tech-incident-detail-view.test.tsx` needed `getIncidentMessages`/`sendIncidentMessage` on its `getIncidentsDataSource` spy**, plus a default empty page in `beforeEach`. Nothing else in that file changed: the thread is lazy, so none of the 47 pre-existing tests ever reaches the messages source. Four new tests were appended (`describe("the messages tab")`), including the R3.2 round trip proved against the **real** close form (`final_cost` + `materials` survive a trip to the thread and back).
+- **Proving non-unmount with a real child, twice.** `tech-incident-tabs.test.tsx` keeps `cleaner`'s `Counter` probe for the structural assertions and adds one test that mounts the real `TechPhotoUpload` in the content tab: its `stage` radio is genuine local state, so a checked «Después» surviving the round trip is the same claim without a test double. Remember `hidden` drops the inactive panel from the a11y tree — `getAllByRole("tabpanel")` is **1**; assert the hidden one with `document.getElementById(...)` + `toHaveAttribute("hidden")`.
+- **Verification run:** `docker compose exec frontend npx vitest run features/tech --maxWorkers=2` → 9 files, 177 tests, all passing (51 of them the detail view's). `npm run typecheck` → clean. `npx eslint features/tech/components/detail/` → clean.
+- **`sdd/specs/tech-app.md` gained `### R7`** plus three accuracy edits outside it: the Purpose paragraph now names the second tab, the role paragraph enumerates `GET`/`POST /incidents/{id}/messages` (verified in `backend/app/maintenance/api/messages_router.py`: `READ_INCIDENTS` and `EXECUTE_INCIDENTS`, **no new permission**), and Key files lists the two new components and `use-incident-messages.ts`. Unlike `cleaner-app.md`, this spec carries no prose method/key counts, so there was no count to recompute.

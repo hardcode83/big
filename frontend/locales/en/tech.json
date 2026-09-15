@@ -62,6 +62,45 @@
       "description": "The address and the access instructions are not available right now."
     }
   },
+  "tabs": {
+    "label": "Incident sections",
+    "content": "Incident"
+  },
+  "messages": {
+    "tab": "Messages",
+    "title": "Messages about this incident",
+    "loading": "Loading the messages…",
+    "loadNewer": "Load newer messages",
+    "empty": {
+      "title": "No messages yet",
+      "description": "When the manager writes to you about this incident, it will show up here."
+    },
+    "error": {
+      "title": "We couldn't load the messages",
+      "description": "Please try again in a few seconds."
+    },
+    "composer": {
+      "label": "Write a message",
+      "placeholder": "Write your message for the manager…",
+      "counter": "{{current}}/{{max}} characters",
+      "send": "Send message",
+      "sending": "Sending…"
+    },
+    "roles": {
+      "SUPER_ADMIN": "Administration",
+      "TENANT_OWNER": "Owner",
+      "PROPERTY_MANAGER": "Manager",
+      "CLEANER": "Cleaner",
+      "TECHNICIAN": "Technician"
+    },
+    "errors": {
+      "required": "Write a message before sending it.",
+      "tooLong": "The message can't be longer than 2000 characters.",
+      "notFound": "This incident is no longer available, so the message was not sent.",
+      "forbidden": "You can't write on this incident.",
+      "generic": "We couldn't send the message. Please try again."
+    }
+  },
   "actions": {
     "title": "What you can do",
     "accept": "Accept",
