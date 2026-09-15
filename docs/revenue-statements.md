@@ -39,9 +39,13 @@ parcial.
 ## Aprobaciones de gastos
 
 Un gasto que supera `TenantConfig.owner_approval_threshold_eur` se crea con una aprobación
-`OwnerApproval(OTHER)` pendiente. La respuesta del propietario no muta el gasto directamente:
-el job `reconcile_owner_approvals_for_expenses` corre cada cinco minutos y materializa una
-aprobación o elimina un gasto rechazado que aún no esté consolidado.
+`OwnerApproval(OTHER)` pendiente. La ruta `POST /api/v1/owner-approvals/{id}/respond` la
+sirve — devuelve `OwnerApprovalResponse` con `status`, `responded_at`, `approval_id`,
+`property_id`, `amount` y `currency` y la respuesta se persiste en la propia fila de la
+aprobación — pero **no** muta el gasto directamente: el job `reconcile_owner_approvals_for_expenses`
+corre cada cinco minutos y materializa una aprobación o elimina un gasto rechazado que aún
+no esté consolidado. La latencia entre la respuesta y la materialización es, por tanto, la
+del job (D7 del change `expense-approval-response`; hasta cinco minutos en producción).
 
 Una vez asociado a un statement, el gasto no puede borrarse ni cambiar sus campos contables.
 La descripción y el justificante siguen siendo editables para completar información
