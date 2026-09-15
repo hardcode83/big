@@ -89,7 +89,7 @@
       (`APPROVED`) or the `Expense` row is deleted (`REJECTED`). The latency reduction is
       not the goal here — the test injects the tick to keep CI deterministic. [R4.1]
 
-## 5. OpenAPI regeneration, docs and verification
+## 5. OpenAPI regeneration, docs and verification <!-- panel: PASS 2026-09-15 receipt:2c80fbff -->
 
 - [x] 5.1 Regenerate the API contract:
       `docker compose exec backend uv run python -m app.maintenance.api.openapi` (or the
