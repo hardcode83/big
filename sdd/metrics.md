@@ -122,3 +122,4 @@
 | reservation-confirm-web | new, design, tasks, run, review, archive | 3072607 | 530938 | 118696062 | 67.2419 | 2026-09-12 | 2026-09-13 |
 | hardening-release | new, design, tasks, run, review, ship, archive | 558539 | 2008528 | 955794755 | 284.2286 | 2026-09-13 | 2026-09-14 |
 | guest-scheduled-comms | new, design, tasks, run, review, ship, archive | 292874 | 1051392 | 362801808 | 105.9539 | 2026-09-13 | 2026-09-14 |
+| validation-error-loc-redaction | tasks, run, review | 22684 | 255581 | 64149164 | 19.1638 | 2026-09-15 | — |
