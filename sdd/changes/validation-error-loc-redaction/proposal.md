@@ -75,18 +75,29 @@ Acceptance criteria:
 4. WHEN a request sends a 5,000-character unknown key (the measured probe), THE SYSTEM SHALL
    produce a `422` body whose size no longer scales with the caller's input — verified with a test
    that repeats the original probe and asserts the bound holds.
-5. WHEN a single request produces more than 20 `extra_forbidden` errors (a caller sending that
-   many distinct unknown keys), THE SYSTEM SHALL stop adding further `extra_forbidden` entries to
-   the serialised list beyond that cap and append one summary entry noting how many were omitted,
-   so the `422` body's size no longer scales with the number of distinct unknown keys either —
-   verified with a test that sends hundreds of distinct unknown keys and asserts the body stays
-   small and bounded. Every other error type keeps being added normally: it is already bounded by
-   the schema's own field count, which a caller cannot inflate.
+5. WHEN a single request produces more than 20 validation errors **of any `type`**, THE SYSTEM
+   SHALL stop adding entries to the serialised list beyond that cap and append one summary entry
+   (`type: "errors_omitted"`) noting how many were omitted, so the `422` body's size no longer
+   scales with the number of errors either — verified with a test that sends hundreds of distinct
+   unknown keys, and a second test that drives many errors of a **non**-`extra_forbidden` type.
+   The cap is on the **total** number of serialised entries and is never scoped to one error
+   `type`: no type is bounded by the schema's own field count once a field can hold a
+   caller-sized collection. `CreatePricingRuleRequest`/`UpdatePricingRuleRequest`
+   (`backend/app/pricing/api/schemas.py`) declare `lead_time_rules`/`occupancy_rules`/
+   `seasonality_rules`/`event_rules` as `list[dict[str, Any]]` with no `max_length`, and a 1 MiB
+   body against them was measured producing a **52.89 MiB** `422` with 520,000 `dict_type`
+   entries — an axis a cap scoped to `extra_forbidden` would not have touched.
 6. WHEN the last segment of an `extra_forbidden` error's `loc` is actually truncated, THE SYSTEM
    SHALL add a sibling `"loc_truncated": true` field to that error entry, present only when
    truncation happened, so a caller-supplied key that merely ends with the truncation marker
    string (but is itself at or under the cap) is never confused for a genuinely truncated one —
    verified with a test that compares a forged key against a genuinely long one.
+7. WHEN the R1.5 cap omits entries, THE SYSTEM SHALL keep the errors Pydantic reports first —
+   which for an `extra="forbid"` model means the declared-field violations (`missing`,
+   `string_too_long`, …) ahead of the `extra_forbidden` ones — so a real schema error the caller
+   needs to see is not displaced by a request flooded with unknown keys — verified with a test
+   that combines 30 unknown keys and a missing required field and asserts the `missing` entry
+   survives alongside the capped entries and the summary.
 
 ### R2 — Schema-derived segments are never touched
 

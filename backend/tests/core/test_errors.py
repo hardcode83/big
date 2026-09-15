@@ -1,9 +1,11 @@
-"""The `extra_forbidden` `loc` bound and entry-count cap (R1, R2, R3.1).
+"""The `extra_forbidden` `loc` bound and the total entry-count cap (R1, R2, R3.1).
 
 Every case drives a real `RequestValidationError` through a throwaway `extra="forbid"`
 model and the actual `register_error_handlers` wiring — a hand-built dict would not
 prove the fix survives Pydantic's real error shape.
 """
+
+from typing import Any
 
 import httpx
 import pytest
@@ -13,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.core.errors import (
     _EXTRA_FORBIDDEN_LOC_MAX_LENGTH,
     _EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER,
-    _MAX_EXTRA_FORBIDDEN_ERRORS,
+    _MAX_SERIALISED_ERRORS,
     register_error_handlers,
 )
 
@@ -30,6 +32,16 @@ class _NestedModel(BaseModel):
     leaf: _LeafModel
 
 
+class _CollectionModel(BaseModel):
+    """Same shape as the real pricing request schemas: an unbounded `list[dict[str, Any]]`
+    with no `max_length`, so the caller — not the schema — decides how many errors a single
+    request produces, and they are not `extra_forbidden`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rules: list[dict[str, Any]]
+
+
 def _build_app() -> FastAPI:
     app = FastAPI()
     register_error_handlers(app)
@@ -40,6 +52,10 @@ def _build_app() -> FastAPI:
 
     @app.post("/nested")
     async def _nested(payload: _NestedModel) -> dict:
+        return {}
+
+    @app.post("/collection")
+    async def _collection(payload: _CollectionModel) -> dict:
         return {}
 
     return app
@@ -153,13 +169,55 @@ async def test_many_distinct_unknown_keys_do_not_scale_the_response() -> None:
 
     assert response.status_code == 422
     extra_forbidden = _extra_forbidden_errors(response)
-    assert len(extra_forbidden) == _MAX_EXTRA_FORBIDDEN_ERRORS
+    assert len(extra_forbidden) == _MAX_SERIALISED_ERRORS
     errors = response.json()["error"]["details"]["errors"]
-    omitted = [error for error in errors if error["type"] == "extra_forbidden_omitted"]
+    omitted = [error for error in errors if error["type"] == "errors_omitted"]
     assert len(omitted) == 1
     assert "280" in omitted[0]["msg"]  # 300 sent - 20 kept = 280 omitted
     # The original unbounded probe scaled linearly with key count; a bounded body must
     # stay small regardless of how many distinct unknown keys the caller sends.
+    assert len(response.content) < 3000
+
+
+@pytest.mark.asyncio
+async def test_a_genuine_error_survives_alongside_capped_unknown_keys() -> None:
+    """The cap must not swallow the errors the caller actually needs to see: a real schema
+    violation is still reported when unknown keys exhaust the entry cap."""
+    app = _build_app()
+    payload = {f"unknown_{i}": "value" for i in range(30)}  # no `name` → one `missing`
+
+    response = await _post(app, "/leaf", payload)
+
+    errors = response.json()["error"]["details"]["errors"]
+    missing = [error for error in errors if error["type"] == "missing"]
+    assert len(missing) == 1
+    assert missing[0]["loc"] == ["body", "name"]
+    # 31 errors, 20 kept (1 `missing` + 19 `extra_forbidden`) plus the summary entry.
+    assert len(_extra_forbidden_errors(response)) == _MAX_SERIALISED_ERRORS - 1
+    omitted = [error for error in errors if error["type"] == "errors_omitted"]
+    assert len(omitted) == 1
+    assert "11" in omitted[0]["msg"]  # 31 errors - 20 kept = 11 omitted
+    assert len(errors) == _MAX_SERIALISED_ERRORS + 1
+
+
+@pytest.mark.asyncio
+async def test_many_errors_of_a_non_extra_forbidden_type_do_not_scale_the_response() -> None:
+    """The count cap is on the total, not on `extra_forbidden`: an unbounded collection
+    field lets a caller drive the error count with a type the schema's field count does not
+    bound at all (the measured `dict_type` vector on the pricing request schemas)."""
+    app = _build_app()
+
+    response = await _post(app, "/collection", {"rules": ["not-a-dict"] * 80})
+
+    assert response.status_code == 422
+    errors = response.json()["error"]["details"]["errors"]
+    dict_type = [error for error in errors if error["type"] == "dict_type"]
+    assert len(dict_type) == _MAX_SERIALISED_ERRORS
+    assert dict_type[0]["loc"] == ["body", "rules", "0"]  # schema-derived, untouched
+    omitted = [error for error in errors if error["type"] == "errors_omitted"]
+    assert len(omitted) == 1
+    assert "60" in omitted[0]["msg"]  # 80 sent - 20 kept = 60 omitted
+    # Bounded regardless of how many invalid items the caller sent.
     assert len(response.content) < 3000
 
 

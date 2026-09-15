@@ -112,13 +112,17 @@ def register_error_handlers(app: FastAPI) -> None:
 _EXTRA_FORBIDDEN_LOC_MAX_LENGTH = 100
 _EXTRA_FORBIDDEN_LOC_TRUNCATION_MARKER = "...(truncated)"
 
-# A caller who sends many distinct unknown keys in one request gets one `extra_forbidden`
-# error per key, and each entry costs a fixed response overhead (`loc`, `type`, the fixed
-# `msg`, JSON punctuation) regardless of how short the key is — so this axis (error COUNT,
-# not `loc` length) can still scale the response well past the request that produced it.
-# 20 is generously above any real accidental-typo scenario (a caller fat-fingering a
-# request sends a handful of wrong keys, never twenty).
-_MAX_EXTRA_FORBIDDEN_ERRORS = 20
+# Error COUNT is a second caller-controlled axis, independent of `loc` length: each entry
+# costs a fixed response overhead (`loc`, `type`, `msg`, JSON punctuation) however short it
+# is, so a request that produces many errors scales the response well past the body that
+# produced it. The cap is on the TOTAL number of serialised entries, of any `type`, because
+# no error type is inherently bounded: `extra_forbidden` scales with the number of distinct
+# unknown keys a caller sends, and any unbounded collection field (a `list[...]` without
+# `max_length`, as the pricing request schemas declare) scales its own error type with the
+# number of invalid items. Capping one type would leave every other one open. 20 is
+# generously above any real accidental scenario (a caller fat-fingering a request sends a
+# handful of bad fields, never twenty).
+_MAX_SERIALISED_ERRORS = 20
 
 
 def _bound_extra_forbidden_segment(segment: str) -> tuple[str, bool]:
@@ -135,10 +139,9 @@ def _bound_extra_forbidden_segment(segment: str) -> tuple[str, bool]:
 
 
 def _serialisable_validation_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
+    errors = exc.errors()
     serialisable: list[dict[str, Any]] = []
-    extra_forbidden_seen = 0
-    extra_forbidden_dropped = 0
-    for error in exc.errors():
+    for error in errors[:_MAX_SERIALISED_ERRORS]:
         loc = [str(part) for part in error.get("loc", ())]
         error_type = str(error.get("type", ""))
         # Only `extra_forbidden` echoes raw caller input. For every schema in this
@@ -149,13 +152,8 @@ def _serialisable_validation_errors(exc: RequestValidationError) -> list[dict[st
         # type (e.g. `string_type`) — this fix does not cover that, because no such field
         # exists in this codebase today.
         truncated = False
-        if error_type == "extra_forbidden":
-            if extra_forbidden_seen >= _MAX_EXTRA_FORBIDDEN_ERRORS:
-                extra_forbidden_dropped += 1
-                continue
-            extra_forbidden_seen += 1
-            if loc:
-                loc[-1], truncated = _bound_extra_forbidden_segment(loc[-1])
+        if error_type == "extra_forbidden" and loc:
+            loc[-1], truncated = _bound_extra_forbidden_segment(loc[-1])
         entry: dict[str, Any] = {
             "loc": loc,
             "type": error_type,
@@ -164,14 +162,15 @@ def _serialisable_validation_errors(exc: RequestValidationError) -> list[dict[st
         if truncated:
             entry["loc_truncated"] = True
         serialisable.append(entry)
-    if extra_forbidden_dropped:
+    omitted = len(errors) - len(serialisable)
+    if omitted:
         serialisable.append(
             {
                 "loc": [],
-                "type": "extra_forbidden_omitted",
+                "type": "errors_omitted",
                 "msg": (
-                    f"{extra_forbidden_dropped} more unknown field error(s) omitted "
-                    f"(cap: {_MAX_EXTRA_FORBIDDEN_ERRORS})"
+                    f"{omitted} more validation error(s) omitted "
+                    f"(cap: {_MAX_SERIALISED_ERRORS})"
                 ),
             }
         )

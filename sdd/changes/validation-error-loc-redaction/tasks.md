@@ -117,3 +117,26 @@
   `msg` and ignore unknown keys). New R1.6. Tests added to `test_errors.py`: entry-count
   cap (300 distinct unknown keys, body stays < 3000 bytes) and forged-vs-genuine truncation
   marker distinguishability. All 6 pre-existing tests kept passing unmodified.
+- Round 2 review fix (2026-09-15), `sdd-security` HIGH + `sdd-qa` LOW: round 1's count cap
+  was scoped to `extra_forbidden`, leaving the COUNT axis open for every other type (the
+  panel measured a 1 MiB body producing a 52.89 MiB `422` with 520,000 `dict_type` entries
+  against the pricing `list[dict[str, Any]]` fields, which have no `max_length`).
+  Generalised it in `backend/app/core/errors.py`: `_MAX_EXTRA_FORBIDDEN_ERRORS` →
+  `_MAX_SERIALISED_ERRORS = 20`, now a cap on the TOTAL entries of any `type`, applied by
+  slicing `exc.errors()` before the serialisation loop (simpler than threading a counter,
+  and it no longer serialises what it drops); summary entry renamed
+  `extra_forbidden_omitted` → `errors_omitted` because the omitted entries are no longer
+  necessarily `extra_forbidden`. The `loc` segment cap and `loc_truncated` are untouched and
+  still apply to every serialised `extra_forbidden` entry. Fix is in the shared handler only
+  — no `max_length` added to the pricing schemas (per `## Out of scope`). Measured ordering
+  gotcha: Pydantic reports declared-field violations BEFORE `extra_forbidden`, so a genuine
+  `missing` survives the total cap (new R1.7 makes that a requirement instead of an
+  accident). Rewrote R1.5 (dropped the false "bounded by the schema's own field count"
+  justification) and the `sdd/specs/api-contract.md` bullet. Tests: 2 new
+  (`test_a_genuine_error_survives_alongside_capped_unknown_keys`, 30 unknown keys + missing
+  field → 1 `missing` + 19 `extra_forbidden` + summary; and
+  `test_many_errors_of_a_non_extra_forbidden_type_do_not_scale_the_response`, a throwaway
+  `list[dict[str, Any]]` model with 80 invalid items → 20 `dict_type` + summary, body <
+  3000 bytes), 1 updated for the renamed constant/summary type. Verification run: `docker
+  compose exec backend uv run pytest tests/core/test_errors.py tests/test_openapi_contract.py
+  -q` → `25 passed` (10 in `test_errors.py` + 15 pre-existing).
