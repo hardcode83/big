@@ -669,7 +669,7 @@ export interface paths {
      * The owner answers a pending approval
      * @description `TENANT_OWNER` only (R2.6), once only, and only within their own tenant. An `APPROVED` answer returns the incident to where the approval's `related_type` says it belongs — `CLASSIFIED` for a budget, `IN_PROGRESS` for a real cost — and a `REJECTED` one cancels it and recomposes the property's operational state (R2.5).
      *
-     * Returns the **incident**, not the approval: what the caller does next depends on where the incident ended up.
+     * The body depends on the approval's `related_type` (R1.6, D5): an `INCIDENT` or `MAINTENANCE_COST` approval returns the updated `IncidentResponse`; an `OTHER` approval (which references an `Expense`, not an incident) returns the reduced `OwnerApprovalResponse` instead.
      */
     post: operations["respond_owner_approval_api_v1_owner_approvals__approval_id__respond_post"];
   };
@@ -3329,6 +3329,44 @@ export interface components {
      * @enum {string}
      */
     OwnerApprovalRelatedType: "INCIDENT" | "MAINTENANCE_COST" | "OTHER";
+    /**
+     * OwnerApprovalResponse
+     * @description Reduced body for `POST /owner-approvals/{id}/respond` when the row is `OTHER` (R1.6, D6).
+     *
+     * Six fields, every one closed-form: no free text from the entity leaks to the wire, so
+     * rule 11's structural guard on `OWNER_APPROVAL`'s audit already covers the rest. The
+     * `OTHER` branch has no incident to hand back — `IncidentResponse` would force a
+     * synthetic id — and this is the smallest body that answers the route.
+     *
+     * `responded_at` is non-nullable here even though the entity field is `datetime | None`:
+     * the use case only reaches `from_domain` after `OwnerApproval.answer()` has written a
+     * concrete timestamp, so a `None` reaching this builder is a contract violation upstream.
+     */
+    OwnerApprovalResponse: {
+      /** Amount */
+      amount: string;
+      /**
+       * Approval Id
+       * Format: uuid
+       */
+      approval_id: string;
+      /**
+       * Currency
+       * @constant
+       */
+      currency: "EUR";
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /**
+       * Responded At
+       * Format: date-time
+       */
+      responded_at: string;
+      status: components["schemas"]["OwnerApprovalStatus"];
+    };
     /**
      * OwnerApprovalStatus
      * @description ASSUMPTION: name invented — the PRD declares this enum inline
@@ -8935,7 +8973,7 @@ export interface operations {
    * The owner answers a pending approval
    * @description `TENANT_OWNER` only (R2.6), once only, and only within their own tenant. An `APPROVED` answer returns the incident to where the approval's `related_type` says it belongs — `CLASSIFIED` for a budget, `IN_PROGRESS` for a real cost — and a `REJECTED` one cancels it and recomposes the property's operational state (R2.5).
    *
-   * Returns the **incident**, not the approval: what the caller does next depends on where the incident ended up.
+   * The body depends on the approval's `related_type` (R1.6, D5): an `INCIDENT` or `MAINTENANCE_COST` approval returns the updated `IncidentResponse`; an `OTHER` approval (which references an `Expense`, not an incident) returns the reduced `OwnerApprovalResponse` instead.
    */
   respond_owner_approval_api_v1_owner_approvals__approval_id__respond_post: {
     parameters: {
@@ -8952,7 +8990,7 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["IncidentResponse"];
+          "application/json": components["schemas"]["IncidentResponse"] | components["schemas"]["OwnerApprovalResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */
