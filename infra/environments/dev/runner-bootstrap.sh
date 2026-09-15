@@ -170,15 +170,21 @@ for r in runs:
     if not rid:
         continue
     try:
-        jobs, _ = gh_get(f"https://api.github.com/repos/{repo}/actions/runs/{rid}/jobs?per_page=100")
-        jobs = jobs.get("jobs", [])
+        jobs_body, jobs_link = gh_get(f"https://api.github.com/repos/{repo}/actions/runs/{rid}/jobs?per_page=100")
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError):
         # No pudimos leer los jobs de ESTE run in-progress: puede ser el que tiene el job del
         # agente. Desconocido, no "este run no lo tiene" — sale !=0 en vez de `continue`.
         sys.exit(1)
-    for j in jobs:
+    if jobs_link and 'rel="next"' in jobs_link:
+        # Más de 100 jobs en ESTE run (matrix grande): el nuestro podría estar en la página 2.
+        # Mismo motivo que la paginación de la lista de runs — desconocido, no "no está aquí".
+        sys.exit(1)
+    for j in jobs_body.get("jobs", []):
         if j.get("status") == "in_progress" and j.get("runner_name") == target:
-            print(r.get("html_url", ""))
+            # El verdicto "encontrado" lo lleva el código de salida (0), no el contenido
+            # impreso — un `html_url` ausente no debe leerse como "no encontrado" en el
+            # llamador, que solo mira si la salida está vacía.
+            print(r.get("html_url") or f"(run {rid}, sin html_url)")
             sys.exit(0)
 PY
 }
@@ -370,9 +376,13 @@ write_runner_env() {
 #   $2 — `1` si el `.env` de este agente CAMBIÓ en esta pasada (ver `write_runner_env`), `0` si no.
 #        Solo se LEE aquí dentro, así que cruzar la frontera de la subshell como argumento posicional
 #        basta: nada tiene que volver al padre.
-#   Códigos de salida: 0 = OK; 2 = el `.env` cambió pero el agente tiene un job en vuelo, así que el
-#   reinicio queda DIFERIDO (no es un fallo — el llamador lo anota en el resumen final, no en
-#   `had_failure`); cualquier otro !=0 = fallo real.
+#   Códigos de salida: 0 = OK; 2 = el `.env` cambió y la API de GitHub CONFIRMÓ un job en vuelo,
+#   así que el reinicio queda DIFERIDO; 3 = el `.env` cambió pero la API de GitHub no respondió —
+#   estado del job DESCONOCIDO, mismo diferimiento por precaución pero con un motivo distinto
+#   (round 4 del panel de `/sdd:review`, `sdd-review-cicd`, 2026-09-15: el resumen final decía
+#   "job en vuelo" incluso cuando la causa real era un fallo de API, y eso lleva al operador a
+#   esperar en vez de investigar el token/la API). Ninguno de los dos es un fallo — el llamador
+#   los anota en el resumen final, no en `had_failure`; cualquier otro !=0 = fallo real.
 start_named_agent() {
     local i="$1"
     local env_changed="${2:-0}"
@@ -420,7 +430,7 @@ start_named_agent() {
                         echo "[hook] agent $i/$RUNNER_COUNT: $svc activo, .env cambiado — la API de GitHub no respondió; no se reinicia por precaución."
                         echo "[hook]   El .env ya declara ACTIONS_RUNNER_HOOK_JOB_STARTED en disco, pero el proceso vivo aún no lo ha leído."
                         echo "[hook]   Comprobar a mano si tiene un job en vuelo y ejecutar 'systemctl restart $svc' cuando esté ocioso (o reaplicar este bootstrap entonces)."
-                        exit 2
+                        exit 3
                     fi
                     if [[ -n "$url" ]]; then
                         echo "[hook] agent $i/$RUNNER_COUNT: $svc activo CON job en vuelo ($url) — no se reinicia."
@@ -593,7 +603,8 @@ trap 'rm -f "$agents_temp"' EXIT
 had_failure=0
 registered_idx=()   # índices `i` cuyo config.sh tuvo éxito — pendientes de arrancar servicio
 env_changed_idx=()  # índices `i` cuyo `.env` cambió en esta pasada → su runner debe releerlo (D3/D4)
-deferred_restart=() # agentes con el `.env` ya correcto en disco pero con job en vuelo (D4)
+deferred_restart=()         # agentes con el `.env` ya correcto en disco pero con job en vuelo CONFIRMADO (D4)
+deferred_restart_unknown=() # ídem, pero diferido por un fallo de la API de GitHub — estado DESCONOCIDO (round 4)
 
 for i in $(seq 1 "$RUNNER_COUNT"); do
     if register_named_agent "$i"; then
@@ -633,9 +644,16 @@ for i in "${registered_idx[@]+"${registered_idx[@]}"}"; do
     start_rc=0
     start_named_agent "$i" "$env_changed" || start_rc=$?
     if [[ "$start_rc" -eq 2 ]]; then
-        # Reinicio diferido por job en vuelo: no es un fallo (el `.env` está bien en disco), pero
-        # tiene que verse en el resumen final o el operador se va creyendo que el hook ya actúa.
+        # Reinicio diferido por job en vuelo CONFIRMADO por la API: no es un fallo (el `.env` está
+        # bien en disco), pero tiene que verse en el resumen final o el operador se va creyendo
+        # que el hook ya actúa.
         deferred_restart+=("autohostai-${ENV}-vm-${i} → systemctl restart ${SERVICE_PREFIX}-${i}.service")
+    elif [[ "$start_rc" -eq 3 ]]; then
+        # Mismo diferimiento, pero por un fallo de la API de GitHub — estado DESCONOCIDO, no
+        # confirmado. Resumen aparte: el operador tiene que investigar la API/el token, no esperar
+        # a que termine un job del que no hay evidencia (round 4, `sdd-review-cicd`, 2026-09-15 —
+        # antes de esto los dos casos compartían el mismo mensaje "job en vuelo").
+        deferred_restart_unknown+=("autohostai-${ENV}-vm-${i} → systemctl restart ${SERVICE_PREFIX}-${i}.service")
     elif [[ "$start_rc" -ne 0 ]]; then
         echo "ERROR: agent $i/$RUNNER_COUNT svc.sh failed (rc=$start_rc); registrado en GitHub pero el servicio no arrancó — sigue en agents.list para el siguiente reaprovisionamiento" >&2
         had_failure=1
@@ -649,11 +667,19 @@ trap - EXIT   # el temp ya no existe (lo mvimos); limpiar el trap evita `rm -f` 
 unset REG_TOKEN INSTALL_TOKEN
 
 if [[ "${#deferred_restart[@]}" -gt 0 ]]; then
-    echo "[hook] ${#deferred_restart[@]} agente(s) con ACTIONS_RUNNER_HOOK_JOB_STARTED escrito en disco pero PENDIENTES de reinicio (job en vuelo):"
+    echo "[hook] ${#deferred_restart[@]} agente(s) con ACTIONS_RUNNER_HOOK_JOB_STARTED escrito en disco pero PENDIENTES de reinicio (job en vuelo CONFIRMADO):"
     for d in "${deferred_restart[@]}"; do
         echo "[hook]   - $d"
     done
     echo "[hook] hasta que se reinicien, esos agentes NO ejecutan el hook de inicio de job."
+fi
+
+if [[ "${#deferred_restart_unknown[@]}" -gt 0 ]]; then
+    echo "[hook] ${#deferred_restart_unknown[@]} agente(s) con ACTIONS_RUNNER_HOOK_JOB_STARTED escrito en disco pero PENDIENTES de reinicio (la API de GitHub no respondió — estado del job DESCONOCIDO, no confirmado en vuelo):"
+    for d in "${deferred_restart_unknown[@]}"; do
+        echo "[hook]   - $d"
+    done
+    echo "[hook] comprobar el token/la API de GitHub, no solo esperar a que termine un job — no hay evidencia de que haya uno."
 fi
 
 if [[ "$had_failure" -ne 0 ]]; then

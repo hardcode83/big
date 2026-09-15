@@ -40,11 +40,17 @@ path onto a writable temp dir without root). See `start_named_agent`'s docstring
 detail on each stub.
 """
 
+import contextlib
+import io
+import json
 import os
 import re
 import stat
 import subprocess
+import sys
 import textwrap
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -481,11 +487,13 @@ def test_env_changed_active_agent_gh_api_failure_defers_not_restarted(tmp_path):
     """Fix round (`sdd-security`, 2026-09-15): a GitHub API failure (expired token, 403/429,
     timeout — `gh_in_progress_url_for_runner` exits non-zero) must NOT be treated the same as
     "no job in flight". Before the fix, `|| true` collapsed both to an empty `url` and this case
-    would have restarted a possibly-live agent; now it must defer (rc=2) exactly like the
-    confirmed-busy case, never touching `systemctl restart`.
+    would have restarted a possibly-live agent; now it must defer, never touching
+    `systemctl restart`. rc=3 (not 2): round 4 (`sdd-review-cicd`, 2026-09-15) split the deferred
+    code so the final summary can tell a CONFIRMED-busy agent apart from an UNKNOWN one instead of
+    reporting "job en vuelo" for both.
     """
     result = start_named_agent(2, 1, tmp_path, service_state="active", api_fails=True)
-    assert result.returncode == 2, f"stdout={result.stdout} stderr={result.stderr}"
+    assert result.returncode == 3, f"stdout={result.stdout} stderr={result.stderr}"
     assert result.restart_log == "", "an API failure must never be treated as 'idle'"
     svc = f"{AGENT_SERVICE_PREFIX}-2.service"
     assert svc in result.stdout, "the deferred message must name the service"
@@ -562,3 +570,180 @@ def test_real_failure_rc_other_than_2_does_count_as_had_failure():
     assert result.returncode == 0, f"stdout={result.stdout} stderr={result.stderr}"
     assert "had_failure=1" in result.stdout, "a genuine start failure must still be reported"
     assert "deferred_count=0" in result.stdout
+
+
+# --- `gh_in_progress_url_for_runner`'s own Python heredoc: fail-closed internals (round 5) -----
+#
+# Every test above stubs `gh_in_progress_url_for_runner` wholesale as an opaque shell function,
+# which is right for testing `start_named_agent`'s CALLER-side logic but never exercises the
+# helper's own body — the round-4 fail-closed fixes (pagination truncation, a per-run jobs-fetch
+# failure) live entirely inside that Python heredoc and had no test of their own (`sdd-qa`,
+# round 5, 2026-09-15). Extracted and driven the same "real code, not a copy" spirit as
+# `extract_function` above, but in-process rather than via `subprocess`: the heredoc's top-level
+# code runs immediately once `exec`d (it is a script, not a set of function definitions), so the
+# only way to intercept its `urllib.request.urlopen(...)` calls is to monkeypatch that attribute
+# on the *shared* `urllib.request` module object before exec'ing — no `import` boundary to cross,
+# since this test process already holds the only copy of that module.
+
+HEREDOC_OPEN = "python3 - \"$target\" <<'PY'\n"
+HEREDOC_CLOSE = "\nPY\n"
+
+
+def extract_gh_helper_heredoc() -> str:
+    """The Python heredoc body of `gh_in_progress_url_for_runner`, verbatim.
+
+    Anchored on the function's own opening line and the heredoc's own delimiters — fails loudly
+    if either ever changes, instead of silently testing a stale copy.
+    """
+    source = BOOTSTRAP.read_text()
+    func_start = source.index("gh_in_progress_url_for_runner() {")
+    heredoc_start = source.index(HEREDOC_OPEN, func_start)
+    body_start = heredoc_start + len(HEREDOC_OPEN)
+    body_end = source.index(HEREDOC_CLOSE, body_start)
+    return source[body_start:body_end]
+
+
+def test_gh_helper_heredoc_extraction_is_anchored_on_the_real_script():
+    body = extract_gh_helper_heredoc()
+    assert "import json, os, sys, urllib.request, urllib.error" in body
+    assert "sys.exit(1)" in body
+    assert 'rel="next"' in body
+
+
+class _FakeResponse:
+    """Mimics the one surface `gh_get` uses from `urllib.request.urlopen`'s return value."""
+
+    def __init__(self, body: dict, link: str | None):
+        self._body = json.dumps(body).encode()
+        self._link = link
+
+    def read(self) -> bytes:
+        return self._body
+
+    def getheader(self, name: str) -> str | None:
+        return self._link if name == "Link" else None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def run_gh_helper(target: str, responses: dict) -> tuple[int, str]:
+    """Execute the REAL heredoc body in-process against a fake `urllib.request.urlopen`.
+
+    `responses` maps a URL substring (checked in insertion order, first match wins) to either
+    `(body_dict, link_header_or_None)` or an exception instance to raise — the same two outcomes
+    `gh_get` itself distinguishes (a parsed response vs. a rejected/broken request).
+    """
+    source = extract_gh_helper_heredoc()
+
+    def fake_urlopen(req, timeout=None):
+        url = req.full_url
+        for pattern, outcome in responses.items():
+            if pattern in url:
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                body, link = outcome
+                return _FakeResponse(body, link)
+        raise AssertionError(f"run_gh_helper: no stubbed response for {url}")
+
+    real_urlopen = urllib.request.urlopen
+    real_argv = sys.argv
+    real_environ = dict(os.environ)
+    urllib.request.urlopen = fake_urlopen
+    sys.argv = ["-", target]
+    os.environ["INSTALL_TOKEN"] = "test-token"
+    os.environ["GITHUB_REPO"] = "acme/repo"
+    stdout = io.StringIO()
+    code = 0
+    try:
+        with contextlib.redirect_stdout(stdout):
+            try:
+                exec(compile(source, "<gh_in_progress_url_for_runner>", "exec"), {"__name__": "__main__"})
+            except SystemExit as exc:
+                code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+    finally:
+        urllib.request.urlopen = real_urlopen
+        sys.argv = real_argv
+        os.environ.clear()
+        os.environ.update(real_environ)
+    return code, stdout.getvalue()
+
+
+RUNS_URL = "actions/runs?status=in_progress"
+
+
+def test_gh_helper_no_runs_in_progress_is_confirmed_idle():
+    code, out = run_gh_helper("agent-2", {RUNS_URL: ({"workflow_runs": []}, None)})
+    assert code == 0
+    assert out == ""
+
+
+def test_gh_helper_matched_job_prints_its_url():
+    runs = {"workflow_runs": [{"id": 1, "html_url": "https://github.com/acme/repo/actions/runs/1"}]}
+    jobs = {"jobs": [{"status": "in_progress", "runner_name": "agent-2"}]}
+    code, out = run_gh_helper("agent-2", {
+        RUNS_URL: (runs, None),
+        "actions/runs/1/jobs": (jobs, None),
+    })
+    assert code == 0
+    assert out.strip() == "https://github.com/acme/repo/actions/runs/1"
+
+
+def test_gh_helper_matched_job_with_missing_html_url_still_prints_something():
+    """Round-5 fix (`sdd-security`): the busy-signal must never come out as an empty string."""
+    runs = {"workflow_runs": [{"id": 42}]}  # no html_url key at all
+    jobs = {"jobs": [{"status": "in_progress", "runner_name": "agent-2"}]}
+    code, out = run_gh_helper("agent-2", {
+        RUNS_URL: (runs, None),
+        "actions/runs/42/jobs": (jobs, None),
+    })
+    assert code == 0
+    assert out.strip() != "", "an absent html_url must never look like 'no job in flight'"
+
+
+def test_gh_helper_no_matching_job_among_real_runs_is_confirmed_idle():
+    runs = {"workflow_runs": [{"id": 1, "html_url": "https://x/1"}]}
+    jobs = {"jobs": [{"status": "in_progress", "runner_name": "some-other-agent"}]}
+    code, out = run_gh_helper("agent-2", {
+        RUNS_URL: (runs, None),
+        "actions/runs/1/jobs": (jobs, None),
+    })
+    assert code == 0
+    assert out == ""
+
+
+def test_gh_helper_runs_list_api_failure_is_unknown_not_idle():
+    code, out = run_gh_helper("agent-2", {RUNS_URL: urllib.error.URLError("boom")})
+    assert code != 0, "an unreachable API must never report as 'confirmed idle'"
+
+
+def test_gh_helper_runs_list_pagination_truncation_is_unknown_not_idle():
+    """Round-4 fix: more than one page of in-progress runs must not silently drop the rest."""
+    runs = {"workflow_runs": []}
+    code, out = run_gh_helper("agent-2", {RUNS_URL: (runs, '<https://x/next>; rel="next"')})
+    assert code != 0, "a truncated runs listing must never report as 'confirmed idle'"
+
+
+def test_gh_helper_a_single_runs_jobs_fetch_failure_is_unknown_not_idle():
+    """Round-4 fix: this run might be the one that owns the agent's job — don't skip it."""
+    runs = {"workflow_runs": [{"id": 7, "html_url": "https://x/7"}]}
+    code, out = run_gh_helper("agent-2", {
+        RUNS_URL: (runs, None),
+        "actions/runs/7/jobs": urllib.error.HTTPError("https://x", 500, "boom", {}, None),
+    })
+    assert code != 0, "a run whose jobs cannot be enumerated must never report as 'confirmed idle'"
+
+
+def test_gh_helper_a_single_runs_jobs_pagination_truncation_is_unknown_not_idle():
+    """Round-5 fix (`sdd-qa` + `sdd-security`): a run with >100 jobs (large matrix) must not
+    silently miss the agent's job on page 2."""
+    runs = {"workflow_runs": [{"id": 7, "html_url": "https://x/7"}]}
+    jobs = {"jobs": [{"status": "in_progress", "runner_name": "some-other-agent"}]}
+    code, out = run_gh_helper("agent-2", {
+        RUNS_URL: (runs, None),
+        "actions/runs/7/jobs": (jobs, '<https://x/next>; rel="next"'),
+    })
+    assert code != 0, "a truncated per-run jobs listing must never report as 'confirmed idle'"
