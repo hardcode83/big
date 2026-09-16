@@ -796,6 +796,22 @@ def test_gh_helper_in_progress_job_with_null_runner_name_is_unknown_not_idle():
     assert code != 0, "a null runner_name on an in-progress job must never report as 'confirmed idle'"
 
 
+def test_gh_helper_in_progress_job_with_empty_string_runner_name_is_unknown_not_idle():
+    """Round 16 (`sdd-security`, 2026-09-15/16): round 8 only guarded `runner_name is None`, so
+    an in-progress job reporting `runner_name: ""` (rather than `null`) fell through past that
+    check into the final `continue`, whose own comment claims the name is "real and different
+    from ours" — false for an empty string, which identifies no agent at all. Same outcome as
+    the null case, triggered from the other falsy value.
+    """
+    runs = {"workflow_runs": [{"id": 1, "html_url": "https://x/1"}]}
+    jobs = {"jobs": [{"status": "in_progress", "runner_name": ""}]}
+    code, out = run_gh_helper("agent-2", {
+        RUNS_URL: (runs, None),
+        "actions/runs/1/jobs": (jobs, None),
+    })
+    assert code != 0, "an empty-string runner_name on an in-progress job must never report as 'confirmed idle'"
+
+
 def test_gh_helper_a_job_already_assigned_to_us_with_a_non_terminal_status_is_busy():
     """Round 9 (`sdd-security`, 2026-09-15): filtering on `status == "in_progress"` BEFORE
     looking at `runner_name` (rounds 6-8's shape) let a job already assigned to THIS agent, but

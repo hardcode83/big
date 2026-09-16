@@ -206,10 +206,15 @@ for r in runs:
         # vez de "no puedo descartarlo" (round 9, panel de `/sdd:review`, `sdd-security`,
         # 2026-09-15 — mismo borde fail-open que rounds 6-8, en el campo que faltaba).
         runner_name = j.get("runner_name")
-        if runner_name is None:
+        if not runner_name:
             # `runner_name` es nullable en el schema de GitHub (p. ej. un job `queued` que
-            # todavía no se ha asignado a ningún agente). No podemos descartarlo sin saber a
-            # quién pertenece. Desconocido, no "no coincide" (round 8).
+            # todavía no se ha asignado a ningún agente) — y una cadena vacía significa
+            # exactamente lo mismo (round 16, panel de `/sdd:review`, `sdd-security`,
+            # 2026-09-15/16: un `if runner_name is None` a secas dejaba pasar `""` hasta el
+            # `continue` final, cuyo propio comentario afirma "es un nombre real y distinto del
+            # nuestro" — falso para `""`). Ni `None` ni `""` identifican a ningún agente, así que
+            # no podemos descartar el job sin saber a quién pertenece. Desconocido, no "no
+            # coincide" (round 8, ampliado aquí).
             sys.exit(1)
         if runner_name == target:
             # El verdicto "encontrado" lo lleva el código de salida (0), no el contenido
@@ -217,8 +222,8 @@ for r in runs:
             # llamador, que solo mira si la salida está vacía.
             print(r.get("html_url") or f"(run {rid}, sin html_url)")
             sys.exit(0)
-        # `runner_name` es un nombre real y distinto del nuestro: sí podemos descartar este job
-        # concreto y seguir mirando los demás.
+        # `runner_name` es un nombre real (no vacío) y distinto del nuestro: sí podemos
+        # descartar este job concreto y seguir mirando los demás.
 PY
 }
 

@@ -45,7 +45,16 @@ escritura, que es lo que pide R3.4.
 Rejected: `chown -R` incondicional en cada job — reescribe metadatos de decenas de miles de ficheros
 en cada arranque sin motivo, y hace indistinguible en el log un agente sano de uno contaminado.
 
-### D3 — La declaración va en `$RUNNER_HOME/.env`, y obliga a reiniciar el agente
+**Enmienda 2026-09-15/16** (panel de `/sdd:review`, feature-scale, rounds 11-16): el `find` mostrado
+arriba es solo el mecanismo ORIGINAL — la sonda real, tras las enmiendas de la fila
+`runner-job-started.sh` de la tabla de abajo, prueba también el MODO del directorio, no solo su
+dueño: `find "$WORK" \( ! -user "$RUNNER_USER" -o \( -type d \( ! -perm -u+w -o ! -perm -u+x -o !
+-perm -u+r \) \) \) -print -quit`. La razón es la misma que motivó D2 (que el hook no haga nada si
+no hay nada que hacer, pero que "nada que hacer" signifique de verdad "el árbol es borrable", no
+solo "el árbol es de quien debe ser") — round 12 encontró que un árbol ya propiedad del agente con
+un directorio de modo restrictivo se leía como "ya limpio" sin serlo, y las rondas 15-16 completaron
+qué bits de modo hacen falta probar (`u+w`, luego `u+x`, luego `u+r`). El resto de la decisión (una
+sola sonda `-print -quit`, sin escritura, para mantener el caso sano barato) no cambia. — La declaración va en `$RUNNER_HOME/.env`, y obliga a reiniciar el agente
 
 **Chosen:** `ACTIONS_RUNNER_HOOK_JOB_STARTED` se declara en `/opt/actions-runner-<i>/.env`, que es
 el mecanismo que documenta GitHub para este hook (*«add them to a file named `.env` within the
