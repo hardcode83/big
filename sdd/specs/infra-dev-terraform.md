@@ -16,6 +16,22 @@ Terraform real y pipeline de CI/CD para el entorno `dev` de AutoHostAI en Oracle
 - THE SYSTEM SHALL declarar también `ignore_changes` sobre `source_details[0].source_id`: el data source resuelve «el Ubuntu 22.04 arm64 más nuevo» en cada plan, y cuando Oracle publica un build el diff parece un update in-place inofensivo — pero el apply **reemplaza el boot volume de la VM viva**: re-imagen desde cero con el `user_data` congelado por el `ignore_changes` de `metadata` (un cloud-init antiguo y roto), host keys nuevas, runner desregistrado y la base de datos de dev perdida (`postgres_data` es un volumen Docker sobre ese disco). Incidente real del 2026-09-03, destapado por el apply de `smtp-delivery-adapter` (fix `ca00fdd`); actualizar el SO de la VM viva es desde entonces un `terraform apply -replace` deliberado, nunca un efecto lateral de un plan rutinario.
 - THE SYSTEM SHALL asociar una IP pública reservada (no efímera) a la instancia.
 - El `cloud-init` (movido a `cloud-init.yaml.tftpl` vía `templatefile()`) provisiona además el **runner self-hosted de GitHub Actions** del CD y declara el **instance principal** (`oci_identity_dynamic_group` + `oci_identity_policy` de mínimo privilegio) que lo autoriza a leer del Vault; el comportamiento del CD se especifica en `app-deploy-dev`.
+- Desde `ci-runner-workspace-pollution` (2026-09-15), `main.tf` pasa `runner_job_started =
+  file("${path.module}/runner-job-started.sh")` a la misma `templatefile()` del `cloud-init`, que
+  escribe el hook a `/opt/runner-job-started.sh` (`write_files`, permisos `0755`) junto a
+  `/opt/bootstrap-runner.sh`. `runner-bootstrap.sh` (ejecutado por el `runcmd` del cloud-init en
+  una VM nueva, o a mano sobre la viva — `RUNBOOK.md §6.2`) lo instala en
+  `$RUNNER_HOME/hooks/runner-job-started.sh` de cada agente `i` y declara
+  `ACTIONS_RUNNER_HOOK_JOB_STARTED=<esa ruta>` en su `.env`, reiniciando el servicio del agente
+  si el `.env` cambió y está ocioso (D4 de ese change). El contrato del hook en sí — por qué
+  existe, qué hace — vive en `ci-runner-self-hosted.md`, no aquí: esta spec solo documenta que
+  Terraform/cloud-init lo hacen llegar a una VM nueva y que `runner-bootstrap.sh` lo hace
+  efectivo en una VM viva. **Matiz confirmado en la VM real (2026-09-15,
+  `sdd/changes/ci-runner-workspace-pollution/tasks.md` 6.4-6.6)**: contra un agente YA
+  registrado, `config.sh --replace` falla ("already configured") antes de que
+  `runner-bootstrap.sh` llegue a instalar/declarar el hook para él — ver `ci-runner-self-hosted.md`
+  y `RUNBOOK.md §6.2` para el rodeo manual. Solo un agente que el bootstrap registra por primera
+  vez en esa misma pasada recibe el hook por esta vía automática.
 - WHEN algún elemento de `var.allowed_ssh_cidrs` no es un CIDR IPv4 con prefijo ≥ /24, o `var.ssh_authorized_keys` está vacía / con formato inválido, THE SYSTEM SHALL rechazar el `plan`/`apply` en la validación de variables.
 - THE SYSTEM SHALL admitir rangos SSH más anchos **solo** por `var.allowed_ssh_cidrs_wide`, lista aparte con su propio suelo (≥ /16, que sigue rechazando /8 y `0.0.0.0/0`) y vacía por defecto; ambas listas se concatenan en `local.ingress_cidrs` conservando cada una su validación. Va separada para que abrir un rango ancho siga siendo una decisión explícita en vez de colarse en una lista donde todo lo demás es un /32 — el 22 es la **única** vía de entrada a la máquina. Uso actual: el `/16` de una operadora con IP dinámica, que llevaba tiempo puesto **a mano en la consola** hasta que el primer `plan` posterior propuso borrarlo.
 - THE SYSTEM SHALL leer los CIDRs y las claves de operadores desde secrets con forma de **array JSON** (`ALLOWED_SSH_CIDRS`, `SSH_PUBLIC_KEYS`), cayendo a los secrets singulares históricos mientras los plurales estén vacíos. El singular admitía **un solo operador**, y eso es lo que empujaba a añadir los demás por consola, donde el siguiente `apply` los borraba sin avisar.

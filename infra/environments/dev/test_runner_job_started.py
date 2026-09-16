@@ -285,6 +285,57 @@ def test_restrictive_self_owned_directory_alone_is_not_reported_as_already_clean
         restrictive.chmod(0o755)  # restore before pytest's own tmp_path cleanup tries to rmtree it
 
 
+def test_writable_but_not_executable_directory_alone_is_not_reported_as_already_clean(tmp_path):
+    """Round 14 (`sdd-security`, 2026-09-15): the D2 probe tested only `u+w` (`! -perm -u+w`), so
+    a self-owned directory left at e.g. `0600` — owner-write SET, owner-execute ABSENT — never
+    matched it: `! -perm -u+w` is false for a directory that already has u+w, so D2 took the
+    "already clean" fast path over a tree that is not actually deletable (both bits are required
+    for `git clean -ffdx` to remove a directory's contents). Same shape as round 12's sibling test
+    above, just the opposite bit missing — and a gap the round-11/12 fixtures (`0555`/`0500`/
+    `0000`, all already missing u+w) never exercised. Fully genuine, no stubs: only ownership is
+    already correct, so D2's own unstubbed `find` must be the one to catch the mode problem.
+    """
+    work = tmp_path / "_work"
+    work.mkdir()
+    restrictive = work / "write_only_dir"
+    restrictive.mkdir(mode=0o600)
+    try:
+        result = run_hook(work)
+        assert "already clean" not in result.stdout.lower(), (
+            "a directory missing only owner-execute must not be reported as already clean"
+        )
+    finally:
+        restrictive.chmod(0o755)  # restore before pytest's own tmp_path cleanup tries to rmtree it
+
+
+def test_writable_but_not_executable_directory_is_repaired_after_chown(tmp_path):
+    """Round 14 (`sdd-security`, 2026-09-15), companion to the test above: once D2 correctly
+    flags a `0600` self-owned directory (previous test), the mode-restoring `find … -exec chmod`
+    that runs after a successful chown had the SAME `! -perm -u+w`-only predicate, so it also
+    never selected that directory for repair — the bug was in both places, not just detection.
+    Same fixture technique as round 11's sibling test: `sudo`/the D2-probe `find` are stubbed
+    (chown to an already-correct owner is a genuine no-op the real `sudo -n` may still refuse
+    without a password on a host without the pool's NOPASSWD grant, so it can't be exercised
+    unprivileged either), but the mode-restoring `find … -exec chmod` that runs after is REAL and
+    unstubbed — this is what actually proves the repair, not just the detection.
+    """
+    work = tmp_path / "_work"
+    work.mkdir()
+    restrictive = work / "write_only_dir"
+    restrictive.mkdir(mode=0o600)
+
+    stubbin = make_stub_bin(tmp_path, find_reports_foreign=True, sudo_exit=0)
+    env = {"PATH": f"{stubbin}:{os.environ['PATH']}"}
+
+    result = run_hook(work, env=env)
+
+    assert result.returncode == 0, result.stderr
+    mode_after = stat.S_IMODE(restrictive.stat().st_mode)
+    assert mode_after & stat.S_IXUSR, (
+        f"owner-execute must be restored on a repair pass (mode after: {oct(mode_after)})"
+    )
+
+
 def test_mode_fix_failure_fails_the_hook_instead_of_claiming_success(tmp_path):
     """Round 12 (`sdd-security`, 2026-09-15): the round-11 mode-restoring `find` piped its exit
     status and stderr to `2>/dev/null || true` — the exact fail-open shape the D2 fix (round 6)
