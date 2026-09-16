@@ -45,7 +45,7 @@ export function DashboardView() {
       return <LoadingState label={tStates("loading.label")} />;
     }
 
-    if (cardsQuery.isError) {
+    if (cardsQuery.isError && !cardsQuery.data) {
       return (
         <ErrorState
           title={t("cards.error.title")}
