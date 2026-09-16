@@ -120,20 +120,28 @@ if [[ -z "$RUNNER_USER" ]]; then
 fi
 
 # --- D2 short-circuit: read-only, must stay fast on a clean tree ------------------------------
-# First entry that is EITHER not owned by $RUNNER_USER OR a directory lacking owner-write OR
-# owner-execute, or empty if the tree is already clean by both measures. Round 11 added the
-# mode-restoring chmod below (a directory a container left `0555`/`0500` blocks `git clean`
-# exactly like wrong ownership does) but only wired it behind the ownership probe — a tree fully
-# owned by $RUNNER_USER yet still holding a restrictive-mode directory took this "already clean"
-# branch and never reached the fix, contradicting the very claim this log line makes (round 12,
-# panel de `/sdd:review`, `sdd-security`, 2026-09-15: "ya lo está" tested ownership, not
-# "borrable" — the spec's actual promise). **Round 14** (same panel): the mode check tested only
-# `u+w`, so a directory left at e.g. `0600`/`0644`/`0666` — owner-write set, owner-execute
-# absent — matched neither `! -perm -u+w` (it already has u+w) nor got repaired, and stayed
-# permanently undeletable (a directory needs BOTH bits for `git clean -ffdx` to remove its
-# contents) — every subsequent job on that agent would die at this hook or at `actions/checkout`
-# step 0 (the very incident this change exists to end) until someone SSHed in, from a single job
-# anywhere on the pool leaving one directory at a w-but-not-x mode. Now tests for EITHER bit
+# First entry that is EITHER not owned by $RUNNER_USER OR a directory lacking owner-write,
+# owner-execute or owner-read, or empty if the tree is already clean by both measures. Round 11
+# added the mode-restoring chmod below (a directory a container left `0555`/`0500` blocks
+# `git clean` exactly like wrong ownership does) but only wired it behind the ownership probe —
+# a tree fully owned by $RUNNER_USER yet still holding a restrictive-mode directory took this
+# "already clean" branch and never reached the fix, contradicting the very claim this log line
+# makes (round 12, panel de `/sdd:review`, `sdd-security`, 2026-09-15: "ya lo está" tested
+# ownership, not "borrable" — the spec's actual promise). **Round 15** (same panel): the mode
+# check tested only `u+w`, so a directory left at e.g. `0600`/`0644`/`0666` — owner-write set,
+# owner-execute absent — matched neither `! -perm -u+w` (it already has u+w) nor got repaired,
+# and stayed permanently undeletable (a directory needs both `u+w` and `u+x` for `git clean
+# -ffdx` to remove its contents). **Round 16** (same panel): adding `u+x` was not enough either
+# — a directory at `0300` (`-wx------`, owner-write AND owner-execute set, owner-READ absent)
+# still matched neither predicate (both bits it tested were already present), so it was found
+# via its PARENT's listing (no `u+r` needed on the entry itself for that) but never SELECTED for
+# `chmod u+rwx` — and separately, `find`'s own attempt to descend INTO it (to check its own
+# children) failed with "Permission denied" (`opendir()` needs `u+r`), so `mode_fix_rc != 0` and
+# the hook exited 1 even though the real defect (the un-repaired mode) went unfixed either way.
+# Any of these three modes leaves every subsequent job on
+# that agent dying at this hook or at `actions/checkout` step 0 (the very incident this change
+# exists to end) until someone SSHed in, from a single job anywhere on the pool leaving one
+# directory at any of these restrictive modes. Now tests for ANY of the three bits
 # missing, not just owner-write. The two conditions share one `-print -quit` probe, not two
 # `find` calls, to keep the fast path fast (this hook has no timeout — see the header comment).
 # `find`'s own exit status is captured SEPARATELY from its output (round 6 fix): before that,
@@ -151,7 +159,7 @@ fi
 # extended to the channel that guard didn't cover.
 find_rc=0
 find_err_file="$(mktemp)"
-FOUND="$(find "$WORK_DIR" \( ! -user "$RUNNER_USER" -o \( -type d \( ! -perm -u+w -o ! -perm -u+x \) \) \) -print -quit 2>"$find_err_file")" || find_rc=$?
+FOUND="$(find "$WORK_DIR" \( ! -user "$RUNNER_USER" -o \( -type d \( ! -perm -u+w -o ! -perm -u+x -o ! -perm -u+r \) \) \) -print -quit 2>"$find_err_file")" || find_rc=$?
 find_err="$(cat "$find_err_file")"
 rm -f "$find_err_file"
 if [[ -n "$find_err" ]]; then
@@ -160,7 +168,7 @@ if [[ -n "$find_err" ]]; then
 fi
 
 if [[ -z "$FOUND" && "$find_rc" -eq 0 ]]; then
-    log "$WORK_DIR is already clean (every entry owned by $RUNNER_USER, every directory owner-writable and owner-executable) — nothing to do"
+    log "$WORK_DIR is already clean (every entry owned by $RUNNER_USER, every directory owner-readable, owner-writable and owner-executable) — nothing to do"
     exit 0
 fi
 
@@ -216,7 +224,7 @@ if [[ "$chown_rc" -eq 0 ]]; then
     # actually deletable). A genuine failure here is treated exactly like a genuine chown failure:
     # exit non-zero, name RUNNER_HOME, let the job fail loudly instead of proceeding into the
     # EACCES this hook exists to prevent.
-    mode_fix_err="$(find "$WORK_DIR" -type d \( ! -perm -u+w -o ! -perm -u+x \) -exec chmod u+rwx {} + 2>&1)"
+    mode_fix_err="$(find "$WORK_DIR" -type d \( ! -perm -u+w -o ! -perm -u+x -o ! -perm -u+r \) -exec chmod u+rwx {} + 2>&1)"
     mode_fix_rc=$?
     if [[ "$mode_fix_rc" -ne 0 ]]; then
         mode_fix_err_safe="$(printf '%s' "$mode_fix_err" | tr '\000-\037\177' '?')"

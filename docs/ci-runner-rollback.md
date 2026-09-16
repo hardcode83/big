@@ -164,10 +164,17 @@ Aumentar el número de agentes registrados contra GitHub, sin parar la app. Camb
 gh workflow run infra-dev.yml --ref main -f action=plan
 gh workflow run infra-dev.yml --ref main -f action=apply
 
-# 3. En la VM, reaprovisionar el runner con el nuevo N. El bootstrap es idempotente:
-#    los agentes ya registrados no se re-crean (./config.sh --replace); los nuevos
-#    se añaden al bucle; el legado `autohostai-${ENV}-vm` (sin sufijo numérico) se
+# 3. En la VM, reaprovisionar el runner con el nuevo N. Los agentes nuevos se añaden
+#    al bucle sin problema; el legado `autohostai-${ENV}-vm` (sin sufijo numérico) se
 #    retira una sola vez si la API de GitHub aún lo lista (ver design.md D3).
+#    OJO — NO es "idempotente" para los agentes YA registrados: `./config.sh --replace`
+#    falla con "Cannot configure the runner because it is already configured" contra
+#    ellos (confirmado en la VM viva, change `ci-runner-workspace-pollution`). El efecto
+#    neto para SUBIR N es benigno (se tolera por agente y sigue con los demás — R3.3;
+#    los agentes existentes simplemente quedan como estaban, sin que el hook se
+#    actualice en ellos), pero ese error en el log es esperado, no una señal de que
+#    algo se rompió. Ver RUNBOOK.md §6.2 para el detalle completo y el rodeo manual si
+#    necesitas ACTUALIZAR el hook de un agente ya registrado, no solo añadir agentes.
 #    OBLIGATORIO exportar RUNNER_COUNT antes de invocar el script: una asignación-
 #    prefijo (`VAR=x cmd "$VAR"`) NO hace visible VAR a la expansión de argumentos de
 #    ese mismo comando, así que sin el `export` "$RUNNER_COUNT" llega vacío y el

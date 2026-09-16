@@ -60,10 +60,15 @@ aceptado" más abajo, que enumera explícitamente este radio.
 - THE SYSTEM SHALL instalar `actions-runner` en cada `RUNNER_HOME` y registrarlo con
   `./svc.sh install <user> && ./svc.sh start`, generando el servicio systemd
   `actions.runner.<org>-<repo>.autohostai-${ENV}-vm-<i>.service` (R2).
-- THE SYSTEM SHALL ejecutar el `./config.sh` de cada agente con `--unattended --replace` para
-  que reaprovisionar la VM viva sea idempotente — el `--replace` reescribe la URL/token de un
-  agente preexistente sin retirarlo, así que reejecutar el bootstrap deja a los agentes
-  correctos intactos (R2, R3).
+- THE SYSTEM SHALL ejecutar el `./config.sh` de cada agente con `--unattended --replace` al
+  registrarlo por primera vez (R2, R3). **Matiz confirmado en la VM viva (2026-09-15, change
+  `ci-runner-workspace-pollution`, `tasks.md` 6.4-6.6): `--replace` NO deja intactos a los
+  agentes ya registrados al reaplicar el bootstrap** — falla con `Cannot configure the runner
+  because it is already configured` contra un agente cuyo nombre ya está registrado, en la
+  versión del runner desplegada. El agente preexistente no se pierde (`register_named_agent`
+  tolera el fallo por agente y sigue con los demás, R3.3) pero tampoco se actualiza: ver la
+  sección «Reaprovisionamiento declarativo e idempotente del pool» más abajo para el
+  comportamiento real y el rodeo manual.
 
 ### Tooling declarado por job, no asumido del runner base
 

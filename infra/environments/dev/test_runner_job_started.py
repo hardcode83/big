@@ -286,7 +286,7 @@ def test_restrictive_self_owned_directory_alone_is_not_reported_as_already_clean
 
 
 def test_writable_but_not_executable_directory_alone_is_not_reported_as_already_clean(tmp_path):
-    """Round 14 (`sdd-security`, 2026-09-15): the D2 probe tested only `u+w` (`! -perm -u+w`), so
+    """Round 15 (`sdd-security`, 2026-09-15): the D2 probe tested only `u+w` (`! -perm -u+w`), so
     a self-owned directory left at e.g. `0600` — owner-write SET, owner-execute ABSENT — never
     matched it: `! -perm -u+w` is false for a directory that already has u+w, so D2 took the
     "already clean" fast path over a tree that is not actually deletable (both bits are required
@@ -309,7 +309,7 @@ def test_writable_but_not_executable_directory_alone_is_not_reported_as_already_
 
 
 def test_writable_but_not_executable_directory_is_repaired_after_chown(tmp_path):
-    """Round 14 (`sdd-security`, 2026-09-15), companion to the test above: once D2 correctly
+    """Round 15 (`sdd-security`, 2026-09-15), companion to the test above: once D2 correctly
     flags a `0600` self-owned directory (previous test), the mode-restoring `find … -exec chmod`
     that runs after a successful chown had the SAME `! -perm -u+w`-only predicate, so it also
     never selected that directory for repair — the bug was in both places, not just detection.
@@ -333,6 +333,70 @@ def test_writable_but_not_executable_directory_is_repaired_after_chown(tmp_path)
     mode_after = stat.S_IMODE(restrictive.stat().st_mode)
     assert mode_after & stat.S_IXUSR, (
         f"owner-execute must be restored on a repair pass (mode after: {oct(mode_after)})"
+    )
+
+
+def test_writable_and_executable_but_not_readable_directory_alone_is_not_reported_as_already_clean(
+    tmp_path,
+):
+    """Round 16 (`sdd-security`, 2026-09-15): round 15 added `u+x` to the predicates but not
+    `u+r`. A directory at `0300` (`-wx------` — owner-write AND owner-execute set, owner-READ
+    absent) still matched neither: both bits round 15 tests were already present. Worse than the
+    round-15 cases: `find` needs `u+r` to `opendir()` a directory at all, so `find`'s own attempt
+    to descend into a `0300` directory fails with "Permission denied" regardless of the
+    predicate — this test only proves the entry itself is still flagged (via its parent's
+    listing, which needs no permission on the entry), not that descent succeeds; that is what
+    the companion repair test below actually needs to prove. Fully genuine, no stubs: only
+    ownership is already correct, so D2's own unstubbed `find` must be the one to catch it.
+    """
+    work = tmp_path / "_work"
+    work.mkdir()
+    restrictive = work / "write_exec_only_dir"
+    restrictive.mkdir(mode=0o300)
+    try:
+        result = run_hook(work)
+        assert "already clean" not in result.stdout.lower(), (
+            "a directory missing only owner-read must not be reported as already clean"
+        )
+    finally:
+        restrictive.chmod(0o755)  # restore before pytest's own tmp_path cleanup tries to rmtree it
+
+
+def test_writable_and_executable_but_not_readable_directory_is_repaired_after_chown(tmp_path):
+    """Round 16 (`sdd-security`, 2026-09-15), companion to the test above: proves the actual
+    repair, not just detection — and that the repair genuinely happens DESPITE the hook still
+    failing loudly this run. Before this fix, a `0300` directory was never selected by the
+    mode-restoring `find … -exec chmod` (predicate false — it already had `u+w` and `u+x`).
+    After adding `u+r`, the predicate DOES select it — `chmod`'s target-path form only needs
+    write permission on the PARENT to change an entry's own mode, never permission on the entry
+    itself — but `find`'s OWN separate attempt to `opendir()` this same directory (to check for
+    further matches inside it) still fails with "Permission denied" regardless of the predicate
+    match, so the overall `find` exit code is still non-zero and the hook still fails the job
+    (verified empirically: the batched `-exec … {} +` DOES apply before/despite that diagnostic).
+    This is exactly the round-12-established trade-off for the `0000` case below: "one loud
+    failure, then self-heal" — the CURRENT job legitimately fails (honest, not swallowed), but
+    the directory is left actually fixed for the next one. `sudo`/the D2-probe `find` are
+    stubbed (chown to an already-correct owner can't be exercised unprivileged either), but the
+    mode-restoring `find … -exec chmod` that runs after is REAL and unstubbed.
+    """
+    work = tmp_path / "_work"
+    work.mkdir()
+    restrictive = work / "write_exec_only_dir"
+    restrictive.mkdir(mode=0o300)
+
+    stubbin = make_stub_bin(tmp_path, find_reports_foreign=True, sudo_exit=0)
+    env = {"PATH": f"{stubbin}:{os.environ['PATH']}"}
+
+    result = run_hook(work, env=env)
+
+    assert result.returncode != 0, (
+        "find still can't opendir() this directory to look for further matches, so the hook "
+        f"still fails this run (same as the 0000 case): stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    mode_after = stat.S_IMODE(restrictive.stat().st_mode)
+    assert mode_after & stat.S_IRUSR, (
+        "owner-read must still be restored on disk despite the reported failure — that's the "
+        f"self-heal for the NEXT job (mode after: {oct(mode_after)})"
     )
 
 
