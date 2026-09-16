@@ -1,11 +1,11 @@
 ---
 schema: 1
-state: ACTIVE
-local_review: PENDING
+state: READY_FOR_PR
+local_review: PASS
 repository:
-base_branch:
-head_branch:
-implementation_sha:
+base_branch: main
+head_branch: sdd/dashboard-auto-refresh
+implementation_sha: 9104e5aa
 pr_number:
 pr_url:
 pr_state:
