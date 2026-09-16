@@ -131,6 +131,8 @@ Categorías:
   needs: maintenance, frontend-auth-session · size: S · kind: feature
 - [x] incident-triage-web — [FE] **las mutaciones del manager sobre la incidencia, que hoy sólo existen para el técnico y para la CLI** … → changes/archive/2026-09-10-incident-triage-web/
   needs: incidents-web, maintenance, tech-incident-context · size: S · kind: feature
+- [ ] owner-incident-create — [BE+FE] **que la propietaria pueda abrir una incidencia desde su dashboard**, cerrando el hueco de PRD §12/§28.8 que hoy cubren el huésped, la limpiadora y las entradas derivadas de conversación. Change ad-hoc de Marta, añadido tras la auditoría de pilot-readiness del 2026-09-16.
+  needs: maintenance, incidents-web, frontend-auth-session · size: M · kind: feature
 - [x] approvals-web — [BE+FE] **la pantalla `/approvals`, hoy `RoutePlaceholder`, y la ruta de lista que necesita** … → changes/archive/2026-09-10-approvals-web/
   needs: maintenance, frontend-auth-session · size: M · kind: feature
 - [x] properties-web — [FE] **la pantalla de listado de propiedades, `/properties` … → changes/archive/2026-08-22-properties-web/
