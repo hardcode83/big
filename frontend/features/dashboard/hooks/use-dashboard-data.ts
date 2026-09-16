@@ -40,6 +40,8 @@ function useTenantId(): string {
  */
 export { retryPolicy } from "@/lib/api/retry-policy";
 
+export const DASHBOARD_CARDS_POLL_INTERVAL_MS = 30_000;
+
 export function useDashboardCards(): UseQueryResult<
   PaginatedResponse<PropertyDashboardCard>
 > {
@@ -48,6 +50,8 @@ export function useDashboardCards(): UseQueryResult<
   return useQuery({
     queryKey: dashboardKeys.cards(tenantId, locale),
     queryFn: () => getDashboardDataSource().getDashboardCards(tenantId),
+    refetchInterval: DASHBOARD_CARDS_POLL_INTERVAL_MS,
+    refetchIntervalInBackground: false,
     retry: retryPolicy,
   });
 }
