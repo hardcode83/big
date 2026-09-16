@@ -2,8 +2,12 @@
 # Bootstrap del POOL de runners self-hosted de GitHub Actions (label = $ENV) en la VM.
 # Crea N agentes en la misma VM: un usuario Linux por agente (`actions-runner-<i>`),
 # su `actions-runner-<i>/` propio, su servicio systemd y su registro ante GitHub con
-# label $ENV. Idempotente en el alta (`--replace`); la baja es EXPLÍCITA cuando
-# `RUNNER_COUNT` baja (fase previa al bucle) y está condicionada a `systemctl is-active`.
+# label $ENV. Idempotente en el alta SOLO para un agente que este script registra por PRIMERA
+# vez (`--replace` falla con "Cannot configure the runner because it is already configured"
+# contra uno ya registrado con ese nombre — confirmado en la VM viva, change
+# `ci-runner-workspace-pollution`, `RUNBOOK.md §6.2` documenta el rodeo manual); la baja es
+# EXPLÍCITA cuando `RUNNER_COUNT` baja (fase previa al bucle) y está condicionada a
+# `systemctl is-active`.
 #
 # Parámetros:
 #   $1 — RUNNER_COUNT (entero 1..4). Default: $RUNNER_COUNT si está exportado, si no 4
@@ -194,7 +198,8 @@ for r in runs:
         # ESTE run no tiene el del agente, solo que no pudimos leerlo.
         sys.exit(1)
     for j in jobs_body["jobs"]:
-        if j.get("status") == "completed":
+        status = j.get("status")
+        if status == "completed":
             # Terminado: no puede estar bloqueando nada, sea cual sea su `runner_name` — el
             # único estado que de verdad descarta un job sin más comprobación.
             continue
@@ -212,9 +217,22 @@ for r in runs:
             # exactamente lo mismo (round 16, panel de `/sdd:review`, `sdd-security`,
             # 2026-09-15/16: un `if runner_name is None` a secas dejaba pasar `""` hasta el
             # `continue` final, cuyo propio comentario afirma "es un nombre real y distinto del
-            # nuestro" — falso para `""`). Ni `None` ni `""` identifican a ningún agente, así que
-            # no podemos descartar el job sin saber a quién pertenece. Desconocido, no "no
-            # coincide" (round 8, ampliado aquí).
+            # nuestro" — falso para `""`).
+            #
+            # Round 18 (`sdd-security`, misma fecha): rounds 9/16 trataban CUALQUIER
+            # `runner_name` vacío como desconocido, incluido el caso normal — un job todavía
+            # `queued`/`waiting`/`pending`/`requested` nunca tiene `runner_name` hasta que un
+            # agente lo recoge, y con `needs:` encadenados (backend-tests, frontend-tests,
+            # e2e-tests, compose-ports ya los usan) es EL ESTADO HABITUAL de cualquier job en
+            # cola mientras el run está `in_progress`. Tratarlo como "desconocido" diferiría el
+            # reinicio de los cuatro agentes en cada CI activa, con un mensaje que le dice al
+            # operador que revise el token/la API cuando en realidad no hay ninguna incertidumbre:
+            # un job sin asignar no puede ser el job de NINGÚN agente concreto, así que no bloquea
+            # el reinicio de este. Solo queda "desconocido" (fail-closed) el caso que sí lo es:
+            # `runner_name` vacío en un job `in_progress` (asignado a alguien y perdimos el campo)
+            # o de estado ausente/no reconocido (respuesta malformada).
+            if status in ("queued", "waiting", "pending", "requested"):
+                continue
             sys.exit(1)
         if runner_name == target:
             # El verdicto "encontrado" lo lleva el código de salida (0), no el contenido

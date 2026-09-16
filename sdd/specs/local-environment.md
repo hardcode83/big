@@ -512,16 +512,22 @@ detect/suite/gate (ver §«Guardia de la postura de red»).
   señal de alcance o fallar cerrado ante un servicio Python no reconocido queda como entrada propia
   de roadmap.
 - **Segunda limitación conocida, aceptada** (2026-09-15/16, panel de `/sdd:review`, lente `qa`,
-  rounds 14 y 16): que el árbol quede realmente sin `__pycache__`/`.pytest_cache` tras ejercitar
-  la pila (el efecto que este guard protege indirectamente — comprobado en `tasks.md` tarea 1.3
-  con un `find`/`git status --porcelain` real tras un `make up` + suite completa) no tiene test
-  de regresión automatizado, solo esa comprobación manual puntual. Aceptado sin arreglar porque
-  el mecanismo es declarativo (la variable `PYTHONDONTWRITEBYTECODE` de arriba y el `cache_dir`
-  fuera del árbol de `backend/pyproject.toml`), no lógica que un cambio posterior pueda
-  regresionar por accidente sin también tocar uno de esos dos ficheros — a diferencia del
-  comportamiento condicional de "degradar sin fallar" ante una ruta de caché no escribible, que
-  sí tiene test propio (`backend/tests/test_pytest_cache_dir.py`) precisamente porque es una
-  rama de código real, no una ausencia de escritura.
+  rounds 14, 16 y 18): que el árbol quede realmente sin `__pycache__`/`.pytest_cache` tras
+  ejercitar la pila (el efecto que este guard y R2 protegen indirectamente — comprobado en
+  `tasks.md` tarea 1.3 con un `find`/`git status --porcelain` real tras un `make up` + suite
+  completa) no tiene test de regresión automatizado que reproduzca esa comprobación, solo esa
+  transcripción manual puntual. Aceptado sin arreglar porque ambas CAUSAS sí tienen guardia
+  propia contra un regreso silencioso: `PYTHONDONTWRITEBYTECODE` la tiene desde el principio
+  (este mismo guard, R5, falla el build si desaparece); el valor de `cache_dir` de
+  `backend/pyproject.toml` no la tenía —round 18 encontró que la simetría con
+  `PYTHONDONTWRITEBYTECODE` que esta nota afirmaba era falsa— y round 18 la cerró con
+  `backend/tests/test_pytest_cache_dir.py::test_configured_cache_dir_resolves_outside_the_repo_tree`,
+  que falla si el valor configurado deja de resolver fuera del árbol. Lo que sigue sin
+  automatizar es solo el EFECTO de punta a punta (que ningún otro mecanismo, presente o futuro,
+  vuelva a escribir dentro del árbol) — su comportamiento condicional de "degradar sin fallar"
+  ante una ruta de caché no escribible sí tiene test propio
+  (`backend/tests/test_pytest_cache_dir.py::test_unwritable_cache_dir_degrades_to_a_warning_instead_of_failing`)
+  precisamente porque es una rama de código real, no una ausencia de escritura.
 
 El script vive en `scripts/compose-bytecode.py` con `scripts/test_compose_bytecode.py` al lado,
 cargado por `importlib` como los demás de `scripts/`. Su suite la recoge el mismo job

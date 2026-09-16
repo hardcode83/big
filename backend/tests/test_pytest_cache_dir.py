@@ -17,6 +17,39 @@ check, so it reproduces the same failure pytest's cache plugin has to handle eit
 
 import subprocess
 import sys
+import tomllib
+from pathlib import Path
+
+
+def test_configured_cache_dir_resolves_outside_the_repo_tree():
+    """R2.1/R1.2 (`ci-runner-workspace-pollution`, round 18, `sdd-qa`): R1's causal setting
+    (`PYTHONDONTWRITEBYTECODE`) has a CI guard (`scripts/compose-bytecode.py`, R5) that fails the
+    build if it's ever removed — a regression there cannot land silently. R2's causal setting
+    (this `cache_dir` value) had no equivalent: nothing previously asserted the configured path
+    actually resolves outside the repo, so an edit that moved it back under `backend/` (a
+    refactor dropping the `/tmp/` prefix, or a careless merge conflict resolution) would pass
+    every existing guard and test, and only surface the next time someone happened to run `git
+    status --porcelain` after `make up` — reproducing the exact 2026-09-14 incident this whole
+    change exists to prevent, silently. This is deliberately independent of R2.3's test above:
+    that one proves pytest degrades gracefully when the configured path is unusable, not that
+    the configured path is the RIGHT one.
+    """
+    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    config = tomllib.loads(pyproject_path.read_text())
+    cache_dir = config["tool"]["pytest"]["ini_options"]["cache_dir"]
+
+    backend_dir = pyproject_path.parent  # pytest resolves a relative cache_dir against this
+    repo_root = backend_dir.parent
+    # A relative value (e.g. a regression that dropped the "/tmp/" prefix back to
+    # ".pytest_cache") must be resolved against `backend_dir` the same way pytest itself would,
+    # not compared as a bare string — otherwise a relative-path regression would silently pass
+    # this check (a relative path is never `is_relative_to` an absolute one, regardless of where
+    # it actually points).
+    resolved = (backend_dir / cache_dir).resolve() if not Path(cache_dir).is_absolute() else Path(cache_dir)
+    assert not resolved.is_relative_to(repo_root), (
+        f"cache_dir={cache_dir!r} resolves to {resolved} — inside the repo tree ({repo_root}), "
+        "which is exactly the pollution R1/R2 exist to prevent"
+    )
 
 
 def test_unwritable_cache_dir_degrades_to_a_warning_instead_of_failing(tmp_path):

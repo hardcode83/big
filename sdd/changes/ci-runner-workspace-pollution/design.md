@@ -131,6 +131,23 @@ igual que los bordes de `id`/`workflow_runs`/`jobs` que los rounds 6-7 ya cerrar
 el mismo criterio: un `in_progress` sin `runner_name` sale `!=0` (desconocido), nunca se lee como
 "no es el nuestro".
 
+**Round 16** (`sdd-security`, 2026-09-15/16) amplió el mismo cierre a la cadena vacía: `if
+runner_name is None` a secas dejaba pasar `runner_name: ""` hasta el `continue` final, cuyo
+propio comentario afirmaba "es un nombre real y distinto del nuestro" — falso para `""`.
+Cambiado a `if not runner_name`, que cubre los dos valores falsy por igual.
+
+**Round 18** (`sdd-security`, misma fecha) encontró que ese `if not runner_name` era, a su vez,
+demasiado amplio: un job todavía `queued`/`waiting`/`pending`/`requested` NUNCA tiene
+`runner_name` hasta que algún agente lo recoge — es su forma normal, no una ambigüedad — y con
+los workflows de este repo que ya encadenan jobs por `needs:` (backend-tests, frontend-tests,
+e2e-tests, compose-ports), un job en cola sin asignar es el estado habitual de cualquier run
+`in_progress` mientras la CI está activa. Tratarlo como "desconocido" diferiría el reinicio de
+los cuatro agentes en cada CI activa, con un mensaje que le pide al operador revisar el
+token/la API cuando no hay ninguna incertidumbre real. Corregido: un `runner_name` vacío en un
+job de estado `queued`/`waiting`/`pending`/`requested` ahora hace `continue` (no puede ser el job
+de NINGÚN agente concreto todavía); solo un job `in_progress` (o de estado ausente/no
+reconocido) sin `runner_name` sigue saliendo `!=0`.
+
 **Round 9** cerró la ordenación equivalente a nivel de job: filtrar por `status == "in_progress"`
 antes de mirar `runner_name` dejaba pasar un job YA asignado al agente pero con cualquier otro
 estado no-terminal. **Round 11** (`sdd-security`) planteó la misma pregunta un nivel más arriba: la
@@ -268,6 +285,7 @@ rápido, pero sin vía de recuperación si el hook falla.
 |---|---|---|
 | Stack local | `docker-compose.yml` | `PYTHONDONTWRITEBYTECODE: "1"` en `environment:` de `migrate`, `backend`, `worker`, `beat` (R1.1) |
 | Backend | `backend/pyproject.toml` | Nueva sección `[tool.pytest.ini_options]` con `cache_dir` fuera del árbol (R2.1) |
+| Backend | `backend/tests/test_pytest_cache_dir.py` | **Nuevo (round 7).** Test de regresión para R2.3: fuerza `ENOTDIR` en el `cache_dir` configurado y confirma que pytest degrada a un warning en vez de fallar |
 | Infra dev | `infra/environments/dev/runner-job-started.sh` | **Nuevo.** El hook: short-circuit si no hay ficheros ajenos, si no `chown -R` acotado al `_work/` propio (R3.1, R3.3, R3.4, R3.6). **Enmienda 2026-09-15 (round 11)**: tras un `chown` con éxito, restaura también `u+rwx` en directorios cuyo modo (no solo su dueño) bloqueaba `git clean` — acotado a `$WORK_DIR`. **Segunda enmienda, misma fecha (round 12)**: el short-circuit ahora prueba TAMBIÉN el modo (no solo el dueño) en la misma sonda `-quit`, porque un árbol ya propiedad del agente con un directorio restrictivo se leía como "ya limpio" y nunca llegaba al arreglo del modo; y el `find`/`chmod` de restauración ya no descarta su código de salida (`2>/dev/null \|\| true`) — un directorio que `find` no puede ni `opendir()` (p. ej. `0000`) ahora falla el hook en voz alta, nombrando `RUNNER_HOME`, en vez de imprimir "succeeded" sobre un árbol que sigue sin ser borrable. **Tercera enmienda, misma fecha (round 13)**: el stderr de la sonda D2 y de `chown -R` se captura y sanea con el mismo filtro `tr` que ya protegía `$FOUND` — antes llegaba sin redirigir al log del job, y un nombre de fichero influido por el atacante (contenido de un fork PR) podía inyectar secuencias ANSI/terminal o falsificar líneas de log en un job POSTERIOR. **Cuarta enmienda, 2026-09-15/16 (round 15)**: tanto la sonda D2 como el arreglo de modo probaban solo `u+w` — un directorio dejado en, p. ej., `0600` (con `u+w` pero sin `u+x`) no encajaba en `! -perm -u+w` (ya lo tiene) y quedaba permanentemente sin poder borrarse (`git clean -ffdx` necesita los dos bits), tumbando cada job posterior en ese agente hasta una intervención manual. Los dos predicados ahora prueban `\( ! -perm -u+w -o ! -perm -u+x \)`. **Quinta enmienda, misma fecha (round 16)**: ni siquiera eso bastaba — un directorio en `0300` (`-wx------`, con `u+w` y `u+x` pero sin `u+r`) tampoco encajaba en ninguno de los dos bits probados, y encima `find` necesita `u+r` para poder `opendir()` un directorio, así que su descenso a comprobar los hijos de ese directorio fallaba con "Permission denied" independientemente del predicado. Los dos predicados ahora prueban también `! -perm -u+r`. Verificado empíricamente que el `chmod u+rwx` por lotes (`-exec … {} +`) SÍ se aplica sobre esa entrada a pesar del código de salida no-cero de `find` — el mismo compromiso que la segunda enmienda (round 12) ya aceptó para `0000`: este job concreto falla en voz alta, pero el árbol queda arreglado para el siguiente |
 | Infra dev | `infra/environments/dev/runner-bootstrap.sh` | Instala el hook en `$RUNNER_HOME/hooks/`, escribe `$RUNNER_HOME/.env`, y reinicia el agente si el `.env` cambió y está ocioso (R3.2, D4). **Enmienda 2026-09-15**: la comprobación de liveness contra la API de GitHub (`gh_in_progress_url_for_runner`) falla cerrada ante cualquier incertidumbre, y el reinicio diferido distingue "job confirmado" (rc=2) de "API no respondió" (rc=3) — ver D4. **Segunda enmienda, misma fecha (round 8)**: marcador `.hook_confirmed` por agente para que un reinicio diferido no quede sin reintentar — ver D4. **Tercera enmienda, misma fecha (round 11)**: el diferimiento ahora borra un marcador previo (`rm -f`) en vez de dejarlo intacto, para que un `.env` que cambia y difiere sobre un agente ya confirmado antes no reabra el mismo callejón sin salida por otra vía — ver D4 |
 | Infra dev | `infra/environments/dev/cloud-init.yaml.tftpl`, `main.tf` | El hook viaja a la VM nueva igual que el bootstrap: `file()` en `main.tf` + `write_files` en el cloud-init |

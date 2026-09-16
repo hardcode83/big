@@ -321,7 +321,8 @@ sustituye por código versionado (change `ci-runner-workspace-pollution`).
 - `infra/environments/dev/{variables.tf,main.tf,cloud-init.yaml.tftpl}` — fuente del
   parámetro `runner_count` (default 4, validación 1..4) cableado al bootstrap vía `templatefile()`
   y `runcmd`.
-- `infra/environments/dev/RUNBOOK.md §6.2` — reaprovisionamiento idempotente del pool con
-  `RUNNER_COUNT` explícito y verificación de N agentes Idle.
+- `infra/environments/dev/RUNBOOK.md §6.2` — reaprovisionamiento del pool con `RUNNER_COUNT`
+  explícito y verificación de N agentes Idle. Declarativo para agentes NUEVOS únicamente
+  (`--replace` no es idempotente contra uno ya registrado — ver el matiz más arriba).
 - `infra/environments/dev/README.md` — nota sobre el rango razonable de `runner_count`, la
   métrica que lo sostiene y la exigencia de nota de medición para `runner_count > default`.

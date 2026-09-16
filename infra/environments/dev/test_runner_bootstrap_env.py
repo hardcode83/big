@@ -812,6 +812,47 @@ def test_gh_helper_in_progress_job_with_empty_string_runner_name_is_unknown_not_
     assert code != 0, "an empty-string runner_name on an in-progress job must never report as 'confirmed idle'"
 
 
+def test_gh_helper_a_queued_job_with_no_runner_name_yet_does_not_block_a_restart():
+    """Round 18 (`sdd-security`, 2026-09-15/16): rounds 9/16 treated ANY falsy `runner_name` on
+    a non-completed job as unknown — but a `queued`/`waiting`/`pending`/`requested` job never HAS
+    a `runner_name` until some agent picks it up; that is its normal, expected shape, not
+    ambiguity. With `needs:`-chained workflows (this repo has several), a queued-and-unassigned
+    job sits inside an `in_progress` run constantly while CI is busy, so treating it as "unknown"
+    deferred every agent's restart on every busy day, with a misleading "check the API/token"
+    message pointing at a problem that doesn't exist. A job with no assignee yet cannot be
+    blocking THIS agent specifically, so it must not count as busy or unknown — it's simply not
+    ours, same as a job with a different real name.
+    """
+    runs = {"workflow_runs": [{"id": 1, "html_url": "https://x/1"}]}
+    for status in ("queued", "waiting", "pending", "requested"):
+        jobs = {"jobs": [{"status": status, "runner_name": None}]}
+        code, out = run_gh_helper("agent-2", {
+            RUNS_URL: (runs, None),
+            "actions/runs/1/jobs": (jobs, None),
+        })
+        assert code == 0, f"status={status!r}: an unassigned job must not block idleness, got rc={code}"
+        assert out.strip() == "", f"status={status!r}: an unassigned job must not report as busy"
+
+
+def test_gh_helper_an_in_progress_job_with_no_runner_name_is_still_unknown():
+    """Companion to the test above: only a queued-shaped status excuses a missing `runner_name`.
+    An `in_progress` job (or a malformed response with no `status` at all) with no `runner_name`
+    is a genuine ambiguity round 18 must not have loosened — it could be OUR job with the field
+    dropped by a flaky response, so it must still fail closed.
+    """
+    runs = {"workflow_runs": [{"id": 1, "html_url": "https://x/1"}]}
+    for status in ("in_progress", None):
+        job = {"runner_name": None}
+        if status is not None:
+            job["status"] = status
+        jobs = {"jobs": [job]}
+        code, out = run_gh_helper("agent-2", {
+            RUNS_URL: (runs, None),
+            "actions/runs/1/jobs": (jobs, None),
+        })
+        assert code != 0, f"status={status!r}: a nameless job that isn't queued-shaped must stay unknown"
+
+
 def test_gh_helper_a_job_already_assigned_to_us_with_a_non_terminal_status_is_busy():
     """Round 9 (`sdd-security`, 2026-09-15): filtering on `status == "in_progress"` BEFORE
     looking at `runner_name` (rounds 6-8's shape) let a job already assigned to THIS agent, but
