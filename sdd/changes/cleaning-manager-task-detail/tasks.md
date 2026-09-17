@@ -24,21 +24,21 @@
 - [x] 1.3 `frontend/features/cleaning/data/cleaning-source.ts` — declarar `getTask` en la
       interfaz `CleaningDataSource`. [R1.1]
 
-## 2. Cache y hooks: `cleaningKeys.task`, `useCleaningTask`, invalidación cruzada <!-- panel: skipped — pure wiring -->
+## 2. Cache y hooks: `cleaningKeys.task`, `useCleaningTask`, invalidación cruzada <!-- panel: PASS 2026-09-17 receipt:580a3413 -->
 
-- [ ] 2.1 `frontend/features/cleaning/hooks/query-keys.ts` — añadir `task: (tenantId,
+- [x] 2.1 `frontend/features/cleaning/hooks/query-keys.ts` — añadir `task: (tenantId,
       taskId): QueryKey => tenantScopedKey(tenantId, "cleaning-task", taskId)` (D4,
       invariante del módulo: "every key begins with `['tenant', tenantId, ...]`"). Ampliar
       `query-keys.test.ts` con un test que verifique que `cleaningKeys.task(tenantId,
       taskId)` empieza por `["tenant", tenantId, "cleaning-task"]`. [R1.1]
-- [ ] 2.2 **nuevo** `frontend/features/cleaning/hooks/use-cleaning-task.ts` —
+- [x] 2.2 **nuevo** `frontend/features/cleaning/hooks/use-cleaning-task.ts` —
       `useQuery({ queryKey: cleaningKeys.task(tenantId, taskId), queryFn: () =>
       getCleaningDataSource().getTask(tenantId, taskId), enabled: !!taskId, retry: false })`,
       con `tenantId` resuelto por `useAuth()` (mismo patrón que `useCleaningTasks` en
       `use-cleaning-data.ts`). Con `use-cleaning-task.test.tsx`: cada rama
       `loading/success/error/forbidden/not-found/validation` (D5/D12), `retry: false`,
       `enabled: false` cuando `taskId` es vacío. [R1.1, R1.3, R1.4]
-- [ ] 2.3 `frontend/features/cleaning/hooks/use-assign-cleaning-task.ts`,
+- [x] 2.3 `frontend/features/cleaning/hooks/use-assign-cleaning-task.ts`,
       `use-validate-cleaning-task.ts`, `use-cancel-cleaning-task.ts` — añadir a su
       `onSettled` (en éxito y fallo) `queryClient.invalidateQueries({ queryKey:
       cleaningKeys.task(tenantId, taskId) })` para que las mutaciones refresquen el detalle
@@ -204,3 +204,8 @@
 - Typecheck scoped: `tsc --noEmit -p <tsconfig con solo los 4 ficheros tocados>` (exit 0); el `npm run typecheck` del proyecto no se intentó por el precedente de OOM de `cleaning-task-manage-web` 7.3.
 - Suite completa del feature `features/cleaning/**` corre verde: 21 ficheros, 449 tests, ~6.5 s.
 - Fix D11 round 1 (sdd-qa medium): `mapTask` en `http-cleaning-source.ts` pasa `value.reservation_id` por `?? null` para casar con el patrón deploy-skew que `mapListItem` ya aplica a `assignment_blocked_by`. Antes, una respuesta del backend sin la clave producía `reservationId === undefined`, violando el tipo declarado `string | null`. Nuevo test `maps an ABSENT reservation_id key to null, the deploy-skew window (design D11)` cubre la omisión total de la clave (no `null`, clave ausente). Suite `features/cleaning/**` re-corrida: 21 ficheros, 450 tests, 6.30 s.
+- `useCleaningTask(taskId)` con `useTenantId()` local (mismo patrón que `use-cleaning-data.ts`): si no hay `user` o `user.tenant_id === null` lanza el error "The cleaning task detail view requires an authenticated tenant context", idéntico al del listado. El `queryFn` lanza si `taskId` es vacío, aunque `enabled: !!taskId` ya impide la llamada — guarda de contrato para futuros callers que se salten el `enabled`.
+- Tests del hook cubren las seis ramas (loading, success, error genérico, forbidden 403, not-found 404, validation 422) leyendo `error.status` directamente — el mapeador `mapCleaningDetailError` (sección 3) aún no existe, así que el mapper no se usa todavía en este test.
+- Las tres mutaciones extienden `onSettled` con `(_data, _error, { taskId })` (antes era `() =>`) para poder invalidar la clave de detalle específica: `cleaningKeys.task(tenantId, taskId)`. El listado mantiene su invalidación de prefijo intacta; la nueva clave corre como `invalidateQueries` adicional, nunca como sustitución.
+- Los tests preexistentes (`use-assign-cleaning-task.test.tsx`, `use-validate-cleaning-task.test.tsx`, `use-cancel-cleaning-task.test.tsx`) tienen fixtures obsoletos: el mock de `CleaningDataSource` no incluye `getTask` y la `task` literal no incluye `reservationId: null`. Section 1 añadió ambos a la frontera/DTO sin barrer estos fixtures (precedente de `cleaning-task-manage-web` 7.3); los tests siguen verdes en runtime pero `tsc` falla. Toca arreglarlos en la sección 7.3 (`assumed`).
+- Suite `features/cleaning/**` re-corrida con mis cambios: 22 ficheros, 467 tests, ~6 s verde.

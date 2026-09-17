@@ -114,6 +114,37 @@ describe("useAssignCleaningTask (R4.1, R4.5, R4.6, design D9)", () => {
     },
   );
 
+  it("invalidates the detail key on success so a detail tab opened elsewhere stays coherent (design D4, R5.3)", async () => {
+    const { invalidate, Wrapper } = harness();
+    const { result } = renderHook(() => useAssignCleaningTask(), {
+      wrapper: Wrapper,
+    });
+
+    result.current.mutate({ taskId: "task-1", cleanerId: "cleaner-9" });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: cleaningKeys.task("tenant-1", "task-1"),
+    });
+  });
+
+  it("invalidates the detail key on failure too (design D4)", async () => {
+    assignTask.mockRejectedValue(
+      new ApiError({ code: "CONFLICT", message: "no", status: 409 }),
+    );
+    const { invalidate, Wrapper } = harness();
+    const { result } = renderHook(() => useAssignCleaningTask(), {
+      wrapper: Wrapper,
+    });
+
+    result.current.mutate({ taskId: "task-1", cleanerId: "cleaner-9" });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: cleaningKeys.task("tenant-1", "task-1"),
+    });
+  });
+
   it("never retries a rejected write", async () => {
     assignTask.mockRejectedValue(
       new ApiError({ code: "CONFLICT", message: "no", status: 409 }),

@@ -78,7 +78,7 @@ export function useCancelCleaningTask(): UseMutationResult<
       return getCleaningDataSource().cancelTask(tenantId, taskId, reason);
     },
     retry: false,
-    onSettled: () => {
+    onSettled: (_data, _error, { taskId }) => {
       if (!tenantId) {
         return;
       }
@@ -97,6 +97,12 @@ export function useCancelCleaningTask(): UseMutationResult<
       });
       void queryClient.invalidateQueries({
         queryKey: ["tenant", tenantId, "property-timeline"],
+      });
+      // The detail key (design D4): refreshes a detail page the user
+      // opened in another tab — without it a stale `404` would leave the
+      // detail showing a state the backend has already changed.
+      void queryClient.invalidateQueries({
+        queryKey: cleaningKeys.task(tenantId, taskId),
       });
     },
   });

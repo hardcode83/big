@@ -329,8 +329,8 @@ interface CleaningDataSource {
 // features/cleaning/hooks/query-keys.ts
 export const cleaningKeys = {
   // ... (existentes)
-  task: (tenantId: string, taskId: string) =>
-    ["cleaning", "task", tenantId, taskId] as const,
+  task: (tenantId: string, taskId: string): QueryKey =>
+    tenantScopedKey(tenantId, "cleaning-task", taskId),
 };
 
 // features/cleaning/lib/detail-error.ts

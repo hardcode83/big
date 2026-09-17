@@ -26,6 +26,13 @@ export const cleaningKeys = {
   /** The prefix every task key shares — what design D9 invalidates. */
   tasksPrefix: (tenantId: string): QueryKey =>
     tenantScopedKey(tenantId, "cleaning-tasks"),
+  /**
+   * One task's detail key (design D4). The three manager mutations invalidate
+   * this on settled, alongside `tasksPrefix`, so a detail page opened in
+   * another tab stays coherent with the listing.
+   */
+  task: (tenantId: string, taskId: string): QueryKey =>
+    tenantScopedKey(tenantId, "cleaning-task", taskId),
   cleaners: (tenantId: string): QueryKey =>
     tenantScopedKey(tenantId, "cleaning-cleaners"),
   properties: (tenantId: string): QueryKey =>
