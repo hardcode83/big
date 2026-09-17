@@ -38,6 +38,13 @@ export interface CleaningDataSource {
     page: number,
   ): Promise<PaginatedResponse<CleaningTaskListItem>>;
 
+  /**
+   * Reads one task by id (design D3, R1.1). Returns the same base shape
+   * `assignTask`/`cancelTask`/`createTask` produce — `CleaningTaskListItem`'s
+   * pre-flight is listing-only, so it does not belong here.
+   */
+  getTask(tenantId: string, taskId: string): Promise<CleaningTask>;
+
   /** The tenant's `role=CLEANER` catalog, active and inactive alike (design D4). */
   listCleaners(tenantId: string): Promise<CleanerSummary[]>;
 

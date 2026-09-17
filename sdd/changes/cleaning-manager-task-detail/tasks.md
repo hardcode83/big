@@ -10,18 +10,18 @@
      it may travel with the PR as a deferred entry; it may sit on any line of
      the task item, not only the checkbox line. -->
 
-## 1. DTO y frontera de datos: `reservationId` + `getTask` <!-- panel: skipped — DTO/HTTP changes only, panel reviews on the consumer side -->
+## 1. DTO y frontera de datos: `reservationId` + `getTask` <!-- panel: PASS 2026-09-17 receipt:17dc36d7 -->
 
-- [ ] 1.1 `frontend/features/cleaning/data/dto.ts` — añadir `reservationId: string | null`
+- [x] 1.1 `frontend/features/cleaning/data/dto.ts` — añadir `reservationId: string | null`
       a `CleaningTask` (D11: es el único de los seis campos ausentes de
       `CleaningTaskResponse` que R2-R6 consume). [R3.2, R4.3]
-- [ ] 1.2 `frontend/features/cleaning/data/http/http-cleaning-source.ts` — añadir
+- [x] 1.2 `frontend/features/cleaning/data/http/http-cleaning-source.ts` — añadir
       `getTask(tenantId, taskId)` (`GET /api/v1/cleaning-tasks/{taskId}`,
       `params: { taskId }`, devuelve `mapTask`); extender `mapTask` con
       `reservation_id→reservationId`; ampliar `http-cleaning-source.test.ts` cubriendo el
       nuevo método (cuerpo de la petición, respuesta mapeada) y el campo nuevo de
       `mapTask`. [R1.1, R3.2]
-- [ ] 1.3 `frontend/features/cleaning/data/cleaning-source.ts` — declarar `getTask` en la
+- [x] 1.3 `frontend/features/cleaning/data/cleaning-source.ts` — declarar `getTask` en la
       interfaz `CleaningDataSource`. [R1.1]
 
 ## 2. Cache y hooks: `cleaningKeys.task`, `useCleaningTask`, invalidación cruzada <!-- panel: skipped — pure wiring -->
@@ -196,3 +196,11 @@
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
+
+- `getTask` en `http-cleaning-source.ts` usa `pathParams: { task_id: taskId }` (snake_case) — el path param del contrato (`openapi.d.ts:6162`) es `task_id`, no `taskId`. El design.md D3 decía "params: { taskId }" pero es la nomenclatura del módulo (`pathParams`, snake_case) la que manda; corregido para casar con el resto de la frontera (`assignTask`/`cancelTask`/`validateTask`).
+- `mappedTask` (fixture de `http-cleaning-source.test.ts`) se ensancha con `reservationId: "reservation-1"`; ahora `expect(...).toEqual(mappedTask)` cubre el campo sin tests adicionales (los tests de `assignTask`/`createTask` ya verificaban `toEqual(mappedTask)` y siguen verdes).
+- El nuevo `describe("HttpCleaningSource.getTask ...")` cubre: body de la petición (sólo `pathParams.task_id`, sin `body`/`query`), mapeo `reservation_id → reservationId` con id real y con `null`, propagación de `ApiError` 403/404/422/500 sin reintento. Se añade un describe corto que verifica que `reservationId` también sale por `mapListItem` (consistencia entre los dos mappers).
+- Test command correcto dentro del contenedor: `docker compose exec -T frontend npx vitest run features/cleaning/data/http/http-cleaning-source.test.ts` (con `frontend/` ya montado en `/app`; el path completo `frontend/features/...` que el task brief cita falla con "No test files found").
+- Typecheck scoped: `tsc --noEmit -p <tsconfig con solo los 4 ficheros tocados>` (exit 0); el `npm run typecheck` del proyecto no se intentó por el precedente de OOM de `cleaning-task-manage-web` 7.3.
+- Suite completa del feature `features/cleaning/**` corre verde: 21 ficheros, 449 tests, ~6.5 s.
+- Fix D11 round 1 (sdd-qa medium): `mapTask` en `http-cleaning-source.ts` pasa `value.reservation_id` por `?? null` para casar con el patrón deploy-skew que `mapListItem` ya aplica a `assignment_blocked_by`. Antes, una respuesta del backend sin la clave producía `reservationId === undefined`, violando el tipo declarado `string | null`. Nuevo test `maps an ABSENT reservation_id key to null, the deploy-skew window (design D11)` cubre la omisión total de la clave (no `null`, clave ausente). Suite `features/cleaning/**` re-corrida: 21 ficheros, 450 tests, 6.30 s.
