@@ -45,9 +45,9 @@
       si el usuario lo abrió en otra pestaña (D4). Ampliar los tres tests existentes con
       un caso que verifique la invalidación adicional. [R5.3]
 
-## 3. Mapeador de error: `detail-error.ts` (D5/D12) <!-- panel: skipped — pure mapping, no UI -->
+## 3. Mapeador de error: `detail-error.ts` (D5/D12) <!-- panel: PASS 2026-09-17 receipt:4c974b2e -->
 
-- [ ] 3.1 **nuevo** `frontend/features/cleaning/lib/detail-error.ts` — declarar la
+- [x] 3.1 **nuevo** `frontend/features/cleaning/lib/detail-error.ts` — declarar la
       union `CleaningDetailState` (`loading | forbidden | not-found | validation | error |
       success`) y `mapCleaningDetailError(query, refetch)` (mismo patrón que
       `mapIncidentsError`: por código HTTP, switch exhaustivo, devuelve `{ kind, data?
@@ -209,3 +209,9 @@
 - Las tres mutaciones extienden `onSettled` con `(_data, _error, { taskId })` (antes era `() =>`) para poder invalidar la clave de detalle específica: `cleaningKeys.task(tenantId, taskId)`. El listado mantiene su invalidación de prefijo intacta; la nueva clave corre como `invalidateQueries` adicional, nunca como sustitución.
 - Los tests preexistentes (`use-assign-cleaning-task.test.tsx`, `use-validate-cleaning-task.test.tsx`, `use-cancel-cleaning-task.test.tsx`) tienen fixtures obsoletos: el mock de `CleaningDataSource` no incluye `getTask` y la `task` literal no incluye `reservationId: null`. Section 1 añadió ambos a la frontera/DTO sin barrer estos fixtures (precedente de `cleaning-task-manage-web` 7.3); los tests siguen verdes en runtime pero `tsc` falla. Toca arreglarlos en la sección 7.3 (`assumed`).
 - Suite `features/cleaning/**` re-corrida con mis cambios: 22 ficheros, 467 tests, ~6 s verde.
+- `mapCleaningDetailError(query, refetch)` firma de dos argumentos (no un sólo `query`): el `error` lleva `refetch: () => void` para que el `ErrorState` (R1.4) sólo necesite la variante, no el `UseQueryResult` crudo. `mapIncidentsError` no lo hace porque su `error` no expone refetch — aquí el precedent lo dicta R1.4 explícitamente.
+- `CleaningDetailState` es cerrado sobre `CleaningTask` (no generic `<TData>`): el detalle sólo tiene un consumidor y un DTO; un genérico ahí abriría sitio a variantes `data: unknown` por descuido.
+- El mapper **no** mapea `401 → loading` como `mapIncidentsError`: la sesión expirada la maneja `lib/api/authenticated-client.ts` (igual que en el detalle de cleaning), pero mantenerla en el mapper añade una rama que esta pantalla no anuncia (no hay copia i18n de "refrescando sesión" en `cleaning:detail.*`); el `401` cae al `error` con refetch, mismo fallback que cualquier `4xx` desconocido, y el refresh de sesión se dispara por el lado del cliente HTTP, no por aquí.
+- `detail-error.test.ts` cubre las seis ramas + casos `forbidden ≠ not-found` (discriminadas, no superpuestas) + verificación de que `refetch` re-dispara la consulta (no es una función muerta) + invariante "no leak del `error.message`" (regla 8 del proyecto: i18n del backend, no del cliente). 15 tests, 6 ms.
+- `tsc --noEmit -p <tsconfig con solo los 2 ficheros>` (exit 0) — sección 3 no necesitó barrer fixtures preexistentes (el mapper no se importa aún en ningún consumer real, sólo en su test), pero la nota de sección 2 sobre fixtures obsoletos sigue vigente para 7.3.
+- Suite `features/cleaning/**` re-corrida con el mapper añadido: 23 ficheros, 482 tests, 6.27 s verde.
