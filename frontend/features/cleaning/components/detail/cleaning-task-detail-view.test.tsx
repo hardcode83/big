@@ -164,11 +164,10 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
       }),
     );
     renderView();
-    // The empty-state title (key fallback until section 6 fills the
-    // catalog) plus the "back to list" link with href="/cleaning".
-    expect(screen.getByText("detail.notFound")).toBeInTheDocument();
+    // The empty-state title plus the "back to list" link with href="/cleaning".
+    expect(screen.getByText("Tarea no disponible")).toBeInTheDocument();
     const backLinks = screen.getAllByRole("link", {
-      name: /detail\.context\.backToList/,
+      name: /Volver al listado/,
     });
     expect(backLinks.length).toBeGreaterThanOrEqual(1);
     expect(backLinks[0]).toHaveAttribute("href", "/cleaning");
@@ -184,7 +183,9 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
       }),
     );
     renderView();
-    expect(screen.getByText("detail.forbidden")).toBeInTheDocument();
+    expect(
+      screen.getByText("No tienes permiso para ver esta limpieza."),
+    ).toBeInTheDocument();
   });
 
   it("renders the validation state without echoing the backend payload (R1.4)", () => {
@@ -202,7 +203,9 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
       }),
     );
     const { container } = renderView();
-    expect(screen.getByText("detail.validation")).toBeInTheDocument();
+    expect(
+      screen.getByText("Identificador de tarea inválido."),
+    ).toBeInTheDocument();
     expect(container.textContent).not.toContain("DO NOT LEAK");
     expect(container.textContent).not.toContain("validation_error");
   });
@@ -219,9 +222,11 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
       }),
     );
     renderView();
-    expect(screen.getByText("detail.error.title")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "detail.error.retry" }),
+      screen.getByText("No se pudo cargar el detalle"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Reintentar" }),
     ).toBeInTheDocument();
   });
 
@@ -230,7 +235,7 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
     // Header (R2.1): status + validation labels (the latter is the new
     // section-4 namespace key, the former is the existing catalog).
     expect(screen.getByText("Asignada")).toBeInTheDocument();
-    expect(screen.getByText("detail.header.validation")).toBeInTheDocument();
+    expect(screen.getByText("Validación")).toBeInTheDocument();
     // Identifying (R3.1): property code + name, never the id.
     expect(screen.getByText("REDES11")).toBeInTheDocument();
     expect(screen.getByText("Redes 11")).toBeInTheDocument();
@@ -256,13 +261,13 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
     // the context-links row, so two matches are expected. The other two
     // links are unique.
     expect(
-      screen.getAllByRole("link", { name: /detail\.context\.backToList/ })[0],
+      screen.getAllByRole("link", { name: /Volver al listado/ })[0],
     ).toHaveAttribute("href", "/cleaning");
     expect(
-      screen.getByRole("link", { name: /detail\.context\.viewProperty/ }),
+      screen.getByRole("link", { name: /Ver vivienda/ }),
     ).toHaveAttribute("href", `/properties/${PROPERTY_UUID}`);
     expect(
-      screen.getByRole("link", { name: /detail\.context\.viewReservation/ }),
+      screen.getByRole("link", { name: /Ver reserva/ }),
     ).toHaveAttribute("href", `/reservations/${RESERVATION_UUID}`);
   });
 
@@ -285,7 +290,7 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
     );
     renderView();
     expect(
-      screen.queryByRole("link", { name: /detail\.context\.viewReservation/ }),
+      screen.queryByRole("link", { name: /Ver reserva/ }),
     ).not.toBeInTheDocument();
   });
 
@@ -295,10 +300,10 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
     );
     renderView();
     expect(
-      screen.queryByRole("link", { name: /detail\.context\.viewProperty/ }),
+      screen.queryByRole("link", { name: /Ver vivienda/ }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("link", { name: /detail\.context\.viewReservation/ }),
+      screen.queryByRole("link", { name: /Ver reserva/ }),
     ).not.toBeInTheDocument();
   });
 

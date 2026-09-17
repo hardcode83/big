@@ -38,11 +38,11 @@ function renderBlock(
   );
 }
 
-const PROPERTY_CODE_KEY = "detail.identifying.propertyCode";
-const PROPERTY_NAME_KEY = "detail.identifying.propertyName";
-const RESERVATION_CODE_KEY = "detail.identifying.reservationCode";
-const PROPERTY_NOT_FOUND_KEY = "detail.identifying.propertyNotFound";
-const RESERVATION_NOT_FOUND_KEY = "detail.identifying.reservationNotFound";
+const PROPERTY_CODE_LABEL = "Código de la vivienda";
+const PROPERTY_NAME_LABEL = "Nombre de la vivienda";
+const RESERVATION_CODE_LABEL = "Código de la reserva";
+const PROPERTY_NOT_FOUND_KEY = "Vivienda no disponible";
+const RESERVATION_NOT_FOUND_LABEL = "Reserva no disponible";
 
 describe("DetailIdentifyingBlock (proposal R3.1/R3.2/R3.4)", () => {
   it("names the property by code and name, never by id (R3.1)", () => {
@@ -55,12 +55,12 @@ describe("DetailIdentifyingBlock (proposal R3.1/R3.2/R3.4)", () => {
   it("paints the reservation id as the code (R3.2)", () => {
     renderBlock({ reservationId: "RES-42" });
     expect(screen.getByText("RES-42")).toBeInTheDocument();
-    expect(screen.getByText(RESERVATION_CODE_KEY)).toBeInTheDocument();
+    expect(screen.getByText(RESERVATION_CODE_LABEL)).toBeInTheDocument();
   });
 
   it("degrades to 'reservation not available' when reservationId is null (R3.2)", () => {
     renderBlock({ reservationId: null });
-    expect(screen.getByText(RESERVATION_NOT_FOUND_KEY)).toBeInTheDocument();
+    expect(screen.getByText(RESERVATION_NOT_FOUND_LABEL)).toBeInTheDocument();
     expect(screen.queryByText("RES-42")).not.toBeInTheDocument();
   });
 
@@ -77,7 +77,7 @@ describe("DetailIdentifyingBlock (proposal R3.1/R3.2/R3.4)", () => {
 
   it("keeps the property identity in the section title (R3.1)", () => {
     renderBlock();
-    expect(screen.getByText(PROPERTY_CODE_KEY)).toBeInTheDocument();
-    expect(screen.getByText(PROPERTY_NAME_KEY)).toBeInTheDocument();
+    expect(screen.getByText(PROPERTY_CODE_LABEL)).toBeInTheDocument();
+    expect(screen.getByText(PROPERTY_NAME_LABEL)).toBeInTheDocument();
   });
 });

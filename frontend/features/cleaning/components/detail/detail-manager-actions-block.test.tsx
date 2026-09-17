@@ -134,6 +134,6 @@ describe("DetailManagerActionsBlock (proposal R5.1/R5.2/R5.3, design D7)", () =>
 
   it("renders the manager section title", () => {
     renderBlock();
-    expect(screen.getByText("detail.manager.title")).toBeInTheDocument();
+    expect(screen.getByText("Acciones del manager")).toBeInTheDocument();
   });
 });

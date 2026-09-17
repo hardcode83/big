@@ -26,19 +26,16 @@ function renderBlock(
 
 /**
  * The locale catalog additions for `cleaning:detail.*` land in section 6 of
- * the change. Until then, i18next returns the key path itself as the
- * rendered text for missing translations, so the tests assert against the
- * key path string — the same shape the lookup would resolve to once the
- * catalog is in place. This is the precedent `cleaning-view.test.tsx`
- * implicitly relies on: when keys are present, the catalog value is
- * what the screen reader announces; when they are not, the key path is
- * the placeholder.
+ * the change. Tests assert against the localized catalog values (es locale)
+ * rather than against the key path — the same shape the screen reader
+ * announces once the catalog is in place. Section 6 of the change fills the
+ * catalog, so the assertions track those translations.
  */
-const STATUS_KEY = "detail.header.status";
-const VALIDATION_KEY = "detail.header.validation";
-const SCHEDULED_KEY = "detail.header.scheduledWindow";
-const COMPLETED_KEY = "detail.header.completedAt";
-const VALIDATED_KEY = "detail.header.validatedAt";
+const STATUS_LABEL = "Estado";
+const VALIDATION_LABEL = "Validación";
+const SCHEDULED_LABEL = "Ventana programada";
+const COMPLETED_LABEL = "Fecha de finalización";
+const VALIDATED_LABEL = "Fecha de validación";
 
 describe("DetailHeaderBlock (proposal R2.1-R2.3)", () => {
   it("renders the status as a translated, coloured badge (R2.1)", () => {
@@ -47,18 +44,18 @@ describe("DetailHeaderBlock (proposal R2.1-R2.3)", () => {
     // status translation exists in the catalog, the column header is
     // the new key.
     expect(screen.getByText("Completada")).toBeInTheDocument();
-    expect(screen.getByText(STATUS_KEY)).toBeInTheDocument();
+    expect(screen.getByText(STATUS_LABEL)).toBeInTheDocument();
   });
 
   it("renders the validation status as a plain label (R2.1)", () => {
     renderBlock({ validationStatus: "FAILED" });
     expect(screen.getByText("No conforme")).toBeInTheDocument();
-    expect(screen.getByText(VALIDATION_KEY)).toBeInTheDocument();
+    expect(screen.getByText(VALIDATION_LABEL)).toBeInTheDocument();
   });
 
   it("formats the scheduled window with Intl.DateTimeFormat (R2.1)", () => {
     renderBlock();
-    expect(screen.getByText(SCHEDULED_KEY)).toBeInTheDocument();
+    expect(screen.getByText(SCHEDULED_LABEL)).toBeInTheDocument();
     // Both endpoints render — the locale is `es`, so a mid-morning time
     // lands inside a date string. We don't pin the exact format (it
     // depends on ICU data) — only that both endpoints render.
@@ -74,8 +71,8 @@ describe("DetailHeaderBlock (proposal R2.1-R2.3)", () => {
       completedAt: null,
       validatedAt: null,
     });
-    expect(screen.queryByText(COMPLETED_KEY)).not.toBeInTheDocument();
-    expect(screen.queryByText(VALIDATED_KEY)).not.toBeInTheDocument();
+    expect(screen.queryByText(COMPLETED_LABEL)).not.toBeInTheDocument();
+    expect(screen.queryByText(VALIDATED_LABEL)).not.toBeInTheDocument();
   });
 
   it("shows completedAt when the task was completed (R2.2)", () => {
@@ -85,14 +82,14 @@ describe("DetailHeaderBlock (proposal R2.1-R2.3)", () => {
       completedAt: "2026-08-20T11:00:00Z",
       validatedAt: null,
     });
-    expect(screen.getByText(COMPLETED_KEY)).toBeInTheDocument();
-    expect(screen.queryByText(VALIDATED_KEY)).not.toBeInTheDocument();
+    expect(screen.getByText(COMPLETED_LABEL)).toBeInTheDocument();
+    expect(screen.queryByText(VALIDATED_LABEL)).not.toBeInTheDocument();
   });
 
   it("renders both completedAt and validatedAt when both exist (R2.2)", () => {
     renderBlock();
-    expect(screen.getByText(COMPLETED_KEY)).toBeInTheDocument();
-    expect(screen.getByText(VALIDATED_KEY)).toBeInTheDocument();
+    expect(screen.getByText(COMPLETED_LABEL)).toBeInTheDocument();
+    expect(screen.getByText(VALIDATED_LABEL)).toBeInTheDocument();
   });
 
   it("never prints the raw enum identifiers in the body text", () => {

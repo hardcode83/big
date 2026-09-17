@@ -31,7 +31,7 @@ describe("DetailContextLinksBlock (proposal R4.1/R4.2/R4.3)", () => {
       canReadProperties: false,
       canReadReservations: false,
     });
-    const back = screen.getByRole("link", { name: /detail\.context\.backToList/ });
+    const back = screen.getByRole("link", { name: /Volver al listado/ });
     expect(back).toHaveAttribute("href", "/cleaning");
     expect(container.innerHTML).not.toContain(`/properties/`);
   });
@@ -39,7 +39,7 @@ describe("DetailContextLinksBlock (proposal R4.1/R4.2/R4.3)", () => {
   it("renders 'view property' when the viewer has READ_PROPERTIES (R4.1)", () => {
     renderBlock();
     const link = screen.getByRole("link", {
-      name: /detail\.context\.viewProperty/,
+      name: /Ver vivienda/,
     });
     expect(link).toHaveAttribute("href", `/properties/${PROPERTY_UUID}`);
   });
@@ -47,7 +47,7 @@ describe("DetailContextLinksBlock (proposal R4.1/R4.2/R4.3)", () => {
   it("hides 'view property' when the viewer lacks READ_PROPERTIES (R4.1)", () => {
     const { container } = renderBlock({ canReadProperties: false });
     expect(
-      screen.queryByRole("link", { name: /detail\.context\.viewProperty/ }),
+      screen.queryByRole("link", { name: /Ver vivienda/ }),
     ).not.toBeInTheDocument();
     expect(container.innerHTML).not.toContain(`/properties/`);
   });
@@ -55,7 +55,7 @@ describe("DetailContextLinksBlock (proposal R4.1/R4.2/R4.3)", () => {
   it("renders 'view reservation' when the viewer has READ_RESERVATIONS and reservationId is set (R4.3)", () => {
     renderBlock();
     const link = screen.getByRole("link", {
-      name: /detail\.context\.viewReservation/,
+      name: /Ver reserva/,
     });
     expect(link).toHaveAttribute("href", `/reservations/${RESERVATION_UUID}`);
   });
@@ -63,7 +63,7 @@ describe("DetailContextLinksBlock (proposal R4.1/R4.2/R4.3)", () => {
   it("hides 'view reservation' when reservationId is null (R4.3)", () => {
     const { container } = renderBlock({ reservationId: null });
     expect(
-      screen.queryByRole("link", { name: /detail\.context\.viewReservation/ }),
+      screen.queryByRole("link", { name: /Ver reserva/ }),
     ).not.toBeInTheDocument();
     expect(container.innerHTML).not.toContain(`/reservations/`);
   });
@@ -71,7 +71,7 @@ describe("DetailContextLinksBlock (proposal R4.1/R4.2/R4.3)", () => {
   it("hides 'view reservation' when the viewer lacks READ_RESERVATIONS (R4.3)", () => {
     const { container } = renderBlock({ canReadReservations: false });
     expect(
-      screen.queryByRole("link", { name: /detail\.context\.viewReservation/ }),
+      screen.queryByRole("link", { name: /Ver reserva/ }),
     ).not.toBeInTheDocument();
     expect(container.innerHTML).not.toContain(`/reservations/`);
   });

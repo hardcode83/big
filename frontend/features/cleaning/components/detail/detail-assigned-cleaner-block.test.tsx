@@ -36,9 +36,9 @@ function renderBlock(
   );
 }
 
-const LABEL_KEY = "detail.assigned.label";
-const UNASSIGNED_KEY = "detail.assigned.unassigned";
-const NOT_FOUND_KEY = "detail.assigned.notFound";
+const LABEL_KEY = "Limpiadora";
+const UNASSIGNED_LABEL = "Sin asignar";
+const NOT_FOUND_LABEL = "Limpiadora no disponible";
 
 describe("DetailAssignedCleanerBlock (proposal R3.3/R3.4)", () => {
   it("names the assigned cleaner, never her id (R3.3)", () => {
@@ -54,8 +54,8 @@ describe("DetailAssignedCleanerBlock (proposal R3.3/R3.4)", () => {
 
   it("says 'unassigned' for null cleaner, distinct from not-available (R3.3)", () => {
     renderBlock({ assignedCleanerId: null });
-    expect(screen.getByText(UNASSIGNED_KEY)).toBeInTheDocument();
-    expect(screen.queryByText(NOT_FOUND_KEY)).not.toBeInTheDocument();
+    expect(screen.getByText(UNASSIGNED_LABEL)).toBeInTheDocument();
+    expect(screen.queryByText(NOT_FOUND_LABEL)).not.toBeInTheDocument();
   });
 
   it("degrades to not-available when the catalog has no match (R3.4)", () => {
@@ -63,7 +63,7 @@ describe("DetailAssignedCleanerBlock (proposal R3.3/R3.4)", () => {
       assignedCleanerId: "gone-1",
       cleaners: settled([]),
     });
-    expect(screen.getByText(NOT_FOUND_KEY)).toBeInTheDocument();
+    expect(screen.getByText(NOT_FOUND_LABEL)).toBeInTheDocument();
     expect(container.innerHTML).not.toContain("gone-1");
   });
 
@@ -84,7 +84,7 @@ describe("DetailAssignedCleanerBlock (proposal R3.3/R3.4)", () => {
       assignedCleanerId: CLEANER_UUID,
       cleaners: absent<CleanerSummary>(false),
     });
-    expect(screen.getByText(NOT_FOUND_KEY)).toBeInTheDocument();
+    expect(screen.getByText(NOT_FOUND_LABEL)).toBeInTheDocument();
     expect(screen.queryByText("Cargando identidad…")).not.toBeInTheDocument();
   });
 
