@@ -548,3 +548,156 @@ class TestReconcileD4Matrix:
         assert second.failed_reconciliation == []
         await db_session.refresh(expense)
         assert expense.approved_by == world.owner.id
+
+
+# ---- `OTHER` branch's API call feeds the reconciler (R4.1) ------------------------------
+
+
+def _make_other_approval_pending(world: World, expense_id: uuid.UUID) -> OwnerApprovalModel:
+    """A pending `OTHER` approval row for the reconciler-after-API-call tests.
+
+    The shared `_make_approval` writes `status.status.value` (a `str`) because the
+    reconciler-only tests don't need the entity to round-trip; here the API call routes
+    the row through `OwnerApproval.answer()`, which reads it back as `OwnerApprovalStatus`
+    and compares with `is`. The column type is the Enum, so the row is built with the
+    Enum and the DB stores it as the Enum — same shape `make_approval` in
+    `tests/maintenance/conftest.py` produces.
+    """
+    return OwnerApprovalModel(
+        id=uuid.uuid4(),
+        tenant_id=world.tenant.id,
+        property_id=world.property.id,
+        related_type=OwnerApprovalRelatedType.OTHER,
+        related_id=expense_id,
+        amount="150.00",
+        reason=f"Expense #{expense_id} above the tenant threshold.",
+        status=OwnerApprovalStatus.PENDING,
+    )
+
+
+class TestReconcileAfterApiRespond:
+    """`expense-approval-response` R4.1: after `POST /owner-approvals/{id}/respond` runs the
+    `OTHER` branch of `RespondOwnerApprovalUseCase` and writes `responded_at`/`responded_by`/
+    `status`, the reconciler must find the row and apply the answer on the next tick.
+
+    The existing matrix tests above set the answer on the model directly. These exercise
+    the integration: API call first, reconciler second, both over the real DB. The tick is
+    injected (`now=NOW`) rather than waited for.
+    """
+
+    async def test_approved_after_api_call_materialises_approved_by(
+        self, world: World, db_session
+    ) -> None:
+        expense = _make_expense(world)
+        db_session.add(expense)
+        await db_session.flush()
+        approval = _make_other_approval_pending(world, expense.id)
+        db_session.add(approval)
+        await db_session.flush()
+
+        # The shared `api` fixture at `backend/tests/conftest.py` builds the real FastAPI
+        # app over the same `db_session` the reconciler will use. The maintenance router
+        # is mounted, so `POST /owner-approvals/{id}/respond` runs the `OTHER` branch,
+        # which writes `status=APPROVED` / `responded_at` / `responded_by` and stops
+        # without touching an incident.
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo
+
+        from httpx import ASGITransport, AsyncClient
+
+        from app.auth.api.dependencies import get_token_codec
+        from app.auth.infrastructure.token_codec import JwtTokenCodec
+        from app.core.db import get_db_session
+        from app.main import create_app
+        from tests.conftest import request_session_override
+
+        app = create_app()
+        codec = JwtTokenCodec(secret="u" * 64, access_minutes=15, refresh_days=7)
+        token = codec.issue_access(
+            user_id=world.owner.id,
+            tenant_id=world.tenant.id,
+            role=world.owner.role,
+            family_id=uuid.uuid4(),
+            now=_dt.now(ZoneInfo("UTC")),
+        )
+        # `db_session` is shared with the test, so the API call's commits land in the same
+        # transaction. Without the override the API would create a new session and the
+        # expense/approval rows would not be visible to it.
+        app.dependency_overrides[get_db_session] = request_session_override(db_session)
+        app.dependency_overrides[get_token_codec] = lambda: codec
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                f"/api/v1/owner-approvals/{approval.id}/respond",
+                json={"status": OwnerApprovalStatus.APPROVED.value},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["approval_id"] == str(approval.id)
+        assert body["status"] == OwnerApprovalStatus.APPROVED.value
+
+        report = await _run(db_session).execute(now=NOW)
+
+        assert report.materialised_approved == 1
+        assert report.materialised_rejected == 0
+        await db_session.refresh(expense)
+        assert expense.approved_by == world.owner.id
+
+    async def test_rejected_after_api_call_deletes_the_expense_row(
+        self, world: World, db_session
+    ) -> None:
+        expense = _make_expense(world)
+        db_session.add(expense)
+        await db_session.flush()
+        approval = _make_other_approval_pending(world, expense.id)
+        db_session.add(approval)
+        await db_session.flush()
+
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo
+
+        from httpx import ASGITransport, AsyncClient
+
+        from app.auth.api.dependencies import get_token_codec
+        from app.auth.infrastructure.token_codec import JwtTokenCodec
+        from app.core.db import get_db_session
+        from app.main import create_app
+        from tests.conftest import request_session_override
+
+        app = create_app()
+        codec = JwtTokenCodec(secret="u" * 64, access_minutes=15, refresh_days=7)
+        token = codec.issue_access(
+            user_id=world.owner.id,
+            tenant_id=world.tenant.id,
+            role=world.owner.role,
+            family_id=uuid.uuid4(),
+            now=_dt.now(ZoneInfo("UTC")),
+        )
+        app.dependency_overrides[get_db_session] = request_session_override(db_session)
+        app.dependency_overrides[get_token_codec] = lambda: codec
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                f"/api/v1/owner-approvals/{approval.id}/respond",
+                json={"status": OwnerApprovalStatus.REJECTED.value},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == OwnerApprovalStatus.REJECTED.value
+
+        report = await _run(db_session).execute(now=NOW)
+
+        assert report.materialised_rejected == 1
+        assert report.materialised_approved == 0
+        from sqlalchemy import select
+
+        rows = await db_session.execute(
+            select(ExpenseModel).where(ExpenseModel.id == expense.id)
+        )
+        assert rows.scalar_one_or_none() is None

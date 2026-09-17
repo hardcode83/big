@@ -2385,6 +2385,182 @@ async def test_a_neighbours_incident_cannot_be_driven(
         )
 
 
+# --- The `OTHER` branch of `RespondOwnerApprovalUseCase` (`expense-approval-response` R1.1-R1.4)
+
+
+async def test_respond_other_approved_writes_approval_status_and_audit_row_R1_1(
+    flow, world, db_session
+) -> None:
+    """R1.1 / R2.2 / R2.3 / R3.1 — APPROVED on an `OTHER` approval writes the four approval
+    fields and a single `OWNER_APPROVAL_ANSWERED` audit row, and touches nothing incident-shaped."""
+    approval = await make_approval(
+        db_session, world, uuid.uuid4(), related_type=OwnerApprovalRelatedType.OTHER
+    )
+
+    result = await flow.respond.execute(
+        tenant_id=world.tenant.id,
+        approval_id=approval.id,
+        status=OwnerApprovalStatus.APPROVED,
+        response_notes="Adelante.",
+        actor=owner(world),
+        now=LATER,
+    )
+
+    assert result.id == approval.id
+    assert result.status is OwnerApprovalStatus.APPROVED
+    assert result.responded_at == LATER
+    assert result.responded_by == world.owner.id
+    assert result.response_notes == "Adelante."
+
+    db_session.expunge_all()
+    approval_row = (
+        await db_session.execute(
+            select(OwnerApprovalModel).where(OwnerApprovalModel.id == approval.id)
+        )
+    ).scalar_one()
+    assert approval_row.status is OwnerApprovalStatus.APPROVED
+    assert approval_row.responded_at == LATER
+    assert approval_row.responded_by == world.owner.id
+    assert approval_row.response_notes == "Adelante."
+
+    # The audit row carries the three fields of the `ChangeSet` and nothing else — `response_notes`
+    # is rule-11 exception 3, so it must not appear in `audit_logs.changes`.
+    actions = await audit_actions_for(db_session, approval.id)
+    assert actions == [audit_actions.OWNER_APPROVAL_ANSWERED]
+    changes = await audit_changes_for(db_session, approval.id, audit_actions.OWNER_APPROVAL_ANSWERED)
+    assert set(changes.keys()) == {"status", "responded_by", "responded_at"}
+    assert changes["status"] == {
+        "old": OwnerApprovalStatus.PENDING.value,
+        "new": OwnerApprovalStatus.APPROVED.value,
+    }
+    assert changes["responded_by"] == {"old": None, "new": str(world.owner.id)}
+    assert changes["responded_at"] == {"old": None, "new": LATER.isoformat()}
+    assert "response_notes" not in changes
+
+    # No incident was loaded — there is no timeline event and no property transition. The
+    # `PropertyStateMachine` trigger and the technician notification paths do not run.
+    assert await timeline_types_for(db_session, world.tenant.id) == []
+    assert await state_of(db_session, world.property.id) is (
+        PropertyOperationalState.VACANT_READY
+    )
+    assert await db_session.scalar(select(func.count()).select_from(NotificationLogModel)) == 0
+
+
+async def test_respond_other_rejected_writes_approval_status_and_skips_incident_paths_R1_1(
+    flow, world, db_session
+) -> None:
+    """R1.1 / R2.2 / R2.3 / R3.1 — REJECTED is the same shape: the four approval fields and
+    the audit row, no incident, no `TimelineEvent`, no `PropertyStateMachine` trigger, no
+    technician notification."""
+    approval = await make_approval(
+        db_session, world, uuid.uuid4(), related_type=OwnerApprovalRelatedType.OTHER
+    )
+
+    result = await flow.respond.execute(
+        tenant_id=world.tenant.id,
+        approval_id=approval.id,
+        status=OwnerApprovalStatus.REJECTED,
+        response_notes="Demasiado caro.",
+        actor=owner(world),
+        now=LATER,
+    )
+
+    assert result.id == approval.id
+    assert result.status is OwnerApprovalStatus.REJECTED
+    assert result.responded_at == LATER
+    assert result.responded_by == world.owner.id
+    assert result.response_notes == "Demasiado caro."
+
+    db_session.expunge_all()
+    approval_row = (
+        await db_session.execute(
+            select(OwnerApprovalModel).where(OwnerApprovalModel.id == approval.id)
+        )
+    ).scalar_one()
+    assert approval_row.status is OwnerApprovalStatus.REJECTED
+
+    actions = await audit_actions_for(db_session, approval.id)
+    assert actions == [audit_actions.OWNER_APPROVAL_ANSWERED]
+
+    assert await timeline_types_for(db_session, world.tenant.id) == []
+    assert await state_of(db_session, world.property.id) is (
+        PropertyOperationalState.VACANT_READY
+    )
+    assert await db_session.scalar(select(func.count()).select_from(NotificationLogModel)) == 0
+
+
+async def test_an_other_approval_cannot_be_answered_twice_R1_4(
+    flow, world, db_session
+) -> None:
+    """R1.4 — the same idempotency guarantee the INCIDENT/MAINTENANCE_COST branch carries:
+    a second `execute(...)` on the same `OTHER` row raises `OwnerApprovalAlreadyAnsweredError`."""
+    from app.maintenance.domain.exceptions import OwnerApprovalAlreadyAnsweredError
+
+    approval = await make_approval(
+        db_session, world, uuid.uuid4(), related_type=OwnerApprovalRelatedType.OTHER
+    )
+
+    await flow.respond.execute(
+        tenant_id=world.tenant.id,
+        approval_id=approval.id,
+        status=OwnerApprovalStatus.APPROVED,
+        response_notes=None,
+        actor=owner(world),
+        now=LATER,
+    )
+    db_session.expunge_all()
+
+    with pytest.raises(OwnerApprovalAlreadyAnsweredError):
+        await flow.respond.execute(
+            tenant_id=world.tenant.id,
+            approval_id=approval.id,
+            status=OwnerApprovalStatus.REJECTED,
+            response_notes=None,
+            actor=owner(world),
+            now=LATER + timedelta(hours=1),
+        )
+
+
+async def test_a_neighbours_other_approval_is_not_found_R1_3(
+    flow, world, neighbour, db_session
+) -> None:
+    """R1.3 — the tenant scoping is structural via `OwnerApprovalRepository.get(tenant_id, ...)`,
+    so an approval of another tenant reads as one that does not exist, on the `OTHER` branch too."""
+    their_approval = await make_approval(
+        db_session, neighbour, uuid.uuid4(), related_type=OwnerApprovalRelatedType.OTHER
+    )
+
+    with pytest.raises(OwnerApprovalNotFoundError):
+        await flow.respond.execute(
+            tenant_id=world.tenant.id,
+            approval_id=their_approval.id,
+            status=OwnerApprovalStatus.APPROVED,
+            response_notes=None,
+            actor=owner(world),
+            now=LATER,
+        )
+
+
+async def test_a_non_owner_cannot_answer_an_other_approval_R1_2(
+    flow, world, db_session
+) -> None:
+    """R1.2 — the role check fires for the `OTHER` branch too: a non-`TENANT_OWNER` actor gets
+    `MaintenanceValidationError` (`422`)."""
+    approval = await make_approval(
+        db_session, world, uuid.uuid4(), related_type=OwnerApprovalRelatedType.OTHER
+    )
+
+    with pytest.raises(MaintenanceValidationError):
+        await flow.respond.execute(
+            tenant_id=world.tenant.id,
+            approval_id=approval.id,
+            status=OwnerApprovalStatus.APPROVED,
+            response_notes=None,
+            actor=manager(world),
+            now=LATER,
+        )
+
+
 # --- What the panel of section 6 changed (R2.1, R4.3, R6.4, D4, D6, D8) -----------------
 
 

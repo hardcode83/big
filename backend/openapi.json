@@ -4881,6 +4881,50 @@
         "title": "OwnerApprovalRelatedType",
         "type": "string"
       },
+      "OwnerApprovalResponse": {
+        "additionalProperties": false,
+        "description": "Reduced body for `POST /owner-approvals/{id}/respond` when the row is `OTHER` (R1.6, D6).\n\nSix fields, every one closed-form: no free text from the entity leaks to the wire, so\nrule 11's structural guard on `OWNER_APPROVAL`'s audit already covers the rest. The\n`OTHER` branch has no incident to hand back — `IncidentResponse` would force a\nsynthetic id — and this is the smallest body that answers the route.\n\n`responded_at` is non-nullable here even though the entity field is `datetime | None`:\nthe use case only reaches `from_domain` after `OwnerApproval.answer()` has written a\nconcrete timestamp, so a `None` reaching this builder is a contract violation upstream.",
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "approval_id": {
+            "format": "uuid",
+            "title": "Approval Id",
+            "type": "string"
+          },
+          "currency": {
+            "const": "EUR",
+            "title": "Currency",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "responded_at": {
+            "format": "date-time",
+            "title": "Responded At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OwnerApprovalStatus"
+          }
+        },
+        "required": [
+          "approval_id",
+          "status",
+          "responded_at",
+          "property_id",
+          "amount",
+          "currency"
+        ],
+        "title": "OwnerApprovalResponse",
+        "type": "object"
+      },
       "OwnerApprovalStatus": {
         "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(OwnerApproval.status) without a named block (§7.19).",
         "enum": [
@@ -16616,7 +16660,7 @@
     },
     "/api/v1/owner-approvals/{approval_id}/respond": {
       "post": {
-        "description": "`TENANT_OWNER` only (R2.6), once only, and only within their own tenant. An `APPROVED` answer returns the incident to where the approval's `related_type` says it belongs — `CLASSIFIED` for a budget, `IN_PROGRESS` for a real cost — and a `REJECTED` one cancels it and recomposes the property's operational state (R2.5).\n\nReturns the **incident**, not the approval: what the caller does next depends on where the incident ended up.",
+        "description": "`TENANT_OWNER` only (R2.6), once only, and only within their own tenant. An `APPROVED` answer returns the incident to where the approval's `related_type` says it belongs — `CLASSIFIED` for a budget, `IN_PROGRESS` for a real cost — and a `REJECTED` one cancels it and recomposes the property's operational state (R2.5).\n\nThe body depends on the approval's `related_type` (R1.6, D5): an `INCIDENT` or `MAINTENANCE_COST` approval returns the updated `IncidentResponse`; an `OTHER` approval (which references an `Expense`, not an incident) returns the reduced `OwnerApprovalResponse` instead.",
         "operationId": "respond_owner_approval_api_v1_owner_approvals__approval_id__respond_post",
         "parameters": [
           {
@@ -16645,7 +16689,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IncidentResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/IncidentResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/OwnerApprovalResponse"
+                    }
+                  ],
+                  "title": "Response Respond Owner Approval Api V1 Owner Approvals  Approval Id  Respond Post"
                 }
               }
             },

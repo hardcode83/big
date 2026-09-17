@@ -12,7 +12,7 @@ real-cost gate.
 """
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Union
 
 from fastapi import APIRouter, Depends, Query
 
@@ -28,6 +28,7 @@ from app.maintenance.api.schemas import (
     MAX_PER_PAGE,
     IncidentResponse,
     OwnerApprovalPageResponse,
+    OwnerApprovalResponse,
     RespondOwnerApprovalRequest,
 )
 from app.maintenance.application.use_cases import (
@@ -35,6 +36,7 @@ from app.maintenance.application.use_cases import (
     ListOwnerApprovalsUseCase,
     RespondOwnerApprovalUseCase,
 )
+from app.maintenance.domain.entities import Incident, OwnerApproval
 from app.maintenance.domain.enums import OwnerApprovalStatus
 from app.maintenance.domain.repositories import OwnerApprovalFilters
 
@@ -81,15 +83,25 @@ async def list_owner_approvals(
 
 @router.post(
     "/{approval_id}/respond",
-    response_model=IncidentResponse,
+    # D5: the route's response body depends on the approval's `related_type`. Declaring a
+    # `Union` of the two response schemas lets FastAPI's response_model validation pass
+    # through the runtime payload (an `IncidentResponse` instance is valid against
+    # `IncidentResponse`; an `OwnerApprovalResponse` instance is valid against itself),
+    # and the OpenAPI schema records both as `oneOf`. Declaring only the smallest body
+    # (e.g. `OwnerApprovalResponse`) makes FastAPI reject `IncidentResponse` payloads
+    # because they lack fields like `approval_id`/`amount`/`currency` — the regression
+    # Section 4's test 4.6 caught.
+    response_model=Union[IncidentResponse, OwnerApprovalResponse],
     summary="The owner answers a pending approval",
     description=(
         "`TENANT_OWNER` only (R2.6), once only, and only within their own tenant. An "
         "`APPROVED` answer returns the incident to where the approval's `related_type` says "
         "it belongs — `CLASSIFIED` for a budget, `IN_PROGRESS` for a real cost — and a "
         "`REJECTED` one cancels it and recomposes the property's operational state (R2.5).\n\n"
-        "Returns the **incident**, not the approval: what the caller does next depends on "
-        "where the incident ended up."
+        "The body depends on the approval's `related_type` (R1.6, D5): an `INCIDENT` or "
+        "`MAINTENANCE_COST` approval returns the updated `IncidentResponse`; an `OTHER` "
+        "approval (which references an `Expense`, not an incident) returns the reduced "
+        "`OwnerApprovalResponse` instead."
     ),
 )
 async def respond_owner_approval(
@@ -100,8 +112,8 @@ async def respond_owner_approval(
         RespondOwnerApprovalUseCase, Depends(get_respond_owner_approval_use_case)
     ],
     client_ip: Annotated[str, Depends(get_client_ip)],
-) -> IncidentResponse:
-    incident = await use_case.execute(
+):
+    result = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         approval_id=approval_id,
         status=payload.status,
@@ -113,4 +125,10 @@ async def respond_owner_approval(
         ),
         now=now_utc(),
     )
-    return IncidentResponse.from_domain(incident)
+    if isinstance(result, Incident):
+        return IncidentResponse.from_domain(result)
+    if isinstance(result, OwnerApproval):
+        return OwnerApprovalResponse.from_domain(result)
+    raise TypeError(
+        f"Unexpected return type from RespondOwnerApprovalUseCase: {type(result)!r}"
+    )

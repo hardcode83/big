@@ -123,14 +123,25 @@ y el técnico repite el cierre. Cerrarla por él haría que `resolved_at` dejara
 
 ## El técnico se entera de la respuesta de la propietaria
 
-Responder una aprobación (`POST /owner-approvals/{id}/respond`) escribe, en la misma
-transacción, una notificación al técnico **asignado** a la incidencia — `OWNER_APPROVAL_APPROVED`
-si dijo que sí, `OWNER_APPROVAL_REJECTED` si dijo que no. El cuerpo es una frase fija más los
-identificadores de la incidencia/propiedad/aprobación: nunca lleva el motivo ni las notas que
-escribió la propietaria (son texto libre de la excepción 3 de la regla 11, y esta notificación no
-es su sumidero). Si la incidencia no tiene técnico asignado —puede pasar en la puerta de
-`INCIDENT` (R1 de esta tabla), que se abre en el triaje antes de asignar a nadie— no se escribe
-nada y la respuesta no falla: no hay a quién avisar.
+Responder una aprobación (`POST /owner-approvals/{id}/respond`) cubre las **dos** ramas
+según `related_type`: una aprobación `INCIDENT` o `MAINTENANCE_COST` lleva asociada una
+incidencia y devuelve `IncidentResponse`; una aprobación `OTHER` (que apunta a un `Expense`,
+no a una incidencia) devuelve `OwnerApprovalResponse` con seis campos — `approval_id`,
+`status`, `responded_at`, `property_id`, `amount`, `currency` — y no toca incidente alguna.
+El cuerpo de la respuesta es un `Union` de los dos DTOs y se elige por `related_type`
+(misma `200` para las dos ramas; D5, D9 del change).
+
+Sólo la rama `INCIDENT` / `MAINTENANCE_COST` escribe, en la misma transacción, una notificación
+al técnico **asignado** a la incidencia — `OWNER_APPROVAL_APPROVED` si dijo que sí,
+`OWNER_APPROVAL_REJECTED` si dijo que no. El cuerpo es una frase fija más los identificadores
+de la incidencia/propiedad/aprobación: nunca lleva el motivo ni las notas que escribió la
+propietaria (son texto libre de la excepción 3 de la regla 11, y esta notificación no es su
+sumidero). Si la incidencia no tiene técnico asignado —puede pasar en la puerta de
+`INCIDENT` (R1 de esta tabla), que se abre en el triaje antes de asignar a nadie— no se
+escribe nada y la respuesta no falla: no hay a quién avisar. La rama `OTHER` no escribe
+ninguna notificación: no hay técnico al que avisar y la materialización del `Expense` la
+hace el job `reconcile_owner_approvals_for_expenses` al siguiente tick (ver
+[`revenue-statements.md`](revenue-statements.md)).
 
 La campana del técnico lleva a `/tech/incidents/{id}`, la misma incidencia. La propia campana de
 la propietaria, cuando se abre una aprobación nueva (`OWNER_APPROVAL_REQUIRED`), lleva a

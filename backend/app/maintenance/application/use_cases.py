@@ -1688,21 +1688,19 @@ class RespondOwnerApprovalUseCase(_IncidentFlowBase):
         response_notes: str | None,
         actor: IncidentActor,
         now: datetime,
-    ) -> Incident:
+    ) -> Incident | OwnerApproval:
         if actor.role is not UserRole.TENANT_OWNER:
             # R2.6. The permission already says this (`RESPOND_OWNER_APPROVALS` is the
             # owner's alone), and it is repeated here because the use case is reachable from
             # anything that constructs it — a job, a command, a future route — and only one
-            # of those goes through `require()`.
+            # of those goes through `require()`. Repeated for both branches: a non-owner
+            # answering an `OTHER` approval gets the same `422` (`expense-approval-response`
+            # R1.2).
             raise MaintenanceValidationError("Only the tenant owner may answer an approval")
 
         approval = await self._approvals.get(tenant_id, approval_id)
         if approval is None:
             raise OwnerApprovalNotFoundError()
-
-        incident = await self._incidents.get(tenant_id, approval.related_id)
-        if incident is None:
-            raise IncidentNotFoundError()
 
         previous_status = approval.status
         # Raises if it was already answered (R2.6) — before anything else is written.
@@ -1713,6 +1711,32 @@ class RespondOwnerApprovalUseCase(_IncidentFlowBase):
             now=now,
         )
         await self._approvals.save(tenant_id, approval)
+
+        # `expense-approval-response` R2.1/R2.2/R2.3/R3.1: an `OTHER` approval references an
+        # `Expense`, not an `Incident`. The branch runs before `IncidentRepository.get(...)`
+        # and skips every step that touches an incident (no incident load, no incident save,
+        # no timeline, no `PropertyStateMachine` trigger, no technician notification). Only
+        # the `OWNER_APPROVAL_ANSWERED` audit row is written — same `ChangeSet` shape as the
+        # existing branch, no new fields audited.
+        if approval.related_type is OwnerApprovalRelatedType.OTHER:
+            await self._audit.record(
+                tenant_id=tenant_id,
+                action=audit_actions.OWNER_APPROVAL_ANSWERED,
+                entity_type=audit_actions.ENTITY_OWNER_APPROVAL,
+                entity_id=approval.id,
+                actor=actor,
+                changes=ChangeSet(audit_actions.ENTITY_OWNER_APPROVAL)
+                .diff("status", previous_status, approval.status)
+                .diff("responded_by", None, approval.responded_by)
+                .diff("responded_at", None, approval.responded_at),
+                now=now,
+            )
+            await self._uow.commit()
+            return approval
+
+        incident = await self._incidents.get(tenant_id, approval.related_id)
+        if incident is None:
+            raise IncidentNotFoundError()
 
         if approved_cost is not None:
             incident.resume_after_approval(

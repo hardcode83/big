@@ -22,7 +22,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -34,6 +34,7 @@ from app.maintenance.domain.entities import (
     MAX_MATERIALS,
     Incident,
     IncidentMessage,
+    OwnerApproval,
 )
 from app.maintenance.domain.read_models import (
     IncidentContext,
@@ -395,6 +396,40 @@ class OwnerApprovalPageResponse(BaseModel):
             total=result.total,
             page=page,
             per_page=per_page,
+        )
+
+
+class OwnerApprovalResponse(BaseModel):
+    """Reduced body for `POST /owner-approvals/{id}/respond` when the row is `OTHER` (R1.6, D6).
+
+    Six fields, every one closed-form: no free text from the entity leaks to the wire, so
+    rule 11's structural guard on `OWNER_APPROVAL`'s audit already covers the rest. The
+    `OTHER` branch has no incident to hand back — `IncidentResponse` would force a
+    synthetic id — and this is the smallest body that answers the route.
+
+    `responded_at` is non-nullable here even though the entity field is `datetime | None`:
+    the use case only reaches `from_domain` after `OwnerApproval.answer()` has written a
+    concrete timestamp, so a `None` reaching this builder is a contract violation upstream.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    approval_id: uuid.UUID
+    status: OwnerApprovalStatus
+    responded_at: datetime
+    property_id: uuid.UUID
+    amount: Decimal
+    currency: Literal["EUR"]
+
+    @classmethod
+    def from_domain(cls, approval: OwnerApproval) -> "OwnerApprovalResponse":
+        return cls(
+            approval_id=approval.id,
+            status=approval.status,
+            responded_at=approval.responded_at,
+            property_id=approval.property_id,
+            amount=approval.amount,
+            currency="EUR",
         )
 
 
