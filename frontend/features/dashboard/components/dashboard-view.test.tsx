@@ -145,6 +145,39 @@ describe("DashboardView (R1)", () => {
     expect(cards.every((card) => card.classList.contains("h-full"))).toBe(true);
   });
 
+  it("keeps prior cards visible during a background refetch (R2, R5)", () => {
+    useDashboardCards.mockReturnValue({
+      isPending: false,
+      isFetching: true,
+      isRefetching: true,
+      isError: false,
+      data: page([sampleCard]),
+    });
+
+    renderView();
+
+    expect(screen.getByText("REDES11")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("keeps prior cards visible after a background refetch error (R2, R5)", () => {
+    useDashboardCards.mockReturnValue({
+      isPending: false,
+      isFetching: false,
+      isRefetching: false,
+      isError: true,
+      data: page([sampleCard]),
+      error: new Error("refresh failed"),
+      refetch: vi.fn(),
+    });
+
+    renderView();
+
+    expect(screen.getByText("REDES11")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText("No se pudo cargar el panel")).not.toBeInTheDocument();
+  });
+
   it("omits the stalls section when the stalls query is still pending (R1.4, blocked-transitions-web)", () => {
     useDashboardCards.mockReturnValue({
       isPending: false,

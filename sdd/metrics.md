@@ -120,6 +120,8 @@
 | whatsapp-dev-credentials-render | new, tasks, run, review, ship, archive | 29110 | 535016 | 556620487 | 125.3342 | 2026-09-12 | 2026-09-12 |
 | pms-ingest-change-events | new, tasks, run, review, ship, archive | 187845 | 836628 | 190039718 | 74.5780 | 2026-09-12 | 2026-09-13 |
 | reservation-confirm-web | new, design, tasks, run, review, archive | 3072607 | 530938 | 118696062 | 67.2419 | 2026-09-12 | 2026-09-13 |
+| statements-web | run, review | 5612531 | 1024847 | 149050712 | 119.5945 | 2026-09-14 | — |
 | hardening-release | new, design, tasks, run, review, ship, archive | 558539 | 2008528 | 955794755 | 284.2286 | 2026-09-13 | 2026-09-14 |
 | guest-scheduled-comms | new, design, tasks, run, review, ship, archive | 292874 | 1051392 | 362801808 | 105.9539 | 2026-09-13 | 2026-09-14 |
 | staff-messaging-web | new, tasks, run, review, ship | 262084 | 1044325 | 302156393 | 100.1669 | 2026-09-15 | — |
+| validation-error-loc-redaction | tasks, run, review, ship, archive | 41421 | 508106 | 102621465 | 36.5748 | 2026-09-15 | 2026-09-15 |
