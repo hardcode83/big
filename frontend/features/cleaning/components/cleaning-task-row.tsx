@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
@@ -191,13 +192,18 @@ export function CleaningTaskRow({
           id={headingId}
           className="min-w-0 flex-1 break-words text-body-lg font-semibold text-foreground"
         >
-          <span className="sr-only">{t("columns.property")}: </span>
-          <IdentityValue
-            identity={property}
-            render={(value) =>
-              `${value.internalCode} ${t("separator")} ${value.name}`
-            }
-          />
+          <Link
+            href={`/cleaning/${task.id}`}
+            className="rounded-sm text-foreground underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none"
+          >
+            <span className="sr-only">{t("columns.property")}: </span>
+            <IdentityValue
+              identity={property}
+              render={(value) =>
+                `${value.internalCode} ${t("separator")} ${value.name}`
+              }
+            />
+          </Link>
         </h3>
         <Badge
           variant="outline"

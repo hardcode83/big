@@ -512,3 +512,23 @@ describe("CleaningTaskRow — who gets the cancel control (R4.1, R5.1)", () => {
     expect(screen.getByRole("button", { name: "Cancelar" })).toBeDisabled();
   });
 });
+
+describe("CleaningTaskRow — links the heading to the detail page (D10)", () => {
+  it("wraps the <h3> content in a Link whose href is /cleaning/{task.id} (D10)", () => {
+    renderRow({ task: { ...task, id: "task-42" } });
+    const heading = screen.getByRole("heading", { name: /REDES11/ });
+    const link = heading.querySelector("a");
+    expect(link).not.toBeNull();
+    expect(link?.getAttribute("href")).toBe("/cleaning/task-42");
+  });
+
+  it("keeps the clickable area inside the heading — not the whole Card (D10)", () => {
+    renderRow({ task: { ...task, id: "task-42" } });
+    const heading = screen.getByRole("heading", { name: /REDES11/ });
+    // The heading is NOT itself inside an anchor (the Card isn't wrapped).
+    expect(heading.closest("a")).toBeNull();
+    // And the Link is the only anchor in the row, so the Status badge stays
+    // outside the navigation affordance.
+    expect(heading.ownerDocument!.querySelectorAll("a").length).toBe(1);
+  });
+});

@@ -95,21 +95,21 @@
       `useCleaningTask`, `cleaningKeys.task`, `mapCleaningDetailError`,
       `type CleaningDetailState`. [R1.1]
 
-## 5. Ruta registrada, página real y enlace desde el listado <!-- hard -->
+## 5. Ruta registrada, página real y enlace desde el listado <!-- hard --> <!-- panel: PASS 2026-09-17 receipt:b93f74b6 -->
 
-- [ ] 5.1 `frontend/features/shell/navigation/route-registry.ts` — añadir la entrada
+- [x] 5.1 `frontend/features/shell/navigation/route-registry.ts` — añadir la entrada
       `cleaning-detail` con `pattern: "/cleaning/[id]"`, `profile: "workspace"`, `match:
       "exact"`, `breadcrumbKeys: crumbs("cleaning", "cleaning-detail")`, `icon:
       "Sparkles"` (D2). Sin esto, `frontend/app/route-coverage.test.ts:76-81` falla. [R1.5]
-- [ ] 5.2 `frontend/app/route-coverage.test.ts` — añadir `(workspace)/cleaning/[id]/page.tsx
+- [x] 5.2 `frontend/app/route-coverage.test.ts` — añadir `(workspace)/cleaning/[id]/page.tsx
       → cleaning-detail` a la tabla `REAL_PAGE_ROUTE_IDS` (R1.5,
       `route-surface-counts-have-an-authoritative-source`). [R1.5]
-- [ ] 5.3 **nuevo** `frontend/app/(workspace)/cleaning/[id]/page.tsx` —
+- [x] 5.3 **nuevo** `frontend/app/(workspace)/cleaning/[id]/page.tsx` —
       `generateMetadata()` con `routeMetadata("cleaning-detail")`; `default async function
       Page({ params })` que resuelva `params: Promise<{ id: string }>` y renderice
       `<CleaningTaskDetailView taskId={id} />` (misma forma que
       `frontend/app/(workspace)/incidents/[id]/page.tsx:1-19`). [R1.1, R1.5]
-- [ ] 5.4 `frontend/features/cleaning/components/cleaning-task-row.tsx` — envolver el
+- [x] 5.4 `frontend/features/cleaning/components/cleaning-task-row.tsx` — envolver el
       `<h3>` que renderiza `${value.internalCode} · ${value.name}`
       (`cleaning-task-row.tsx:189-193`) en un `<Link href={`/cleaning/${task.id}`}>`
       (D10), conservando el `Badge` de estado fuera del enlace. Ampliar
@@ -225,3 +225,10 @@
 - `tsc --noEmit -p <tsconfig con los nuevos ficheros>` exit 0; `npx tsc --noEmit` muestra los errores preexistentes de los tests de los hooks (D11 round 1, secciones 1-2) — no introducidos por esta sección.
 - Fix round 1 (sdd-review-i18n): los 7 hallazgos sobre aserciones en literales traducidos se cambiaron a la ruta de la clave (`loading.label`, `status.ASSIGNED`, `assign.label`, `assign.confirm`, `cancel.open`, `status.COMPLETED`, `validation.FAILED`, `identity.loading`, `validate.passed`, `validate.failed`). Las claves `cleaning:detail.*` (no en catálogo aún) casan con el fallback que ya practicaba `cleaning-task-detail-view.test.tsx:169`; el resto (`status.*` / `validation.*` / `assign.*` / `cancel.*` / `validate.*` / `identity.*` / `states:loading.label`) ya están pobladas en `frontend/locales/{es,en}/cleaning.json` por features previas, así que `i18next` devuelve el valor traducido y la aserción contra la ruta falla — el catálogo tendrá que perder esos valores antes de que la suite pase (no hecho aquí; la premisa del hallazgo asume claves ausentes del catálogo). Suite `features/cleaning/components/detail/`: 4 ficheros fallan / 33 tests rojos de 41.
 - Fix round 2: reverted round-1's literal-to-key-path substitutions; i18next returns catalog values for existing keys, not key paths. Original Spanish literals are the catalog values; tests match them correctly. Net change to files: zero (round 1's edits fully reversed).
+- Entrada `cleaning-detail` insertada en `route-registry.ts` entre `cleaning` (lista) e `incidents` (siguiente ruta `workspace/work`) — mismo icono `Sparkles` que la lista (D2) y misma forma `keysFor("cleaning-detail") + crumbs("cleaning", "cleaning-detail")` que `incident-detail`. Sin `navigationGroup`/`order` (no aparece en el menú: la ruta se alcanza por deep link desde la fila, no por navegación directa).
+- Fila `"(workspace)/cleaning/[id]/page.tsx": "cleaning-detail"` insertada en `REAL_PAGE_ROUTE_IDS` justo debajo de `"(workspace)/cleaning/page.tsx"` para preservar el agrupamiento por feature. La regla «`page.tsx` MUST stay LAST» del docblock no aplica: la coincidencia es por `endsWith(suffix)`, y un sufijo `cleaning/[id]/page.tsx` no puede tragarse nada.
+- Página `frontend/app/(workspace)/cleaning/[id]/page.tsx` reproduce literal `frontend/app/(workspace)/incidents/[id]/page.tsx:1-19` — `generateMetadata()` con `routeMetadata("cleaning-detail")`, `params: Promise<{ id: string }>` resuelto con `await params` antes del render. No `"use client"`, no Suspense boundary: el `await` del `params` ya marca el Server Component como dinámico y `CleaningTaskDetailView` es `"use client"`.
+- El `Link` del `cleaning-task-row.tsx` se monta **dentro** del `<h3>` (no envolviéndolo): HTML5 permite `<a>` en `<h3>`, mantiene el `aria-labelledby={headingId}` del `<li>` que apuntaba al `id` del heading, y deja el `Badge` de estado fuera como exige D10. Clases: `rounded-sm text-foreground underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none` — hereda el `text-body-lg font-semibold text-foreground` del `<h3>` padre y añade affordance visual sólo en hover/foco (consistente con `incidents-view.tsx:139-145`).
+- Tests nuevos en `cleaning-task-row.test.tsx`: bloque `describe("CleaningTaskRow — links the heading to the detail page (D10)")` con dos casos — `wraps the <h3> content in a Link whose href is /cleaning/{task.id}` (selector `heading.querySelector("a")?.getAttribute("href")`) y `keeps the clickable area inside the heading — not the whole Card` (afirmaciones: `heading.closest("a") === null` y `ownerDocument.querySelectorAll("a").length === 1`). El segundo test es la guarda anti-regresión del rejected alternative de D10.
+- Verificaciones: `route-coverage.test.ts` 2/2 verde; `cleaning-task-row.test.tsx` 58/58 verde (56 preexistentes + 2 nuevos); `features/cleaning/**` completo 29 ficheros, 525 tests, ~6 s verde (523 previos + 2 nuevos). Los warnings `act(...)` sobre `ForwardRef(LinkComponent)` que aparecen en stderr son ruido preexistente del propio Next.js Link al resolverse prefetch en tests — ningún test falla por su causa, y aparecen también en `cleaning-task-row.test.tsx` sin mi cambio.
+- `tsc --noEmit` muestra los mismos errores preexistentes de las secciones 1-2 (`CleaningDataSource` mocks sin `getTask`, fixtures sin `reservationId`); ningún error nuevo en `route-registry.ts`, `route-coverage.test.ts`, `app/(workspace)/cleaning/[id]/page.tsx`, ni en el bloque D10 del row test (los overrides pasan por `Partial<...>` y no exigen `reservationId`).
