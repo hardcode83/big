@@ -379,6 +379,7 @@ describe("HttpIncidentsSource", () => {
           "/api/v1/incidents/{incident_id}",
           "/api/v1/incidents/{incident_id}/context",
           "/api/v1/incidents/{incident_id}/photos",
+          "/api/v1/incidents/{incident_id}/messages",
           "/api/v1/incidents/{incident_id}/accept",
           "/api/v1/incidents/{incident_id}/en-route",
           "/api/v1/incidents/{incident_id}/reject",
@@ -831,6 +832,108 @@ describe("HttpIncidentsSource", () => {
       );
       expect(request.mock.calls[0][1]).not.toHaveProperty("body");
       expect(result.status).toBe("CANCELLED");
+    });
+  });
+
+  describe("getIncidentMessages (R2.1)", () => {
+    function messagePage(items: unknown[]) {
+      return {
+        data: items,
+        total: items.length,
+        page: 1,
+        per_page: 20,
+        total_pages: 1,
+      };
+    }
+
+    it("sends page + per_page and maps the envelope to camelCase", async () => {
+      const request = vi.fn().mockResolvedValue(
+        messagePage([
+          {
+            id: "message-1",
+            author_id: "technician-1",
+            author_role: "TECHNICIAN",
+            content: "Ya he llegado",
+            created_at: "2026-08-20T10:00:00Z",
+          },
+        ]),
+      );
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      const page = await source.getIncidentMessages("tenant-1", "i1", 1);
+
+      expect(request).toHaveBeenCalledWith(
+        "/api/v1/incidents/{incident_id}/messages",
+        {
+          pathParams: { incident_id: "i1" },
+          query: { page: 1, per_page: 20 },
+        },
+      );
+      expect(page).toEqual({
+        data: [
+          {
+            id: "message-1",
+            authorId: "technician-1",
+            authorRole: "TECHNICIAN",
+            content: "Ya he llegado",
+            createdAt: "2026-08-20T10:00:00Z",
+          },
+        ],
+        total: 1,
+        page: 1,
+        perPage: 20,
+        totalPages: 1,
+      });
+    });
+
+    it("requests page 2 when asked", async () => {
+      const request = vi.fn().mockResolvedValue(messagePage([]));
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      await source.getIncidentMessages("tenant-1", "i1", 2);
+
+      expect(request).toHaveBeenCalledWith(
+        "/api/v1/incidents/{incident_id}/messages",
+        {
+          pathParams: { incident_id: "i1" },
+          query: { page: 2, per_page: 20 },
+        },
+      );
+    });
+  });
+
+  describe("sendIncidentMessage (R2.2)", () => {
+    it("POSTs content and maps the created message", async () => {
+      const request = vi.fn().mockResolvedValue({
+        id: "message-2",
+        author_id: "manager-1",
+        author_role: "PROPERTY_MANAGER",
+        content: "Todo listo",
+        created_at: "2026-08-20T10:05:00Z",
+      });
+      const source = new HttpIncidentsSource(buildClient(request));
+
+      const message = await source.sendIncidentMessage(
+        "tenant-1",
+        "i1",
+        "Todo listo",
+      );
+
+      expect(request).toHaveBeenCalledWith(
+        "/api/v1/incidents/{incident_id}/messages",
+        {
+          method: "POST",
+          pathParams: { incident_id: "i1" },
+          body: { content: "Todo listo" },
+        },
+      );
+      expect(message).toEqual({
+        id: "message-2",
+        authorId: "manager-1",
+        authorRole: "PROPERTY_MANAGER",
+        content: "Todo listo",
+        createdAt: "2026-08-20T10:05:00Z",
+      });
     });
   });
 });

@@ -12,6 +12,7 @@ import type {
   CleaningTask,
   CleaningTaskContext,
   CleaningTaskListItem,
+  CleaningTaskMessage,
   PaginatedResponse,
   PhotoRequirementState,
   PhotoRequirementsResponse,
@@ -36,9 +37,15 @@ type CleaningPhotoListResponse =
   components["schemas"]["CleaningPhotoListResponse"];
 type TaskIncidentReportedResponse =
   components["schemas"]["TaskIncidentReportedResponse"];
+type TaskMessagePageResponse =
+  components["schemas"]["CleaningTaskMessagePageResponse"];
+type TaskMessageResponse =
+  components["schemas"]["CleaningTaskMessageResponse"];
 
 /** `page` is what the paginator moves (R1.5). */
 const TASKS_PER_PAGE = 20;
+/** Same constant `cleaner-task-list-view.tsx:33` uses for lists (design D4). */
+const MESSAGES_PER_PAGE = 20;
 
 function mapPage<T, U>(
   page: {
@@ -164,6 +171,17 @@ function mapIncidentAck(
   };
 }
 
+/** Wire → UI for one staff-thread message (R1.1, R1.2, D3). */
+function mapMessage(value: TaskMessageResponse): CleaningTaskMessage {
+  return {
+    id: value.id,
+    authorId: value.author_id,
+    authorRole: value.author_role,
+    content: value.content,
+    createdAt: value.created_at,
+  };
+}
+
 /**
  * The HTTP source for the cleaner's task app (design D2).
  *
@@ -243,6 +261,26 @@ export class HttpCleanerSource implements CleanerDataSource {
       { pathParams: { task_id: taskId } },
     );
     return (response as CleaningPhotoListResponse).data.map(mapPhoto);
+  }
+
+  /**
+   * One page of the task's staff thread, oldest first (R1.1, design D4).
+   * Mirrors `getTaskPhotos`'s shape: `pathParams` only, the page envelope
+   * mapped through `mapPage`.
+   */
+  async getTaskMessages(
+    _tenantId: string,
+    taskId: string,
+    page: number,
+  ): Promise<PaginatedResponse<CleaningTaskMessage>> {
+    const response = await this.client.request<
+      "/api/v1/cleaning-tasks/{task_id}/messages",
+      "GET"
+    >("/api/v1/cleaning-tasks/{task_id}/messages", {
+      pathParams: { task_id: taskId },
+      query: { page, per_page: MESSAGES_PER_PAGE },
+    });
+    return mapPage(response as TaskMessagePageResponse, mapMessage);
   }
 
   async acceptTask(_tenantId: string, taskId: string): Promise<CleaningTask> {
@@ -355,5 +393,27 @@ export class HttpCleanerSource implements CleanerDataSource {
       },
     );
     return mapIncidentAck(response as TaskIncidentReportedResponse);
+  }
+
+  /**
+   * Sends one message on the task's staff thread (R1.2). `content` is the
+   * only field the request admits — length validation (1-2000 chars) is the
+   * backend's `SendCleaningTaskMessageRequest`, mirrored client-side by D6,
+   * never re-derived here.
+   */
+  async sendTaskMessage(
+    _tenantId: string,
+    taskId: string,
+    content: string,
+  ): Promise<CleaningTaskMessage> {
+    const response = await this.client.request(
+      "/api/v1/cleaning-tasks/{task_id}/messages",
+      {
+        method: "POST",
+        pathParams: { task_id: taskId },
+        body: { content },
+      },
+    );
+    return mapMessage(response as TaskMessageResponse);
   }
 }

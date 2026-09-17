@@ -12,6 +12,8 @@ import type {
   CleaningPhoto,
   CleaningTask,
   CleaningTaskContext,
+  CleaningTaskMessage,
+  PaginatedResponse,
   PhotoRequirementsResponse,
 } from "../../data";
 import { CleanerTaskDetailView } from "./cleaner-task-detail-view";
@@ -29,6 +31,8 @@ const completeTask = vi.hoisted(() => vi.fn());
 const completeChecklistItem = vi.hoisted(() => vi.fn());
 const uploadPhoto = vi.hoisted(() => vi.fn());
 const reportIncident = vi.hoisted(() => vi.fn());
+const getTaskMessages = vi.hoisted(() => vi.fn());
+const sendTaskMessage = vi.hoisted(() => vi.fn());
 
 const tenantId = vi.hoisted(() => ({ current: "tenant-1" }));
 const routerReplace = vi.hoisted(() => vi.fn());
@@ -66,6 +70,8 @@ vi.mock("../../data", async (importOriginal) => ({
     completeChecklistItem,
     uploadPhoto,
     reportIncident,
+    getTaskMessages,
+    sendTaskMessage,
   }),
 }));
 
@@ -122,6 +128,22 @@ const requirements: PhotoRequirementsResponse = {
   ],
 };
 
+const messagesPage: PaginatedResponse<CleaningTaskMessage> = {
+  data: [
+    {
+      id: "message-1",
+      authorId: "manager-1",
+      authorRole: "PROPERTY_MANAGER",
+      content: "Deja la llave en el buzón",
+      createdAt: "2026-08-20T09:00:00Z",
+    },
+  ],
+  total: 1,
+  page: 1,
+  perPage: 20,
+  totalPages: 1,
+};
+
 const photo: CleaningPhoto = {
   id: "photo-1",
   cleaningTaskId: "task-1",
@@ -153,6 +175,7 @@ beforeEach(() => {
   getTaskChecklist.mockReset().mockResolvedValue(checklist);
   getTaskPhotoRequirements.mockReset().mockResolvedValue(requirements);
   getTaskPhotos.mockReset().mockResolvedValue([photo]);
+  getTaskMessages.mockReset().mockResolvedValue(messagesPage);
   for (const mock of [
     listTasks,
     acceptTask,
@@ -162,6 +185,7 @@ beforeEach(() => {
     completeChecklistItem,
     uploadPhoto,
     reportIncident,
+    sendTaskMessage,
   ]) {
     mock.mockReset();
   }
@@ -216,6 +240,83 @@ describe("CleanerTaskDetailView (R2.1, R2.8)", () => {
     expect(
       screen.getByRole("button", { name: "Volver a mis tareas" }),
     ).toBeInTheDocument();
+  });
+
+  it("replaces the whole screen with the not-found EmptyState when the messages read 404s (R4.3)", async () => {
+    getTaskMessages.mockRejectedValue(
+      new ApiError({ status: 404, code: "NOT_FOUND", message: "missing" }),
+    );
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByText("REDES11")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Mensajes" }));
+
+    // The whole detail screen — tabs included — is replaced by the same
+    // "tarea no disponible" EmptyState the other five parallel reads already
+    // produce: no tablist, no leftover content tab underneath. Waiting on the
+    // tablist's disappearance (rather than just the title text) is what pins
+    // this to the whole-screen swap. The panel itself renders nothing while a
+    // parent is listening, so this title only ever comes from the swap.
+    await waitFor(() => {
+      expect(screen.queryByRole("tablist")).toBeNull();
+    });
+    expect(screen.getByText("Tarea no disponible")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Volver a mis tareas" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("REDES11")).toBeNull();
+  });
+
+  it("opens on the content tab and does not request the thread yet (R3.1, D1)", async () => {
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByText("REDES11")).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("tab", { name: "Tarea" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "Mensajes" })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+    expect(getTaskMessages).not.toHaveBeenCalled();
+  });
+
+  it("loads the thread when the messages tab is opened (R1.1)", async () => {
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByText("REDES11")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Mensajes" }));
+    await waitFor(() =>
+      expect(getTaskMessages).toHaveBeenCalledWith("tenant-1", "task-1", 1),
+    );
+    expect(
+      await screen.findByText("Deja la llave en el buzón"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the content panel mounted across a round trip to messages (R3.2)", async () => {
+    getTask.mockResolvedValue({ ...task, status: "IN_PROGRESS" });
+    renderView();
+    await waitFor(() =>
+      expect(screen.getByText("REDES11")).toBeInTheDocument(),
+    );
+    // The incident report form is the content tab's stateful child: opened
+    // here, it must still be open after visiting the messages tab.
+    fireEvent.click(
+      screen.getByTestId("cleaner-incident-report-trigger"),
+    );
+    expect(screen.getByLabelText("Título")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Mensajes" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Tarea" }));
+
+    expect(screen.getByLabelText("Título")).toBeInTheDocument();
+    expect(screen.getByText("REDES11")).toBeVisible();
   });
 
   it("renders the completion panel after the close fires (R7.2)", async () => {

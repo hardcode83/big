@@ -6,7 +6,8 @@ Las dos superficies web sobre las que un `TECHNICIAN` **opera** el backend de ma
 (PRD §12, §24): `/tech` lista sus incidencias asignadas con la vivienda de cada fila, y
 `/tech/incidents/[id]` reúne la avería, el contexto de acceso a la propiedad, la galería de fotos,
 los botones del ciclo del técnico y el cierre con coste y materiales, con la puerta de aprobación
-de la propietaria mostrada tal como el backend la resuelve. Es una capa de presentación pura sobre
+de la propietaria mostrada tal como el backend la resuelve, y ofrece el hilo de mensajes con el
+manager en una segunda pestaña (R7). Es una capa de presentación pura sobre
 los contratos que ya describen [`maintenance.md`](maintenance.md),
 [`tech-incident-context.md`](tech-incident-context.md) e
 [`incident-photos.md`](incident-photos.md) — **no añade ni relaja ninguna regla de negocio ni de
@@ -18,8 +19,9 @@ El rol alcanza exactamente lo que la pantalla usa. `TECHNICIAN` es
 `_SELF_SERVICE | _INCIDENT_EXECUTE` en `backend/app/auth/domain/policy.py`, es decir
 `READ_INCIDENTS` + `EXECUTE_INCIDENTS` sobre `app/maintenance/api/incidents_router.py`:
 `GET /incidents`, `GET /incidents/{id}`, `GET /incidents/{id}/context`,
-`GET /incidents/{id}/photos`, los `POST` de `accept`, `reject`, `en-route`, `wait-parts`,
-`resume`, `resolve` y `photos`, y la ruta anónima a propósito
+`GET /incidents/{id}/photos`, `GET /incidents/{id}/messages` (`READ_INCIDENTS`), los `POST` de
+`accept`, `reject`, `en-route`, `wait-parts`, `resume`, `resolve`, `photos` y `messages` —este
+último también bajo `EXECUTE_INCIDENTS`, sin ningún permiso nuevo—, y la ruta anónima a propósito
 `GET /api/v1/incident-photos/{photo_id}`. **No** alcanza `classify`, `PATCH /incidents/{id}`,
 `assign` ni `cancel` (`ManageDep`), ni ninguna ruta de `/api/v1/properties/…` (`READ_PROPERTIES`).
 
@@ -176,6 +178,53 @@ El rol alcanza exactamente lo que la pantalla usa. `TECHNICIAN` es
   monta el layout es un escudo de UX, y ninguna decisión de negocio SHALL derivarse del rol en el
   cliente.
 
+### R7 — Hilo de mensajes con el manager, en pestaña
+
+- THE SYSTEM SHALL organizar `/tech/incidents/[id]` en dos pestañas (`TechIncidentTabs`,
+  `role="tablist"` propio — no hay primitivo `Tabs` en `components/ui/`): «Incidencia», con los
+  campos de la avería, el bloque de contexto, las tarjetas de estado, la galería, la subida de
+  fotos y las acciones del ciclo, y «Mensajes», con el hilo técnico↔manager. La pestaña
+  «Incidencia» SHALL estar activa al cargar la pantalla.
+- THE SYSTEM SHALL mantener **los dos paneles montados** y ocultar el inactivo con el atributo
+  `hidden` — SHALL NOT desmontarlo, a diferencia de `reviews-tabs.tsx`/`pricing-tabs.tsx`: el
+  estado local de la pestaña de contenido (el formulario de cierre de `tech-resolve-form.tsx`, la
+  ETA escrita en `tech-eta-field.tsx`, el `stage` elegido en `tech-photo-upload.tsx`, el scroll y
+  los datos ya cargados) sobrevive a un viaje de ida y vuelta a «Mensajes».
+- THE SYSTEM SHALL pedir la primera página del hilo solo cuando el técnico abre «Mensajes» por
+  primera vez (`hasOpenedMessagesTab`, un flag que pasa a `true` una vez y nunca vuelve a `false`,
+  que viaja como `enabled` hasta la query) — SHALL NOT pedirla al montar el detalle ni volver a
+  deshabilitarla al alternar de pestaña.
+- THE SYSTEM SHALL listar los mensajes de `GET /api/v1/incidents/{incident_id}/messages` en el
+  orden cronológico ascendente que fija el backend, de 20 en 20: la página 1 son los más antiguos
+  y «Cargar mensajes más recientes» pide `page + 1` y **añade** al final lo que llega, sin
+  reemplazar lo ya mostrado ni duplicar filas (cada página se guarda bajo su propio número).
+- THE SYSTEM SHALL ofrecer un compositor con `<textarea maxLength={2000}>` nativo y label asociado
+  (`htmlFor`), contador de caracteres visible, y SHALL deshabilitar el envío mientras el contenido
+  recortado no esté entre 1 y 2000 caracteres —mostrando la validación en línea— o mientras la
+  mutación esté en vuelo, de modo que ni un envío vacío ni un doble envío lleguen al backend.
+- WHEN el envío responde `201`, THE SYSTEM SHALL limpiar el compositor y reflejar el mensaje al
+  final del hilo por la invalidación de `incidentsKeys.messagesPrefix` que la mutación dispara en
+  `onSettled` —sin recarga de página y sin parcheo optimista—; si ese mensaje estrena página y el
+  técnico ya estaba al final del hilo, la vista avanza exactamente una página, la única que un
+  mensaje puede añadir.
+- IF el envío falla, THEN THE SYSTEM SHALL conservar el texto escrito y mostrar la copia
+  localizada — SHALL NOT limpiar el campo ni renderizar el `message` del sobre. La copia la elige
+  el propio panel a partir del `kind` que devuelve `mapIncidentsError(mutationResult)`
+  (`validation` → `messages.errors.tooLong`, `not-found` → `notFound`, `forbidden` → `forbidden`,
+  el resto → `generic`), porque este módulo comparte un mapeador **genérico por código de estado**
+  sin parámetro `kind` ni `messageKey`, a diferencia del `mapCleanerError(error, kind)` de
+  `cleaner-app`: quien sabe que la superficie es un compositor es el componente, no el mapeador.
+- IF la lectura del hilo falla, THEN THE SYSTEM SHALL mostrar `ErrorState`; IF responde `404`,
+  THEN SHALL mostrar el vacío «Incidencia no disponible» sin compositor, la misma convención que
+  siguen las otras lecturas de esta pantalla (R2); y si el hilo no tiene mensajes, SHALL mostrar un
+  `EmptyState` explícito, nunca un hueco en blanco.
+- THE SYSTEM SHALL etiquetar al autor de cada mensaje con `messages.roles.<UserRole>` del catálogo
+  `tech` — SHALL NOT renderizar el valor crudo del enum.
+- THE SYSTEM SHALL montar este hilo **solo** en `features/tech`: los hooks viven en
+  `features/incidents` porque `getIncidentsDataSource`/`incidentsKeys` ya viven allí, pero
+  `IncidentDetailView` —la pantalla del manager— SHALL NOT ganar ninguna superficie de mensajería
+  por ello.
+
 ## Known limitations
 
 - **N+1 de contextos en la lista.** Cada fila pide su propio
@@ -203,14 +252,18 @@ El rol alcanza exactamente lo que la pantalla usa. `TECHNICIAN` es
 - `frontend/features/tech/components/detail/` — `tech-incident-detail-view.tsx` (composición),
   `tech-incident-fields.tsx`, `tech-context-block.tsx` (dirección, acceso y nota del manager),
   `tech-cycle-actions.tsx`, `tech-eta-field.tsx`, `tech-photo-gallery.tsx`, `tech-photo-upload.tsx`,
-  `tech-resolve-form.tsx`.
+  `tech-resolve-form.tsx`, `tech-incident-tabs.tsx` (las dos pestañas, R7) y
+  `tech-incident-messages-panel.tsx` (el hilo y su compositor, R7).
 - `frontend/features/tech/lib/tech-actions.ts` — `TECH_ACTIONS`, `techActions`,
   `techNoActionReason` y `techAcceptsPhotoUpload`: las tres tablas `Record<IncidentStatus, …>` que
   deciden qué ofrece cada estado.
 - `frontend/features/tech/lib/format.ts` — `formatDateTime(iso, locale)`.
 - `frontend/features/incidents/hooks/` — `use-incidents.ts` (lista, detalle, contexto, fotos),
-  `use-incident-cycle.ts` (las cinco mutaciones del ciclo y la subida), `query-keys.ts`
-  (`incidentsKeys`, con `context` compartida entre lista y detalle).
+  `use-incident-cycle.ts` (las cinco mutaciones del ciclo y la subida),
+  `use-incident-messages.ts` (`useIncidentMessages`, lectura perezosa con `enabled` como tercer
+  parámetro, y `useSendIncidentMessage` — R7), `query-keys.ts` (`incidentsKeys`, con `context`
+  compartida entre lista y detalle y `messages()` parametrizada por página bajo el prefijo que
+  invalida el envío).
 - `frontend/features/incidents/data/http/http-incidents-source.ts` y `data/dto.ts` — el transporte y
   los DTO, ensanchados con `etaAt` y `materials`.
 - `frontend/features/incidents/lib/conflict-reason.ts` — los tres casos del `409`.

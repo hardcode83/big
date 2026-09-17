@@ -230,6 +230,34 @@ mutación ya invalidó. La pantalla **no** deriva su propio veredicto de `/photo
 `uploaded` es un hecho, y la regla de validación vive **dentro de `CleaningTask.complete()` y en
 ningún otro sitio** (`sdd/specs/cleaning.md` §Cierre y validación).
 
+#### Mensajes con el manager (R9)
+
+La pantalla tiene dos pestañas — «Tarea» (activa al cargar) y «Mensajes» — en vez de una
+sección más en el flujo vertical: el hilo es infrecuente frente al checklist/fotos que se
+miran en *cada* apertura, así que el coste de un tap extra para lo infrecuente gana al coste
+de scroll extra en lo frecuente. Cambiar de pestaña **no** descarta nada de la otra: los dos
+paneles quedan montados (la inactiva se oculta con `hidden`), así que el formulario abierto
+de «Reportar incidencia», el scroll y los datos ya cargados sobreviven a un viaje de ida y
+vuelta a «Mensajes».
+
+El hilo no se pide al abrir la pantalla, solo la primera vez que la limpiadora toca
+«Mensajes» — y a partir de ahí queda cargado aunque vuelva a «Tarea». Los mensajes salen de
+`GET /api/v1/cleaning-tasks/{task_id}/messages`, de 20 en 20 y del más antiguo al más
+reciente; «Cargar mensajes más recientes» pide la página siguiente y la añade al final, sin
+reemplazar lo ya visible. Para escribir hay un `<textarea>` con contador (1-2000 caracteres):
+el botón de enviar se deshabilita mientras el texto esté fuera de rango o mientras el envío
+esté en vuelo, así que no llega ni un envío vacío ni uno doble al backend. Un envío que
+falla **conserva el texto escrito** y muestra el error localizado junto al compositor; uno
+que responde `201` limpia el compositor y el mensaje aparece al final del hilo sin recargar
+la página. Cada mensaje lleva el rol de quien lo escribió (limpiadora/manager) traducido,
+nunca el valor crudo del enum.
+
+El único caso que sustituye toda la pantalla —compositor incluido— es un `404` de la tarea:
+seguirá la misma convención «tarea no disponible» que ya aplican el checklist, las fotos y el
+contexto, porque no hay a quién enviarle un mensaje sobre una tarea que ha dejado de existir
+para esta usuaria. El detalle EARS completo está en
+[`sdd/specs/cleaner-app.md`](../sdd/specs/cleaner-app.md) R9; esta página no lo duplica.
+
 #### Estados compartidos y la postura mobile-first
 
 Los estados de carga, vacío y error se montan sobre los primitivos compartidos

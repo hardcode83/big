@@ -38,4 +38,9 @@ export const cleanerKeys = {
     tenantScopedKey(tenantId, "cleaner-task-photo-requirements", taskId),
   photos: (tenantId: string, taskId: string): QueryKey =>
     tenantScopedKey(tenantId, "cleaner-task-photos", taskId),
+  messages: (tenantId: string, taskId: string, page: number): QueryKey =>
+    tenantScopedKey(tenantId, "cleaner-task-messages", taskId, page),
+  /** The prefix every message page shares — what `sendTaskMessage` invalidates (D3, D5). */
+  messagesPrefix: (tenantId: string, taskId: string): QueryKey =>
+    tenantScopedKey(tenantId, "cleaner-task-messages", taskId),
 } as const;

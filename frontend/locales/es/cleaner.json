@@ -74,6 +74,41 @@
     },
     "alt": "Foto de la limpieza"
   },
+  "tabs": {
+    "label": "Secciones de la tarea",
+    "content": "Tarea"
+  },
+  "messages": {
+    "tab": "Mensajes",
+    "title": "Mensajes sobre esta tarea",
+    "loading": "Cargando los mensajes…",
+    "loadNewer": "Cargar mensajes más recientes",
+    "empty": {
+      "title": "Todavía no hay mensajes",
+      "description": "Cuando el manager te escriba sobre esta tarea, lo verás aquí."
+    },
+    "error": {
+      "description": "No hemos podido cargar los mensajes. Vuelve a intentarlo en unos segundos."
+    },
+    "composer": {
+      "label": "Escribe un mensaje",
+      "placeholder": "Escribe tu mensaje para el manager…",
+      "counter": "{{current}}/{{max}} caracteres",
+      "send": "Enviar mensaje",
+      "sending": "Enviando…"
+    },
+    "roles": {
+      "SUPER_ADMIN": "Administración",
+      "TENANT_OWNER": "Propietaria",
+      "PROPERTY_MANAGER": "Gestora",
+      "CLEANER": "Limpiadora",
+      "TECHNICIAN": "Técnico"
+    },
+    "errors": {
+      "required": "Escribe un mensaje antes de enviarlo.",
+      "tooLong": "El mensaje no puede pasar de 2000 caracteres."
+    }
+  },
   "actions": {
     "title": "Qué puedes hacer",
     "accept": "Aceptar",
