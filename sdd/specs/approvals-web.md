@@ -65,9 +65,12 @@ aprobación. Cierra el callejón sin salida que dejaba al técnico bloqueado en
   rechazar **cancela la incidencia** y no es reversible desde esta pantalla — en la propia
   interfaz, no sólo en un diálogo de confirmación.
 - THE SYSTEM NEVER SHALL ofrecer los controles de decisión en una fila `relatedType = OTHER`: se
-  pinta con la nota genérica y ninguna acción, porque la ruta de respuesta 404 para ese tipo
-  ([`maintenance.md`](maintenance.md) — `OwnerApprovalRelatedType.OTHER` no puede responderse por
-  esta ruta).
+  pinta con la nota genérica y ninguna acción. **Esto ya no es una limitación de backend**: desde
+  `expense-approval-response` (2026-09-17), `POST /owner-approvals/{id}/respond` sirve las
+  aprobaciones `OTHER` ([`maintenance.md`](maintenance.md) R8) devolviendo `OwnerApprovalResponse`.
+  La pantalla sigue ocultando los controles porque este `NEVER SHALL` no se tocó aquí — habilitarlos
+  requiere un change propio de FE que toque `use-respond-approval.ts`, `approvals-view.tsx`,
+  `error-mapping.ts` y `locales/{es,en}/approvals.json` (candidato de roadmap, no nombrado aún).
 
 ### R5 — El enlace desde el detalle de propiedad
 

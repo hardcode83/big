@@ -189,11 +189,12 @@ una conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   `maintenance.owner_approval_property_unresolved`; `total` SHALL seguir siendo el recuento crudo
   del `LEFT OUTER JOIN`, sin descontar la fila omitida.
 - THE SYSTEM SHALL incluir en la lista las aprobaciones `related_type = OTHER`: R1.1 pide «las
-  aprobaciones de su tenant» y ocultarlas mentiría sobre lo pendiente. THE SYSTEM SHALL seguir
-  respondiendo `404` a `POST /owner-approvals/{id}/respond` para una de ellas —`related_id` es un
-  id de `Expense`, no de incidencia, y la ruta de respuesta resuelve siempre por incidencia—: la
-  lista las hace **visibles** sin hacerlas **respondibles**, un vacío que sigue abierto hasta que
-  lo cierre la entrada de roadmap `expense-approval-response`.
+  aprobaciones de su tenant» y ocultarlas mentiría sobre lo pendiente. THE SYSTEM SHALL servir
+  `POST /owner-approvals/{id}/respond` para una de ellas —la rama `OTHER` responde sobre la propia
+  fila `OwnerApproval`, sin resolver incidencia alguna (`expense-approval-response` R1, R2)—: la
+  lista las hace **visibles** y, desde este change, **respondibles** por esta misma ruta; la
+  pantalla `/approvals` sigue sin ofrecer los controles de decisión para ellas hasta que un change
+  propio de FE los habilite ([`approvals-web`](approvals-web.md) R4).
 - WHEN la propietaria responde una aprobación cuya incidencia tiene técnico asignado, THE SYSTEM
   SHALL escribir, **dentro de la misma transacción** que registra la respuesta, una notificación
   al técnico con `notification_type = OWNER_APPROVAL_APPROVED` o `OWNER_APPROVAL_REJECTED` según
@@ -345,6 +346,13 @@ una conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   `resume`, `resolve` y `cancel`) y **dos** bajo `/api/v1/owner-approvals` —
   `GET ""` (lista, bajo `READ_OWNER_APPROVALS`, [`approvals-web`](approvals-web.md) R1) y
   `POST /{approval_id}/respond` (bajo `RESPOND_OWNER_APPROVALS`).
+- THE SYSTEM SHALL responder `POST /owner-approvals/{id}/respond` con `IncidentResponse` cuando la
+  aprobación es `INCIDENT` o `MAINTENANCE_COST`, y con `OwnerApprovalResponse` — un cuerpo reducido
+  sin incidencia — cuando es `OTHER` (`expense-approval-response` R1.6, R6.1); ambos DTOs viven en
+  `OpenAPIContract` como `oneOf` de la misma ruta, y `backend/openapi.json` /
+  `frontend/lib/api/generated/openapi.d.ts` los reflejan (R6.2). Sigue respondiendo el mismo `404`
+  con el mismo cuerpo, exista o no la aprobación, y el mismo `409` cuando ya está respondida —
+  ninguno de los dos distingue `related_type`.
 - THE SYSTEM SHALL exponer además **una** ruta **anónima** del módulo,
   `GET /api/v1/incident-photos/{photo_id}`, que sirve los bytes de una foto contra su firma HMAC
   porque un `<img src>` no puede mandar `Authorization`. Es la única del módulo sin permiso, cuelga
@@ -639,17 +647,20 @@ in-app tenga algo que enseñar. No es un efecto colateral.
   automática quedó fuera a propósito: `OwnerApproval` es la única tabla editable del esquema sin
   `updated_at`, y expirar sin dejar rastro temporal es una decisión de columna que le toca a quien
   traiga la expiración.
-- **`OwnerApprovalRelatedType.OTHER` no puede responderse por esta ruta.** Medido, no supuesto
-  (`approvals-web` D11): `RespondOwnerApprovalUseCase` resuelve `related_id` como id de incidencia
-  antes de nada, y para una fila `OTHER` ese id es de un `Expense` — resuelve a `None` y levanta
-  `IncidentNotFoundError` (`404`), no `MaintenanceValidationError`. Y sí hay hoy quien cree
-  aprobaciones `OTHER`: `CreateExpenseUseCase` de `statements` las escribe en vivo cuando el
-  importe del gasto supera el umbral del tenant (`revenue-statements` D4) — su propia spec
-  (`sdd/specs/revenue-statements.md`) afirma que la propietaria las responde por esta misma ruta,
-  lo cual esta medición contradice; corregirlo es de la entrada de roadmap
-  `expense-approval-response`, no de este módulo. Lo que sí hace este módulo desde
-  [`approvals-web`](approvals-web.md): las lista (R1.1, sin excluir `OTHER`) sin ofrecer decisión
-  sobre ellas.
+- **`OwnerApprovalRelatedType.OTHER` se responde por esta ruta desde `expense-approval-response`.**
+  `RespondOwnerApprovalUseCase` resuelve la aprobación por su propio repositorio y, cuando
+  `related_type` es `OTHER`, escribe la respuesta (`status`, `responded_at`, `responded_by`,
+  `response_notes`) y el `AuditLog OWNER_APPROVAL_ANSWERED` sin cargar ni mutar ninguna
+  incidencia, sin `TimelineEvent`, sin `PropertyStateMachine` y sin notificar a ningún técnico —
+  esa rama corta antes de `IncidentRepository.get(...)`. La respuesta HTTP es
+  `OwnerApprovalResponse` (`approval_id`, `status`, `responded_at`, `property_id`, `amount`,
+  `currency`), nunca `IncidentResponse`: no hay incidencia que devolver y forzar un id sintético
+  mentiría. `CreateExpenseUseCase` de `statements` sigue escribiendo estas filas en vivo cuando el
+  importe del gasto supera el umbral del tenant (`revenue-statements` D4); la materialización sobre
+  `expenses.approved_by` la hace el job `reconcile_owner_approvals_for_expenses` (latencia hasta 5
+  min, `revenue-statements` R5.7), sin cambios por este change. Lo que sigue sin este change: la
+  pantalla `/approvals` sigue ocultando los controles de decisión para filas `OTHER`
+  ([`approvals-web`](approvals-web.md) R4) hasta que un change propio de FE los habilite.
 - **`incidents.assignment_note` no pasa por `storable_text`.** Es el único sumidero de texto libre
   vivo del módulo declarado como `str` con `max_length` a secas: `materials` entró con
   `MultiLineText` desde el primer día, así que un `U+0000` en la nota de asignación llega a asyncpg

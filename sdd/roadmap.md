@@ -253,7 +253,7 @@ Categorías:
   size: M · kind: feature
 - [x] revenue-statements-detail-breakdown — [BE] **el GET de detalle de liquidación publica el resumen junto con las proyecciones financieras mínimas de reservas y gastos**, manteniendo separado el contrato del listado y de las mutaciones → changes/archive/2026-09-13-revenue-statements-detail-breakdown/
   needs: revenue-statements · size: S · kind: feature
-- [ ] expense-approval-response — [BE] **`OwnerApproval(related_type=OTHER)` no tiene ninguna ruta por la que la propietaria pueda responderla** …
+- [x] expense-approval-response — [BE] **`OwnerApproval(related_type=OTHER)` no tiene ninguna ruta por la que la propietaria pueda responderla** … → changes/archive/2026-09-17-expense-approval-response/
   needs: revenue-statements · size: S · kind: feature
 - [ ] statements-web — [FE] **`/statements`, hoy `RoutePlaceholder` sobre un backend entregado** …
   needs: revenue-statements, frontend-auth-session · size: M · kind: feature

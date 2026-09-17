@@ -259,16 +259,16 @@ de tablas locales, igual que `revenue-pricing`. La pantalla `/statements` queda 
   `MANAGE_OWNER_STATEMENTS`—, concediendo `READ` a `TENANT_OWNER` y `PROPERTY_MANAGER`,
   y `MANAGE` sólo a `PROPERTY_MANAGER`. `CLEANER`, `TECHNICIAN` y `SUPER_ADMIN` no
   reciben ninguno.
-- **Corrección medida en `approvals-web` (design D11, 2026-09-10), no en la frase de
-  arriba porque no es cuestión de permisos sino de ruta.** `RESPOND_OWNER_APPROVALS` sigue
-  siendo el único permiso de escritura sobre una `OwnerApproval`, pero
-  `POST /api/v1/owner-approvals/{id}/respond` **no sirve** las aprobaciones
-  `related_type = OTHER` que D4 genera para un `Expense`: `RespondOwnerApprovalUseCase`
-  carga la incidencia desde `approval.related_id` sin condición y responde `404`
-  (`IncidentNotFoundError`) cuando no existe, y en una aprobación `OTHER` ese `related_id`
-  es un id de `Expense`, no de incidencia. Hoy **no hay ninguna ruta** por la que la
-  propietaria responda una `OwnerApproval(OTHER)` desde la API; la entrada de roadmap
-  `expense-approval-response` recoge el hueco.
+- **Corrección medida en `approvals-web` (design D11, 2026-09-10) y cerrada por
+  `expense-approval-response` (2026-09-17).** `RESPOND_OWNER_APPROVALS` sigue siendo el
+  único permiso de escritura sobre una `OwnerApproval`, y desde este segundo change
+  `POST /api/v1/owner-approvals/{id}/respond` **sí sirve** las aprobaciones
+  `related_type = OTHER` que D4 genera para un `Expense`: la rama `OTHER` de
+  `RespondOwnerApprovalUseCase` escribe la respuesta directamente sobre `OwnerApproval`
+  —sin cargar ninguna incidencia— y devuelve `OwnerApprovalResponse` (`maintenance` R8,
+  `expense-approval-response` R1, R2). El límite que sigue en pie: la materialización
+  sobre `expenses.approved_by` la hace `reconcile_owner_approvals_for_expenses`, no esta
+  ruta — hasta 5 minutos de latencia (R5.7, sin cambios).
 - THE SYSTEM SHALL resolver el tenant siempre desde la sesión autenticada (nunca del
   cuerpo ni de la query) y comprobar en el repositorio que la entidad pertenece a ese
   tenant antes de leer o mutar.
@@ -305,15 +305,14 @@ de tablas locales, igual que `revenue-pricing`. La pantalla `/statements` queda 
   `plaintext-sink-encryption-at-rest` del roadmap.
 - **Receipt uploader / OCR**: `receipt_storage_key` es un puntero de texto libre; no hay
   subida ni validación de justificantes en este change.
-- **`RESPOND_OWNER_APPROVALS` sobre `Expense`**: el endpoint de respuesta de
-  `maintenance` no se toca; la integración pasa por el `OwnerApproval(related_type=OTHER)`
-  canónico y el job de reconciliación, sin acoplar `maintenance.application` a
-  `Expense`. **Esta decisión no tocar el endpoint es correcta y sigue vigente; lo que era
-  falso es la frase que solía seguir aquí, afirmando que ese endpoint sin tocar ya
-  servía la respuesta — no la sirve (ver §«Permisos, aislamiento, auditoría», corrección
-  de `approvals-web` D11): hoy no hay ninguna ruta que responda una `OwnerApproval(OTHER)`,
-  y ese hueco es justamente lo que queda fuera de alcance aquí y lo que recoge la
-  entrada de roadmap `expense-approval-response`.**
+- **`RESPOND_OWNER_APPROVALS` sobre `Expense`**: la integración pasa por el
+  `OwnerApproval(related_type=OTHER)` canónico y el job de reconciliación, sin acoplar
+  `maintenance.application` a `Expense` — ese límite sigue vigente. La ruta de respuesta de
+  `maintenance` sí quedó ensanchada, pero por `expense-approval-response`, no por este
+  change: `POST /api/v1/owner-approvals/{id}/respond` sirve hoy las aprobaciones `OTHER`
+  (ver §«Permisos, aislamiento, auditoría»); lo que queda fuera de alcance **aquí** es la
+  pantalla `/approvals` mostrando los controles de decisión sobre esas filas — sigue siendo
+  un change propio de FE ([`approvals-web`](approvals-web.md) R4).
 
 ## Estado y deuda conocida
 
