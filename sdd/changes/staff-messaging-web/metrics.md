@@ -6,4 +6,4 @@
 | 2026-09-15 | tasks | claude-sonnet-5 | 6 | 6444 | 567776 | 0.2052 |  |
 | 2026-09-15 | run | claude-opus-5[1m] claude-sonnet-5 | 249351 | 660580 | 246230280 | 78.6857 | incl. subagents |
 | 2026-09-15 | review | claude-haiku-4-5-20251001 claude-opus-5[1m] claude-sonnet-5 | 1678 | 308294 | 36939208 | 15.6542 | incl. subagents |
-| 2026-09-15 | ship | claude-sonnet-5 | 40 | 16102 | 8448735 | 2.3266 | incl. subagents |
+| 2026-09-17 | ship | claude-sonnet-5 | 72 | 20911 | 9415364 | 2.7187 | incl. subagents |
