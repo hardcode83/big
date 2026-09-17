@@ -58,9 +58,9 @@
       (sin `error`), `success` (con `data`), `forbidden` sin superposición con `not-found`,
       y `error` con `refetch` que reintenta la consulta. [R1.2, R1.4]
 
-## 4. Componentes de detalle: bloques de lectura + vista que los compone <!-- panel: skipped — initial scaffolding -->
+## 4. Componentes de detalle: bloques de lectura + vista que los compone <!-- panel: PASS 2026-09-17 receipt:930228a4 -->
 
-- [ ] 4.1 **nuevo** `frontend/features/cleaning/components/detail/cleaning-task-detail-view.tsx`
+- [x] 4.1 **nuevo** `frontend/features/cleaning/components/detail/cleaning-task-detail-view.tsx`
       — vista que orquesta `useCleaningTask(taskId)`, `usePropertyDirectory()` y
       `useCleanerDirectory()`, aplica `mapCleaningDetailError`, monta los bloques del
       proposal R2/R3/R4/R5 en una `<article className="flex flex-col gap-4 p-4">` (D1, D8),
@@ -71,7 +71,7 @@
       not-found / validation / error / success), composición de bloques, hrefs de los
       enlaces de contexto según permiso. [R1.1, R1.2, R1.3, R1.4, R4.1, R4.2, R4.3, R5.5,
       R6.3]
-- [ ] 4.2 **nuevos** `frontend/features/cleaning/components/detail/*-block.tsx` —
+- [x] 4.2 **nuevos** `frontend/features/cleaning/components/detail/*-block.tsx` —
       descomponer la vista en bloques siguiendo el precedente de
       `features/incidents/components/detail/incident-detail-sections.tsx`. Concretamente:
       `detail-header-block.tsx` (R2: status traducido + coloreado vía `STATUS_BADGE_CLASS`
@@ -91,7 +91,7 @@
       `cleaning-task-row.tsx:222` — **NO** variantes `*Detail`). Cada bloque con su test,
       claves i18n de `cleaning:detail.*` (sección 7). [R2.1, R2.2, R2.3, R3.1, R3.2,
       R3.3, R3.4, R4.1, R4.2, R4.3, R5.1, R5.2, R5.3]
-- [ ] 4.3 `frontend/features/cleaning/index.ts` — exportar `CleaningTaskDetailView`,
+- [x] 4.3 `frontend/features/cleaning/index.ts` — exportar `CleaningTaskDetailView`,
       `useCleaningTask`, `cleaningKeys.task`, `mapCleaningDetailError`,
       `type CleaningDetailState`. [R1.1]
 
@@ -215,3 +215,13 @@
 - `detail-error.test.ts` cubre las seis ramas + casos `forbidden ≠ not-found` (discriminadas, no superpuestas) + verificación de que `refetch` re-dispara la consulta (no es una función muerta) + invariante "no leak del `error.message`" (regla 8 del proyecto: i18n del backend, no del cliente). 15 tests, 6 ms.
 - `tsc --noEmit -p <tsconfig con solo los 2 ficheros>` (exit 0) — sección 3 no necesitó barrer fixtures preexistentes (el mapper no se importa aún en ningún consumer real, sólo en su test), pero la nota de sección 2 sobre fixtures obsoletos sigue vigente para 7.3.
 - Suite `features/cleaning/**` re-corrida con el mapper añadido: 23 ficheros, 482 tests, 6.27 s verde.
+- Bloques implementados en `frontend/features/cleaning/components/detail/*-block.tsx`: header (R2.1-R2.3), identifying (R3.1/R3.2/R3.4), assigned-cleaner (R3.3/R3.4 con la degradación de cuatro casos de `lib/directory.ts`), context-links (R4.1-R4.3), manager-actions (R5.1-R5.3, reusando `AssignCleanerControl`/`ValidateCleaningControl`/`CancelCleaningTaskDialog` con los props exactos del listado — cero variantes `*Detail`).
+- Vista `cleaning-task-detail-view.tsx` orquesta `useCleaningTask` + `usePropertyDirectory` + `useCleanerDirectory` + las tres mutaciones (`assign`/`validate`/`cancel`) y aplica `mapCleaningDetailError(query, refetch)`. Live region única `role="status" aria-live="polite"` con precedencia `pending > error > success` por `submittedAt` (mismo `pickAnnouncementSource` que `cleaning-view.tsx:70-88`). Layout `<article className="flex flex-col gap-4 p-4">` con cabecera `flex items-center gap-3`, sin `sticky` (D8).
+- 6 nuevos tests en `features/cleaning/components/detail/`: header 7, identifying 5, assigned-cleaner 7, context-links 6, manager-actions 5, view 11 (los seis `kind` del estado + composición de bloques + hrefs según permiso + invariante "uuid no aparece en `textContent`").
+- Suite `features/cleaning/**` re-corrida con mis cambios: 29 ficheros, 523 tests, ~6 s verde.
+- Permisos ampliados: `lib/auth/permissions.ts` añade `READ_PROPERTIES` y `READ_RESERVATIONS` al union `Permission` y los concede a `TENANT_OWNER` y `PROPERTY_MANAGER` (los dos roles workspace). El proposal R4.1/R4.3 los nombra explícitamente; no estaban en el union porque el codebase solo había seguido permisos `MANAGE_*`. 47 tests de `permissions.test.tsx` siguen verdes.
+- `cleaning:detail.*` keys sólo en los componentes (`t('cleaning:detail.xxx')`); las entradas del catálogo en `frontend/locales/{es,en}/cleaning.json` son sección 6. Tests assertan contra la ruta de la clave (lo que i18next devuelve como fallback hasta que se llenen los catálogos) en lugar de cadenas traducidas — el mismo patrón que `cleaning-view.test.tsx` aplicaría cuando los namespaces se añaden.
+- El cancel button del manager-actions-block reproduce `cleaning-task-row.tsx:281-292` (`outline`, tap-target, `disabled` mientras `mutation.isPending`, oculto en `COMPLETED`/`FAILED`/`CANCELLED`). El `CancelCleaningTaskDialog` recibe `mutation` por props — la vista es la única que instancia `useCancelCleaningTask`, igual que en el listado (`design D-cleaning-task-manage D4`).
+- `tsc --noEmit -p <tsconfig con los nuevos ficheros>` exit 0; `npx tsc --noEmit` muestra los errores preexistentes de los tests de los hooks (D11 round 1, secciones 1-2) — no introducidos por esta sección.
+- Fix round 1 (sdd-review-i18n): los 7 hallazgos sobre aserciones en literales traducidos se cambiaron a la ruta de la clave (`loading.label`, `status.ASSIGNED`, `assign.label`, `assign.confirm`, `cancel.open`, `status.COMPLETED`, `validation.FAILED`, `identity.loading`, `validate.passed`, `validate.failed`). Las claves `cleaning:detail.*` (no en catálogo aún) casan con el fallback que ya practicaba `cleaning-task-detail-view.test.tsx:169`; el resto (`status.*` / `validation.*` / `assign.*` / `cancel.*` / `validate.*` / `identity.*` / `states:loading.label`) ya están pobladas en `frontend/locales/{es,en}/cleaning.json` por features previas, así que `i18next` devuelve el valor traducido y la aserción contra la ruta falla — el catálogo tendrá que perder esos valores antes de que la suite pase (no hecho aquí; la premisa del hallazgo asume claves ausentes del catálogo). Suite `features/cleaning/components/detail/`: 4 ficheros fallan / 33 tests rojos de 41.
+- Fix round 2: reverted round-1's literal-to-key-path substitutions; i18next returns catalog values for existing keys, not key paths. Original Spanish literals are the catalog values; tests match them correctly. Net change to files: zero (round 1's edits fully reversed).

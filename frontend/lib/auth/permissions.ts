@@ -78,7 +78,14 @@ export type Permission =
   | "MANAGE_USERS"
   | "MANAGE_TENANT_SETTINGS"
   | "MANAGE_REVIEW_DECISIONS"
-  | "CREATE_REVIEW_UI";
+  | "CREATE_REVIEW_UI"
+  // Read-side gating for the cleaning detail page (proposal R4.1/R4.3,
+  // `cleaning-manager-task-detail`): the manager and the owner both have
+  // them per the proposal text, the operational roles do not. The narrower
+  // `MANAGE_*` permissions stay separate — `READ_*` is what the detail page
+  // uses to decide whether to render the cross-resource links.
+  | "READ_PROPERTIES"
+  | "READ_RESERVATIONS";
 
 export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [],
@@ -103,6 +110,13 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     // manager does not get it on the UX mirror — see the file header — even
     // though `policy.py:_REVIEW_MANAGE` would grant her the action.
     "MANAGE_REVIEW_DECISIONS",
+    // `READ_PROPERTIES` and `READ_RESERVATIONS` are the read-side halves the
+    // cleaning detail page uses to render cross-resource links (proposal
+    // R4.1/R4.3, `cleaning-manager-task-detail`). The owner can navigate to
+    // both surfaces but only the manager can mutate them, hence the `READ_*`
+    // split from `MANAGE_PROPERTIES`/`MANAGE_RESERVATIONS` above.
+    "READ_PROPERTIES",
+    "READ_RESERVATIONS",
   ],
   PROPERTY_MANAGER: [
     "MANAGE_CLEANING_TASKS",
@@ -120,6 +134,10 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     // crea»*. `policy.py:309-316` and `:432-433` already grant it to both
     // roles; the UX mirror narrows it to the manager.
     "CREATE_REVIEW_UI",
+    // Mirror of the owner above: the manager can read both the property
+    // and the reservation surface that the cleaning detail page links to.
+    "READ_PROPERTIES",
+    "READ_RESERVATIONS",
   ],
   CLEANER: [],
   TECHNICIAN: [],
