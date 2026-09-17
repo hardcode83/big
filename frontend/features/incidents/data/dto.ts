@@ -137,3 +137,38 @@ export interface IncidentPagination {
   total: number;
   lastPage: number;
 }
+
+/**
+ * The wire-shaped list envelope for a paginated resource that DOES carry
+ * `total_pages` (unlike `IncidentList`/`IncidentPageResponse` above) —
+ * `IncidentMessagePageResponse` is one such envelope. Renamed to camelCase at
+ * the boundary. Identical shape to `PaginatedResponse` in
+ * `features/cleaner/data/dto.ts` (design D3) — each domain owns its own copy,
+ * not a shared type.
+ */
+export interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  perPage: number;
+  totalPages: number;
+}
+
+/**
+ * One message of an incident's staff thread (proposal R2.1, R2.2, design D3).
+ * Shape is identical to `CleaningTaskMessage` (`features/cleaner/data/dto.ts`)
+ * by design — each domain owns its own thread, but the wire and the UI DTO
+ * agree.
+ */
+export interface IncidentMessage {
+  id: string;
+  authorId: string;
+  authorRole: components["schemas"]["UserRole"];
+  content: string;
+  createdAt: string;
+}
+
+/** Body of `POST /incidents/{incident_id}/messages` (R2.2). */
+export interface SendIncidentMessageInput {
+  content: string;
+}

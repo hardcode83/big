@@ -30,6 +30,8 @@ const waitParts = vi.fn();
 const resume = vi.fn();
 const resolve = vi.fn();
 const uploadPhoto = vi.fn();
+const getIncidentMessages = vi.fn();
+const sendIncidentMessage = vi.fn();
 
 vi.spyOn(incidentsData, "getIncidentsDataSource").mockImplementation(
   () =>
@@ -44,6 +46,8 @@ vi.spyOn(incidentsData, "getIncidentsDataSource").mockImplementation(
       resume,
       resolve,
       uploadPhoto,
+      getIncidentMessages,
+      sendIncidentMessage,
     }) as unknown as ReturnType<typeof incidentsData.getIncidentsDataSource>,
 );
 
@@ -119,6 +123,7 @@ describe("TechIncidentDetailView (R2–R5)", () => {
       resume,
       resolve,
       uploadPhoto,
+      sendIncidentMessage,
     ]) {
       mock.mockReset();
     }
@@ -126,6 +131,13 @@ describe("TechIncidentDetailView (R2–R5)", () => {
     getIncidentContext.mockResolvedValue(CONTEXT);
     listPhotos.mockResolvedValue([]);
     accept.mockResolvedValue(incident({ status: "ACCEPTED" }));
+    getIncidentMessages.mockReset().mockResolvedValue({
+      data: [],
+      total: 0,
+      page: 1,
+      perPage: 20,
+      totalPages: 0,
+    });
   });
 
   it("(a) renders the incident fields and the context, access notes verbatim (R2.2, R2.3)", async () => {
@@ -616,6 +628,112 @@ describe("TechIncidentDetailView (R2–R5)", () => {
     expect(
       screen.getByRole("button", { name: esTech.resolve.submit }),
     ).toBeEnabled();
+  });
+
+  /**
+   * The two tabs this screen gained (R2, R3). The thread's own states live in
+   * `tech-incident-messages-panel.test.tsx`; what is asserted here is the
+   * wiring: which tab opens, when the thread is first requested, and that the
+   * operational panel is hidden rather than unmounted.
+   */
+  describe("the messages tab (R2, R3)", () => {
+    const contentTab = () =>
+      screen.getByRole("tab", { name: esTech.tabs.content });
+    const messagesTab = () =>
+      screen.getByRole("tab", { name: esTech.messages.tab });
+
+    it("opens on the operational content, and asks for no thread until the tab is touched (R3.1, D1)", async () => {
+      renderDetail();
+
+      await screen.findByText("Fuga en el baño");
+      expect(contentTab()).toHaveAttribute("aria-selected", "true");
+      expect(messagesTab()).toHaveAttribute("aria-selected", "false");
+      expect(getIncidentMessages).not.toHaveBeenCalled();
+    });
+
+    it("requests the first page and shows the thread once the tab is opened (R2.1)", async () => {
+      renderDetail();
+      await screen.findByText("Fuga en el baño");
+
+      fireEvent.click(messagesTab());
+
+      await waitFor(() =>
+        expect(getIncidentMessages).toHaveBeenCalledWith(TENANT, "i1", 1),
+      );
+      expect(
+        await screen.findByText(esTech.messages.empty.title),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByLabelText(esTech.messages.composer.label),
+      ).toBeInTheDocument();
+    });
+
+    it("hides the operational panel instead of unmounting it (R3.2, D1)", async () => {
+      renderDetail();
+      await screen.findByText("Fuga en el baño");
+
+      fireEvent.click(messagesTab());
+
+      const contentPanel = document.getElementById(
+        "tech-incident-panel-content",
+      );
+      expect(contentPanel).toHaveAttribute("hidden");
+      // Still in the DOM, with the incident it had already loaded.
+      expect(contentPanel?.textContent ?? "").toContain("Fuga en el baño");
+    });
+
+    /**
+     * R3.2 with the real screen rather than a probe: the close form is open,
+     * half filled in, when the technician goes to read the thread. An unmount
+     * of the content panel would empty it.
+     */
+    it("keeps what was typed in the close form through a round trip to the thread (R3.2)", async () => {
+      getIncident.mockResolvedValue(incident({ status: "IN_PROGRESS" }));
+      renderDetail();
+
+      const cost = await screen.findByLabelText(esTech.resolve.finalCost);
+      fireEvent.change(cost, { target: { value: "120.50" } });
+      fireEvent.change(screen.getByLabelText(esTech.resolve.materials), {
+        target: { value: "Junta de 12 mm" },
+      });
+
+      fireEvent.click(messagesTab());
+      await screen.findByText(esTech.messages.empty.title);
+      fireEvent.click(contentTab());
+
+      expect(screen.getByLabelText(esTech.resolve.finalCost)).toHaveValue(
+        120.5,
+      );
+      expect(screen.getByLabelText(esTech.resolve.materials)).toHaveValue(
+        "Junta de 12 mm",
+      );
+      // And the close was never sent just because the tabs moved.
+      expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it("replaces the whole screen with the not-found EmptyState when the messages read 404s (R4.3)", async () => {
+      getIncidentMessages.mockRejectedValue(
+        new ApiError({ status: 404, code: "NOT_FOUND", message: "x" }),
+      );
+      renderDetail();
+      await screen.findByText("Fuga en el baño");
+
+      fireEvent.click(messagesTab());
+
+      // The whole detail screen — tabs included — is replaced by the same
+      // "not available" EmptyState the incident/context reads already
+      // produce: no tablist, no leftover content tab underneath. Waiting on
+      // the tablist's disappearance (rather than just the title text) is what
+      // pins this to the whole-screen swap. The panel itself renders nothing
+      // while a parent is listening, so this title only comes from the swap.
+      await waitFor(() => {
+        expect(screen.queryByRole("tablist")).toBeNull();
+      });
+      expect(
+        screen.getByText(esTech.detail.unavailable.title),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Fuga en el baño")).toBeNull();
+    });
   });
 
   it("calls no /api/v1/properties route from this screen (R2.5)", async () => {

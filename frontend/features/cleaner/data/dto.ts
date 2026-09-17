@@ -143,3 +143,21 @@ export interface CleaningIncidentReportAck {
   status: components["schemas"]["IncidentStatus"];
   createdAt: IsoDateTime;
 }
+
+/**
+ * One message of a cleaning task's staff thread (R1.1, R1.2, design D3).
+ * Shape is identical to `IncidentMessage` (`incidents/data/dto.ts`) by design
+ * — each domain owns its own thread, but the wire and the UI DTO agree.
+ */
+export interface CleaningTaskMessage {
+  id: string;
+  authorId: string;
+  authorRole: components["schemas"]["UserRole"];
+  content: string;
+  createdAt: IsoDateTime;
+}
+
+/** Body of `POST /cleaning-tasks/{task_id}/messages` (R1.2). */
+export interface SendCleaningTaskMessageInput {
+  content: string;
+}

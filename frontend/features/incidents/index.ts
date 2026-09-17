@@ -14,6 +14,16 @@ export {
   useIncidentPhotos,
   type IncidentsPagesResult,
 } from "./hooks/use-incidents";
+// The incident staff-thread hooks (design D2, proposal R2). Shared here
+// because `getIncidentsDataSource`/`incidentsKeys` already are, but **no UI
+// component** for the thread lives in this module or is exported from this
+// barrel: only `features/tech` mounts it (section 4), so `IncidentDetailView`
+// (the manager's view, exported above) gains no surface from these hooks.
+export {
+  useIncidentMessages,
+  useSendIncidentMessage,
+  type SendIncidentMessageVariables,
+} from "./hooks/use-incident-messages";
 export {
   useIncidentCycleAction,
   useCloseIncident,

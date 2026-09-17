@@ -62,6 +62,45 @@
       "description": "La dirección y las instrucciones de acceso no están disponibles ahora mismo."
     }
   },
+  "tabs": {
+    "label": "Secciones de la incidencia",
+    "content": "Incidencia"
+  },
+  "messages": {
+    "tab": "Mensajes",
+    "title": "Mensajes sobre esta incidencia",
+    "loading": "Cargando los mensajes…",
+    "loadNewer": "Cargar mensajes más recientes",
+    "empty": {
+      "title": "Todavía no hay mensajes",
+      "description": "Cuando el manager te escriba sobre esta incidencia, lo verás aquí."
+    },
+    "error": {
+      "title": "No hemos podido cargar los mensajes",
+      "description": "Vuelve a intentarlo en unos segundos."
+    },
+    "composer": {
+      "label": "Escribe un mensaje",
+      "placeholder": "Escribe tu mensaje para el manager…",
+      "counter": "{{current}}/{{max}} caracteres",
+      "send": "Enviar mensaje",
+      "sending": "Enviando…"
+    },
+    "roles": {
+      "SUPER_ADMIN": "Administración",
+      "TENANT_OWNER": "Propietaria",
+      "PROPERTY_MANAGER": "Gestora",
+      "CLEANER": "Limpiadora",
+      "TECHNICIAN": "Técnico"
+    },
+    "errors": {
+      "required": "Escribe un mensaje antes de enviarlo.",
+      "tooLong": "El mensaje no puede pasar de 2000 caracteres.",
+      "notFound": "Esta incidencia ya no está disponible, así que el mensaje no se ha enviado.",
+      "forbidden": "No puedes escribir en esta incidencia.",
+      "generic": "No hemos podido enviar el mensaje. Vuelve a intentarlo."
+    }
+  },
   "actions": {
     "title": "Qué puedes hacer",
     "accept": "Aceptar",

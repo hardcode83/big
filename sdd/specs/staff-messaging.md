@@ -181,9 +181,16 @@ alcance».
   `PROPERTY_MANAGER` activos del tenant.
 - **Restringir la escritura por estado** de la tarea/incidencia (D4): el scoping por asignación no
   mira el estado, igual que el resto de la lectura de estos dos dominios.
-- **UI dedicada.** Ninguna pantalla de web/`cleaner-app`/`tech-app` consume estas rutas todavía —
-  esta entrega es la API y su contrato publicado; una entrada de roadmap posterior decide la
-  pantalla.
+- **UI dedicada.** Esta entrega es la API y su contrato publicado, sin consumidor. El consumidor
+  llegó con `staff-messaging-web`: una pestaña "Mensajes" en `/cleaner/tasks/[id]`
+  (`CleanerTaskDetailView`) y en `/tech/incidents/[id]` (`TechIncidentDetailView`) — las dos
+  pantallas de campo que ya existían como página real. **La vista del manager sigue sin
+  consumidor** a propósito: el manager ya tiene permiso de lectura/escritura de ambos hilos por
+  R4 (vía `READ_CLEANING_TASKS`/`MANAGE_CLEANING_TASKS` y `READ_INCIDENTS`/`EXECUTE_INCIDENTS`),
+  pero no existe una página de detalle de tarea de limpieza del manager con la que emparejar el
+  hilo de `cleaning_task_messages` de forma simétrica a como `/incidents/[id]` sí existe para
+  `incident_messages` — dar el hilo solo al lado de incidencias habría sido cobertura asimétrica.
+  Queda para una entrada de roadmap futura.
 
 ## Key files
 

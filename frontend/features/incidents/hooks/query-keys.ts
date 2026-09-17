@@ -35,4 +35,13 @@ export const incidentsKeys = {
   /** The tenant's technician roster (R2.1), read by `useTechnicianDirectory`. */
   technicians: (tenantId: string): QueryKey =>
     tenantScopedKey(tenantId, "incidents-technicians"),
+  /**
+   * One page of an incident's staff thread, oldest first (proposal R2.1,
+   * design D3, D4). Same shape as `photos`, parametrized by page.
+   */
+  messages: (tenantId: string, incidentId: string, page: number): QueryKey =>
+    tenantScopedKey(tenantId, "incidents-messages", incidentId, page),
+  /** The prefix every message page shares — what `sendIncidentMessage` invalidates (D3, D5). */
+  messagesPrefix: (tenantId: string, incidentId: string): QueryKey =>
+    tenantScopedKey(tenantId, "incidents-messages", incidentId),
 } as const;

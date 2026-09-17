@@ -475,8 +475,11 @@ test.describe.serial("R4 — ciclo de incidencia", () => {
       // `TECH_ACTIONS` (`features/tech/lib/tech-actions.ts`) fixes the order:
       // ASSIGNED → [accept, reject], ACCEPTED → [en-route, reject]. The first
       // button advances the cycle; the count is what proves which state the
-      // screen is in.
-      const cycleButtons = page.locator("main button");
+      // screen is in. Scoped to the content tabpanel (`TechIncidentTabs`,
+      // staff-messaging-web) — the messages tab's tab buttons and composer
+      // stay mounted (hidden, not unmounted) so its state survives a round
+      // trip, and "main button" would count those too.
+      const cycleButtons = page.locator("#tech-incident-panel-content button");
       await expect(cycleButtons).toHaveCount(2);
       await cycleButtons.nth(0).click();
       await expect
@@ -546,7 +549,8 @@ test.describe.serial("R4 — ciclo de incidencia", () => {
     await withRole(browser, "TECHNICIAN", async (page, go) => {
       await go(`/tech/incidents/${incidentId}`);
 
-      const cycleButtons = page.locator("main button");
+      // Scoped to the content tabpanel — see 4.2's identical locator.
+      const cycleButtons = page.locator("#tech-incident-panel-content button");
       await expect(cycleButtons).toHaveCount(2);
       await cycleButtons.nth(0).click(); // accept
       await expect

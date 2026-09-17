@@ -25,6 +25,8 @@ describe("incidentsKeys tenant isolation (steering security rule 1, R1.3)", () =
     photos: incidentsKeys.photos(tenantId, "i1"),
     listPrefix: incidentsKeys.listPrefix(tenantId),
     technicians: incidentsKeys.technicians(tenantId),
+    messages: incidentsKeys.messages(tenantId, "i1", 1),
+    messagesPrefix: incidentsKeys.messagesPrefix(tenantId, "i1"),
   });
 
   it("prefixes every key with its tenant", () => {
@@ -82,5 +84,37 @@ describe("incidentsKeys tenant isolation (steering security rule 1, R1.3)", () =
     ]) {
       expect(key.slice(0, prefix.length)).toEqual(prefix);
     }
+  });
+
+  it("gives the staff thread its own key, distinct from the others (R2.1)", () => {
+    const { list, detail, context, photos, technicians, messages } =
+      forTenant(A);
+    expect(
+      new Set(
+        [list, detail, context, photos, technicians, messages].map((k) =>
+          JSON.stringify(k),
+        ),
+      ).size,
+    ).toBe(6);
+  });
+
+  it("gives a later message page its own key (D4 — advancing page never replaces the earlier one)", () => {
+    expect(incidentsKeys.messages(A, "i1", 1)).not.toEqual(
+      incidentsKeys.messages(A, "i1", 2),
+    );
+  });
+
+  it("makes messagesPrefix a prefix of every message page key in the same tenant/incident", () => {
+    const prefix = incidentsKeys.messagesPrefix(A, "i1");
+    for (const key of [
+      incidentsKeys.messages(A, "i1", 1),
+      incidentsKeys.messages(A, "i1", 2),
+    ]) {
+      expect(key.slice(0, prefix.length)).toEqual(prefix);
+    }
+    // A different incident's pages must not share this prefix.
+    expect(
+      incidentsKeys.messages(A, "i2", 1).slice(0, prefix.length),
+    ).not.toEqual(prefix);
   });
 });
