@@ -118,11 +118,16 @@
       added on the frontend side — verifies the change did not introduce one by
       accident). Verdict: "ningún bloque fuera de la tabla de la regla 11 declara
       quién escribe un sumidero del censo."
-- [ ] 5.6 Manual check: open `/cleaner/tasks/[id]` and `/tech/incidents/[id]` in a
+- [x] 5.6 Manual check: open `/cleaner/tasks/[id]` and `/tech/incidents/[id]` in a
       running stack, confirm the Messages tab renders empty state, send a message,
       confirm it appears without a full page reload, confirm the content tab's
       scroll/state survives a round trip through the messages tab, at 360px
-      viewport. <!-- manual -->
+      viewport. <!-- manual --> Verified at archive time (2026-09-17) on both
+      routes with a seeded demo cleaning task and incident, at 360x740 viewport:
+      empty state rendered ("Todavía no hay mensajes"), a sent message appeared
+      in-place with no navigation/URL change and no new `/api/` request, and it
+      remained after a round trip through the content tab (no refetch, no data
+      loss). No horizontal overflow observed on either tab.
 
 ## Implementation Notes
 
