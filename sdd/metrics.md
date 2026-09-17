@@ -122,4 +122,4 @@
 | reservation-confirm-web | new, design, tasks, run, review, archive | 3072607 | 530938 | 118696062 | 67.2419 | 2026-09-12 | 2026-09-13 |
 | hardening-release | new, design, tasks, run, review, ship, archive | 558539 | 2008528 | 955794755 | 284.2286 | 2026-09-13 | 2026-09-14 |
 | guest-scheduled-comms | new, design, tasks, run, review, ship, archive | 292874 | 1051392 | 362801808 | 105.9539 | 2026-09-13 | 2026-09-14 |
-| staff-messaging-web | new, tasks, run, review | 196507 | 855419 | 216221640 | 76.9494 | 2026-09-15 | — |
+| staff-messaging-web | new, tasks, run, review, ship | 262084 | 1044325 | 302156393 | 100.1669 | 2026-09-15 | — |
