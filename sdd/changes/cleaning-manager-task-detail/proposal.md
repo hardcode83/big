@@ -42,16 +42,21 @@ los tres controles que el listado ya posee — asignar/reasignar, validar y canc
 misma tarea, sin recargar la página entre operaciones. El acceso desde el listado es un enlace
 por fila; el regreso es un enlace «Volver al listado» en la cabecera.
 
-**No se regenera el contrato**: `CleaningTaskResponse` ya publica los 17 campos que la vista
+**No se regenera el contrato**: `CleaningTaskResponse` ya publica los campos que la vista
 consume (id, property_id, reservation_id, checklist_template_id, assigned_cleaner_id, status,
 scheduled_start/end, accepted_at, started_at, completed_at, validated_at, validated_by_user_id,
-validation_status y created_at) y `CleaningTask` en `features/cleaning/data/dto.ts` ya los
-mapea vía `mapTask`. La identidad legible de la vivienda (`property_internal_code`,
-`property_name`) **no viaja en `CleaningTaskResponse`** — verificado el 2026-09-17 contra
-`backend/openapi.json` —, así que la página la resuelve vía `usePropertyDirectory()` (R3.5),
-igual que `cleaning-manager-view` ya hace en el listado. Se añade un
-`getTask(tenantId, taskId)` a la frontera `CleaningDataSource` y un `useCleaningTask` al lado
-de los hooks existentes.
+validation_status y created_at) — verificado el 2026-09-17 contra
+`backend/openapi.json`. Lo que el DTO actual `CleaningTask`
+(`features/cleaning/data/dto.ts`) ya mapea son 10 de esos campos vía `mapTask`
+(`features/cleaning/data/http/http-cleaning-source.ts:59-72`); **esta entrada añade
+`reservationId: string | null` al DTO y lo extrae en `mapTask`** — es el único de los seis
+campos ausentes que R3.2 y R4.3 necesitan (los otros cinco —`accepted_at`,
+`checklist_template_id`, `started_at`, `validated_by_user_id`, `updated_at`— son internos
+al ciclo de la limpiadora, no de la supervisión del manager). La identidad legible de la
+vivienda (`property_internal_code`, `property_name`) **no viaja en `CleaningTaskResponse`**,
+así que la página la resuelve vía `usePropertyDirectory()` (R3.5), igual que
+`cleaning-manager-view` ya hace en el listado. Se añade un `getTask(tenantId, taskId)` a la
+frontera `CleaningDataSource` y un `useCleaningTask` al lado de los hooks existentes.
 
 **Sin permiso nuevo**: la lectura usa `READ_CLEANING_TASKS` (la tienen manager y owner); las
 tres mutaciones usan `MANAGE_CLEANING_TASKS` (sólo manager) — exactamente los tres permisos
