@@ -1,6 +1,7 @@
 export { createApiClient } from "./client";
 export type {
   ApiClient,
+  ApiBinaryResponse,
   ApiClientOptions,
   RequestOptions,
   UnauthorizedContext,

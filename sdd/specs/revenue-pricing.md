@@ -585,11 +585,12 @@ sólo eran alcanzables por `curl`.
   `96d526599bc1_domain_foundation_financial`, y esta capacidad no añade ninguna variable de
   entorno: el horizonte y la ventana de ocupación son cifras del PRD, no palancas de
   operación, así que son constantes de módulo y se revisan en un Pull Request.
-- **El `422` de validación devuelve el `loc` de Pydantic sin acotar**, y con
-  `extra="forbid"` ese `loc` lleva el nombre de la clave desconocida que envió el llamante. No
-  es un hueco de esta capacidad —vive en el handler compartido y afecta a todo módulo con
-  `extra="forbid"`— pero se midió desde aquí: entrada `validation-error-loc-redaction` del
-  roadmap.
+- **El `422` de validación devolvía el `loc` de Pydantic sin acotar**, y con
+  `extra="forbid"` ese `loc` llevaba el nombre de la clave desconocida que envió el llamante. No
+  era un hueco de esta capacidad —vivía en el handler compartido y afectaba a todo módulo con
+  `extra="forbid"`— y se midió desde aquí; el hueco ya está cerrado por
+  `validation-error-loc-redaction` del roadmap. El contrato de la cota vive en
+  `sdd/specs/api-contract.md`, sección "Lo que el documento declara sobre los errores".
 - **`audit_logs.changes` se cierra en `ChangeSet` y no en el repositorio**, así que quien
   construya un `AuditLog` a mano escribe lo que quiera. Ningún call site lo hace, así que no
   hay exposición viva; lo levantó el panel de QA de este change y pertenece a `app/audit/`:

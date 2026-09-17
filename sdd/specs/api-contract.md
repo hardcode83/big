@@ -129,6 +129,34 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
 - THE SYSTEM SHALL mantener esa exención **estrecha**: un `content` ausente o vacío no la
   satisface y sigue fallando la guarda, comprobado con rutas de prueba que declaran una cosa y
   la otra.
+- THE SYSTEM SHALL acotar, en el handler compartido de `app/core/errors.py`, únicamente el
+  último segmento de `loc` de un error de tipo `extra_forbidden` —el único caller-controlled,
+  porque Pydantic lo rellena con la clave desconocida literal que envió el llamante— a 100
+  caracteres totales, incluida la marca de truncado `...(truncated)`. Todo otro segmento de
+  `loc` y todo error de cualquier otro `type` (`missing`, `string_too_long`, `value_error`,
+  …) queda sin tocar, porque para todo schema de este código hoy —modelos `extra="forbid"`
+  con campos tipados, no `dict`— son schema-derived y acotarlos cortaría un nombre de campo
+  legítimo. Excepción nombrada: un hipotético campo `dict[str, <modelo>]` dejaría aparecer
+  una clave del llamante sin acotar bajo otro `type` (p. ej. `string_type`); ningún schema de
+  este código tiene hoy esa forma, así que esta corrección no la cubre. Se aplica una sola vez
+  para todo módulo con `extra="forbid"`, no por router. Cuando el segmento se trunca de
+  verdad, el error añade `"loc_truncated": true` junto a `loc`/`type`/`msg` —una señal que el
+  llamante no puede forjar, porque una clave propia de ≤100 caracteres que termine en la
+  marca literal nunca la activa. Medido: una clave desconocida de 5.000 caracteres pasa de un
+  cuerpo `422` de 5.182 bytes a uno de 282 bytes para la misma prueba. Además, THE SYSTEM
+  SHALL acotar a 20 el número **total** de errores serializados por request, sea cual sea su
+  `type`, añadiendo una única entrada resumen de `type` `errors_omitted` que declara cuántos
+  se omitieron. El eje de CANTIDAD, no de longitud, también lo controla el llamante, y ningún
+  `type` está a salvo por sí solo: `extra_forbidden` escala con el número de claves
+  desconocidas distintas, y cualquier campo de colección sin `max_length` —los
+  `list[dict[str, Any]]` de `CreatePricingRuleRequest`/`UpdatePricingRuleRequest`— escala su
+  propio `type` con el número de ítems inválidos que envíe el llamante, no con el número de
+  campos del schema. Medido: un cuerpo de 1 MiB contra esos campos devolvía un `422` de 52,89
+  MiB con 520.000 entradas `dict_type`. WHEN el tope descarta entradas, THE SYSTEM SHALL
+  conservar las que Pydantic reporta primero —las violaciones de campos declarados antes que
+  los `extra_forbidden`—, de modo que un error de schema real no lo desplaza un llamante que
+  inunde la petición de claves desconocidas. Entrada `validation-error-loc-redaction` del
+  roadmap.
 
 ### Verificación estructural sin vacuidad
 

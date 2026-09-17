@@ -78,6 +78,13 @@ export interface UnauthorizedContext {
   retryCount: number;
 }
 
+/** An opaque successful response for downloads and other non-JSON payloads. */
+export interface ApiBinaryResponse {
+  bytes: Uint8Array;
+  headers: Headers;
+  status: number;
+}
+
 export interface RequestOptions<Body, Method extends string> {
   method?: Method;
   body?: Body;
@@ -137,6 +144,14 @@ export interface ApiClient {
     path: Path,
     ...options: RequestArguments<Path, Method>
   ): Promise<ResponseFor<OperationFor<Path, Method>>>;
+
+  requestBinary<
+    Path extends keyof paths,
+    Method extends Uppercase<MethodForPath<Path>> = Uppercase<MethodForPath<Path>>,
+  >(
+    path: Path,
+    ...options: RequestArguments<Path, Method>
+  ): Promise<ApiBinaryResponse>;
 }
 
 function joinUrl(baseUrl: string, path: string): string {
@@ -186,13 +201,13 @@ function appendQuery(
 export function createApiClient(options: ApiClientOptions): ApiClient {
   const doFetch = options.fetchImpl ?? fetch;
 
-  async function request<
+  async function requestResponse<
     Path extends keyof paths,
     Method extends Uppercase<MethodForPath<Path>> = Uppercase<MethodForPath<Path>>,
   >(
     path: Path,
     ...requestArguments: RequestArguments<Path, Method>
-  ): Promise<ResponseFor<OperationFor<Path, Method>>> {
+  ): Promise<Response> {
     const { method, body, formData, headers, pathParams, query, signal } =
       requestArguments[0] ?? {};
     let retryCount = 0;
@@ -264,13 +279,40 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         throw await parseApiError(response);
       }
 
-      if (response.status === 204) {
-        return undefined as ResponseFor<OperationFor<Path, Method>>;
-      }
-
-      return (await response.json()) as ResponseFor<OperationFor<Path, Method>>;
+      return response;
     }
   }
 
-  return { request };
+  async function request<
+    Path extends keyof paths,
+    Method extends Uppercase<MethodForPath<Path>> = Uppercase<MethodForPath<Path>>,
+  >(
+    path: Path,
+    ...requestArguments: RequestArguments<Path, Method>
+  ): Promise<ResponseFor<OperationFor<Path, Method>>> {
+    const response = await requestResponse(path, ...requestArguments);
+
+    if (response.status === 204) {
+      return undefined as ResponseFor<OperationFor<Path, Method>>;
+    }
+
+    return (await response.json()) as ResponseFor<OperationFor<Path, Method>>;
+  }
+
+  async function requestBinary<
+    Path extends keyof paths,
+    Method extends Uppercase<MethodForPath<Path>> = Uppercase<MethodForPath<Path>>,
+  >(
+    path: Path,
+    ...requestArguments: RequestArguments<Path, Method>
+  ): Promise<ApiBinaryResponse> {
+    const response = await requestResponse(path, ...requestArguments);
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      headers: response.headers,
+      status: response.status,
+    };
+  }
+
+  return { request, requestBinary };
 }
