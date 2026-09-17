@@ -40,6 +40,7 @@ const task: CleaningTaskListItem = {
   completedAt: null,
   validationStatus: "PENDING",
   validatedAt: null,
+  reservationId: null,
   // The default row is assignable, so the pre-existing tests keep describing the ordinary
   // case. The blocked shapes are posed explicitly by the tests that are about them.
   assignmentBlockedBy: null,

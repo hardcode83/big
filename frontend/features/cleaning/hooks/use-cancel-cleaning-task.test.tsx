@@ -40,6 +40,7 @@ const task: CleaningTask = {
   completedAt: null,
   validationStatus: "PENDING",
   validatedAt: null,
+  reservationId: null,
 };
 
 function harness() {

@@ -31,6 +31,7 @@ vi.mock("../data", async (importOriginal) => ({
     cancelTask,
     createTask,
     validateTask,
+    getTask: vi.fn(),
   }),
 }));
 
@@ -45,6 +46,7 @@ const task: CleaningTask = {
   completedAt: null,
   validationStatus: "PENDING",
   validatedAt: null,
+  reservationId: null,
 };
 
 function harness() {

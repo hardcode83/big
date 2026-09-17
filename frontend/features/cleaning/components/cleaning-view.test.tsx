@@ -49,6 +49,7 @@ vi.mock("../data", async (importOriginal) => ({
     cancelTask,
     createTask,
     validateTask,
+    getTask: vi.fn(),
   }),
 }));
 
@@ -66,6 +67,7 @@ const task: CleaningTaskListItem = {
   completedAt: null,
   validationStatus: "PENDING",
   validatedAt: null,
+  reservationId: null,
   // Assignable by default, so every pre-existing test keeps describing the ordinary row.
   assignmentBlockedBy: null,
 };
