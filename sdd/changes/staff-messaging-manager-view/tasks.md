@@ -10,7 +10,7 @@
      it may travel with the PR as a deferred entry; it may sit on any line of
      the task item, not only the checkbox line. -->
 
-## 1. i18n: messages.* + tabs.* en incidents.json y cleaning.json
+## 1. i18n: messages.* + tabs.* en incidents.json y cleaning.json <!-- panel: PASS 2026-09-18 receipt:5a7992f9 -->
 
 - [x] 1.1 `frontend/locales/es/incidents.json` + `frontend/locales/en/incidents.json` — añadir claves `tabs.label`, `tabs.content` y la sección `messages.*` completa (`messages.tab`, `messages.title`, `messages.loading`, `messages.error.{title,description}`, `messages.empty.{title,description}`, `messages.composer.{label,placeholder,counter,send,sending}`, `messages.roles.{TECHNICIAN,PROPERTY_MANAGER,TENANT_OWNER}`, `messages.errors.{required,tooLong,forbidden,notFound,generic}`, `messages.loadNewer`) con la misma forma y semántica que ya tienen `frontend/locales/{es,en}/tech.json`. Las claves deben ser cadenas literales (sin interpolación de JS) y pasar el panel i18n de `sdd-review-i18n` (cada clave con su traducción ES/EN). [R4.1, R4.2]
 - [x] 1.2 `frontend/locales/es/cleaning.json` + `frontend/locales/en/cleaning.json` — añadir el mismo árbol de claves que en 1.1 pero con los roles `messages.roles.{CLEANER,PROPERTY_MANAGER,TENANT_OWNER}` (la limpiadora en vez del técnico), copiando la forma y semántica de `frontend/locales/{es,en}/cleaner.json`. [R4.1, R4.2]
@@ -52,3 +52,8 @@
 - manager `messages.roles` order follows tech.json convention (TENANT_OWNER, PROPERTY_MANAGER, TECHNICIAN/CLEANER) without SUPER_ADMIN.
 - `messages.error` includes `title` (tech.json has it; cleaner.json only has description) — task spec requires both, manager view has both.
 - empty.description and composer.placeholder are written from the manager's perspective (manager reads the thread, writes to technician/cleaner).
+- section 2 (incidents wrapper): all new DOM IDs use the `manager-incident-` prefix; tab order `["content","messages"]` and the sticky `hasOpenedMessagesTab` are a direct copy of the tech tabs pattern.
+- section 2: `ManagerIncidentMessagesPanel` keeps `MAX_CONTENT = 2000` local and uses `mapIncidentsError(query).kind` for the 404 propagation (panel-local EmptyState only as standalone fallback when no `onNotFound` is wired).
+- section 2: wrapper (`ManagerIncidentDetailView`) composes the same six blocks from `incident-detail-sections.tsx` and does NOT import `IncidentDetailView` (D7); state machine lives in the wrapper.
+- section 2: `messagesNotFound` collapses the whole screen to the `/incidents` EmptyState via a stable `useCallback` `onMessagesNotFound`; `useLayoutEffect` in the panel calls it before paint, no frame flash.
+- section 2: wrapper test (`manager-incident-detail-view.test.tsx`) added alongside the panel/tabs tests since the verification command listed it; not a strict 2.5 deliverable but it locks the wiring (state machine + tab activation + 404 propagation).

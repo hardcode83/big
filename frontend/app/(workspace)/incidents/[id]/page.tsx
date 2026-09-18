@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { IncidentDetailView } from "@/features/incidents";
+import { ManagerIncidentDetailView } from "@/features/incidents";
 import { routeMetadata } from "@/features/shell/server";
 
 export function generateMetadata(): Promise<Metadata> {
@@ -13,5 +13,5 @@ export default async function Page({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  return <IncidentDetailView incidentId={id} />;
+  return <ManagerIncidentDetailView incidentId={id} />;
 }

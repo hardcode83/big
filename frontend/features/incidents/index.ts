@@ -5,6 +5,7 @@
 export { IncidentsView } from "./components/list/incidents-view";
 export { IncidentsFilters } from "./components/list/incidents-filters";
 export { IncidentDetailView } from "./components/detail/incident-detail-view";
+export { ManagerIncidentDetailView } from "./components/detail/manager-incident-detail-view";
 export {
   useIncidents,
   useIncidentsPages,
