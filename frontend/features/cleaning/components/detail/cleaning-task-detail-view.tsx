@@ -93,7 +93,6 @@ export function CleaningTaskDetailView({ taskId }: { taskId: string }) {
       <section className="flex flex-col gap-2 p-4">
         <EmptyState
           title={t("detail.notFound")}
-          description={t("detail.context.backToList")}
           action={
             <Link
               href="/cleaning"

@@ -142,7 +142,7 @@ function CancelOpenButton({
   return (
     <button
       type="button"
-      className="tap-target rounded-md border bg-background px-3 py-1 text-body-base transition-colors hover:bg-accent hover:text-accent-foreground"
+      className="tap-target rounded-md border bg-background px-3 py-1 text-body-base transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed"
       disabled={isPending}
       onClick={onOpen}
     >

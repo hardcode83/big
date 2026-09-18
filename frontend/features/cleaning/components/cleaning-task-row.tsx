@@ -194,7 +194,7 @@ export function CleaningTaskRow({
         >
           <Link
             href={`/cleaning/${task.id}`}
-            className="rounded-sm text-foreground underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none"
+            className="rounded-sm text-foreground underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <span className="sr-only">{t("columns.property")}: </span>
             <IdentityValue
