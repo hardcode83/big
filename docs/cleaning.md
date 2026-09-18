@@ -772,12 +772,21 @@ horizontal: bloques apilados en una columna, controles con objetivo táctil ≥ 
 `min-w-0` / `break-words` en cada nivel de anidamiento. El foco visible recorre la página de
 arriba abajo: cabecera → bloques informativos → controles del manager → enlaces de contexto.
 
-**Lo que sigue sin ser.** El detalle **no** pinta el checklist ni las fotos de la limpieza —
-eso sigue donde estaba (§«Las fotos» y la app de la limpiadora), y `cleaning-task-manage-web`
-ya dejó razonado en su proposal por qué se queda fuera del navegador de manager: la limpiadora
-lo vive en su propia app y abrir esa superficie en `/cleaning/[id]` duplicaría el cliente HTTP
-de la limpiadora, su caché y su manera de tratar los reintentos. El detalle tampoco edita
-plantillas de checklist — la gestión de plantillas tiene su propia ruta y no entra en esta.
+**Lo que sigue sin ser.** El detalle **no** pinta el checklist —eso sigue donde estaba, en la
+app de la limpiadora—, y `cleaning-task-manage-web` ya dejó razonado en su proposal por qué se
+queda fuera del navegador de manager: la limpiadora lo vive en su propia app y abrir esa
+superficie en `/cleaning/[id]` duplicaría el cliente HTTP de la limpiadora, su caché y su
+manera de tratar los reintentos. El detalle tampoco edita plantillas de checklist — la gestión
+de plantillas tiene su propia ruta y no entra en esta.
+
+**Las fotos sí llegaron, en solo lectura, con `photo-storage-manager-view` (2026-09-18).** El
+detalle pinta ahora la galería de `GET .../photos`, agrupada por `photo_type` (los que declare
+la plantilla de la tarea), con los mismos `LoadingState`/`ErrorState`/`EmptyState` y el mismo
+mecanismo de re-listar-al-caducar que la galería de incidencia (§«Las fotos de la
+incidencia» en [`maintenance.md`](maintenance.md)). Sin control de subida ni de borrado: subir
+sigue siendo solo de la limpiadora asignada (`EXECUTE_CLEANING_TASKS`) y no hay borrado por
+ninguna vía de la API. La ve tanto el manager como la propietaria, sin permiso nuevo — el mismo
+`READ_CLEANING_TASKS` que ya abre este detalle.
 
 ## Entradas de roadmap relacionadas
 
