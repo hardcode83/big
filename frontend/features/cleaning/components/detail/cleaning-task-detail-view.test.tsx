@@ -3,6 +3,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Permission } from "@/lib/auth";
+// The real mirror, not a hand-copied list: R3.3's `TENANT_OWNER` is only
+// meaningful if the permissions it is denied are the ones the app denies it.
+import { ROLE_UI_PERMISSIONS } from "@/lib/auth/permissions";
 
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import { ApiError } from "@/lib/api";
@@ -48,8 +51,12 @@ vi.mock("../../hooks/use-validate-cleaning-task", () => ({
 vi.mock("../../hooks/use-cancel-cleaning-task", () => ({
   useCancelCleaningTask: useCancelCleaningTaskMock,
 }));
+// The viewer's role is a knob, not a constant: R3.3 is about what a second
+// role (`TENANT_OWNER`) sees on the messages tab, so the mocked session has
+// to be able to say something other than `PROPERTY_MANAGER`.
+const session = vi.hoisted(() => ({ role: "PROPERTY_MANAGER" as string }));
 vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ user: { tenant_id: "tenant-1", role: "PROPERTY_MANAGER" } }),
+  useAuth: () => ({ user: { tenant_id: "tenant-1", role: session.role } }),
   useHasPermission: useHasPermissionMock,
 }));
 
@@ -171,6 +178,7 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
     useValidateCleaningTaskMock.mockReturnValue(makeMutation());
     useCancelCleaningTaskMock.mockReturnValue(makeMutation());
     useHasPermissionMock.mockReturnValue(true);
+    session.role = "PROPERTY_MANAGER";
   });
 
   it("renders the loading state when the query is pending (R1.3)", () => {
@@ -453,6 +461,102 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
       expect(
         screen.getByText(esCleaning.detail.context.backToList),
       ).toHaveAttribute("href", "/cleaning");
+    });
+  });
+
+  /**
+   * R3.3: `TENANT_OWNER` holds `READ_CLEANING_TASKS` but not
+   * `MANAGE_CLEANING_TASKS`, so she reaches this screen with the operational
+   * actions hidden — and the messages tab is *not* one of them. The contract
+   * is equality, so the test is an equality: the messages tabpanel's markup is
+   * captured for the manager and for the owner and compared byte for byte,
+   * with the owner's missing actions block proving the role really did change
+   * underneath.
+   */
+  describe("CleaningTaskDetailView — TENANT_OWNER parity (R3.3)", () => {
+    const messagesTab = () =>
+      screen.getByRole("tab", { name: esCleaning.messages.tab });
+
+    function asRole(role: "PROPERTY_MANAGER" | "TENANT_OWNER") {
+      session.role = role;
+      const granted = ROLE_UI_PERMISSIONS[role];
+      useHasPermissionMock.mockImplementation((permission: Permission) =>
+        granted.includes(permission),
+      );
+    }
+
+    beforeEach(() => {
+      getTaskMessagesMock.mockReset().mockResolvedValue({
+        data: [
+          {
+            id: "m-1",
+            authorId: "user-1",
+            authorRole: "PROPERTY_MANAGER",
+            content: "hilo compartido",
+            createdAt: "2026-08-20T10:00:00Z",
+          },
+        ],
+        total: 1,
+        page: 1,
+        perPage: 20,
+        totalPages: 1,
+      });
+    });
+
+    async function messagesPanelMarkupFor(
+      role: "PROPERTY_MANAGER" | "TENANT_OWNER",
+    ): Promise<string> {
+      asRole(role);
+      const view = renderView();
+      fireEvent.click(messagesTab());
+      expect(await screen.findByText("hilo compartido")).toBeInTheDocument();
+      const markup =
+        document.getElementById("manager-cleaning-panel-messages")?.innerHTML ??
+        "";
+      view.unmount();
+      return markup;
+    }
+
+    it("renders a byte-identical messages panel for TENANT_OWNER and PROPERTY_MANAGER (R3.3)", async () => {
+      const managerMarkup = await messagesPanelMarkupFor("PROPERTY_MANAGER");
+      const ownerMarkup = await messagesPanelMarkupFor("TENANT_OWNER");
+
+      expect(managerMarkup).toContain("hilo compartido");
+      expect(ownerMarkup).toBe(managerMarkup);
+    });
+
+    it("opens the thread for TENANT_OWNER with the composer, while the manager actions stay hidden (R3.3)", async () => {
+      asRole("TENANT_OWNER");
+      // The mirror itself: the owner is on this screen without the manage
+      // permission, so anything below that still renders is role-independent.
+      expect(
+        ROLE_UI_PERMISSIONS.TENANT_OWNER.includes("MANAGE_CLEANING_TASKS"),
+      ).toBe(false);
+
+      renderView();
+      expect(
+        screen.queryByRole("combobox", { name: "Asignar limpiadora" }),
+      ).not.toBeInTheDocument();
+
+      fireEvent.click(messagesTab());
+      await waitFor(() =>
+        expect(getTaskMessagesMock).toHaveBeenCalledWith(
+          "tenant-1",
+          "task-1",
+          1,
+        ),
+      );
+      expect(messagesTab()).toHaveAttribute("aria-selected", "true");
+      expect(await screen.findByText("hilo compartido")).toBeInTheDocument();
+
+      const composer = screen.getByLabelText(
+        esCleaning.messages.composer.label,
+      );
+      expect(composer).toBeInTheDocument();
+      fireEvent.change(composer, { target: { value: "respondo" } });
+      expect(
+        screen.getByRole("button", { name: esCleaning.messages.composer.send }),
+      ).toBeEnabled();
     });
   });
 });

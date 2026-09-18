@@ -343,6 +343,54 @@ describe("ManagerIncidentMessagesPanel — composer (R1.3, R1.4, D3)", () => {
     expect(composer()).toHaveAttribute("maxlength", "2000");
   });
 
+  // The `maxlength` attribute above is the browser's constraint on *typing*;
+  // paste and programmatic input walk straight past it, which is why the
+  // component keeps its own `validate()` (`trim().length` in 1..2000). These
+  // two exercise that function through the rendered composer at the exact
+  // boundary — jsdom does not clip a programmatic `value`, so the 2001-char
+  // case really does reach `validate()`.
+  it("accepts exactly 2000 trimmed characters and sends them (R1.3)", async () => {
+    const atLimit = "a".repeat(2000);
+    renderPanel();
+    await waitFor(() =>
+      expect(
+        screen.getByText(esIncidents.messages.empty.title),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.change(composer(), { target: { value: `  ${atLimit}  ` } });
+
+    expect(sendButton()).toBeEnabled();
+    expect(screen.queryByText(esIncidents.messages.errors.tooLong)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    fireEvent.click(sendButton());
+    await waitFor(() =>
+      expect(sendIncidentMessage).toHaveBeenCalledWith(TENANT, "i1", atLimit),
+    );
+  });
+
+  it("rejects 2001 trimmed characters without calling the backend (R1.3)", async () => {
+    const overLimit = "a".repeat(2001);
+    renderPanel();
+    await waitFor(() =>
+      expect(
+        screen.getByText(esIncidents.messages.empty.title),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.change(composer(), { target: { value: `  ${overLimit}  ` } });
+
+    // The value really is past the cap: `maxlength` did not intervene, so
+    // what disables the control below is `validate()`, not the DOM.
+    expect(composer()).toHaveValue(`  ${overLimit}  `);
+    expect(sendButton()).toBeDisabled();
+    expect(
+      screen.getByText(esIncidents.messages.errors.tooLong),
+    ).toBeInTheDocument();
+
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(sendIncidentMessage).not.toHaveBeenCalled());
+  });
+
   it("sends the trimmed content and clears the field on success (R1.3)", async () => {
     renderPanel();
     await waitFor(() =>

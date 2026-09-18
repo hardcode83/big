@@ -9,16 +9,26 @@ import esIncidents from "@/locales/es/incidents.json";
 import esStates from "@/locales/es/states.json";
 import type { IncidentMessage, PaginatedResponse } from "@/features/incidents";
 import * as incidentsData from "@/features/incidents/data";
+import type { Permission } from "@/lib/auth";
+// The real mirror, not a hand-copied list: R3.3's `TENANT_OWNER` is only
+// meaningful if the permissions it is denied are the ones the app denies it.
+import { ROLE_UI_PERMISSIONS } from "@/lib/auth/permissions";
 
 const useIncidentMock = vi.hoisted(() => vi.fn());
 vi.mock("../../hooks/use-incidents", () => ({
   useIncident: useIncidentMock,
 }));
 
-const useHasPermissionMock = vi.hoisted(() => vi.fn(() => true));
+const useHasPermissionMock = vi.hoisted(() =>
+  vi.fn((_permission?: Permission): boolean => true),
+);
+// The viewer's role is a knob, not a constant: R3.3 is about what a second
+// role (`TENANT_OWNER`) sees on the messages tab, so the mocked session has
+// to be able to say something other than `PROPERTY_MANAGER`.
+const session = vi.hoisted(() => ({ role: "PROPERTY_MANAGER" as string }));
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({
-    user: { tenant_id: "tenant-1", role: "PROPERTY_MANAGER" },
+    user: { tenant_id: "tenant-1", role: session.role },
   }),
   useHasPermission: useHasPermissionMock,
 }));
@@ -106,6 +116,7 @@ function renderDetail() {
 }
 
 beforeEach(() => {
+  session.role = "PROPERTY_MANAGER";
   useHasPermissionMock.mockReturnValue(true);
   useTechnicianDirectoryMock.mockReturnValue({ data: undefined });
   getIncidentMessages.mockReset().mockResolvedValue(emptyPage());
@@ -303,5 +314,101 @@ describe("ManagerIncidentDetailView — tabs wiring (R1.1, R1.2)", () => {
       "href",
       "/incidents",
     );
+  });
+});
+
+/**
+ * R3.3: `TENANT_OWNER` holds `READ_INCIDENTS` but not `MANAGE_INCIDENTS`, so
+ * she reaches this screen with the operational actions hidden — and the
+ * messages tab is *not* one of them. The contract is equality, so the test is
+ * an equality: the messages tabpanel's markup is captured for the manager and
+ * for the owner and compared byte for byte, with the owner's missing actions
+ * block proving the role really did change underneath.
+ */
+describe("ManagerIncidentDetailView — TENANT_OWNER parity (R3.3)", () => {
+  const THREAD = [
+    { id: "m-1", content: "hilo compartido" },
+  ] as const;
+
+  const messagesTab = () =>
+    screen.getByRole("tab", { name: esIncidents.messages.tab });
+
+  function asRole(role: "PROPERTY_MANAGER" | "TENANT_OWNER") {
+    session.role = role;
+    const granted = ROLE_UI_PERMISSIONS[role];
+    useHasPermissionMock.mockImplementation((permission?: Permission) =>
+      permission !== undefined && granted.includes(permission),
+    );
+  }
+
+  beforeEach(() => {
+    useIncidentMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+      data: DETAIL,
+      refetch: vi.fn(),
+    });
+    getIncidentMessages.mockReset().mockResolvedValue(
+      emptyPage(
+        THREAD.map((row) => ({
+          id: row.id,
+          authorId: "user-1",
+          authorRole: "PROPERTY_MANAGER" as const,
+          content: row.content,
+          createdAt: "2026-08-20T10:00:00Z",
+        })),
+      ),
+    );
+  });
+
+  async function messagesPanelMarkupFor(
+    role: "PROPERTY_MANAGER" | "TENANT_OWNER",
+  ): Promise<string> {
+    asRole(role);
+    const view = renderDetail();
+    fireEvent.click(messagesTab());
+    expect(await screen.findByText("hilo compartido")).toBeInTheDocument();
+    const markup =
+      document.getElementById("manager-incident-panel-messages")?.innerHTML ??
+      "";
+    view.unmount();
+    return markup;
+  }
+
+  it("renders a byte-identical messages panel for TENANT_OWNER and PROPERTY_MANAGER (R3.3)", async () => {
+    const managerMarkup = await messagesPanelMarkupFor("PROPERTY_MANAGER");
+    const ownerMarkup = await messagesPanelMarkupFor("TENANT_OWNER");
+
+    expect(managerMarkup).toContain("hilo compartido");
+    expect(ownerMarkup).toBe(managerMarkup);
+  });
+
+  it("opens the thread for TENANT_OWNER with the composer, while the actions block stays hidden (R3.3)", async () => {
+    asRole("TENANT_OWNER");
+    // The mirror itself: the owner is on this screen without the manage
+    // permission, so anything below that still renders is role-independent.
+    expect(
+      ROLE_UI_PERMISSIONS.TENANT_OWNER.includes("MANAGE_INCIDENTS"),
+    ).toBe(false);
+
+    renderDetail();
+    expect(screen.queryByTestId("manager-incident-actions")).toBeNull();
+
+    fireEvent.click(messagesTab());
+    await waitFor(() =>
+      expect(getIncidentMessages).toHaveBeenCalledWith("tenant-1", "i1", 1),
+    );
+    expect(messagesTab()).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByText("hilo compartido")).toBeInTheDocument();
+
+    const composer = screen.getByLabelText(
+      esIncidents.messages.composer.label,
+    );
+    expect(composer).toBeInTheDocument();
+    fireEvent.change(composer, { target: { value: "respondo" } });
+    expect(
+      screen.getByRole("button", { name: esIncidents.messages.composer.send }),
+    ).toBeEnabled();
   });
 });
