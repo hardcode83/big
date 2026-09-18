@@ -127,4 +127,4 @@
 | validation-error-loc-redaction | tasks, run, review, ship, archive | 41421 | 508106 | 102621465 | 36.5748 | 2026-09-15 | 2026-09-15 |
 | expense-approval-response | new, design, tasks, run, review, ship, archive | 2804537 | 443054 | 100047786 | 69.9064 | 2026-09-15 | 2026-09-17 |
 | cleaning-manager-task-detail | new, design, tasks, run, review, ship, archive | 11586718 | 1201284 | 249885879 | 212.9087 | 2026-09-17 | 2026-09-18 |
-| cleaner-list-property-projection | run, review | 58006 | 313316 | 330680292 | 74.0420 | 2026-09-18 | — |
+| cleaner-list-property-projection | run, review, ship, archive | 59074 | 335106 | 346088320 | 79.2008 | 2026-09-18 | 2026-09-18 |

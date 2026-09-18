@@ -233,10 +233,15 @@ allow={["CLEANER"]}` del layout es el único escudo de UX.
 - **N+1 de contextos en la lista.** Cada fila pide su propio
   `GET /api/v1/cleaning-tasks/{id}/context`, hasta `per_page` peticiones extra por página.
   Mitigado —TanStack deduplica por clave, el detalle reaprovecha lo que la lista trajo y un
-  fallo por fila degrada a `—` sin tumbar la pantalla— pero no resuelto: la salida es que
-  `GET /api/v1/cleaning-tasks` proyecte `property_name` y `property_internal_code` en cada fila,
-  entrada de roadmap `cleaner-list-property-projection`. A diferencia de `tech-app`, el contexto
-  de limpieza no lleva `access_notes`, así que esta caché no guarda instrucciones de acceso.
+  fallo por fila degrada a `—` sin tumbar la pantalla— pero no resuelto en el cliente: el lado
+  `[BE]` ya está cerrado (`cleaner-list-property-projection`) — `GET /api/v1/cleaning-tasks` ya
+  proyecta `property_name` y `property_internal_code` en cada fila del listado
+  (`CleaningTaskListItemResponse`, ver [`cleaning.md`](cleaning.md)) — pero esta pantalla todavía
+  no los consume: sigue pidiendo `GET .../context` por fila como describe R1 más arriba. Consumir
+  los campos del listado y dejar de pedir el contexto por fila es la mitad `[FE]`, una entrada de
+  roadmap propia todavía no candidata (precedente: `reservation-property-identity` →
+  `reservations-identity-web`). A diferencia de `tech-app`, el contexto de limpieza no lleva
+  `access_notes`, así que esta caché no guarda instrucciones de acceso.
 - **Firma caducada en una pantalla abierta mucho rato.** El `onError` de cada `<img>` invalida
   la clave de fotos, acotado a un reintento por foto (`useRef<Set<string>>` de ids ya
   reintentados), para que una foto realmente ilegible no entre en bucle de refetch.
