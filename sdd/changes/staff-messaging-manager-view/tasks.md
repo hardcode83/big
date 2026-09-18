@@ -25,7 +25,7 @@
 - [x] 2.6 `frontend/features/incidents/index.ts` — añadir `export { ManagerIncidentDetailView } from "./components/detail/manager-incident-detail-view"`. [R1.1]
 - [x] 2.7 `frontend/app/(workspace)/incidents/[id]/page.tsx` — cambiar el componente montado de `IncidentDetailView` a `ManagerIncidentDetailView` (import desde `@/features/incidents`). `IncidentDetailView` sigue exportado y disponible. [R1.1, R3.2]
 
-## 3. Manager cleaning surface: tabs + panel + refactor del detail view + barrel
+## 3. Manager cleaning surface: tabs + panel + refactor del detail view + barrel <!-- panel: PASS 2026-09-18 receipt:7743949e -->
 
 - [x] 3.1 `frontend/features/cleaning/components/detail/manager-cleaning-task-tabs.tsx` (nuevo) — copia de `frontend/features/cleaner/components/detail/cleaner-task-tabs.tsx` con prefijo DOM `manager-cleaning-` y `useTranslation("cleaning")`. Tipo `ManagerCleaningTaskTabKey = "content" | "messages"`, exportado. Mismo contrato ARIA, mismo sticky `hasOpenedMessagesTab`, mismo manejo de teclado. La pestaña `"messages"` muestra `t("messages.tab")`; la `"content"` muestra `t("tabs.content")`. [R2.1]
 - [x] 3.2 `frontend/features/cleaning/components/detail/manager-cleaning-task-tabs.test.tsx` (nuevo) — equivalente al test de 2.2 con los selectores `manager-cleaning-*` y el namespace `cleaning`. [R2.1]
