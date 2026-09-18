@@ -497,6 +497,56 @@ def test_the_storage_type_is_the_one_the_environment_runs_on(
     assert demo_reset.build_plan().bootstrap.storage_type is StorageType.S3
 
 
+# --- `LOCAL` storage is refused outside `local` here too (`photo-storage-manager-view`,
+# review round 1) -------------------------------------------------------------------------
+#
+# `demo_reset.build_plan()` constructs its own `BootstrapPlan` instead of calling
+# `bootstrap.build_plan()` (D3, above) and therefore does not get that function's R3.1/D6 gate
+# for free. It calls the shared `reject_local_storage_outside_local_environment` directly, with
+# its own `DemoResetConfigurationError`, mirroring the three cases pinned in
+# `tests/auth/test_bootstrap.py` for `bootstrap.build_plan()` itself.
+
+
+@pytest.mark.parametrize("environment", ["dev", "staging", "production"])
+def test_demo_reset_also_refuses_local_storage_outside_the_local_environment(
+    demo_env, monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    """The gap the review found: a manual `python -m app.cli.demo_reset` run in a real
+    environment with no explicit `BOOTSTRAP_STORAGE_TYPE=S3` must not silently converge the
+    demonstration tenant to `LOCAL` storage, the same way `bootstrap.build_plan()` refuses it."""
+    monkeypatch.setattr(settings, "environment", environment)
+
+    with pytest.raises(demo_reset.DemoResetConfigurationError) as excinfo:
+        demo_reset.build_plan()
+
+    assert "BOOTSTRAP_STORAGE_TYPE" in str(excinfo.value)
+
+
+def test_demo_reset_local_storage_is_still_the_default_in_the_local_environment(
+    demo_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "environment", "local")
+
+    plan = demo_reset.build_plan()
+
+    assert plan.bootstrap.storage_type is StorageType.LOCAL
+
+
+@pytest.mark.parametrize("environment", ["dev", "staging", "production"])
+def test_demo_reset_s3_storage_is_unaffected_outside_the_local_environment(
+    demo_env, monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    """This is what `.github/workflows/demo-reset.yml` already does — it always sets
+    `BOOTSTRAP_STORAGE_TYPE=S3` explicitly — so the fix must be inert for it (R3.4's spirit,
+    even though R3.4 only names `bootstrap.py`'s own workflow explicitly)."""
+    monkeypatch.setattr(settings, "environment", environment)
+    monkeypatch.setattr(settings, "bootstrap_storage_type", StorageType.S3.value)
+
+    plan = demo_reset.build_plan()
+
+    assert plan.bootstrap.storage_type is StorageType.S3
+
+
 # --- R1.4, R3.2: the refusal, before any transaction (design D2) -----------------------
 
 

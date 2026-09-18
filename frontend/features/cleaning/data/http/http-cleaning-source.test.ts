@@ -651,3 +651,77 @@ describe("HttpCleaningSource maps reservationId everywhere mapTask is used (desi
     expect(page.data[0].reservationId).toBe("reservation-7");
   });
 });
+
+const photoResponse = {
+  id: "photo-1",
+  cleaning_task_id: "task-1",
+  photo_type: "KITCHEN",
+  uploaded_by: "cleaner-1",
+  created_at: "2026-09-18T09:00:00Z",
+  url: "/api/v1/cleaning-photos/photo-1?exp=1&sig=a",
+};
+
+const mappedPhoto = {
+  id: "photo-1",
+  cleaningTaskId: "task-1",
+  photoType: "KITCHEN",
+  uploadedBy: "cleaner-1",
+  createdAt: "2026-09-18T09:00:00Z",
+  url: "/api/v1/cleaning-photos/photo-1?exp=1&sig=a",
+};
+
+describe("HttpCleaningSource.listPhotos (R2.1, design D3)", () => {
+  it("GETs the task's photos with task_id as the only path param, no body", async () => {
+    const { source, request } = sourceWith({ data: [photoResponse] });
+
+    await expect(source.listPhotos("tenant-1", "task-1")).resolves.toEqual([
+      mappedPhoto,
+    ]);
+
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/cleaning-tasks/{task_id}/photos",
+      {
+        method: "GET",
+        pathParams: { task_id: "task-1" },
+      },
+    );
+    const [, options] = request.mock.calls[0];
+    expect(options.body).toBeUndefined();
+    expect(options.query).toBeUndefined();
+    expect(Object.keys(options.pathParams)).toEqual(["task_id"]);
+  });
+
+  it("maps every field of response.data to the DTO", async () => {
+    const { source } = sourceWith({ data: [photoResponse] });
+
+    const photos = await source.listPhotos("tenant-1", "task-1");
+
+    expect(photos).toEqual([mappedPhoto]);
+  });
+
+  it("returns an empty array when the task has no photos yet", async () => {
+    const { source } = sourceWith({ data: [] });
+
+    await expect(source.listPhotos("tenant-1", "task-1")).resolves.toEqual(
+      [],
+    );
+  });
+
+  it.each([403, 404, 422, 500] as const)(
+    "propagates an ApiError %s untouched, without wrapping or adapter retry",
+    async (status) => {
+      const error = new ApiError({
+        code: "CODE",
+        message: `API error ${status}`,
+        status,
+      });
+      const request = vi.fn().mockRejectedValue(error);
+      const source = new HttpCleaningSource({ request } as unknown as ApiClient);
+
+      await expect(source.listPhotos("tenant-1", "task-1")).rejects.toBe(
+        error,
+      );
+      expect(request).toHaveBeenCalledTimes(1);
+    },
+  );
+});

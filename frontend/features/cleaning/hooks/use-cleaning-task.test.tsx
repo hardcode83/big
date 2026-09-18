@@ -17,6 +17,7 @@ const cancelTask = vi.hoisted(() => vi.fn());
 const createTask = vi.hoisted(() => vi.fn());
 const validateTask = vi.hoisted(() => vi.fn());
 const getTask = vi.hoisted(() => vi.fn());
+const listPhotos = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ user: { tenant_id: "tenant-1" } }),
@@ -33,6 +34,7 @@ vi.mock("../data", async (importOriginal) => ({
     createTask,
     validateTask,
     getTask,
+    listPhotos,
   }),
 }));
 

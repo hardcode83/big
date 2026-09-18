@@ -1,5 +1,6 @@
 import type {
   CleanerSummary,
+  CleaningPhotoDto,
   CleaningTask,
   CleaningTaskFilters,
   CleaningTaskListItem,
@@ -93,4 +94,11 @@ export interface CleaningDataSource {
     taskId: string,
     verdict: CleaningValidationVerdict,
   ): Promise<CleaningTask>;
+
+  /**
+   * Every photo uploaded for one cleaning task, oldest first (R2.1, design D3).
+   * A manager or owner reaches every task of their tenant; the backend is the
+   * authority, `tenantId` here only keeps the query key honest.
+   */
+  listPhotos(tenantId: string, taskId: string): Promise<CleaningPhotoDto[]>;
 }

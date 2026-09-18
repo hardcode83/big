@@ -412,6 +412,48 @@ def test_an_unknown_storage_type_is_refused_at_configuration_time(
         )
 
 
+# --- `LOCAL` storage is refused outside `local` (`photo-storage-manager-view` R3) ---
+
+
+@pytest.mark.parametrize("environment", ["dev", "staging", "production"])
+def test_local_storage_is_refused_outside_the_local_environment(
+    monkeypatch: pytest.MonkeyPatch, complete_env, environment: str
+) -> None:
+    """R3.1/R3.2 — the default `bootstrap_storage_type` (`LOCAL`) must not silently reach a
+    real environment: a tenant born there with no photo storage would be unrecoverable."""
+    monkeypatch.setattr(settings, "environment", environment)
+
+    with pytest.raises(BootstrapConfigurationError) as excinfo:
+        build_plan()
+
+    assert "BOOTSTRAP_STORAGE_TYPE" in str(excinfo.value)
+
+
+def test_local_storage_is_still_the_default_in_the_local_environment(
+    monkeypatch: pytest.MonkeyPatch, complete_env
+) -> None:
+    """R3.2 — `local` is left unchanged: `LOCAL` stays the default and needs no flag there."""
+    monkeypatch.setattr(settings, "environment", "local")
+
+    plan = build_plan()
+
+    assert plan.storage_type is StorageType.LOCAL
+
+
+@pytest.mark.parametrize("environment", ["dev", "staging", "production"])
+def test_s3_storage_is_unaffected_outside_the_local_environment(
+    monkeypatch: pytest.MonkeyPatch, complete_env, environment: str
+) -> None:
+    """R3.4 — a deployment that already sets `BOOTSTRAP_STORAGE_TYPE=S3` explicitly (like
+    `.github/workflows/demo-reset.yml`) is untouched by the new gate."""
+    monkeypatch.setattr(settings, "environment", environment)
+    monkeypatch.setattr(settings, "bootstrap_storage_type", StorageType.S3.value)
+
+    plan = build_plan()
+
+    assert plan.storage_type is StorageType.S3
+
+
 async def _stored_storage_type(db_session) -> StorageType:
     tenant = (
         await db_session.execute(

@@ -3,6 +3,7 @@ export { CleaningTaskDetailView } from "./components/detail/cleaning-task-detail
 export { useCancelCleaningTask } from "./hooks/use-cancel-cleaning-task";
 export type { CancelCleaningTaskInput } from "./hooks/use-cancel-cleaning-task";
 export { useCleaningTask } from "./hooks/use-cleaning-task";
+export { useCleaningTaskPhotos } from "./hooks/use-cleaning-photos";
 export { cleaningKeys } from "./hooks/query-keys";
 export { mapCleaningDetailError } from "./lib/detail-error";
 export type { CleaningDetailState } from "./lib/detail-error";

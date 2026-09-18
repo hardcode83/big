@@ -16,6 +16,7 @@ import {
   DetailIdentifyingBlock,
   DetailMetadataBlock,
 } from "./incident-detail-sections";
+import { IncidentPhotosBlock } from "./incident-photos-block";
 import { ManagerIncidentActions } from "./manager-incident-actions";
 
 /**
@@ -113,6 +114,7 @@ export function IncidentDetailView({ incidentId }: { incidentId: string }) {
         approvedCost={d.approvedCost}
         finalCost={d.finalCost}
       />
+      <IncidentPhotosBlock incidentId={d.id} />
       <DetailMetadataBlock
         aiSummary={d.aiSummary}
         createdAt={d.createdAt}
