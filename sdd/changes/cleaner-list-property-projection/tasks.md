@@ -57,14 +57,24 @@ lo publica y rompe el contrato a propósito (aditivo), §3 verifica.
 
 ## 3. Verificación
 
-- [ ] 3.1 Suite completa del backend en verde: `docker compose exec backend uv run pytest` (o
+- [x] 3.1 Suite completa del backend en verde: `docker compose exec backend uv run pytest` (o
   `docker compose run --rm backend uv run pytest` con el stack parado), desde este worktree sobre
-  su propio stack.
-- [ ] 3.2 `uv run pyright .` limpio en `backend` (`sdd/project.md`, Commands).
-- [ ] 3.3 Deriva de contrato cero: tras 2.5/2.6, `cd frontend && npm run api:check` (con la
-  secuencia de `docker compose cp` ya aplicada) y `git status` sin cambios en
-  `backend/openapi.json` tras un `make openapi` de comprobación.
-- [ ] 3.4 Repaso de cobertura, criterio a criterio:
+  su propio stack. **Medido 2026-09-18 en este worktree: 11184 passed, 44 skipped, 0 failed
+  (1200.00s).** Cifra de referencia de este worktree, no de `main` (`sdd/project.md`: «la cifra de
+  referencia se mide, no se recuerda»).
+- [x] 3.2 `uv run pyright .` limpio en `backend` (`sdd/project.md`, Commands). **966 errores
+  pre-existentes, ninguno atribuible a este change**: el único hallazgo en código de producción
+  (`use_cases.py:2461`, `get_active_by_id` con `UUID | None`) está fuera de las líneas que este
+  change toca (1710-1810) y ya existe en `main` (`389d3fda`, verificado con `git show`). Los
+  hallazgos en `test_list_cleaning_tasks_use_case.py` y en las dos fakes de `test_tasks_api.py`
+  (`_ResolvesNothing`, `_CountingProperties`) son el mismo patrón ya establecido de fakes que
+  implementan solo un subconjunto del `Protocol` (como `test_task_context_use_case.py`), no una
+  regresión — confirmado por el panel de arquitectura de la sección 1.
+- [x] 3.3 Deriva de contrato cero: tras 2.5/2.6, `cd frontend && npm run api:check` (con la
+  secuencia de `docker compose cp` ya aplicada) → **"api: generated types are up to date"**; y
+  `git status` sin cambios en `backend/openapi.json` tras un `make openapi` de comprobación →
+  confirmado, árbol limpio.
+- [x] 3.4 Repaso de cobertura, criterio a criterio:
 
   | Criterio | Qué lo demuestra |
   |---|---|
