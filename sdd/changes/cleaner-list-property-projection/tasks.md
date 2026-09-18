@@ -26,30 +26,30 @@ lo publica y rompe el contrato a propósito (aditivo), §3 verifica.
   `property_id` que el fake `list_for_ids` no resuelve deja los dos campos en `None` sin lanzar.
   [R1.1, R1.3]
 
-## 2. El contrato del listado publica los campos nuevos
+## 2. El contrato del listado publica los campos nuevos <!-- panel: PASS 2026-09-18 receipt:690ba6f8 -->
 
-- [ ] 2.1 `CleaningTaskListItemResponse` (`backend/app/cleaning/api/schemas.py:286-334`): añadir
+- [x] 2.1 `CleaningTaskListItemResponse` (`backend/app/cleaning/api/schemas.py:286-334`): añadir
   `property_name: str | None` y `property_internal_code: str | None`, poblados en `from_domain`
   desde `view.property_name` / `view.property_internal_code`. No heredar de `CleaningTaskResponse`
   (se mantiene la duplicación deliberada que ya documenta el comentario de la clase). [R1.1, R1.2]
-- [ ] 2.2 Actualizar `test_the_listing_item_mirrors_the_task_response_field_for_field`
+- [x] 2.2 Actualizar `test_the_listing_item_mirrors_the_task_response_field_for_field`
   (`backend/tests/cleaning/test_tasks_api.py:1162`): el conjunto de campos exclusivos del listado
   pasa de `{"assignment_blocked_by"}` a `{"assignment_blocked_by", "property_name",
   "property_internal_code"}`. [R1.2]
-- [ ] 2.3 Tests de API del listado en `backend/tests/cleaning/test_tasks_api.py`: una página con
+- [x] 2.3 Tests de API del listado en `backend/tests/cleaning/test_tasks_api.py`: una página con
   filas de más de una vivienda devuelve el `property_name`/`property_internal_code` correctos por
   fila; `test_the_listing_rows_never_carry_notes` sigue en verde sin tocar; y un caso que reutilice
   el fake `_ResolvesNothing` (o equivalente) de
   `test_a_row_whose_property_state_is_unresolved_is_still_offered` (línea 1125) para probar que un
   `property_id` sin resolver deja los dos campos en `null` y la fila se sigue ofreciendo. [R1.1,
   R1.3, R1.4]
-- [ ] 2.4 Test nuevo, mismo principio que `test_the_listing_reads_the_property_states_once_per_page`
+- [x] 2.4 Test nuevo, mismo principio que `test_the_listing_reads_the_property_states_once_per_page`
   (línea 1182): envolver el `PropertyRepository` real para contar llamadas a `list_for_ids` durante
   un `GET /api/v1/cleaning-tasks` con varias filas repartidas en más de una vivienda, y afirmar
   **una sola llamada** con el conjunto exacto de `property_id` distintos de la página. [R2.1, R2.3]
-- [ ] 2.5 Regenerar y commitear `backend/openapi.json` (`make openapi`) en el mismo Pull Request —
+- [x] 2.5 Regenerar y commitear `backend/openapi.json` (`make openapi`) en el mismo Pull Request —
   `steering/documentation.md`, workflow `api-contract`. [R3.1]
-- [ ] 2.6 Regenerar y commitear `frontend/lib/api/generated/openapi.d.ts` (`cd frontend && npm run
+- [x] 2.6 Regenerar y commitear `frontend/lib/api/generated/openapi.d.ts` (`cd frontend && npm run
   api:generate`) — la otra mitad del puente que exige `steering/documentation.md`. **Desde este
   worktree el comando documentado no funciona tal cual**: usar la secuencia de `docker compose cp`
   de `sdd/project.md` («Lo que tampoco funciona tal cual: regenerar el contrato del frontend»),
@@ -86,3 +86,20 @@ lo publica y rompe el contrato a propósito (aditivo), §3 verifica.
 - Test nuevo de aplicación (task 1.3): `backend/tests/cleaning/test_list_cleaning_tasks_use_case.py`. Sigue el patrón de `test_task_context_use_case.py` (fakes en memoria, sin DB). Clases reutilizables si hacen falta en §2: `FakeCleaningTaskRepository` (implementa solo `.list()`, ignora filtros) y `FakePropertyRepository` (implementa `states_for` — siempre `{}` — y `list_for_ids`, y graba las llamadas en `self.list_for_ids_calls` como `(tenant_id, frozenset(property_ids))`, útil como referencia para el contador de 2.4).
 - **Regresión esperada, ya anotada por el propio `tasks.md`**: tras 1.2, `docker compose exec backend uv run pytest tests/cleaning/` da **2 failed** en `test_tasks_api.py` — `test_a_row_whose_property_state_is_unresolved_is_still_offered` y `test_the_listing_reads_the_property_states_once_per_page` — porque sus fakes ad-hoc (`_ResolvesNothing`, `_CountingProperties`) solo implementan `states_for` y ahora el caso de uso también llama a `list_for_ids`, que no existe en esos objetos (`AttributeError`). Esto es exactamente lo que 2.3 y 2.4 ya planean tocar (extender/reemplazar esos dos fakes con `list_for_ids`); no lo arreglé yo porque ese fichero es API-level y pertenece a §2. El resto de `tests/cleaning/` (778 tests) sigue en verde.
 - `uv run pyright .` no introduce hallazgos nuevos atribuibles a este cambio más allá del patrón ya existente en el repo: los fakes de `test_list_cleaning_tasks_use_case.py` no implementan el protocolo completo de `CleaningTaskRepository`/`PropertyRepository` (mismos `reportArgumentType` que ya produce `test_task_context_use_case.py` con sus propios fakes parciales) — no es una regresión, es el estilo ya establecido para tests de `application/` con fakes.
+
+### Sección 2 (2026-09-18)
+
+- `CleaningTaskListItemResponse` (`backend/app/cleaning/api/schemas.py:286-...`) gana `property_name: str | None` y `property_internal_code: str | None`, últimos dos campos del modelo (después de `assignment_blocked_by`), poblados en `from_domain` desde `view.property_name`/`view.property_internal_code`. Sin herencia de `CleaningTaskResponse`, tal como pedía la tarea — se mantiene la duplicación deliberada.
+- `test_the_listing_item_mirrors_the_task_response_field_for_field` (`backend/tests/cleaning/test_tasks_api.py`): el set de campos exclusivos del listado pasó a `{"assignment_blocked_by", "property_name", "property_internal_code"}`.
+- Task 2.3 se resolvió así, para tocar lo mínimo:
+  - Test nuevo `test_the_listing_rows_carry_their_own_propertys_name_and_code`: página con `task_a` (vivienda `REDES11`) y `task_on_a_property_not_awaiting_cleaning` (vivienda `MADRID42`) — verifica que cada fila trae el `property_name`/`property_internal_code` de **su propia** vivienda, no la primera resuelta.
+  - `test_the_listing_rows_never_carry_notes`: intacto, sigue en verde sin tocar.
+  - En vez de un test nuevo, se extendió el ya existente `test_a_row_whose_property_state_is_unresolved_is_still_offered` (que ya usa `_ResolvesNothing`) con dos aserciones más: `property_name` y `property_internal_code` vienen `None` para la fila con `property_id` sin resolver, y la fila se sigue devolviendo (`assignment_blocked_by` también `None`). Se le añadió `list_for_ids` a `_ResolvesNothing` (devuelve `[]`) porque el caso de uso ahora también la llama.
+- Task 2.4: test nuevo `test_the_listing_reads_the_properties_once_per_page`, mismo patrón que `test_the_listing_reads_the_property_states_once_per_page` pero contando `list_for_ids` en vez de `states_for` — clase `_CountingProperties` local a este test (no reutiliza el contador `calls` de la clase homónima de la otra prueba, para no acoplar las dos cardinalidades en el mismo contador y no romper su assert `len(calls) == 1`). Cuatro tareas sobre tres viviendas, una página: una sola llamada, con el conjunto exacto de los tres `property_id` distintos (`property_a.id`, `task_on_a_property_not_awaiting_cleaning.property_id`, `third.id`).
+  - La `_CountingProperties` de `test_the_listing_reads_the_property_states_once_per_page` (la ya existente, del task 1.2/regresión) también ganó un `list_for_ids` que delega sin contar, solo para no romper con `AttributeError` — esa prueba sigue verificando cardinalidad de `states_for` únicamente.
+- Suite completa de `tests/cleaning/`: **782 passed, 0 failed** (`docker compose exec backend uv run pytest tests/cleaning/`), incluidas las 2 regresiones anotadas por la sección 1 (`test_a_row_whose_property_state_is_unresolved_is_still_offered`, `test_the_listing_reads_the_property_states_once_per_page`), ahora en verde.
+- `backend/openapi.json` regenerado con `make openapi`: diff puramente aditivo — dos propiedades nuevas (`property_name`, `property_internal_code`) y dos entradas nuevas en `required` de `CleaningTaskListItemResponse`; nada más cambia.
+- `frontend/lib/api/generated/openapi.d.ts` regenerado con la secuencia de worktree de `sdd/project.md` (`docker compose exec -T frontend mkdir -p /backend` → `docker compose cp backend/openapi.json frontend:/backend/openapi.json` → `docker compose exec -T frontend ln -sfn /app /frontend` → `docker compose exec -T frontend npm run api:generate`): diff igualmente aditivo, dos líneas nuevas en el tipo del item del listado. `docker compose exec -T frontend npm run api:check` confirma cero deriva (`api: generated types are up to date`) tras la regeneración.
+- Ficheros tocados por esta sección (visibles en `git status`): `backend/app/cleaning/api/schemas.py`, `backend/tests/cleaning/test_tasks_api.py`, `backend/openapi.json`, `frontend/lib/api/generated/openapi.d.ts`.
+- No se tocó nada de `frontend/features/cleaner/` ni ningún otro código de frontend fuera del artefacto generado, conforme al contrato de la sección.
+- No se corrió la suite completa del backend (`pytest` sin filtro) ni `pyright` desde esta sección — son tareas 3.1/3.2, de la sección de verificación, no de ésta. Sí se corrió el módulo completo de `tests/cleaning/` como exige el contrato de esta sección.
