@@ -142,7 +142,7 @@
 
 <!-- Use the commands recorded in `sdd/project.md`. -->
 
-- [ ] 7.1 Full test suite passes: `docker compose exec -T frontend npm test` (o, en
+- [x] 7.1 Full test suite passes: `docker compose exec -T frontend npm test` (o, en
       este worktree enlazado, los workarounds documentados en `sdd/project.md` §Worktree
       bootstrap si los `ENOENT` reaparecen: `docker compose cp ...` antes de
       `npm test`). Si la suite completa cae por contención del host (medida en
@@ -151,10 +151,10 @@
       `features/cleaning/lib/detail-error*`, `cleaning-task-row.test.tsx`,
       `route-coverage.test.ts`, `query-keys.test.ts`,
       `http-cleaning-source.test.ts`, `lib/i18n/catalog-parity.test.ts`).
-- [ ] 7.2 Lint passes: `docker compose exec -T frontend npm run lint`. Si cae por OOM
+- [x] 7.2 Lint passes: `docker compose exec -T frontend npm run lint`. Si cae por OOM
       del host (precedente: `cleaning-task-manage-web` 7.2), lintar los ficheros tocados
       individualmente con `docker compose exec -T frontend npx eslint <paths>`.
-- [ ] 7.3 Typecheck passes: `cd frontend && npm run typecheck` (host con stack parado, o
+- [x] 7.3 Typecheck passes: `cd frontend && npm run typecheck` (host con stack parado, o
       `docker compose run --rm frontend npm run typecheck` si no hay `node_modules` en
       host). Confirmar 0 errores en los seis bloques nuevos
       (`features/cleaning/components/detail/**`) y en los hooks y el mapper.
