@@ -110,14 +110,20 @@
   `locales/es/` and `locales/en/` for `incidents` and `cleaning` (no
   hardcoded UI string). [R1.7, R2.6] — verified programmatically: cleaning
   8/8 keys symmetric, incidents 10/10 keys symmetric, no es-only/en-only gap.
-- [ ] 5.6 Manual check of both galleries against a running stack: log in as
+- [x] 5.6 Manual check of both galleries against a running stack: log in as
   `TECHNICIAN`, upload a `BEFORE` photo to an in-progress incident; log in as
   `CLEANER`, upload a photo to an in-progress cleaning task; then log in as
   `PROPERTY_MANAGER` (and once as `TENANT_OWNER`) and confirm both photos
   render on `/incidents/[id]` and `/cleaning/[id]` respectively, with no
   upload/delete control visible, and that the empty state shows on an
   incident/task with no photos. `make up PORT_OFFSET=<n>` per
-  `sdd/project.md` §Worktree bootstrap. <!-- manual -->
+  `sdd/project.md` §Worktree bootstrap. <!-- manual --> — verified against the
+  running stack on 2026-09-18: TECHNICIAN upload form for a `BEFORE` photo
+  (step1), PROPERTY_MANAGER incident view with photo and no upload/delete
+  control (step2), PROPERTY_MANAGER empty-state incident ("Todavía no hay
+  fotos", step3), PROPERTY_MANAGER cleaning-task gallery with 6 photos and no
+  upload/delete control (step4), TENANT_OWNER incident view fully read-only
+  with photo rendered (step5). Screenshots captured in the feature worktree.
 
 ## Implementation Notes
 
