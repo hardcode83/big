@@ -191,5 +191,42 @@
       "retry": "Retry",
       "unknown": "An unexpected error occurred."
     }
+  },
+  "tabs": {
+    "label": "Task sections",
+    "content": "Task"
+  },
+  "messages": {
+    "tab": "Messages",
+    "title": "Messages about this task",
+    "loading": "Loading the messages…",
+    "loadNewer": "Load newer messages",
+    "empty": {
+      "title": "No messages yet",
+      "description": "When the cleaner writes to you about this task, it will show up here."
+    },
+    "error": {
+      "title": "We couldn't load the messages",
+      "description": "We couldn't load the messages. Please try again in a few seconds."
+    },
+    "composer": {
+      "label": "Write a message",
+      "placeholder": "Write your message for the cleaner…",
+      "counter": "{{current}}/{{max}} characters",
+      "send": "Send message",
+      "sending": "Sending…"
+    },
+    "roles": {
+      "TENANT_OWNER": "Owner",
+      "PROPERTY_MANAGER": "Manager",
+      "CLEANER": "Cleaner"
+    },
+    "errors": {
+      "required": "Write a message before sending it.",
+      "tooLong": "The message can't be longer than 2000 characters.",
+      "forbidden": "You can't write on this task.",
+      "notFound": "This task is no longer available, so the message was not sent.",
+      "generic": "We couldn't send the message. Please try again."
+    }
   }
 }

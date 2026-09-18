@@ -135,5 +135,42 @@
       "awaitingApproval": "El coste estimado superó el umbral del tenant: la incidencia espera la respuesta de la propietaria.",
       "stillOpen": "La incidencia sigue pendiente de clasificar. Para clasificarla, fija categoría y severidad."
     }
+  },
+  "tabs": {
+    "label": "Secciones de la incidencia",
+    "content": "Incidencia"
+  },
+  "messages": {
+    "tab": "Mensajes",
+    "title": "Mensajes sobre esta incidencia",
+    "loading": "Cargando los mensajes…",
+    "loadNewer": "Cargar mensajes más recientes",
+    "empty": {
+      "title": "Todavía no hay mensajes",
+      "description": "Cuando el técnico te escriba sobre esta incidencia, lo verás aquí."
+    },
+    "error": {
+      "title": "No hemos podido cargar los mensajes",
+      "description": "No hemos podido cargar los mensajes. Vuelve a intentarlo en unos segundos."
+    },
+    "composer": {
+      "label": "Escribe un mensaje",
+      "placeholder": "Escribe tu mensaje para el técnico…",
+      "counter": "{{current}}/{{max}} caracteres",
+      "send": "Enviar mensaje",
+      "sending": "Enviando…"
+    },
+    "roles": {
+      "TENANT_OWNER": "Propietaria",
+      "PROPERTY_MANAGER": "Gestora",
+      "TECHNICIAN": "Técnico"
+    },
+    "errors": {
+      "required": "Escribe un mensaje antes de enviarlo.",
+      "tooLong": "El mensaje no puede pasar de 2000 caracteres.",
+      "forbidden": "No puedes escribir en esta incidencia.",
+      "notFound": "Esta incidencia ya no está disponible, así que el mensaje no se ha enviado.",
+      "generic": "No hemos podido enviar el mensaje. Vuelve a intentarlo."
+    }
   }
 }

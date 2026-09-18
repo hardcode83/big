@@ -191,5 +191,42 @@
       "retry": "Reintentar",
       "unknown": "Ha ocurrido un error inesperado."
     }
+  },
+  "tabs": {
+    "label": "Secciones de la tarea",
+    "content": "Tarea"
+  },
+  "messages": {
+    "tab": "Mensajes",
+    "title": "Mensajes sobre esta tarea",
+    "loading": "Cargando los mensajes…",
+    "loadNewer": "Cargar mensajes más recientes",
+    "empty": {
+      "title": "Todavía no hay mensajes",
+      "description": "Cuando la limpiadora te escriba sobre esta tarea, lo verás aquí."
+    },
+    "error": {
+      "title": "No hemos podido cargar los mensajes",
+      "description": "No hemos podido cargar los mensajes. Vuelve a intentarlo en unos segundos."
+    },
+    "composer": {
+      "label": "Escribe un mensaje",
+      "placeholder": "Escribe tu mensaje para la limpiadora…",
+      "counter": "{{current}}/{{max}} caracteres",
+      "send": "Enviar mensaje",
+      "sending": "Enviando…"
+    },
+    "roles": {
+      "TENANT_OWNER": "Propietaria",
+      "PROPERTY_MANAGER": "Gestora",
+      "CLEANER": "Limpiadora"
+    },
+    "errors": {
+      "required": "Escribe un mensaje antes de enviarlo.",
+      "tooLong": "El mensaje no puede pasar de 2000 caracteres.",
+      "forbidden": "No puedes escribir en esta tarea.",
+      "notFound": "Esta tarea ya no está disponible, así que el mensaje no se ha enviado.",
+      "generic": "No hemos podido enviar el mensaje. Vuelve a intentarlo."
+    }
   }
 }

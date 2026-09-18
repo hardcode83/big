@@ -135,5 +135,42 @@
       "awaitingApproval": "The estimated cost exceeded the tenant's threshold: the incident is waiting for the owner's response.",
       "stillOpen": "The incident is still pending classification. To classify it, set both category and severity."
     }
+  },
+  "tabs": {
+    "label": "Incident sections",
+    "content": "Incident"
+  },
+  "messages": {
+    "tab": "Messages",
+    "title": "Messages about this incident",
+    "loading": "Loading the messages…",
+    "loadNewer": "Load newer messages",
+    "empty": {
+      "title": "No messages yet",
+      "description": "When the technician writes to you about this incident, it will show up here."
+    },
+    "error": {
+      "title": "We couldn't load the messages",
+      "description": "We couldn't load the messages. Please try again in a few seconds."
+    },
+    "composer": {
+      "label": "Write a message",
+      "placeholder": "Write your message for the technician…",
+      "counter": "{{current}}/{{max}} characters",
+      "send": "Send message",
+      "sending": "Sending…"
+    },
+    "roles": {
+      "TENANT_OWNER": "Owner",
+      "PROPERTY_MANAGER": "Manager",
+      "TECHNICIAN": "Technician"
+    },
+    "errors": {
+      "required": "Write a message before sending it.",
+      "tooLong": "The message can't be longer than 2000 characters.",
+      "forbidden": "You can't write on this incident.",
+      "notFound": "This incident is no longer available, so the message was not sent.",
+      "generic": "We couldn't send the message. Please try again."
+    }
   }
 }

@@ -12,8 +12,8 @@
 
 ## 1. i18n: messages.* + tabs.* en incidents.json y cleaning.json
 
-- [ ] 1.1 `frontend/locales/es/incidents.json` + `frontend/locales/en/incidents.json` — añadir claves `tabs.label`, `tabs.content` y la sección `messages.*` completa (`messages.tab`, `messages.title`, `messages.loading`, `messages.error.{title,description}`, `messages.empty.{title,description}`, `messages.composer.{label,placeholder,counter,send,sending}`, `messages.roles.{TECHNICIAN,PROPERTY_MANAGER,TENANT_OWNER}`, `messages.errors.{required,tooLong,forbidden,notFound,generic}`, `messages.loadNewer`) con la misma forma y semántica que ya tienen `frontend/locales/{es,en}/tech.json`. Las claves deben ser cadenas literales (sin interpolación de JS) y pasar el panel i18n de `sdd-review-i18n` (cada clave con su traducción ES/EN). [R4.1, R4.2]
-- [ ] 1.2 `frontend/locales/es/cleaning.json` + `frontend/locales/en/cleaning.json` — añadir el mismo árbol de claves que en 1.1 pero con los roles `messages.roles.{CLEANER,PROPERTY_MANAGER,TENANT_OWNER}` (la limpiadora en vez del técnico), copiando la forma y semántica de `frontend/locales/{es,en}/cleaner.json`. [R4.1, R4.2]
+- [x] 1.1 `frontend/locales/es/incidents.json` + `frontend/locales/en/incidents.json` — añadir claves `tabs.label`, `tabs.content` y la sección `messages.*` completa (`messages.tab`, `messages.title`, `messages.loading`, `messages.error.{title,description}`, `messages.empty.{title,description}`, `messages.composer.{label,placeholder,counter,send,sending}`, `messages.roles.{TECHNICIAN,PROPERTY_MANAGER,TENANT_OWNER}`, `messages.errors.{required,tooLong,forbidden,notFound,generic}`, `messages.loadNewer`) con la misma forma y semántica que ya tienen `frontend/locales/{es,en}/tech.json`. Las claves deben ser cadenas literales (sin interpolación de JS) y pasar el panel i18n de `sdd-review-i18n` (cada clave con su traducción ES/EN). [R4.1, R4.2]
+- [x] 1.2 `frontend/locales/es/cleaning.json` + `frontend/locales/en/cleaning.json` — añadir el mismo árbol de claves que en 1.1 pero con los roles `messages.roles.{CLEANER,PROPERTY_MANAGER,TENANT_OWNER}` (la limpiadora en vez del técnico), copiando la forma y semántica de `frontend/locales/{es,en}/cleaner.json`. [R4.1, R4.2]
 
 ## 2. Manager incident surface: tabs + panel + wrapper + page
 
@@ -47,3 +47,8 @@
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
+- incidents.json: new `tabs` + `messages` placed after `manager` section (manager view had no tabs/messages section before).
+- cleaning.json: new `tabs` + `messages` placed after `detail` section (cleaning view had no tabs/messages section before).
+- manager `messages.roles` order follows tech.json convention (TENANT_OWNER, PROPERTY_MANAGER, TECHNICIAN/CLEANER) without SUPER_ADMIN.
+- `messages.error` includes `title` (tech.json has it; cleaner.json only has description) — task spec requires both, manager view has both.
+- empty.description and composer.placeholder are written from the manager's perspective (manager reads the thread, writes to technician/cleaner).
