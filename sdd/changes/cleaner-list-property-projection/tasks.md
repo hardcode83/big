@@ -7,12 +7,12 @@ ya existe y ya sirve este propósito exacto en `reservations`. No hay decisión 
 solo aplicar la forma. Orden: §1 calcula el dato en la capa de aplicación sin tocar el contrato, §2
 lo publica y rompe el contrato a propósito (aditivo), §3 verifica.
 
-## 1. La vista del listado resuelve el nombre y el código de la vivienda
+## 1. La vista del listado resuelve el nombre y el código de la vivienda <!-- panel: PASS 2026-09-18 receipt:101902f1 -->
 
-- [ ] 1.1 `CleaningTaskListView` (`backend/app/cleaning/application/use_cases.py:1710-1721`) gana
+- [x] 1.1 `CleaningTaskListView` (`backend/app/cleaning/application/use_cases.py:1710-1721`) gana
   `property_name: str | None` y `property_internal_code: str | None`, junto a `task` y `blocker`.
   [R1.1]
-- [ ] 1.2 `ListCleaningTasksUseCase.execute` (`use_cases.py:1744-1800`): tras calcular
+- [x] 1.2 `ListCleaningTasksUseCase.execute` (`use_cases.py:1744-1800`): tras calcular
   `property_ids` (los mismos, distintos, ya usados para `states_for`), añadir
   `properties_by_id = {p.id: p for p in await self._properties.list_for_ids(tenant_id,
   property_ids)}` y poblar los dos campos nuevos de cada `CleaningTaskListView` desde
@@ -20,7 +20,7 @@ lo publica y rompe el contrato a propósito (aditivo), §3 verifica.
   `blocker` cuando el id no resuelve (R1.3). **No** añadir ningún método a `PropertyRepository`: el
   puerto ya se inyecta en este caso de uso (para `states_for`) y `list_for_ids` ya existe en él.
   [R1.1, R1.3, R2.1, R2.2]
-- [ ] 1.3 Tests de `application/` con fakes en memoria (`steering/backend-architecture.md`: nunca la
+- [x] 1.3 Tests de `application/` con fakes en memoria (`steering/backend-architecture.md`: nunca la
   DB real en esta capa) en el fichero de test del caso de uso: una página con dos viviendas
   distintas puebla `property_name`/`property_internal_code` correctamente por fila, y un
   `property_id` que el fake `list_for_ids` no resuelve deja los dos campos en `None` sin lanzar.
@@ -77,3 +77,12 @@ lo publica y rompe el contrato a propósito (aditivo), §3 verifica.
   | R2.3 | 2.4 |
   | R3.1 | 2.5, 2.6 |
   | R3.2 | 2.1 — ningún campo existente cambia de nombre/tipo/obligatoriedad |
+
+## Implementation Notes
+
+- `CleaningTaskListView` (`backend/app/cleaning/application/use_cases.py:1710-1727`) ganó dos campos, ambos `str | None`, sin default (después de `task`/`blocker` en el orden del dataclass): `property_name`, `property_internal_code`.
+- La segunda llamada batched vive en `ListCleaningTasksUseCase.execute`, justo después de `states = await self._properties.states_for(...)` y antes de construir las `CleaningTaskListView`: `properties_by_id = {p.id: p for p in await self._properties.list_for_ids(tenant_id, property_ids)}`, reutilizando el mismo `property_ids` de `states_for` (mismo orden, mismos distintos).
+- El comprehension original de `items=tuple(... for task in result.items)` se convirtió en un bucle `for` explícito (variable `views: list[CleaningTaskListView]`) para poder calcular `prop = properties_by_id.get(task.property_id)` una vez por fila y usarlo en dos campos; `.get()`, nunca `[]` — fails open a `None`/`None` igual que `blocker`.
+- Test nuevo de aplicación (task 1.3): `backend/tests/cleaning/test_list_cleaning_tasks_use_case.py`. Sigue el patrón de `test_task_context_use_case.py` (fakes en memoria, sin DB). Clases reutilizables si hacen falta en §2: `FakeCleaningTaskRepository` (implementa solo `.list()`, ignora filtros) y `FakePropertyRepository` (implementa `states_for` — siempre `{}` — y `list_for_ids`, y graba las llamadas en `self.list_for_ids_calls` como `(tenant_id, frozenset(property_ids))`, útil como referencia para el contador de 2.4).
+- **Regresión esperada, ya anotada por el propio `tasks.md`**: tras 1.2, `docker compose exec backend uv run pytest tests/cleaning/` da **2 failed** en `test_tasks_api.py` — `test_a_row_whose_property_state_is_unresolved_is_still_offered` y `test_the_listing_reads_the_property_states_once_per_page` — porque sus fakes ad-hoc (`_ResolvesNothing`, `_CountingProperties`) solo implementan `states_for` y ahora el caso de uso también llama a `list_for_ids`, que no existe en esos objetos (`AttributeError`). Esto es exactamente lo que 2.3 y 2.4 ya planean tocar (extender/reemplazar esos dos fakes con `list_for_ids`); no lo arreglé yo porque ese fichero es API-level y pertenece a §2. El resto de `tests/cleaning/` (778 tests) sigue en verde.
+- `uv run pyright .` no introduce hallazgos nuevos atribuibles a este cambio más allá del patrón ya existente en el repo: los fakes de `test_list_cleaning_tasks_use_case.py` no implementan el protocolo completo de `CleaningTaskRepository`/`PropertyRepository` (mismos `reportArgumentType` que ya produce `test_task_context_use_case.py` con sus propios fakes parciales) — no es una regresión, es el estilo ya establecido para tests de `application/` con fakes.
