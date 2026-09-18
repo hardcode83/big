@@ -33,6 +33,7 @@ import { DetailContextLinksBlock } from "./detail-context-links-block";
 import { DetailHeaderBlock } from "./detail-header-block";
 import { DetailIdentifyingBlock } from "./detail-identifying-block";
 import { DetailManagerActionsBlock } from "./detail-manager-actions-block";
+import { DetailPhotosBlock } from "./detail-photos-block";
 
 /**
  * The detail view for `/cleaning/[id]` (proposal R1-R6, design D1/D6/D7/D8).
@@ -256,6 +257,7 @@ export function CleaningTaskDetailView({ taskId }: { taskId: string }) {
         assignedCleanerId={task.assignedCleanerId}
         cleaners={cleaners}
       />
+      <DetailPhotosBlock taskId={task.id} />
       {canManage ? (
         <DetailManagerActionsBlock
           task={task}

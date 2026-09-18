@@ -41,11 +41,11 @@
 
 ## 3. Frontend — cleaning task detail: photo gallery
 
-- [ ] 3.1 Add `photos.*` keys to `frontend/locales/es/cleaning.json` and
+- [x] 3.1 Add `photos.*` keys to `frontend/locales/es/cleaning.json` and
   `frontend/locales/en/cleaning.json` (title, loading, empty.title/description,
   error.title/description/retry, alt text) — manager-appropriate copy, no
   "photos you upload" language. [R2.6]
-- [ ] 3.2 Create `frontend/features/cleaning/components/detail/detail-photos-block.tsx`
+- [x] 3.2 Create `frontend/features/cleaning/components/detail/detail-photos-block.tsx`
   (`DetailPhotosBlock`, design D1/D4): consumes `useCleaningTaskPhotos(taskId)`,
   groups photos by `photoType` in first-appearance order (already
   chronological from the API), renders `LoadingState`/`ErrorState`/`EmptyState`
@@ -54,7 +54,7 @@
   upload/delete control. Cover in `detail-photos-block.test.tsx`: loading,
   empty, error+retry, grouped rendering, single re-fetch on image error.
   [R2.1, R2.2, R2.3, R2.4, R2.5]
-- [ ] 3.3 In `frontend/features/cleaning/components/detail/cleaning-task-detail-view.tsx`,
+- [x] 3.3 In `frontend/features/cleaning/components/detail/cleaning-task-detail-view.tsx`,
   compose `<DetailPhotosBlock taskId={task.id} />` after
   `DetailAssignedCleanerBlock` and before the `canManage`-gated
   `DetailManagerActionsBlock` (design D5), unconditional. Update
@@ -118,3 +118,9 @@
   - `useCleaningTaskPhotos(taskId): UseQueryResult<CleaningPhotoDto[]>` in new file `frontend/features/cleaning/hooks/use-cleaning-photos.ts`, exported from `frontend/features/cleaning/index.ts`. Same shape as `useIncidentPhotos`: `useQuery` + `retry: retryPolicy`, tenant id resolved via a local `useTenantId()` (copied from `use-cleaning-task.ts`, that file itself untouched). No `enabled` guard — unlike `useCleaningTask`, `taskId` is required (not optional) since the detail page always has one by the time it mounts.
   - Adding `listPhotos` to `CleaningDataSource` is a breaking interface change: 5 pre-existing test files that construct a full mock object (not a partial cast) needed a `listPhotos: vi.fn()` added to compile — `cleaning-view.test.tsx`, `use-assign-cleaning-task.test.tsx`, `use-cleaning-data.test.tsx`, `use-cleaning-task.test.tsx`, `use-create-cleaning-task.test.tsx`, `use-validate-cleaning-task.test.tsx`. No behavior in those tests changed. Section 3's `detail-photos-block.test.tsx` and section 4's incident equivalent are new files and won't hit this.
   - Verified: `docker compose exec frontend npm test -- features/cleaning` → 30 files / 542 tests pass; `npm run typecheck` and `npm run lint` both clean.
+- Section 3 (cleaning detail photo gallery) is done. `DetailPhotosBlock` (`frontend/features/cleaning/components/detail/detail-photos-block.tsx`) mirrors `TechPhotoGallery` closely — same `LoadingState`/`ErrorState`/`EmptyState` usage, same `useRef<Set<string>>` re-fetch-once-per-photo-id pattern on `onError` — with two changes: grouping by a dynamic `photoType` (first-appearance order, via a small `groupByPhotoType` helper, not a fixed `STAGES` array) and no upload copy at all.
+  - i18n JSON convention section 4 should mirror for consistency: the `photos.*` block lives as a **top-level** key in the namespace file (sibling to `detail`), not nested under `detail`, matching `tech.json`'s existing shape — `photos.title`, `photos.loading`, `photos.empty.title/description`, `photos.error.title/description/retry`, `photos.alt`. Since `photoType` here is a free-form string (not a closed enum), there is **no `photos.stage.*` translation table** — the raw `photoType` string is painted directly as the group heading. Section 4's incidents gallery *does* need `photos.stage.BEFORE`/`AFTER` since that stage set is closed and translatable — keep that key only there.
+  - Manager-appropriate empty-state copy settled on: EN "No one has uploaded photos for this task yet.", ES "Nadie ha subido fotos de esta tarea todavía." — no "photos you upload" language, since this view never uploads.
+  - Test-mocking pattern for a component that calls both `useAuth` and a feature query hook: mock `@/lib/auth`'s `useAuth` to return `{ user: { tenant_id: "tenant-1" } }`, mock `@tanstack/react-query`'s `useQueryClient` to return a stub with a spy-able `invalidateQueries`, and assert the exact `queryKey` array shape (`["tenant", tenantId, "<resource>", id]`) rather than reaching into `cleaningKeys`/`incidentsKeys` — keeps the test decoupled from the key-builder's internals while still proving the single re-fetch and its target.
+  - `CleaningTaskDetailView`'s existing test file fully replaces the `@/lib/auth` module mock (`vi.mock("@/lib/auth", () => ({...}))`), so composing any child that calls `useAuth` requires adding `useAuth` to that same mock object — a partial mock without it makes `useAuth()` undefined at runtime. Section 4's `incident-detail-view.test.tsx` likely has the same shape and will need the same addition when it mocks `IncidentPhotosBlock`'s hook usage.
+  - Verified: `docker compose exec frontend npm test -- features/cleaning` → 31 files / 549 tests pass (up from section 2's 30/542, i.e. +1 new test file and +7 new tests: 6 in `detail-photos-block.test.tsx` + 1 new assertion in `cleaning-task-detail-view.test.tsx`); `npm run typecheck` and `npm run lint` both clean.

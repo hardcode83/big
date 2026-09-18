@@ -191,5 +191,19 @@
       "retry": "Retry",
       "unknown": "An unexpected error occurred."
     }
+  },
+  "photos": {
+    "title": "Photos",
+    "loading": "Loading the photos…",
+    "empty": {
+      "title": "No photos yet",
+      "description": "No one has uploaded photos for this task yet."
+    },
+    "error": {
+      "title": "We could not load the photos",
+      "description": "Please try again in a few seconds.",
+      "retry": "Retry"
+    },
+    "alt": "Cleaning task photo"
   }
 }

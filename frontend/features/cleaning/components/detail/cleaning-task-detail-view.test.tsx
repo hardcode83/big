@@ -16,6 +16,16 @@ import type {
 import type { CancelCleaningTaskInput } from "../../hooks/use-cancel-cleaning-task";
 
 const useCleaningTaskMock = vi.hoisted(() => vi.fn());
+const useCleaningTaskPhotosMock = vi.hoisted(() =>
+  vi.fn(() => ({
+    isPending: false,
+    isError: false,
+    isSuccess: true,
+    data: [],
+    error: null,
+    refetch: vi.fn(),
+  })),
+);
 const usePropertyDirectoryMock = vi.hoisted(() =>
   vi.fn((): { data: PropertySummary[] | undefined } => ({ data: undefined })),
 );
@@ -32,6 +42,9 @@ const useHasPermissionMock = vi.hoisted(() =>
 vi.mock("../../hooks/use-cleaning-task", () => ({
   useCleaningTask: useCleaningTaskMock,
 }));
+vi.mock("../../hooks/use-cleaning-photos", () => ({
+  useCleaningTaskPhotos: useCleaningTaskPhotosMock,
+}));
 vi.mock("../../hooks/use-cleaning-data", () => ({
   usePropertyDirectory: usePropertyDirectoryMock,
   useCleanerDirectory: useCleanerDirectoryMock,
@@ -47,6 +60,7 @@ vi.mock("../../hooks/use-cancel-cleaning-task", () => ({
 }));
 vi.mock("@/lib/auth", () => ({
   useHasPermission: useHasPermissionMock,
+  useAuth: () => ({ user: { tenant_id: "tenant-1" } }),
 }));
 
 import { CleaningTaskDetailView } from "./cleaning-task-detail-view";
@@ -144,6 +158,14 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
     useValidateCleaningTaskMock.mockReturnValue(makeMutation());
     useCancelCleaningTaskMock.mockReturnValue(makeMutation());
     useHasPermissionMock.mockReturnValue(true);
+    useCleaningTaskPhotosMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+      data: [],
+      error: null,
+      refetch: vi.fn(),
+    });
   });
 
   it("renders the loading state when the query is pending (R1.3)", () => {
@@ -269,6 +291,14 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
     expect(
       screen.getByRole("link", { name: /Ver reserva/ }),
     ).toHaveAttribute("href", `/reservations/${RESERVATION_UUID}`);
+  });
+
+  it("composes the photo gallery block between the assigned cleaner and manager actions (R2.1, R2.5, D5)", () => {
+    renderView();
+    // The gallery's own heading and empty state (cleaning:photos.*),
+    // proving DetailPhotosBlock is mounted unconditionally on the detail page.
+    expect(screen.getByText("Fotos")).toBeInTheDocument();
+    expect(screen.getByText("Todavía no hay fotos")).toBeInTheDocument();
   });
 
   it("hides the manager-actions block without MANAGE_CLEANING_TASKS (R5.1)", () => {
