@@ -1104,6 +1104,33 @@ async def test_the_listing_publishes_the_three_shapes_of_the_pre_flight(
 
 
 @pytest.mark.asyncio
+async def test_the_listing_rows_carry_their_own_propertys_name_and_code(
+    api, property_a, users_by_role_a, task_a, task_on_a_property_not_awaiting_cleaning
+):
+    """R1.1 — a page with rows over more than one flat resolves each row against its own.
+
+    `task_a` sits on `property_a` (`REDES11`) and `task_on_a_property_not_awaiting_cleaning`
+    sits on a second flat inserted with code `MADRID42`; asserting both together is what proves
+    the projection is keyed per row rather than echoing whichever flat the batch happened to
+    resolve first.
+    """
+    response = await api.get(
+        TASKS, headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+    )
+
+    assert response.status_code == 200
+    rows = {row["id"]: row for row in response.json()["data"]}
+    assert rows[str(task_a.id)]["property_name"] == property_a.name
+    assert rows[str(task_a.id)]["property_internal_code"] == property_a.internal_code
+    assert rows[str(task_on_a_property_not_awaiting_cleaning.id)]["property_name"] == (
+        "Property MADRID42"
+    )
+    assert rows[str(task_on_a_property_not_awaiting_cleaning.id)][
+        "property_internal_code"
+    ] == "MADRID42"
+
+
+@pytest.mark.asyncio
 async def test_the_listing_rows_never_carry_notes(api, users_by_role_a, task_a):
     """Design D13 of `cleaning`, for the second model.
 
@@ -1141,6 +1168,9 @@ async def test_a_row_whose_property_state_is_unresolved_is_still_offered(
         async def states_for(self, tenant_id, property_ids):
             return {}
 
+        async def list_for_ids(self, tenant_id, property_ids):
+            return []
+
     api.asgi_app.dependency_overrides[get_list_cleaning_tasks_use_case] = (
         lambda: ListCleaningTasksUseCase(
             tasks=SqlAlchemyCleaningTaskRepository(db_session),
@@ -1155,8 +1185,11 @@ async def test_a_row_whose_property_state_is_unresolved_is_still_offered(
         api.asgi_app.dependency_overrides.pop(get_list_cleaning_tasks_use_case)
 
     assert response.status_code == 200
-    rows = {row["id"]: row["assignment_blocked_by"] for row in response.json()["data"]}
-    assert rows[str(task_on_a_property_not_awaiting_cleaning.id)] is None
+    rows = {row["id"]: row for row in response.json()["data"]}
+    row = rows[str(task_on_a_property_not_awaiting_cleaning.id)]
+    assert row["assignment_blocked_by"] is None
+    assert row["property_name"] is None
+    assert row["property_internal_code"] is None
 
 
 def test_the_listing_item_mirrors_the_task_response_field_for_field():
@@ -1174,7 +1207,11 @@ def test_the_listing_item_mirrors_the_task_response_field_for_field():
     listed = set(CleaningTaskListItemResponse.model_fields)
     detail = set(CleaningTaskResponse.model_fields)
 
-    assert listed - detail == {"assignment_blocked_by"}
+    assert listed - detail == {
+        "assignment_blocked_by",
+        "property_name",
+        "property_internal_code",
+    }
     assert detail - listed == set()
 
 
@@ -1216,6 +1253,9 @@ async def test_the_listing_reads_the_property_states_once_per_page(
             calls.append(tuple(property_ids))
             return await self._inner.states_for(tenant_id, property_ids)
 
+        async def list_for_ids(self, tenant_id, property_ids):
+            return await self._inner.list_for_ids(tenant_id, property_ids)
+
     api.asgi_app.dependency_overrides[get_list_cleaning_tasks_use_case] = (
         lambda: ListCleaningTasksUseCase(
             tasks=SqlAlchemyCleaningTaskRepository(db_session),
@@ -1233,6 +1273,65 @@ async def test_the_listing_reads_the_property_states_once_per_page(
     assert len(response.json()["data"]) == 4
     assert len(calls) == 1
     assert len(calls[0]) == 3
+
+
+@pytest.mark.asyncio
+async def test_the_listing_reads_the_properties_once_per_page(
+    api, db_session, tenant_a, property_a, template_a, users_by_role_a, task_a,
+    task_on_a_property_not_awaiting_cleaning,
+):
+    """R2.1, R2.3 — the same cardinality guarantee as the states read, for `list_for_ids`.
+
+    Same shape as `test_the_listing_reads_the_property_states_once_per_page`, applied to the
+    batch call §1 added for the name/code projection: four tasks over three flats, one page,
+    exactly one call to `list_for_ids` carrying exactly the three distinct `property_id`s.
+    """
+    from app.cleaning.api.dependencies import get_list_cleaning_tasks_use_case
+    from app.cleaning.application.use_cases import ListCleaningTasksUseCase
+    from app.cleaning.infrastructure.repositories import SqlAlchemyCleaningTaskRepository
+    from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
+
+    third = await insert_property(db_session, tenant_a, code="TERCERA4")
+    await insert_task(db_session, tenant_a, third, template_a)
+    # A second task on `property_a`, so the page holds four rows over three flats — otherwise
+    # a caller that stopped de-duplicating would still make one call and this would not catch it.
+    await insert_task(db_session, tenant_a, property_a, template_a)
+    calls: list[tuple] = []
+
+    class _CountingProperties:
+        """Wraps the real adapter — it counts, it does not fake the answer."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        async def states_for(self, tenant_id, property_ids):
+            return await self._inner.states_for(tenant_id, property_ids)
+
+        async def list_for_ids(self, tenant_id, property_ids):
+            calls.append(tuple(property_ids))
+            return await self._inner.list_for_ids(tenant_id, property_ids)
+
+    api.asgi_app.dependency_overrides[get_list_cleaning_tasks_use_case] = (
+        lambda: ListCleaningTasksUseCase(
+            tasks=SqlAlchemyCleaningTaskRepository(db_session),
+            properties=_CountingProperties(SqlAlchemyPropertyRepository(db_session)),
+        )
+    )
+    try:
+        response = await api.get(
+            TASKS, headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+        )
+    finally:
+        api.asgi_app.dependency_overrides.pop(get_list_cleaning_tasks_use_case)
+
+    assert response.status_code == 200
+    assert len(response.json()["data"]) == 4
+    assert len(calls) == 1
+    assert set(calls[0]) == {
+        property_a.id,
+        task_on_a_property_not_awaiting_cleaning.property_id,
+        third.id,
+    }
 
 
 @pytest.mark.asyncio

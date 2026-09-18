@@ -530,6 +530,13 @@ tocar la base de datos a mano.
   sigue devolviendo `422`. Cambiarlo apuntaría a ficheros ya subidos a un sitio donde no están.
 - THE SYSTEM SHALL mantener `LOCAL` como default tanto de la columna como del ajuste, de modo que
   cualquier tenant creado por cualquier otra vía nazca `LOCAL`.
+- IF `settings.environment` no es `local` Y el `BOOTSTRAP_STORAGE_TYPE` resuelto (explícito o por
+  default) es `LOCAL`, THEN THE SYSTEM SHALL rechazar el bootstrap **antes** de abrir transacción
+  con un `BootstrapConfigurationError` que nombre `BOOTSTRAP_STORAGE_TYPE` como la variable a
+  fijar explícitamente — mismo patrón que las once `BOOTSTRAP_*` requeridas
+  (`photo-storage-manager-view`, 2026-09-18). `app/cli/demo_reset.py` aplica el mismo rechazo en
+  su propio `build_plan()`. El entorno `local` no cambia: `LOCAL` sigue siendo su default sin
+  exigir ningún flag.
 - IF una dirección del bootstrap ya existe bajo otro tenant, THEN THE SYSTEM SHALL abortar
   con `BootstrapConflictError` nombrando `BOOTSTRAP_TENANT_NAME`. El índice único global
   rechazaría la escritura igualmente; el aborto explícito existe para dar un mensaje

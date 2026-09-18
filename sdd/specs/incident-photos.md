@@ -408,8 +408,12 @@ cambio de comportamiento.
 - **La migración de la ruta anónima de `cleaning` a la capa compartida no cambió comportamiento**, y
   eso lo sostiene la suite de `cleaning`, que compara los cuerpos de refusal literalmente y fija el
   orden de los middlewares.
-- **Sin pantalla.** Las tres rutas existen y nadie las llama todavía: `tech-app` es quien pinta
-  `/tech/incidents/[id]` y declara esta capacidad en su `needs`.
+- **Ya tiene pantalla, dos veces.** `tech-app` pinta `/tech/incidents/[id]` y declara esta
+  capacidad en su `needs`; y desde `photo-storage-manager-view` (2026-09-18) el detalle del
+  workspace en `/incidents/[id]` también lista `GET /incidents/{id}/photos` — de solo lectura,
+  visible a quien pueda abrir el detalle (manager, propietaria), sin control de subida ni de
+  borrado (ver [`photo-storage-manager-view.md`](photo-storage-manager-view.md)). Las rutas de
+  subida siguen sin más llamador que `tech-app`.
 - **Sin borrado, sin puerta de evidencia y sin validación por IA**, los tres por decisión escrita y
   no por olvido. Ver §Lo que esta capacidad no hace.
 

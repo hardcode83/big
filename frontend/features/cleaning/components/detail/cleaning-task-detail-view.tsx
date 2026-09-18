@@ -33,6 +33,7 @@ import { DetailContextLinksBlock } from "./detail-context-links-block";
 import { DetailHeaderBlock } from "./detail-header-block";
 import { DetailIdentifyingBlock } from "./detail-identifying-block";
 import { DetailManagerActionsBlock } from "./detail-manager-actions-block";
+import { DetailPhotosBlock } from "./detail-photos-block";
 import { ManagerCleaningTaskMessagesPanel } from "./manager-cleaning-task-messages-panel";
 import { ManagerCleaningTaskTabs } from "./manager-cleaning-task-tabs";
 
@@ -263,7 +264,10 @@ export function CleaningTaskDetailView({ taskId }: { taskId: string }) {
         messages tab can mount alongside it, but the six reading blocks and
         the cancel dialog stay in the same order with the same props. Both
         tabs stay mounted (D4) so the cancel sheet's `open` state survives
-        a round trip through the messages tab.
+        a round trip through the messages tab. `DetailPhotosBlock`
+        (`photo-storage-manager-view`, merged from `main`) slots in right
+        after the assigned-cleaner block, in the same position that change
+        put it — it is part of the operational content, not the thread.
       */}
       <ManagerCleaningTaskTabs
         content={
@@ -285,6 +289,7 @@ export function CleaningTaskDetailView({ taskId }: { taskId: string }) {
               assignedCleanerId={task.assignedCleanerId}
               cleaners={cleaners}
             />
+            <DetailPhotosBlock taskId={task.id} />
             {canManage ? (
               <DetailManagerActionsBlock
                 task={task}

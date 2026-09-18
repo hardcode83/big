@@ -4,6 +4,7 @@ import type { components } from "@/lib/api/generated/openapi";
 import type { CleaningDataSource } from "../cleaning-source";
 import type {
   CleanerSummary,
+  CleaningPhotoDto,
   CleaningTask,
   CleaningTaskFilters,
   CleaningTaskListItem,
@@ -22,6 +23,10 @@ type UserResponse = components["schemas"]["UserResponse"];
 type PropertyPageResponse = components["schemas"]["PropertyPageResponse"];
 type PropertyListItemResponse =
   components["schemas"]["PropertyListItemResponse"];
+type CleaningPhotoListResponse =
+  components["schemas"]["CleaningPhotoListResponse"];
+type CleaningPhotoResponse =
+  components["schemas"]["app__cleaning__api__schemas__CleaningPhotoResponse"];
 
 /** One page of tasks per request; `page` is what the pagination control moves (R1.5). */
 const TASKS_PER_PAGE = 20;
@@ -102,6 +107,17 @@ function mapProperty(value: PropertyListItemResponse): PropertySummary {
     name: value.name,
     internalCode: value.internal_code,
     currentOperationalState: value.current_operational_state,
+  };
+}
+
+function mapCleaningPhoto(value: CleaningPhotoResponse): CleaningPhotoDto {
+  return {
+    id: value.id,
+    cleaningTaskId: value.cleaning_task_id,
+    photoType: value.photo_type,
+    uploadedBy: value.uploaded_by,
+    createdAt: value.created_at,
+    url: value.url,
   };
 }
 
@@ -266,5 +282,25 @@ export class HttpCleaningSource implements CleaningDataSource {
       },
     );
     return mapTask(response);
+  }
+
+  /**
+   * Every photo uploaded for one cleaning task, oldest first (R2.1, design D3).
+   * The path param is `task_id`, same discipline as `getTask` above; the
+   * response envelope is `CleaningPhotoListResponse.data`, unwrapped here the
+   * same way `listCleaners`/`listProperties` unwrap their own `response.data`.
+   */
+  async listPhotos(
+    _tenantId: string,
+    taskId: string,
+  ): Promise<CleaningPhotoDto[]> {
+    const response: CleaningPhotoListResponse = await this.client.request(
+      "/api/v1/cleaning-tasks/{task_id}/photos",
+      {
+        method: "GET",
+        pathParams: { task_id: taskId },
+      },
+    );
+    return response.data.map(mapCleaningPhoto);
   }
 }

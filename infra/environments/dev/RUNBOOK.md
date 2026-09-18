@@ -856,7 +856,15 @@ fotos). Migrar de verdad está fuera de alcance del change: las filas seguirían
 están en disco y `GET /api/v1/cleaning-photos/{id}` devolvería `404` para ese tenant.
 
 `apply_plan` **converge**: crea la configuración con ese `storage_type` y la **actualiza si difiere**
-en una re-ejecución. Volver atrás es el mismo comando con `BOOTSTRAP_STORAGE_TYPE=LOCAL`.
+en una re-ejecución.
+
+**Volver atrás a `LOCAL` en esta VM ya no es posible desde `photo-storage-manager-view`
+(2026-09-18).** El comando rechaza el bootstrap con `BootstrapConfigurationError` en cuanto
+`settings.environment` no es `local` y el `BOOTSTRAP_STORAGE_TYPE` resuelto es `LOCAL` — y esta VM
+siempre corre con `APP_ENVIRONMENT=dev` (§Ejecución con `sim_advance` más abajo tiene el detalle de
+por qué). Es a propósito: es justo el olvido que la entrada cierra, y en `dev` seguiría dejando las
+fotos ya subidas a `S3` inalcanzables por la ruta `LOCAL`. Si hace falta un tenant `LOCAL` para
+probar algo, hazlo en local (`make bootstrap`), no en esta VM.
 
 
 ## 10. La contraseña del tenant de demostración (change `demo-user`)

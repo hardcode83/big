@@ -552,7 +552,12 @@ fila en `/incidents/[id]`. El detalle pinta los 20 campos de `IncidentResponse` 
 `description` como **texto plano** (regla 11 de `sdd/steering/security.md`: texto libre del
 huésped o de la limpiadora, nunca HTML) — y el técnico asignado ya por **nombre**, resuelto
 contra `GET /api/v1/users` (ver «Quién puede hacer qué» arriba); el UUID ya no se enseña sin
-resolver.
+resolver. **Desde `photo-storage-manager-view` (2026-09-18)** el detalle pinta también, en
+solo lectura, la galería de fotos antes/después que subió el técnico —mismo `GET
+.../photos`, agrupada por etapa igual que en `/tech/incidents/[id]`— sin ningún control de
+subida ni de borrado: subir sigue siendo del técnico y no hay borrado por API. La ve tanto el
+manager como la propietaria, porque no está gateada por `MANAGE_INCIDENTS` ni por ningún
+permiso nuevo, solo por poder abrir el detalle.
 
 Quien tiene `MANAGE_INCIDENTS` ve además, en el propio detalle, las **cuatro operaciones del
 manager** —`classify`, `triage` vía `PATCH`, `assign`/reasignar, `cancel`—, gateadas por

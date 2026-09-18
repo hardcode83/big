@@ -1,4 +1,22 @@
 {
+  "photos": {
+    "title": "Photos",
+    "loading": "Loading the photos…",
+    "empty": {
+      "title": "No photos yet",
+      "description": "No one has uploaded photos for this incident yet."
+    },
+    "error": {
+      "title": "We could not load the photos",
+      "description": "Try again in a few seconds.",
+      "retry": "Retry"
+    },
+    "stage": {
+      "BEFORE": "Before",
+      "AFTER": "After"
+    },
+    "alt": "Incident photo"
+  },
   "status": {
     "OPEN": "Open",
     "CLASSIFIED": "Classified",

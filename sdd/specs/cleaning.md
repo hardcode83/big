@@ -132,9 +132,10 @@ mueve la vivienda a `CLEANING_SCHEDULED`, y `AWAITING_CLEANING` es el único est
 - IF la lectura de la página no resuelve el estado de una vivienda, THEN THE SYSTEM SHALL devolver
   `null` para esa fila: **falla abierto**, ofrece la acción y deja decidir al backend.
 - THE SYSTEM SHALL llevar ese campo **solo** en el item del listado
-  (`CleaningTaskListItemResponse`, los dieciséis campos de `CleaningTaskResponse` más éste) y no en
-  `CleaningTaskResponse`, que devuelven ocho rutas a ninguna de las cuales se le está haciendo esa
-  pregunta. El campo es aditivo, así que ningún cliente se rompe por su llegada.
+  (`CleaningTaskListItemResponse`, los dieciséis campos de `CleaningTaskResponse` más éste y los dos
+  de identidad de vivienda de más abajo) y no en `CleaningTaskResponse`, que devuelven ocho rutas a
+  ninguna de las cuales se le está haciendo esa pregunta. El campo es aditivo, así que ningún cliente
+  se rompe por su llegada.
 - THE SYSTEM SHALL resolver el estado de las viviendas de la página con **una** consulta acotada a
   los identificadores de esa página —`PropertyRepository.states_for(tenant_id, property_ids)`,
   filtrada por `tenant_id` como manda la regla 1 de `steering/security.md`— y NUNCA con una
@@ -142,6 +143,27 @@ mueve la vivienda a `CLEANING_SCHEDULED`, y `AWAITING_CLEANING` es el único est
 - **Es una cortesía y no un permiso**: THE SYSTEM SHALL seguir comprobando la precondición en la
   propia asignación, cuyo rechazo es la autoridad. El indicador se calcula al leer la página, así
   que puede estar obsoleto cuando alguien actúe sobre él, y el contrato lo declara así.
+
+### El listado lleva la identidad de la vivienda
+
+- WHEN se solicita `GET /api/v1/cleaning-tasks`, THE SYSTEM SHALL devolver en cada fila
+  `property_name` y `property_internal_code`, tomados de la vivienda que referencia `property_id`
+  (`cleaner-list-property-projection` R1.1) — así `/cleaner` no necesita pedirlos aparte por fila
+  vía `GET /cleaning-tasks/{id}/context`.
+- THE SYSTEM SHALL llevar estos dos campos **solo** en el item del listado
+  (`CleaningTaskListItemResponse`) y no en `CleaningTaskResponse`, siguiendo el mismo criterio de
+  forma que ya fija `assignment_blocked_by`: el campo es aditivo y ningún cliente existente se
+  rompe por su llegada (R1.2).
+- IF `property_id` no resuelve a ninguna vivienda visible para el tenant (dato inconsistente, nunca
+  esperado en operación normal), THEN THE SYSTEM SHALL devolver `property_name` y
+  `property_internal_code` como `null` en esa fila en vez de fallar la petición completa — falla
+  abierto, el mismo criterio que ya aplica `assignment_blocked_by` (R1.3).
+- THE SYSTEM SHALL resolver `property_name` y `property_internal_code` de todas las filas de la
+  página con **una sola** llamada batched adicional a `PropertyRepository.list_for_ids`, acotada a
+  los `property_id` distintos de esa página — el mismo principio que ya aplica `states_for` para
+  `assignment_blocked_by`, y no SHALL introducir un método de repositorio nuevo para este propósito:
+  reutiliza el puerto que ya usa `ListReservationsUseCase` para la misma proyección en
+  `reservations` (R2.1, R2.2).
 
 ### Ciclo de vida de la tarea
 
@@ -392,6 +414,12 @@ compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo 
   (`CLEANING_PHOTO_URL_PREFIX`) **explícito** en cada punto de wiring, incluido `make seed-demo`, y
   NEVER SHALL depender del valor por defecto: aunque hoy coincida con el de limpieza, depender de él
   es lo que rompió al segundo consumidor, y el síntoma es un `403` que no parece un error de wiring.
+- **La lectura ya tenía llamador real desde el 2026-09-18.** `GET .../photos` la listaba por API
+  desde el principio, pero ningún frontend del manager la pintaba: `/cleaning/[id]` gana su
+  galería de solo lectura con `photo-storage-manager-view`, mediante un hook nuevo
+  (`useCleaningTaskPhotos`, `frontend/features/cleaning/hooks/use-cleaning-photos.ts`) — sin
+  control de subida ni de borrado, agrupada por `photo_type`. Detalle en
+  [`photo-storage-manager-view.md`](photo-storage-manager-view.md).
 
 ### Los requisitos de foto de la tarea
 

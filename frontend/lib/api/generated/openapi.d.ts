@@ -1570,6 +1570,10 @@ export interface components {
        * Format: uuid
        */
       property_id: string;
+      /** Property Internal Code */
+      property_internal_code: string | null;
+      /** Property Name */
+      property_name: string | null;
       /** Reservation Id */
       reservation_id: string | null;
       /** Scheduled End */

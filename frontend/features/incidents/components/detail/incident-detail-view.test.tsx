@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { render, screen } from "@/test/render";
@@ -9,16 +10,35 @@ import { TONE_BADGE_CLASS } from "@/lib/ui/status-tone";
 import { severityColorGroup } from "../../lib/severity-tone";
 
 const useIncidentMock = vi.hoisted(() => vi.fn());
+// `IncidentPhotosBlock` (section 4) calls `useIncidentPhotos` from this same
+// module — defaulted to an empty, settled query so every pre-existing test
+// in this file keeps rendering the gallery's empty state without touching
+// its own mock setup.
+const useIncidentPhotosMock = vi.hoisted(() =>
+  vi.fn(() => ({
+    isPending: false,
+    isError: false,
+    isSuccess: true,
+    data: [],
+    error: null,
+    refetch: vi.fn(),
+  })),
+);
 vi.mock("../../hooks/use-incidents", () => ({
   useIncident: useIncidentMock,
+  useIncidentPhotos: useIncidentPhotosMock,
 }));
 
 // `useHasPermission("MANAGE_INCIDENTS")` gates `ManagerIncidentActions`
 // (R1.1, R1.2). Default: no permission — most of this file's tests are
-// about the read-only detail, not the manager's controls.
+// about the read-only detail, not the manager's controls. `useAuth` is
+// needed too: `IncidentPhotosBlock` reads `user.tenant_id` for its re-fetch
+// invalidation key, and this mock fully replaces `@/lib/auth`, so a partial
+// mock without `useAuth` would make `useAuth()` undefined at runtime.
 const useHasPermissionMock = vi.hoisted(() => vi.fn(() => false));
 vi.mock("@/lib/auth", () => ({
   useHasPermission: useHasPermissionMock,
+  useAuth: () => ({ user: { tenant_id: "tenant-1" } }),
 }));
 
 // `useTechnicianDirectory` is what resolves the assigned technician's name
@@ -49,10 +69,19 @@ vi.mock("./manager-incident-actions", () => ({
 import { IncidentDetailView } from "./incident-detail-view";
 
 function renderDetail(incidentId = "i1") {
+  // `IncidentPhotosBlock` (section 4) calls the real `useQueryClient()` for
+  // its re-fetch-on-image-error invalidation, so this needs a real
+  // `QueryClientProvider` in the tree — `useIncidentPhotos` itself stays
+  // mocked above.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <I18nProvider locale="es">
-      <IncidentDetailView incidentId={incidentId} />
-    </I18nProvider>,
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider locale="es">
+        <IncidentDetailView incidentId={incidentId} />
+      </I18nProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -84,6 +113,14 @@ describe("IncidentDetailView", () => {
   beforeEach(() => {
     useHasPermissionMock.mockReturnValue(false);
     useTechnicianDirectoryMock.mockReturnValue({ data: undefined });
+    useIncidentPhotosMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+      data: [],
+      error: null,
+      refetch: vi.fn(),
+    });
   });
 
   it("renders the loading state", () => {
@@ -401,5 +438,22 @@ describe("IncidentDetailView", () => {
     });
     renderDetail();
     expect(screen.getByTestId("manager-incident-actions")).toBeInTheDocument();
+  });
+
+  it("composes the photo gallery block between the costs and metadata sections, unconditionally (R1.1, R1.6, D5)", () => {
+    useIncidentMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+      data: DETAIL,
+      refetch: vi.fn(),
+    });
+    renderDetail();
+    // The gallery's own heading and empty state (incidents:photos.*),
+    // proving IncidentPhotosBlock is mounted unconditionally on the detail page.
+    expect(screen.getByText(esIncidents.photos.title)).toBeInTheDocument();
+    expect(
+      screen.getByText(esIncidents.photos.empty.title),
+    ).toBeInTheDocument();
   });
 });

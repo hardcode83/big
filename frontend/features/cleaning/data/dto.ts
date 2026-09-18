@@ -143,6 +143,29 @@ export interface CleaningTaskFilters {
 }
 
 /**
+ * One uploaded cleaning photo (R2.1, design D3), mapped from the generated
+ * `app__cleaning__api__schemas__CleaningPhotoResponse` (`cleaning_task_id`,
+ * `created_at`, `id`, `photo_type`, `uploaded_by`, `url`).
+ *
+ * `photoType` is a free-form string, not a closed union — the template that
+ * defines the task decides its categories, unlike `IncidentPhotoStage`'s
+ * fixed `BEFORE`/`AFTER` (R2.1, in contrast with R1). Grouping by it is the
+ * gallery's job (section 3), not this DTO's.
+ *
+ * `url` is the signed URL minted per response (backend design D7) — painted
+ * verbatim into an `<img src>`, never persisted or rebuilt client-side, same
+ * discipline as `IncidentPhotoDto.url`.
+ */
+export interface CleaningPhotoDto {
+  id: string;
+  cleaningTaskId: string;
+  photoType: string;
+  uploadedBy: string;
+  createdAt: IsoDateTime;
+  url: string;
+}
+
+/**
  * The only three fields R1.2 allows the create control to send. `propertyId` is
  * mandatory; the scheduled window is optional and, unlike the rest of this
  * feature's inputs, still camelCase to ISO strings — `reservation_id` is never

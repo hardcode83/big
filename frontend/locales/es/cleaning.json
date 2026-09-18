@@ -228,5 +228,19 @@
       "notFound": "Esta tarea ya no está disponible, así que el mensaje no se ha enviado.",
       "generic": "No hemos podido enviar el mensaje. Vuelve a intentarlo."
     }
+  },
+  "photos": {
+    "title": "Fotos",
+    "loading": "Cargando las fotos…",
+    "empty": {
+      "title": "Todavía no hay fotos",
+      "description": "Nadie ha subido fotos de esta tarea todavía."
+    },
+    "error": {
+      "title": "No hemos podido cargar las fotos",
+      "description": "Vuelve a intentarlo en unos segundos.",
+      "retry": "Reintentar"
+    },
+    "alt": "Foto de la tarea de limpieza"
   }
 }

@@ -55,7 +55,11 @@ from app.auth.infrastructure.repositories import (
 )
 from app.auth.infrastructure.throttle import RedisLoginThrottle
 from app.cli import bootstrap, seed_demo
-from app.cli.bootstrap import BootstrapPlan, SeedUser
+from app.cli.bootstrap import (
+    BootstrapPlan,
+    SeedUser,
+    reject_local_storage_outside_local_environment,
+)
 from app.cli.seed_demo import SeedAccount, SeedPlan
 from app.core.config import settings
 from app.core.db import (
@@ -223,6 +227,16 @@ def build_plan() -> DemoResetPlan:
     `BOOTSTRAP_STORAGE_TYPE`, which is not a tenant identity but the store the environment runs
     on: the deploy passes it inline (D14) so the demonstration tenant is born `S3` like its
     neighbour, and locally its `LOCAL` default is the right answer.
+
+    **It also carries R3.1/D6's guard**, and building `BootstrapPlan` directly is exactly why it
+    has to: `bootstrap.build_plan()` refuses a `LOCAL` storage type resolved outside
+    `environment == "local"` before it constructs its own `BootstrapPlan`, but this function
+    never calls that one — so, unpatched, a manual `python -m app.cli.demo_reset` in dev/staging/
+    production with no explicit `BOOTSTRAP_STORAGE_TYPE=S3` would still converge the
+    demonstration tenant to `LOCAL` storage, skipping the gate entirely (the deployed workflow is
+    unaffected — `.github/workflows/demo-reset.yml` always sets `BOOTSTRAP_STORAGE_TYPE=S3`
+    explicitly, R3.4). `reject_local_storage_outside_local_environment` is the one place that
+    condition is written, shared with `bootstrap.build_plan()`, so the two can no longer drift.
     """
     password = settings.demo_account_password
     if not password:
@@ -247,6 +261,18 @@ def build_plan() -> DemoResetPlan:
             f"DEMO_ACCOUNT_PASSWORD is not acceptable (value not echoed): {exc}. "
             f"It must be at least {PASSWORD_MIN_LENGTH} characters long."
         ) from exc
+
+    reject_local_storage_outside_local_environment(
+        settings.environment,
+        settings.bootstrap_storage_type,
+        exception_type=DemoResetConfigurationError,
+        message=(
+            "BOOTSTRAP_STORAGE_TYPE must be set to 'S3' explicitly when "
+            f"APP_ENVIRONMENT={settings.environment!r}; the demonstration tenant must not "
+            "converge to LOCAL storage outside APP_ENVIRONMENT=local. LOCAL is only the safe "
+            "default for APP_ENVIRONMENT=local."
+        ),
+    )
 
     return DemoResetPlan(
         bootstrap=BootstrapPlan(

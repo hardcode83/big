@@ -74,4 +74,22 @@ describe("cleaningKeys (R1, R2.5, R3)", () => {
     const key = cleaningKeys.task("tenant-1", "task-9");
     expect(key.slice(0, 3)).toEqual(["tenant", "tenant-1", "cleaning-task"]);
   });
+
+  it("scopes a task's photos under ['tenant', tenantId, 'cleaning-photos', taskId] (R2.1)", () => {
+    const key = cleaningKeys.photos("tenant-1", "task-9");
+    expect(key.slice(0, 3)).toEqual(["tenant", "tenant-1", "cleaning-photos"]);
+    expect(key).toContain("task-9");
+  });
+
+  it("keeps a different task's photos key distinct, same tenant (R2.1)", () => {
+    expect(cleaningKeys.photos("tenant-1", "task-9")).not.toEqual(
+      cleaningKeys.photos("tenant-1", "task-10"),
+    );
+  });
+
+  it("keeps a different tenant's photos key distinct for the same task (R2.1)", () => {
+    expect(cleaningKeys.photos("tenant-1", "task-9")).not.toEqual(
+      cleaningKeys.photos("tenant-2", "task-9"),
+    );
+  });
 });
