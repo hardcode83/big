@@ -6,7 +6,8 @@ import type { Permission } from "@/lib/auth";
 
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import { ApiError } from "@/lib/api";
-import { render, screen } from "@/test/render";
+import { fireEvent, render, screen, waitFor } from "@/test/render";
+import esCleaning from "@/locales/es/cleaning.json";
 import type { CleanerDataSource } from "@/features/cleaner/data";
 import * as cleanerData from "@/features/cleaner/data";
 
@@ -379,5 +380,79 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toContain("No tienes permiso para asignar limpiezas");
     expect(alert.textContent).not.toContain("Ha ocurrido un error inesperado");
+  });
+
+  describe("CleaningTaskDetailView — tabs wiring (R2.1, R2.2, R2.5, D4)", () => {
+    const contentTab = () =>
+      screen.getByRole("tab", { name: esCleaning.tabs.content });
+    const messagesTab = () =>
+      screen.getByRole("tab", { name: esCleaning.messages.tab });
+
+    beforeEach(() => {
+      getTaskMessagesMock.mockReset().mockResolvedValue({
+        data: [],
+        total: 0,
+        page: 1,
+        perPage: 20,
+        totalPages: 0,
+      });
+    });
+
+    it("opens on the operational content tab, and asks for no thread until the tab is touched (R2.1, D4)", () => {
+      renderView();
+      expect(contentTab()).toHaveAttribute("aria-selected", "true");
+      expect(messagesTab()).toHaveAttribute("aria-selected", "false");
+      expect(getTaskMessagesMock).not.toHaveBeenCalled();
+    });
+
+    it("requests the first page and shows the thread once the tab is opened (R2.2)", async () => {
+      renderView();
+      fireEvent.click(messagesTab());
+      await waitFor(() =>
+        expect(getTaskMessagesMock).toHaveBeenCalledWith(
+          "tenant-1",
+          "task-1",
+          1,
+        ),
+      );
+      expect(
+        await screen.findByText(esCleaning.messages.empty.title),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByLabelText(esCleaning.messages.composer.label),
+      ).toBeInTheDocument();
+    });
+
+    it("hides the operational panel instead of unmounting it (R2.1)", () => {
+      renderView();
+      fireEvent.click(messagesTab());
+      const contentPanel = document.getElementById(
+        "manager-cleaning-panel-content",
+      );
+      expect(contentPanel).toHaveAttribute("hidden");
+    });
+
+    /**
+     * R2.5 with the real wrapper rather than the panel in isolation: the
+     * messages read 404s, the wrapper's `messagesNotFound` flips, the whole
+     * detail screen — tabs included — is replaced by the same not-found
+     * EmptyState the task read already produces.
+     */
+    it("replaces the whole screen with the not-found EmptyState when the messages read 404s (R2.5)", async () => {
+      getTaskMessagesMock.mockRejectedValue(
+        new ApiError({ status: 404, code: "NOT_FOUND", message: "missing" }),
+      );
+      renderView();
+
+      fireEvent.click(messagesTab());
+
+      await waitFor(() => {
+        expect(screen.queryByRole("tablist")).toBeNull();
+      });
+      expect(screen.getByText(esCleaning.detail.notFound)).toBeInTheDocument();
+      expect(
+        screen.getByText(esCleaning.detail.context.backToList),
+      ).toHaveAttribute("href", "/cleaning");
+    });
   });
 });
