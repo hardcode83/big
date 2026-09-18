@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/staff-messaging-manager-view
 implementation_sha: e5b20c99d1c588a2f3301058197bf1153cf051a4
 pr_number:
 pr_url:
