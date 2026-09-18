@@ -62,12 +62,12 @@
 
 ## 4. Frontend — incident detail: photo gallery
 
-- [ ] 4.1 Add `photos.*` keys to `frontend/locales/es/incidents.json` and
+- [x] 4.1 Add `photos.*` keys to `frontend/locales/es/incidents.json` and
   `frontend/locales/en/incidents.json`, mirroring `tech.json`'s shape (title,
   loading, empty, error, `stage.BEFORE`/`stage.AFTER`, alt) but with
   manager-appropriate empty-state copy (no "photos you upload" language).
   [R1.7]
-- [ ] 4.2 Create `frontend/features/incidents/components/detail/incident-photos-block.tsx`
+- [x] 4.2 Create `frontend/features/incidents/components/detail/incident-photos-block.tsx`
   (`IncidentPhotosBlock`, design D1/D2): consumes the existing
   `useIncidentPhotos(incidentId)`, groups by the fixed `STAGES = ["BEFORE", "AFTER"]`
   order (mirrors `TechPhotoGallery`), renders the shared
@@ -76,7 +76,7 @@
   control. Cover in `incident-photos-block.test.tsx`: loading, empty,
   error+retry, grouped-by-stage rendering, single re-fetch on image error.
   [R1.1, R1.2, R1.3, R1.4, R1.5, R1.6]
-- [ ] 4.3 In `frontend/features/incidents/components/detail/incident-detail-view.tsx`,
+- [x] 4.3 In `frontend/features/incidents/components/detail/incident-detail-view.tsx`,
   compose `<IncidentPhotosBlock incidentId={d.id} />` after `DetailCostsBlock`
   and before `DetailMetadataBlock` (design D5), unconditional. Update
   `incident-detail-view.test.tsx` to assert the block renders. [R1.1, R1.6]
@@ -124,3 +124,8 @@
   - Test-mocking pattern for a component that calls both `useAuth` and a feature query hook: mock `@/lib/auth`'s `useAuth` to return `{ user: { tenant_id: "tenant-1" } }`, mock `@tanstack/react-query`'s `useQueryClient` to return a stub with a spy-able `invalidateQueries`, and assert the exact `queryKey` array shape (`["tenant", tenantId, "<resource>", id]`) rather than reaching into `cleaningKeys`/`incidentsKeys` — keeps the test decoupled from the key-builder's internals while still proving the single re-fetch and its target.
   - `CleaningTaskDetailView`'s existing test file fully replaces the `@/lib/auth` module mock (`vi.mock("@/lib/auth", () => ({...}))`), so composing any child that calls `useAuth` requires adding `useAuth` to that same mock object — a partial mock without it makes `useAuth()` undefined at runtime. Section 4's `incident-detail-view.test.tsx` likely has the same shape and will need the same addition when it mocks `IncidentPhotosBlock`'s hook usage.
   - Verified: `docker compose exec frontend npm test -- features/cleaning` → 31 files / 549 tests pass (up from section 2's 30/542, i.e. +1 new test file and +7 new tests: 6 in `detail-photos-block.test.tsx` + 1 new assertion in `cleaning-task-detail-view.test.tsx`); `npm run typecheck` and `npm run lint` both clean.
+- Section 4 (incidents detail photo gallery) is done. `IncidentPhotosBlock` (`frontend/features/incidents/components/detail/incident-photos-block.tsx`) mirrors `TechPhotoGallery` almost verbatim — same fixed `STAGES = ["BEFORE", "AFTER"]` grouping, same `LoadingState`/`ErrorState`/`EmptyState` usage, same `useRef<Set<string>>` re-fetch-once-per-photo-id pattern on `onError` — with only the translation namespace (`incidents`, not `tech`) and no upload copy. Imports `useIncidentPhotos` from `../../hooks/use-incidents` and `incidentsKeys` from `../../hooks/query-keys` (the same local-module pattern `IncidentDetailView` itself already uses, not the `@/features/incidents` barrel `TechPhotoGallery` uses cross-feature). `photos.*` added as a top-level key in `incidents.json` (both locales), with `photos.stage.BEFORE`/`AFTER` (EN "Before"/"After", ES "Antes"/"Después") since the incident stage set is closed — settled empty-state copy: EN "No one has uploaded photos for this incident yet.", ES "Nadie ha subido fotos de esta incidencia todavía."
+  - The predicted gotcha in `incident-detail-view.test.tsx` was real and needed two fixes, not one: (1) its `@/lib/auth` mock only had `useHasPermission`, so `useAuth` was added to it (`{ user: { tenant_id: "tenant-1" } }`), matching section 3's note; (2) `../../hooks/use-incidents` mock only stubbed `useIncident`, so `useIncidentPhotos` was added there too, defaulted in `beforeEach` to a settled empty-array query so every pre-existing test keeps rendering the gallery's empty state untouched. A third issue not flagged by section 3 (because `CleaningTaskDetailView`'s test already wrapped in a real `QueryClientProvider`, but this file's `renderDetail` did not): `IncidentPhotosBlock` calls the real `useQueryClient()` (unlike `DetailPhotosBlock`'s own unit test, which mocks `@tanstack/react-query` directly), so `renderDetail` needed a real `QueryClient`/`QueryClientProvider` wrapper — without it every test failed with "No QueryClient set, use QueryClientProvider to set one," not just the new one.
+  - `incident-photos-block.test.tsx` is a new file mirroring `detail-photos-block.test.tsx`'s structure exactly (mocks `@tanstack/react-query`'s `useQueryClient` locally instead of relying on a real provider): 6 tests — loading, empty, error+retry, grouped-by-stage + verbatim url, no upload/delete control, single re-fetch on image error.
+  - Verified: `docker compose exec frontend npm test -- features/incidents` → 19 files / 262 tests pass; `docker compose exec frontend npm test` (full suite) → 3687/3688 tests pass across 330/332 files, the one failure (`lib/config/build-identity-contract.test.ts` + its own failed-to-collect sibling `features/provenance/workflow-contract.test.ts`) is a pre-existing, unrelated-to-this-change environment artifact: both read `.github/workflows/deploy-dev.yml` via `join(process.cwd(), "..", ...)`, but the `frontend` docker-compose service only mounts the `frontend/` subtree, not the monorepo root, so `..` from the container's `/app` never reaches a `.github` directory — confirmed the file exists on the host at the repo root and is unrelated to any file this change (sections 1-4) touches. `npm run lint` and `npm run typecheck` both clean on the full project.
+  - Cumulative frontend count for the orchestrator's section 5 verification pass: full `npm test` → 330/332 files, 3687/3688 tests pass, with the one pre-existing failure above (not introduced by sections 2-4). `npm run lint` and `npm run typecheck` clean.

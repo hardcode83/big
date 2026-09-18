@@ -1,4 +1,22 @@
 {
+  "photos": {
+    "title": "Fotos",
+    "loading": "Cargando las fotos…",
+    "empty": {
+      "title": "Todavía no hay fotos",
+      "description": "Nadie ha subido fotos de esta incidencia todavía."
+    },
+    "error": {
+      "title": "No hemos podido cargar las fotos",
+      "description": "Vuelve a intentarlo en unos segundos.",
+      "retry": "Reintentar"
+    },
+    "stage": {
+      "BEFORE": "Antes",
+      "AFTER": "Después"
+    },
+    "alt": "Foto de la incidencia"
+  },
   "status": {
     "OPEN": "Abierta",
     "CLASSIFIED": "Clasificada",
