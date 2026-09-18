@@ -160,7 +160,8 @@
       "scheduledWindow": "Ventana programada",
       "scheduledWindowValue": "{start} – {end}",
       "completedAt": "Fecha de finalización",
-      "validatedAt": "Fecha de validación"
+      "validatedAt": "Fecha de validación",
+      "validatedAtFailed": "Validación rechazada"
     },
     "identifying": {
       "propertyCode": "Código de la vivienda",

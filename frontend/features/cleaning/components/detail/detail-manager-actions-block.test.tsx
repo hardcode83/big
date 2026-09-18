@@ -130,6 +130,12 @@ describe("DetailManagerActionsBlock (proposal R5.1/R5.2/R5.3, design D7)", () =>
       },
     });
     expect(screen.getByRole("button", { name: "Cancelar" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancelar" })).toHaveClass(
+      "disabled:opacity-50",
+    );
+    expect(screen.getByRole("button", { name: "Cancelar" })).toHaveClass(
+      "disabled:cursor-not-allowed",
+    );
   });
 
   it("renders the manager section title", () => {

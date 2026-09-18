@@ -59,18 +59,39 @@ export function DetailIdentifyingBlock({
     propertyId,
     properties,
   );
+  // Same four-shape degradation `detail-assigned-cleaner-block.tsx` uses
+  // (R3.4/R3.5): `pending` paints a dash + sr-only "cargando" so a screen
+  // reader hears the loading state but the visible cell stays neutral,
+  // `unavailable` paints the translated "not available" copy. A property
+  // always has an id (the schema forbids null), so `unassigned` does not
+  // arise here; the switch handles the three real shapes plus the
+  // unreachable fourth.
+  const renderPropertyField = (field: "code" | "name"): React.ReactNode => {
+    switch (property.kind) {
+      case "resolved":
+        return field === "code"
+          ? property.value.internalCode
+          : property.value.name;
+      case "pending":
+        return (
+          <>
+            <span aria-hidden="true">—</span>
+            <span className="sr-only">{t("identity.loading")}</span>
+          </>
+        );
+      case "unavailable":
+      case "unassigned":
+        return t("detail.identifying.propertyNotFound");
+    }
+  };
   return (
     <section className="border-b border-border py-4">
       <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label={t("detail.identifying.propertyCode")}>
-          {property.kind === "resolved"
-            ? property.value.internalCode
-            : t("detail.identifying.propertyNotFound")}
+          {renderPropertyField("code")}
         </Field>
         <Field label={t("detail.identifying.propertyName")}>
-          {property.kind === "resolved"
-            ? property.value.name
-            : t("detail.identifying.propertyNotFound")}
+          {renderPropertyField("name")}
         </Field>
         <Field label={t("detail.identifying.reservationCode")}>
           {reservationId !== null

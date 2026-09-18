@@ -12,8 +12,14 @@ import type {
   CleaningTask,
   CleaningTaskListItem,
 } from "../../data";
+import { assignErrorKey } from "../../lib/assign-error";
 import { buildDirectory } from "../../lib/directory";
 import { mapCleaningDetailError } from "../../lib/detail-error";
+import {
+  GENERIC_VALIDATE_ERROR_KEY,
+  VALIDATE_ERROR_TABLE,
+  keyForStatus,
+} from "../../lib/manage-error";
 import { useCleaningTask } from "../../hooks/use-cleaning-task";
 import { useAssignCleaningTask } from "../../hooks/use-assign-cleaning-task";
 import { useCancelCleaningTask } from "../../hooks/use-cancel-cleaning-task";
@@ -171,7 +177,13 @@ export function CleaningTaskDetailView({ taskId }: { taskId: string }) {
       if (source.via === "error") {
         return (
           <span role="alert">
-            {t("detail.error.unknown", { defaultValue: t("detail.error.description") })}
+            {t(
+              keyForStatus(
+                validate.error,
+                VALIDATE_ERROR_TABLE,
+                GENERIC_VALIDATE_ERROR_KEY,
+              ),
+            )}
           </span>
         );
       }
@@ -186,7 +198,7 @@ export function CleaningTaskDetailView({ taskId }: { taskId: string }) {
       return t("assign.sending");
     }
     if (source.via === "error") {
-      return <span role="alert">{t("detail.error.unknown")}</span>;
+      return <span role="alert">{t(assignErrorKey(assign.error))}</span>;
     }
     const assigned = resolveCleanerName(assign.data, cleaners);
     return t("assign.success", {

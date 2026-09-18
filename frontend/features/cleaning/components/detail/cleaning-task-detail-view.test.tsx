@@ -169,7 +169,7 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
     const backLinks = screen.getAllByRole("link", {
       name: /Volver al listado/,
     });
-    expect(backLinks.length).toBeGreaterThanOrEqual(1);
+    expect(backLinks.length).toBe(1);
     expect(backLinks[0]).toHaveAttribute("href", "/cleaning");
   });
 
@@ -330,5 +330,28 @@ describe("CleaningTaskDetailView (proposal R1-R6)", () => {
     // the raw HTML. Same shape the listing uses for the cleaner cell.
     renderView();
     expect(document.body.textContent ?? "").not.toContain(CLEANER_UUID);
+  });
+
+  it("announces the status-specific copy in the live region, not the generic 'unknown' (R5.4)", () => {
+    // A 403 on the assign mutation must paint the status-specific key
+    // (cleaning:assign.error.forbidden), not the generic 'Ha ocurrido un
+    // error inesperado' from detail.error.unknown — that's the gap the
+    // round-2 fix closes.
+    useAssignCleaningTaskMock.mockReturnValue(
+      makeMutation({
+        isError: true,
+        isSuccess: false,
+        submittedAt: 1,
+        error: new ApiError({
+          status: 403,
+          code: "forbidden",
+          message: "x",
+        }),
+      }),
+    );
+    renderView();
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("No tienes permiso para asignar limpiezas");
+    expect(alert.textContent).not.toContain("Ha ocurrido un error inesperado");
   });
 });

@@ -80,4 +80,17 @@ describe("DetailIdentifyingBlock (proposal R3.1/R3.2/R3.4)", () => {
     expect(screen.getByText(PROPERTY_CODE_LABEL)).toBeInTheDocument();
     expect(screen.getByText(PROPERTY_NAME_LABEL)).toBeInTheDocument();
   });
+
+  it("paints a dash + sr-only 'cargando' while the directory is in flight (R3.5)", () => {
+    renderBlock({
+      properties: { index: buildDirectory<PropertySummary>(undefined), isPending: true },
+    });
+    // The visible marker is an em-dash with an `sr-only` loading copy
+    // from the cleaning namespace — the same pattern
+    // `detail-assigned-cleaner-block.tsx:48-54` uses.
+    expect(screen.getAllByText("Cargando identidad…").length).toBe(2);
+    // The "not available" copy must not appear yet, even though the id
+    // is not in the (empty) index — distinguishes this branch from R3.4.
+    expect(screen.queryByText(PROPERTY_NOT_FOUND_KEY)).not.toBeInTheDocument();
+  });
 });

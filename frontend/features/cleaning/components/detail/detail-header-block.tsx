@@ -119,7 +119,13 @@ export function DetailHeaderBlock({
             {formatDateTime(completedAt, locale)}
           </HeaderField>
           {validatedAt !== null ? (
-            <HeaderField label={t("detail.header.validatedAt")}>
+            <HeaderField
+              label={t(
+                validationStatus === "FAILED"
+                  ? "detail.header.validatedAtFailed"
+                  : "detail.header.validatedAt",
+              )}
+            >
               {formatDateTime(validatedAt, locale)}
             </HeaderField>
           ) : null}

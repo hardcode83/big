@@ -97,4 +97,10 @@ describe("DetailHeaderBlock (proposal R2.1-R2.3)", () => {
     expect(container.textContent).not.toContain("COMPLETED");
     expect(container.textContent).not.toContain("PASSED");
   });
+
+  it("uses the 'Validación rechazada' label when validationStatus is FAILED (R2.3)", () => {
+    renderBlock({ validationStatus: "FAILED" });
+    expect(screen.getByText("Validación rechazada")).toBeInTheDocument();
+    expect(screen.queryByText(VALIDATED_LABEL)).not.toBeInTheDocument();
+  });
 });

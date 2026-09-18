@@ -160,7 +160,8 @@
       "scheduledWindow": "Scheduled window",
       "scheduledWindowValue": "{start} – {end}",
       "completedAt": "Completion date",
-      "validatedAt": "Validation date"
+      "validatedAt": "Validation date",
+      "validatedAtFailed": "Validation rejected"
     },
     "identifying": {
       "propertyCode": "Property code",
