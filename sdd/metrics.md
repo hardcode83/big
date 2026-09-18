@@ -126,3 +126,4 @@
 | staff-messaging-web | new, tasks, run, review, ship, archive | 283583 | 1200622 | 347926639 | 113.7065 | 2026-09-15 | 2026-09-17 |
 | validation-error-loc-redaction | tasks, run, review, ship, archive | 41421 | 508106 | 102621465 | 36.5748 | 2026-09-15 | 2026-09-15 |
 | expense-approval-response | new, design, tasks, run, review, ship, archive | 2804537 | 443054 | 100047786 | 69.9064 | 2026-09-15 | 2026-09-17 |
+| cleaning-manager-task-detail | new, design, tasks, run, review, ship, archive | 11586718 | 1201284 | 249885879 | 212.9087 | 2026-09-17 | 2026-09-18 |
