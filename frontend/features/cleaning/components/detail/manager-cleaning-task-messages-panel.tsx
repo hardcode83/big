@@ -10,8 +10,9 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import {
   useCleanerTaskMessages,
   useSendCleanerTaskMessage,
-} from "@/features/cleaner/hooks/use-cleaner-task-messages";
-import type { CleaningTaskMessage, PaginatedResponse } from "@/features/cleaner/data";
+  type CleaningTaskMessage,
+  type PaginatedResponse,
+} from "@/features/cleaner";
 
 import { mapCleaningError, sendErrorKeyForCleaning } from "../../lib/messages-error";
 
