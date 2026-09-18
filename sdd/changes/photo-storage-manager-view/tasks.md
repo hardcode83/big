@@ -2,20 +2,20 @@
 
 ## 1. Backend — bootstrap storage gate
 
-- [ ] 1.1 In `backend/app/cli/bootstrap.py`, add the environment/storage-type
+- [x] 1.1 In `backend/app/cli/bootstrap.py`, add the environment/storage-type
   check to `build_plan()` (design D6): immediately after the existing
   `missing` required-vars check and before constructing `BootstrapPlan`,
   raise `BootstrapConfigurationError` when `settings.environment != "local"`
   and `settings.bootstrap_storage_type == StorageType.LOCAL.value`, naming
   `BOOTSTRAP_STORAGE_TYPE` in the message. [R3.1, R3.2, R3.3]
-- [ ] 1.2 In `backend/tests/auth/test_bootstrap.py`, add cases: (a)
+- [x] 1.2 In `backend/tests/auth/test_bootstrap.py`, add cases: (a)
   `environment` in `{"dev", "staging", "production"}` with the default
   `bootstrap_storage_type` (`LOCAL`) → `build_plan()` raises
   `BootstrapConfigurationError`; (b) `environment="local"` with `LOCAL` →
   unchanged (plan builds); (c) any non-`local` environment with
   `bootstrap_storage_type=StorageType.S3.value` → unchanged (plan builds,
   mirrors existing cases at lines 339/353/358/373/375). [R3.1, R3.2, R3.4]
-- [ ] 1.3 Run `docker compose exec backend uv run pytest backend/tests/auth/test_bootstrap.py -q`
+- [x] 1.3 Run `docker compose exec backend uv run pytest backend/tests/auth/test_bootstrap.py -q`
   and confirm the new and existing cases pass. [R3]
 
 ## 2. Frontend — cleaning task photos data layer
@@ -110,3 +110,4 @@
 
 <!-- Append-only, written by the implementer of each section for the next one:
      decisions taken, names chosen, gotchas found. One bullet each, no prose. -->
+- Section 1 (backend bootstrap storage gate) is fully isolated from sections 2-4 (frontend photo galleries) — nothing here changes any name, type, or contract the frontend sections depend on. No handoff needed.

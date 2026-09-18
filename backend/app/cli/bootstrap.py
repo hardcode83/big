@@ -85,6 +85,16 @@ def build_plan() -> BootstrapPlan:
             "Missing required environment variables: " + ", ".join(missing)
         )
 
+    if (
+        settings.environment != "local"
+        and settings.bootstrap_storage_type == StorageType.LOCAL.value
+    ):
+        raise BootstrapConfigurationError(
+            "BOOTSTRAP_STORAGE_TYPE must be set to 'S3' explicitly when "
+            f"APP_ENVIRONMENT={settings.environment!r}; LOCAL is only the safe "
+            "default for APP_ENVIRONMENT=local."
+        )
+
     return BootstrapPlan(
         tenant_name=settings.bootstrap_tenant_name.strip(),
         billing_email=normalize_email(settings.bootstrap_tenant_billing_email),
