@@ -32,6 +32,7 @@ vi.mock("../data", async (importOriginal) => ({
     createTask,
     validateTask,
     getTask: vi.fn(),
+    listPhotos: vi.fn(),
   }),
 }));
 

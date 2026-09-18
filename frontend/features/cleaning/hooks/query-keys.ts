@@ -33,6 +33,9 @@ export const cleaningKeys = {
    */
   task: (tenantId: string, taskId: string): QueryKey =>
     tenantScopedKey(tenantId, "cleaning-task", taskId),
+  /** One task's photos (R2.1), same tenant-scoping shape as `task` above. */
+  photos: (tenantId: string, taskId: string): QueryKey =>
+    tenantScopedKey(tenantId, "cleaning-photos", taskId),
   cleaners: (tenantId: string): QueryKey =>
     tenantScopedKey(tenantId, "cleaning-cleaners"),
   properties: (tenantId: string): QueryKey =>
