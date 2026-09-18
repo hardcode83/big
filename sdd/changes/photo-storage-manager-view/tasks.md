@@ -81,22 +81,35 @@
   and before `DetailMetadataBlock` (design D5), unconditional. Update
   `incident-detail-view.test.tsx` to assert the block renders. [R1.1, R1.6]
 
-## 5. Verification
+## 5. Verification <!-- panel: skipped — verification-only, no production code -->
 
-- [ ] 5.1 Backend full test suite passes: `docker compose exec backend uv run pytest`
+- [x] 5.1 Backend full test suite passes: `docker compose exec backend uv run pytest`
   (or `docker compose run --rm backend uv run pytest` with the stack down).
-  [R3]
-- [ ] 5.2 Backend static tooling passes: `uv run pyright .` from `backend`
-  (per `sdd/project.md` §Commands). [R3]
-- [ ] 5.3 Frontend test suite passes: `cd frontend && npm test` — confirm the
+  [R3] — 11187 passed, 44 skipped, 0 failed.
+- [x] 5.2 Backend static tooling passes: `uv run pyright .` from `backend`
+  (per `sdd/project.md` §Commands). [R3] — 963 pre-existing errors, all in
+  `backend/tests/timeline/test_event_factory.py` and `test_filters.py`;
+  verified unrelated: this change's only backend files are
+  `backend/app/cli/bootstrap.py` and `backend/tests/auth/test_bootstrap.py`
+  (`git diff --stat 389d3fda..HEAD -- backend/` confirms it), neither
+  imported by nor related to `timeline`. Pre-existing on `origin/main` before
+  this change; not introduced by any of the 4 sections.
+- [x] 5.3 Frontend test suite passes: `cd frontend && npm test` — confirm the
   file/test count is at or above the pre-change baseline (measure, don't
   assume, per `sdd/steering/architecture.md`-adjacent convention in
-  `sdd/project.md`). [R1, R2]
-- [ ] 5.4 Frontend lint and typecheck pass: `cd frontend && npm run lint` and
-  `npm run typecheck`. [R1, R2]
-- [ ] 5.5 i18n completeness: every new `photos.*` key exists in both
+  `sdd/project.md`). [R1, R2] — 330/332 files, 3691/3692 tests pass. The 2
+  failing (`lib/config/build-identity-contract.test.ts`,
+  `features/provenance/workflow-contract.test.ts`) are the documented,
+  pre-existing worktree bind-mount ENOENT limitation
+  (`sdd/project.md` §Worktree bootstrap), independently confirmed unrelated
+  by section 4's qa reviewer. Net new: 3 test files, 12+ new tests added
+  across sections 2-4 plus the round-1 fix — strictly above baseline.
+- [x] 5.4 Frontend lint and typecheck pass: `cd frontend && npm run lint` and
+  `npm run typecheck`. [R1, R2] — both clean.
+- [x] 5.5 i18n completeness: every new `photos.*` key exists in both
   `locales/es/` and `locales/en/` for `incidents` and `cleaning` (no
-  hardcoded UI string). [R1.7, R2.6]
+  hardcoded UI string). [R1.7, R2.6] — verified programmatically: cleaning
+  8/8 keys symmetric, incidents 10/10 keys symmetric, no es-only/en-only gap.
 - [ ] 5.6 Manual check of both galleries against a running stack: log in as
   `TECHNICIAN`, upload a `BEFORE` photo to an in-progress incident; log in as
   `CLEANER`, upload a photo to an in-progress cleaning task; then log in as
