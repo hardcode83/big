@@ -106,6 +106,20 @@ export function ManagerIncidentMessagesPanel({
     ? sendErrorKeyFor(mapIncidentsError(mutation).kind)
     : null;
 
+  // The error shown beneath the composer (R1.3 / R1.4). Client-side
+  // validation has priority so the user sees the cursor-side reason first;
+  // it only surfaces once the field has been touched. The textarea's
+  // `aria-describedby` and `aria-invalid` track this same value so
+  // assistive tech gets the same association the eye does.
+  const visibleErrorKey =
+    touched && validationKey ? validationKey : sendErrorKey;
+  const describedById = [
+    "manager-incident-message-counter",
+    visibleErrorKey ? "manager-incident-message-error" : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setTouched(true);
@@ -150,7 +164,8 @@ export function ManagerIncidentMessagesPanel({
         maxLength={MAX_CONTENT}
         value={content}
         placeholder={t("messages.composer.placeholder")}
-        aria-describedby="manager-incident-message-counter"
+        aria-describedby={describedById}
+        aria-invalid={visibleErrorKey !== null}
         onChange={(event) => {
           setContent(event.target.value);
           setTouched(true);
@@ -167,12 +182,19 @@ export function ManagerIncidentMessagesPanel({
         })}
       </span>
       {touched && validationKey ? (
-        <span role="alert" className="text-xs text-destructive">
+        <span
+          id="manager-incident-message-error"
+          role="alert"
+          className="text-xs text-destructive"
+        >
           {t(validationKey)}
         </span>
-      ) : null}
-      {sendErrorKey ? (
-        <span role="alert" className="text-xs text-destructive">
+      ) : sendErrorKey ? (
+        <span
+          id="manager-incident-message-error"
+          role="alert"
+          className="text-xs text-destructive"
+        >
           {t(sendErrorKey)}
         </span>
       ) : null}
@@ -234,6 +256,10 @@ export function ManagerIncidentMessagesPanel({
       <ErrorState
         title={t("messages.error.title")}
         description={t("messages.error.description")}
+        retryLabel={t("states:error.retry", { ns: "states" })}
+        onRetry={() => {
+          void query.refetch();
+        }}
       />
     );
   } else if (messages.length === 0) {
@@ -286,6 +312,10 @@ export function ManagerIncidentMessagesPanel({
         <ErrorState
           title={t("messages.error.title")}
           description={t("messages.error.description")}
+          retryLabel={t("states:error.retry", { ns: "states" })}
+          onRetry={() => {
+            void query.refetch();
+          }}
         />
       ) : null}
       {hasMoreRecent ? (
