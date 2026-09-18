@@ -39,7 +39,7 @@
   (pending/success/error). Export both from `frontend/features/cleaning/index.ts`
   where the feature's other public hooks are exported. [R2.1]
 
-## 3. Frontend — cleaning task detail: photo gallery
+## 3. Frontend — cleaning task detail: photo gallery <!-- panel: PASS 2026-09-18 receipt:2907cad9 -->
 
 - [x] 3.1 Add `photos.*` keys to `frontend/locales/es/cleaning.json` and
   `frontend/locales/en/cleaning.json` (title, loading, empty.title/description,
