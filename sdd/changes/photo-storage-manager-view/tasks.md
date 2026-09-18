@@ -18,7 +18,7 @@
 - [x] 1.3 Run `docker compose exec backend uv run pytest backend/tests/auth/test_bootstrap.py -q`
   and confirm the new and existing cases pass. [R3]
 
-## 2. Frontend — cleaning task photos data layer
+## 2. Frontend — cleaning task photos data layer <!-- panel: PASS 2026-09-18 receipt:bcd3d01f -->
 
 - [x] 2.1 In `frontend/features/cleaning/data/dto.ts`, add `CleaningPhotoDto`
   (`id`, `cleaningTaskId`, `photoType`, `uploadedBy`, `createdAt`, `url`),
