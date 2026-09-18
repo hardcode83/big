@@ -60,7 +60,7 @@
   `DetailManagerActionsBlock` (design D5), unconditional. Update
   `cleaning-task-detail-view.test.tsx` to assert the block renders. [R2.1, R2.5]
 
-## 4. Frontend — incident detail: photo gallery
+## 4. Frontend — incident detail: photo gallery <!-- panel: PASS 2026-09-18 receipt:8fb89c02 -->
 
 - [x] 4.1 Add `photos.*` keys to `frontend/locales/es/incidents.json` and
   `frontend/locales/en/incidents.json`, mirroring `tech.json`'s shape (title,
