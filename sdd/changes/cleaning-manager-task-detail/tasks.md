@@ -164,7 +164,7 @@
       con `reservationId` (sección 1.1), así que el mismo barrido de fixtures
       preexistentes es esperable y entra en 7.3 como `assumed` (D11 del design declara
       el alcance explícito).
-- [ ] 7.4 Pasada manual en navegador de `/cleaning/[id]`: abrir la app con `make up
+- [x] 7.4 Pasada manual en navegador de `/cleaning/[id]`: abrir la app con `make up
       PORT_OFFSET=<n>` (per `sdd/project.md` §Worktree bootstrap), entrar como manager,
       abrir `/cleaning`, clicar en el `<h3>` de una tarea cualquiera (sección 5.4) para
       llegar al detalle, y verificar:
