@@ -72,6 +72,12 @@ export type PropertyOperationalState =
  * `CleaningTaskListItem` (design D3): both `CleaningTaskResponse` (create,
  * validate, cancel) and `CleaningTaskListItemResponse` (the listing) publish
  * all three identically.
+ *
+ * `reservationId` was added by `cleaning-manager-task-detail` (design D11): it
+ * is the only one of the six `CleaningTaskResponse` fields this view consumes
+ * — the others (`accepted_at`, `checklist_template_id`, `started_at`,
+ * `updated_at`, `validated_by_user_id`) stay server-side because the manager's
+ * detail page does not render them.
  */
 export interface CleaningTask {
   id: string;
@@ -84,6 +90,7 @@ export interface CleaningTask {
   completedAt: IsoDateTime | null;
   validationStatus: CleaningValidationStatus;
   validatedAt: IsoDateTime | null;
+  reservationId: string | null;
 }
 
 /**

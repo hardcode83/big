@@ -31,6 +31,7 @@ vi.mock("../data", async (importOriginal) => ({
     cancelTask,
     createTask,
     validateTask,
+    getTask: vi.fn(),
   }),
 }));
 
@@ -45,6 +46,7 @@ const task: CleaningTask = {
   completedAt: "2026-08-20T10:00:00Z",
   validationStatus: "PASSED",
   validatedAt: "2026-08-20T11:00:00Z",
+  reservationId: null,
 };
 
 function harness() {
@@ -120,6 +122,37 @@ describe("useValidateCleaningTask (R3.2, design D10)", () => {
       });
     },
   );
+
+  it("invalidates the detail key on success so a detail tab opened elsewhere stays coherent (design D4, R5.3)", async () => {
+    const { invalidate, Wrapper } = harness();
+    const { result } = renderHook(() => useValidateCleaningTask(), {
+      wrapper: Wrapper,
+    });
+
+    result.current.mutate({ taskId: "task-1", verdict: "PASSED" });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: cleaningKeys.task("tenant-1", "task-1"),
+    });
+  });
+
+  it("invalidates the detail key on failure too (design D4)", async () => {
+    validateTask.mockRejectedValue(
+      new ApiError({ code: "CONFLICT", message: "no", status: 409 }),
+    );
+    const { invalidate, Wrapper } = harness();
+    const { result } = renderHook(() => useValidateCleaningTask(), {
+      wrapper: Wrapper,
+    });
+
+    result.current.mutate({ taskId: "task-1", verdict: "PASSED" });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: cleaningKeys.task("tenant-1", "task-1"),
+    });
+  });
 
   it("never retries a rejected write", async () => {
     validateTask.mockRejectedValue(

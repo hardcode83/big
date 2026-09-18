@@ -30,6 +30,7 @@ function findPageFiles(dir: string): string[] {
 // every other entry first.
 const REAL_PAGE_ROUTE_IDS: Record<string, string> = {
   "(workspace)/cleaning/page.tsx": "cleaning",
+  "(workspace)/cleaning/[id]/page.tsx": "cleaning-detail",
   "(workspace)/dashboard/page.tsx": "dashboard",
   "(workspace)/properties/page.tsx": "properties",
   "(workspace)/properties/[id]/page.tsx": "property-detail",

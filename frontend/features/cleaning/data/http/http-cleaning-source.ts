@@ -68,6 +68,7 @@ function mapTask(value: TaskResponse): CleaningTask {
     completedAt: value.completed_at,
     validationStatus: value.validation_status,
     validatedAt: value.validated_at,
+    reservationId: value.reservation_id ?? null,
   };
 }
 
@@ -131,6 +132,28 @@ export class HttpCleaningSource implements CleaningDataSource {
       },
     );
     return mapPage(response, mapListItem);
+  }
+
+  /**
+   * Reads one task (design D3, R1.1). The endpoint is the same
+   * `CleaningTaskResponse` the listing publishes, so the body maps through
+   * `mapTask` and the row shape stays identical to `assignTask`/`cancelTask`.
+   *
+   * The path param is `task_id` (snake_case), matching the rest of the
+   * module — `pathParams.task_id` is what `openapi.d.ts:6162` declares.
+   */
+  async getTask(
+    _tenantId: string,
+    taskId: string,
+  ): Promise<CleaningTask> {
+    const response: TaskResponse = await this.client.request(
+      "/api/v1/cleaning-tasks/{task_id}",
+      {
+        method: "GET",
+        pathParams: { task_id: taskId },
+      },
+    );
+    return mapTask(response);
   }
 
   async listCleaners(_tenantId: string): Promise<CleanerSummary[]> {

@@ -45,10 +45,19 @@ export function useValidateCleaningTask(): UseMutationResult<
       return getCleaningDataSource().validateTask(tenantId, taskId, verdict);
     },
     retry: false,
-    onSettled: () => {
+    onSettled: (_data, _error, { taskId }) => {
       if (tenantId) {
+        // The listing prefix (design D10): a validation moves a task out of
+        // the active filter and only a refetch of the page the current
+        // parameters describe reflects that.
         void queryClient.invalidateQueries({
           queryKey: cleaningKeys.tasksPrefix(tenantId),
+        });
+        // The detail key (design D4): refreshes a detail page the user
+        // opened in another tab — the verdict & `validated_at` flip in the
+        // header the next time it paints.
+        void queryClient.invalidateQueries({
+          queryKey: cleaningKeys.task(tenantId, taskId),
         });
       }
     },

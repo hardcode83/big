@@ -7,6 +7,7 @@ describe("cleaningKeys (R1, R2.5, R3)", () => {
     const keys = [
       cleaningKeys.tasks("tenant-1", {}, 1),
       cleaningKeys.tasksPrefix("tenant-1"),
+      cleaningKeys.task("tenant-1", "task-9"),
       cleaningKeys.cleaners("tenant-1"),
       cleaningKeys.properties("tenant-1"),
     ];
@@ -67,5 +68,10 @@ describe("cleaningKeys (R1, R2.5, R3)", () => {
     ]) {
       expect(key.slice(0, prefix.length)).not.toEqual(prefix);
     }
+  });
+
+  it("details a task under the ['tenant', tenantId, 'cleaning-task'] prefix (design D4, R1.1)", () => {
+    const key = cleaningKeys.task("tenant-1", "task-9");
+    expect(key.slice(0, 3)).toEqual(["tenant", "tenant-1", "cleaning-task"]);
   });
 });

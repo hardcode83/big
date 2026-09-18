@@ -45,6 +45,7 @@ const mappedTask = {
   completedAt: null,
   validationStatus: "PENDING",
   validatedAt: null,
+  reservationId: "reservation-1",
 };
 
 /**
@@ -564,4 +565,89 @@ describe("HttpCleaningSource.validateTask (R3.2)", () => {
       expect(request).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe("HttpCleaningSource.getTask (R1.1, design D3)", () => {
+  it("GETs the task with task_id as the only path param, no body", async () => {
+    const { source, request } = sourceWith(taskResponse);
+
+    await expect(source.getTask("tenant-1", "task-1")).resolves.toEqual(
+      mappedTask,
+    );
+
+    expect(request).toHaveBeenCalledWith("/api/v1/cleaning-tasks/{task_id}", {
+      method: "GET",
+      pathParams: { task_id: "task-1" },
+    });
+    // `body`/`query` would be `undefined` if sent at all; the absence is the
+    // real assertion. `Object.keys` on `undefined` throws, which proves it.
+    const [, options] = request.mock.calls[0];
+    expect(options.body).toBeUndefined();
+    expect(options.query).toBeUndefined();
+    expect(Object.keys(options.pathParams)).toEqual(["task_id"]);
+  });
+
+  it("maps reservation_id through to reservationId on the task (design D11)", async () => {
+    const { source } = sourceWith({
+      ...taskResponse,
+      reservation_id: "reservation-42",
+    });
+
+    const task = await source.getTask("tenant-1", "task-1");
+
+    expect(task.reservationId).toBe("reservation-42");
+  });
+
+  it("maps a null reservation_id to null, so the detail can degrade", async () => {
+    const { source } = sourceWith({
+      ...taskResponse,
+      reservation_id: null,
+    });
+
+    const task = await source.getTask("tenant-1", "task-1");
+
+    expect(task.reservationId).toBeNull();
+  });
+
+  it("maps an ABSENT reservation_id key to null, the deploy-skew window (design D11)", async () => {
+    // A frontend newer than its backend receives a body without the field.
+    // `?? null` turns the missing key into "no reservation linked", so the
+    // detail renders the same shape regardless of skew. `undefined` would
+    // violate the declared `string | null` and break the consumer.
+    const { reservation_id: _omitted, ...withoutTheField } = taskResponse;
+    const { source } = sourceWith(withoutTheField);
+
+    const task = await source.getTask("tenant-1", "task-1");
+
+    expect(task.reservationId).toBeNull();
+    expect("reservationId" in task).toBe(true);
+  });
+
+  it.each([403, 404, 422, 500] as const)(
+    "propagates an ApiError %s untouched, without wrapping or adapter retry",
+    async (status) => {
+      const error = new ApiError({
+        code: "CODE",
+        message: `API error ${status}`,
+        status,
+      });
+      const request = vi.fn().mockRejectedValue(error);
+      const source = new HttpCleaningSource({ request } as unknown as ApiClient);
+
+      await expect(source.getTask("tenant-1", "task-1")).rejects.toBe(error);
+      expect(request).toHaveBeenCalledTimes(1);
+    },
+  );
+});
+
+describe("HttpCleaningSource maps reservationId everywhere mapTask is used (design D11)", () => {
+  it("maps reservationId through mapListItem as well, so the listing row carries it too", async () => {
+    const { source } = sourceWith(
+      taskPage([{ ...taskResponse, reservation_id: "reservation-7" }]),
+    );
+
+    const page = await source.listTasks("tenant-1", {}, 1);
+
+    expect(page.data[0].reservationId).toBe("reservation-7");
+  });
 });

@@ -148,5 +148,48 @@
       "propertyState": "The property's state prevents cancelling this cleaning right now.",
       "generic": "The cleaning could not be cancelled. Please try again."
     }
+  },
+  "detail": {
+    "title": "Cleaning detail",
+    "manager": {
+      "title": "Manager actions"
+    },
+    "header": {
+      "status": "Status",
+      "validation": "Validation",
+      "scheduledWindow": "Scheduled window",
+      "scheduledWindowValue": "{start} – {end}",
+      "completedAt": "Completion date",
+      "validatedAt": "Validation date",
+      "validatedAtFailed": "Validation rejected"
+    },
+    "identifying": {
+      "propertyCode": "Property code",
+      "propertyName": "Property name",
+      "propertyNotFound": "Property not available",
+      "reservationCode": "Reservation code",
+      "reservationNotFound": "Reservation not available"
+    },
+    "assigned": {
+      "label": "Cleaner",
+      "unassigned": "Unassigned",
+      "notFound": "Cleaner not available"
+    },
+    "context": {
+      "label": "Related actions",
+      "viewProperty": "View property",
+      "viewReservation": "View reservation",
+      "backToList": "Back to list"
+    },
+    "loading": "Loading cleaning detail…",
+    "forbidden": "You do not have permission to view this cleaning.",
+    "notFound": "Task not available",
+    "validation": "Invalid task identifier.",
+    "error": {
+      "title": "Could not load the detail",
+      "description": "Please try again in a few seconds.",
+      "retry": "Retry",
+      "unknown": "An unexpected error occurred."
+    }
   }
 }

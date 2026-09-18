@@ -47,10 +47,18 @@ export function useAssignCleaningTask(): UseMutationResult<
       return getCleaningDataSource().assignTask(tenantId, taskId, cleanerId);
     },
     retry: false,
-    onSettled: () => {
+    onSettled: (_data, _error, { taskId }) => {
       if (tenantId) {
+        // The listing prefix: every filter/page combination that may have
+        // moved the row out of view (design D9).
         void queryClient.invalidateQueries({
           queryKey: cleaningKeys.tasksPrefix(tenantId),
+        });
+        // The detail key: refreshes a detail page the user opened in
+        // another tab (design D4) — a stale `404` on the detail side is
+        // what this prevents.
+        void queryClient.invalidateQueries({
+          queryKey: cleaningKeys.task(tenantId, taskId),
         });
       }
     },

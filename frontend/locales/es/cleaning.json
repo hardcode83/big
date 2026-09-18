@@ -148,5 +148,48 @@
       "propertyState": "El estado de la vivienda impide cancelar esta limpieza ahora mismo.",
       "generic": "No se pudo cancelar la limpieza. Vuelve a intentarlo."
     }
+  },
+  "detail": {
+    "title": "Detalle de limpieza",
+    "manager": {
+      "title": "Acciones del manager"
+    },
+    "header": {
+      "status": "Estado",
+      "validation": "Validación",
+      "scheduledWindow": "Ventana programada",
+      "scheduledWindowValue": "{start} – {end}",
+      "completedAt": "Fecha de finalización",
+      "validatedAt": "Fecha de validación",
+      "validatedAtFailed": "Validación rechazada"
+    },
+    "identifying": {
+      "propertyCode": "Código de la vivienda",
+      "propertyName": "Nombre de la vivienda",
+      "propertyNotFound": "Vivienda no disponible",
+      "reservationCode": "Código de la reserva",
+      "reservationNotFound": "Reserva no disponible"
+    },
+    "assigned": {
+      "label": "Limpiadora",
+      "unassigned": "Sin asignar",
+      "notFound": "Limpiadora no disponible"
+    },
+    "context": {
+      "label": "Acciones relacionadas",
+      "viewProperty": "Ver vivienda",
+      "viewReservation": "Ver reserva",
+      "backToList": "Volver al listado"
+    },
+    "loading": "Cargando detalle de limpieza…",
+    "forbidden": "No tienes permiso para ver esta limpieza.",
+    "notFound": "Tarea no disponible",
+    "validation": "Identificador de tarea inválido.",
+    "error": {
+      "title": "No se pudo cargar el detalle",
+      "description": "Vuelve a intentarlo en unos segundos.",
+      "retry": "Reintentar",
+      "unknown": "Ha ocurrido un error inesperado."
+    }
   }
 }

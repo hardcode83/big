@@ -34,6 +34,10 @@
       "title": "Cleaning",
       "description": "Cleaning tasks and their coordination."
     },
+    "cleaning-detail": {
+      "title": "Cleaning detail",
+      "description": "Detailed information for a cleaning task."
+    },
     "incidents": {
       "title": "Incidents",
       "description": "Property incidents and maintenance."

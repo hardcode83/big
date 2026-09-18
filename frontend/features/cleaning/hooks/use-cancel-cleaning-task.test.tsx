@@ -23,6 +23,9 @@ vi.mock("../data", async (importOriginal) => ({
       listProperties: vi.fn(),
       assignTask: vi.fn(),
       cancelTask,
+      createTask: vi.fn(),
+      validateTask: vi.fn(),
+      getTask: vi.fn(),
     }) as unknown as CleaningDataSource,
 }));
 
@@ -37,6 +40,7 @@ const task: CleaningTask = {
   completedAt: null,
   validationStatus: "PENDING",
   validatedAt: null,
+  reservationId: null,
 };
 
 function harness() {
@@ -116,7 +120,23 @@ describe("useCancelCleaningTask (R2.2, R3.1, R3.2, design D5)", () => {
       expect.arrayContaining([
         ["tenant", "tenant-1", "blocked-transitions"],
         cleaningKeys.tasksPrefix("tenant-1"),
+        cleaningKeys.task("tenant-1", "task-1"),
       ]),
+    );
+  });
+
+  it("invalidates the detail key on success so a detail tab opened elsewhere stays coherent (design D4, R5.3)", async () => {
+    const { invalidate, Wrapper } = harness();
+    const { result } = renderHook(() => useCancelCleaningTask(), {
+      wrapper: Wrapper,
+    });
+
+    result.current.mutate({ taskId: "task-1", reason: "guest arrived early" });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const called = invalidate.mock.calls.map((call) => call[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([cleaningKeys.task("tenant-1", "task-1")]),
     );
   });
 

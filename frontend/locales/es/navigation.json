@@ -34,6 +34,10 @@
       "title": "Limpieza",
       "description": "Tareas de limpieza y su coordinación."
     },
+    "cleaning-detail": {
+      "title": "Detalle de limpieza",
+      "description": "Información detallada de una tarea de limpieza."
+    },
     "incidents": {
       "title": "Incidencias",
       "description": "Incidencias y mantenimiento de las propiedades."

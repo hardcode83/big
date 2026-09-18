@@ -499,9 +499,13 @@ limpiadora activa y la tarea «queda pendiente»— se rompía porque nadie ten�
 `/cleaning` es esa pantalla.
 
 **Desde `cleaning-task-manage-web`, además crea, valida y cancela** — las tres, descritas en
-§«Crear, validar y cancelar desde la lista» más abajo. Lo que sigue sin ser: no abre el detalle
-de una tarea (checklist, fotos) ni edita plantillas. Eso sigue donde estaba —§«Las fotos» y la
-app de la limpiadora— y las razones de dejarlo fuera están en el proposal de ese change.
+§«Crear, validar y cancelar desde la lista» más abajo. Lo que sigue sin ser: no edita plantillas
+de checklist ni opera la app de la limpiadora — eso queda donde estaba (§«Las fotos» y la app
+de la limpiadora), y las razones de dejarlo así están en el proposal de `cleaning-task-manage-web`.
+
+**Desde `cleaning-manager-task-detail`, además abre el detalle** de la tarea en `/cleaning/[id]`.
+La fila del listado enlaza a esa ruta, y la pantalla pinta los seis bloques que se cuentan en
+§«Detalle operativo del manager» más abajo.
 
 ### Qué ve cada rol, y por qué
 
@@ -664,6 +668,117 @@ abierto para que el manager lo lea y decida si reintenta o lo cierra sin más �
 que tiene éxito cierra el formulario, y es entonces cuando la región de la lista anuncia el
 resultado.
 
+## Detalle operativo del manager: `/cleaning/[id]`
+
+`cleaning-manager-task-detail` añadió `/cleaning/[id]` — la página a la que llega el manager o la
+propietaria al pulsar una fila del listado de `/cleaning`. Es una vista de **lectura** del
+backend que ya describe `cleaning.md`; ni añade reglas de negocio ni rutas nuevas. La pantalla
+pinta seis bloques apilados en una columna (R6.2), en este orden de arriba abajo, y los tres
+últimos están condicionados a permisos:
+
+### Quién ve la página, y qué ve cada rol
+
+`/cleaning/[id]` se monta bajo el mismo `AuthGuard` que `/cleaning` (grupo `workspace`, sólo
+comprueba sesión). Si la consulta de la tarea falla con `404` se pinta `EmptyState` con un
+enlace de regreso a `/cleaning`; si falla con `403`, un texto plano que dice que la tarea no
+está disponible para ese rol; cualquier otro error, `ErrorState` con reintento (R1.2/R1.4).
+
+| | Owner (`TENANT_OWNER`) | Manager (`PROPERTY_MANAGER`) |
+|---|---|---|
+| Cabecera (estado, veredicto de validación si existe, ventana programada) | sí | sí |
+| Bloque identificador (vivienda por nombre, reserva por código si existe) | sí | sí |
+| Bloque de limpiadora asignada (nombre, o «sin asignar», o «no disponible») | sí | sí |
+| Acciones del manager (asignar, validar, cancelar) | **no** | sí |
+| Enlaces de contexto («Ver vivienda», «Ver reserva» si hay permiso) | sí | sí |
+
+La propietaria ve lectura porque tiene `READ_CLEANING_TASKS`; no ve las acciones porque no tiene
+`MANAGE_CLEANING_TASKS` — mismo gate que el listado, y la pantalla se monta exactamente así:
+los tres controles se importan dentro de `if (canManage)` y se renderizan `null` cuando el rol
+no los tiene (R5.1). El frontend oculta; el backend decide — si una llamada directa saltase la
+UI, el `403` del servidor es la autoridad.
+
+Los enlaces de contexto se rigen por sus propios permisos: «Ver vivienda» aparece si el rol
+tiene `READ_PROPERTIES` y «Ver reserva» si tiene `READ_RESERVATIONS`. Los dos workspace roles
+los tienen concedidos por `lib/auth/permissions.ts`; la limpiadora y el técnico no llegan a la
+página porque el `AuthGuard` ya los echa.
+
+### Lo que dice cada bloque
+
+**Cabecera.** Lleva el título de la pantalla (`detail.title` en i18n) y, en una sola fila, el
+estado de la tarea como etiqueta traducida, el veredicto de validación si la tarea ya se cerró
+alguna vez (`validation_status !== "PENDING"` o `completed_at` no nulo), y la ventana programada
+como `Intl.DateTimeFormat` en el idioma activo. Si la tarea nunca se programó, se pinta
+«sin programar» (mismo `identity.notScheduled` que el listado). El bloque **no** es sticky: la
+vista se desplaza con el scroll — misma convención que `IncidentDetailView`.
+
+**Identificador.** Resuelve `property_id` y `reservation_id` contra los catálogos
+(`usePropertyDirectory`, `useCleanerDirectory` ya cacheados por el listado, sin petición nueva
+por la apertura del detalle). Cuando el catálogo está en vuelo pinta un guion con `sr-only`
+«cargando»; cuando el id no está en la página consultada (techo de 100, §«El límite de 100»)
+degrada a «Vivienda no disponible» / «Reserva no disponible» y sigue pintando el resto. El
+`property_id` y el `reservation_id` crudos no se pintan en ninguna rama.
+
+**Limpiadora asignada.** Mismo degradado de cuatro casos que el listado: **sin asignar**
+(`assigned_cleaner_id` nulo), **cargando** (catálogo en vuelo), **no disponible** (id ausente
+del catálogo) o **resuelta** (nombre). Una inactiva se sigue resolviendo por nombre aunque la
+lista de candidatas a asignación la excluya — el nombre es un dato, la oferta de candidatas es
+otro.
+
+**Acciones del manager.** Las mismas tres que el listado: asignar o reasignar
+(`AssignCleanerControl`), validar (`ValidateCleaningControl`) y cancelar
+(`CancelCleaningTaskDialog`). Son los componentes existentes reutilizados por props — el detalle
+no estrena variantes `*Detail` (R5.2): duplicar la pinta entera duplica también el bug y la
+deriva. La mutación de cancelación es la misma instancia compartida de `useCancelCleaningTask`
+que el diálogo del listado, así un envío abierto desde el listado y otro desde el detalle
+comparten la misma cola y un segundo `mutate` despegará al primero. La cabecera del diálogo
+lleva su propio `role="alert"` mientras está abierto; el resto de resultados los anuncia la
+**única** región viva de la página (`role="status" aria-live="polite"`), con la precedencia
+«en vuelo > error > éxito» y `submittedAt` como discriminador (mismo `pickAnnouncementSource`
+que `cleaning-view.tsx:70-88`). Las tres mutaciones invalidan, en su `onSettled`, el prefijo
+`cleaningKeys.tasksPrefix(tenantId)` y la clave específica `cleaningKeys.task(tenantId, taskId)`,
+de modo que la cabecera refleja el nuevo estado sin recarga y, si el usuario vuelve al
+listado, la fila ya está al día. El listado concreto (`cleaningKeys.tasks`) NO se invalida: el
+filtro y la página son datos del listado, no del detalle.
+
+**Enlaces de contexto.** Un enlace «Volver al listado» (`href="/cleaning"`) en la cabecera, al
+lado del título — accesible por teclado, operable por lector de pantalla. Un enlace «Ver
+vivienda» (`href="/properties/[property_id]"`) que aparece sólo si el rol tiene
+`READ_PROPERTIES`. Un enlace «Ver reserva» (`href="/reservations/[reservation_id]"`) sólo si la
+tarea tiene `reservation_id` y el rol tiene `READ_RESERVATIONS`. Los tres abren en la misma
+pestaña; no se degradan a texto plano cuando no se muestran — si el permiso falta es que el
+control debe estar ausente, no visible pero inerte.
+
+### Cómo encaja con lo que ya existía
+
+**Backend intacto.** Cero cambios en `backend/` y cero cambios en `backend/openapi.json`. La
+página consume `GET /api/v1/cleaning-tasks/{task_id}` (de `cleaning.md`), `PATCH .../{task_id}`
+para asignar, `POST .../validate` para validar y `POST .../cancel` para cancelar — los cuatro
+endpoints ya estaban publicados. Los campos nuevos en pantalla (`completed_at`,
+`validation_status`, `validated_at`) ya venían en `CleaningTaskResponse` y los campos del
+detalle de la vivienda (`current_operational_state`) ya venían en
+`PropertyListItemResponse` — el DTO anterior los descartaba y ahora los lee.
+
+**Region viva única.** Es el mismo patrón que `cleaning-view.tsx` (D11 de `cleaning-manager-view`)
+y `cleaning-task-manage-web` (D4/D11): una sola `role="status" aria-live="polite"` para los
+anuncios de las tres mutaciones. Los diálogos (`CancelCleaningTaskDialog`) son la excepción
+declarada — pintan su propio `role="alert"` mientras el Sheet está abierto, igual que en el
+listado.
+
+**i18n y mobile-first.** Toda la cadena nueva vive en `locales/{es,en}/cleaning.json` bajo
+`detail.*` (cabecera, etiquetas de bloque, enlaces, `notFound`, `forbidden`, `validation`,
+`error.title/description/retry`) y el breadcrumb `cleaning-detail` en
+`locales/{es,en}/navigation.json`. El layout es legible y operable desde 320 px sin scroll
+horizontal: bloques apilados en una columna, controles con objetivo táctil ≥ 44×44 px, y
+`min-w-0` / `break-words` en cada nivel de anidamiento. El foco visible recorre la página de
+arriba abajo: cabecera → bloques informativos → controles del manager → enlaces de contexto.
+
+**Lo que sigue sin ser.** El detalle **no** pinta el checklist ni las fotos de la limpieza —
+eso sigue donde estaba (§«Las fotos» y la app de la limpiadora), y `cleaning-task-manage-web`
+ya dejó razonado en su proposal por qué se queda fuera del navegador de manager: la limpiadora
+lo vive en su propia app y abrir esa superficie en `/cleaning/[id]` duplicaría el cliente HTTP
+de la limpiadora, su caché y su manera de tratar los reintentos. El detalle tampoco edita
+plantillas de checklist — la gestión de plantillas tiene su propia ruta y no entra en esta.
+
 ## Entradas de roadmap relacionadas
 
 - `cleaning-photos-storage` — **ya entregada**: fotos, almacenamiento (`LOCAL`/`S3`), URL
@@ -682,3 +797,6 @@ resultado.
   `POST /cleaning-tasks`, `.../validate` y `.../cancel`, este último reutilizando el mismo hook
   (`useCancelCleaningTask`, misma lógica) que ya usaba el diálogo de cancelar del dashboard —
   cada diálogo instancia su propia mutación en tiempo de ejecución, no una compartida.
+- `cleaning-manager-task-detail` — **ya entregada**: `/cleaning/[id]`, descrita en
+  §«Detalle operativo del manager». Cero cambios de backend; consume los mismos cuatro
+  endpoints que el listado y reutiliza los mismos componentes de acción sin variantes `*Detail`.
