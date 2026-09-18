@@ -1,6 +1,6 @@
 # Tasks: photo-storage-manager-view
 
-## 1. Backend — bootstrap storage gate
+## 1. Backend — bootstrap storage gate <!-- panel: PASS 2026-09-18 receipt:9ccd27da -->
 
 - [x] 1.1 In `backend/app/cli/bootstrap.py`, add the environment/storage-type
   check to `build_plan()` (design D6): immediately after the existing
