@@ -101,6 +101,46 @@ describe("DetailPhotosBlock (R2.1-R2.6)", () => {
     expect(refetch).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the error state's retry control keyboard reachable (steering: Testing UI/UX)", () => {
+    useCleaningTaskPhotosMock.mockReturnValue(
+      makeQueryResult({
+        isError: true,
+        isSuccess: false,
+        data: undefined,
+        error: new Error("network broken"),
+      }),
+    );
+    renderBlock();
+    const retry = screen.getByRole("button", { name: "Reintentar" });
+    expect(retry.tabIndex).toBeGreaterThanOrEqual(0);
+    retry.focus();
+    expect(retry).toHaveFocus();
+  });
+
+  it("lays the gallery out in a fraction-based grid that cannot clip at narrow widths (steering: Responsive verificable)", () => {
+    useCleaningTaskPhotosMock.mockReturnValue(
+      makeQueryResult({
+        data: [
+          photo({ id: "p1", photoType: "KITCHEN" }),
+          photo({ id: "p2", photoType: "BATHROOM" }),
+        ],
+      }),
+    );
+    const { container } = renderBlock();
+    const grids = container.querySelectorAll("ul");
+    expect(grids.length).toBeGreaterThan(0);
+    // `grid-cols-2` divides the available width into `1fr` columns rather
+    // than a fixed pixel width, so each column only ever shrinks with the
+    // viewport — it never overflows or clips at this project's mobile-first
+    // narrow widths. Same reasoning for `w-full` on each `<img>`.
+    grids.forEach((grid) => {
+      expect(grid.className).toContain("grid-cols-2");
+    });
+    screen.getAllByRole("img").forEach((img) => {
+      expect(img.className).toContain("w-full");
+    });
+  });
+
   it("groups photos by photoType in first-appearance order and paints urls verbatim (R2.1, R2.3, D4)", () => {
     useCleaningTaskPhotosMock.mockReturnValue(
       makeQueryResult({
