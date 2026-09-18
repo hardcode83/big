@@ -414,6 +414,12 @@ compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo 
   (`CLEANING_PHOTO_URL_PREFIX`) **explícito** en cada punto de wiring, incluido `make seed-demo`, y
   NEVER SHALL depender del valor por defecto: aunque hoy coincida con el de limpieza, depender de él
   es lo que rompió al segundo consumidor, y el síntoma es un `403` que no parece un error de wiring.
+- **La lectura ya tenía llamador real desde el 2026-09-18.** `GET .../photos` la listaba por API
+  desde el principio, pero ningún frontend del manager la pintaba: `/cleaning/[id]` gana su
+  galería de solo lectura con `photo-storage-manager-view`, mediante un hook nuevo
+  (`useCleaningTaskPhotos`, `frontend/features/cleaning/hooks/use-cleaning-photos.ts`) — sin
+  control de subida ni de borrado, agrupada por `photo_type`. Detalle en
+  [`photo-storage-manager-view.md`](photo-storage-manager-view.md).
 
 ### Los requisitos de foto de la tarea
 
