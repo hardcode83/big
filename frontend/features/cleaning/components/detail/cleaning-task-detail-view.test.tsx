@@ -7,6 +7,8 @@ import type { Permission } from "@/lib/auth";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import { ApiError } from "@/lib/api";
 import { render, screen } from "@/test/render";
+import type { CleanerDataSource } from "@/features/cleaner/data";
+import * as cleanerData from "@/features/cleaner/data";
 
 import type {
   CleanerSummary,
@@ -46,8 +48,32 @@ vi.mock("../../hooks/use-cancel-cleaning-task", () => ({
   useCancelCleaningTask: useCancelCleaningTaskMock,
 }));
 vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ user: { tenant_id: "tenant-1", role: "PROPERTY_MANAGER" } }),
   useHasPermission: useHasPermissionMock,
 }));
+
+// Section 3 (D4/D6): `ManagerCleaningTaskMessagesPanel` is now always mounted
+// alongside the operational tab, so its `useCleanerTaskMessages` call always
+// resolves a tenant via `useAuth` (mocked above) and always goes through the
+// cleaner data source. The panel's own query is lazy (`enabled` starts
+// false), so `getTaskMessages` is never actually invoked by these tests, but
+// the spy still has to exist so `getCleanerDataSource()` resolves to
+// something callable instead of hitting the real HTTP data source.
+const getTaskMessagesMock = vi.fn().mockResolvedValue({
+  data: [],
+  total: 0,
+  page: 1,
+  perPage: 20,
+  totalPages: 0,
+});
+const sendTaskMessageMock = vi.fn();
+vi.spyOn(cleanerData, "getCleanerDataSource").mockImplementation(
+  (): CleanerDataSource =>
+    ({
+      getTaskMessages: getTaskMessagesMock,
+      sendTaskMessage: sendTaskMessageMock,
+    }) as unknown as CleanerDataSource,
+);
 
 import { CleaningTaskDetailView } from "./cleaning-task-detail-view";
 
