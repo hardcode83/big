@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
@@ -33,6 +33,8 @@ import { DetailContextLinksBlock } from "./detail-context-links-block";
 import { DetailHeaderBlock } from "./detail-header-block";
 import { DetailIdentifyingBlock } from "./detail-identifying-block";
 import { DetailManagerActionsBlock } from "./detail-manager-actions-block";
+import { ManagerCleaningTaskMessagesPanel } from "./manager-cleaning-task-messages-panel";
+import { ManagerCleaningTaskTabs } from "./manager-cleaning-task-tabs";
 
 /**
  * The detail view for `/cleaning/[id]` (proposal R1-R6, design D1/D6/D7/D8).
@@ -82,6 +84,17 @@ export function CleaningTaskDetailView({ taskId }: { taskId: string }) {
   const cancel = useCancelCleaningTask();
   const [cancelOpen, setCancelOpen] = useState(false);
 
+  // Sticky: once the messages read 404s the task is gone, and it does not
+  // come back by refetching the task query. `useLayoutEffect` (in the panel)
+  // fires before the browser paints, so this flag flips in the same frame
+  // the panel returns `null` for — same convention `ManagerIncidentDetailView`
+  // uses (section 2, R1.5).
+  const [messagesNotFound, setMessagesNotFound] = useState(false);
+  const onMessagesNotFound = useCallback(
+    () => setMessagesNotFound(true),
+    [],
+  );
+
   if (state.kind === "loading") {
     return (
       <LoadingState label={tStates("loading.label")} className="p-4" />
@@ -94,7 +107,7 @@ export function CleaningTaskDetailView({ taskId }: { taskId: string }) {
       </p>
     );
   }
-  if (state.kind === "not-found") {
+  if (state.kind === "not-found" || messagesNotFound) {
     return (
       <section className="flex flex-col gap-2 p-4">
         <EmptyState
@@ -231,6 +244,11 @@ export function CleaningTaskDetailView({ taskId }: { taskId: string }) {
         observing it when the result arrives. `announcement()` picks which
         mutation gets to speak, exactly the same precedence the listing
         declares in its `pickAnnouncementSource` (`cleaning-view.tsx:70-88`).
+        D6 of `staff-messaging-manager-view` keeps this region here in the
+        wrapper — the architect review of 2026-09-18 measured that separation
+        in `cleaning-manager-task-detail` D7, and moving it into the tabs
+        or the messages panel would break R5.5 (live region observable to
+        the manager).
       */}
       <div
         role="status"
@@ -239,52 +257,73 @@ export function CleaningTaskDetailView({ taskId }: { taskId: string }) {
       >
         {announcement()}
       </div>
-      <DetailHeaderBlock
-        status={task.status}
-        validationStatus={task.validationStatus}
-        scheduledStart={task.scheduledStart}
-        scheduledEnd={task.scheduledEnd}
-        completedAt={task.completedAt}
-        validatedAt={task.validatedAt}
-      />
-      <DetailIdentifyingBlock
-        propertyId={task.propertyId}
-        reservationId={task.reservationId}
-        properties={properties}
-      />
-      <DetailAssignedCleanerBlock
-        assignedCleanerId={task.assignedCleanerId}
-        cleaners={cleaners}
-      />
-      {canManage ? (
-        <DetailManagerActionsBlock
-          task={task}
-          assignment={{
-            isPending: assign.isPending,
-            // The view owns one mutation; a second `mutate` would detach the
-            // first and lose its rejection, which R5.4 makes mandatory, so the
-            // confirm button is unreachable until the first settles.
-            isBlocked: assign.isPending,
-            onConfirm: assign.mutate,
-          }}
-          validate={{
-            isPending: validate.isPending,
-            isBlocked: validate.isPending,
-            onValidate: validate.mutate,
-          }}
-          cancel={{
-            open: cancelOpen,
-            onOpenChange: setCancelOpen,
-            mutation: cancel,
-          }}
-          cleaners={Array.from(cleaners.index.values())}
-        />
-      ) : null}
-      <DetailContextLinksBlock
-        propertyId={task.propertyId}
-        reservationId={task.reservationId}
-        canReadProperties={canReadProperties}
-        canReadReservations={canReadReservations}
+      {/*
+        Structural refactor of `staff-messaging-manager-view` D6: the
+        operational content passes through `ManagerCleaningTaskTabs` so the
+        messages tab can mount alongside it, but the six reading blocks and
+        the cancel dialog stay in the same order with the same props. Both
+        tabs stay mounted (D4) so the cancel sheet's `open` state survives
+        a round trip through the messages tab.
+      */}
+      <ManagerCleaningTaskTabs
+        content={
+          <div className="flex flex-col gap-4">
+            <DetailHeaderBlock
+              status={task.status}
+              validationStatus={task.validationStatus}
+              scheduledStart={task.scheduledStart}
+              scheduledEnd={task.scheduledEnd}
+              completedAt={task.completedAt}
+              validatedAt={task.validatedAt}
+            />
+            <DetailIdentifyingBlock
+              propertyId={task.propertyId}
+              reservationId={task.reservationId}
+              properties={properties}
+            />
+            <DetailAssignedCleanerBlock
+              assignedCleanerId={task.assignedCleanerId}
+              cleaners={cleaners}
+            />
+            {canManage ? (
+              <DetailManagerActionsBlock
+                task={task}
+                assignment={{
+                  isPending: assign.isPending,
+                  // The view owns one mutation; a second `mutate` would detach the
+                  // first and lose its rejection, which R5.4 makes mandatory, so the
+                  // confirm button is unreachable until the first settles.
+                  isBlocked: assign.isPending,
+                  onConfirm: assign.mutate,
+                }}
+                validate={{
+                  isPending: validate.isPending,
+                  isBlocked: validate.isPending,
+                  onValidate: validate.mutate,
+                }}
+                cancel={{
+                  open: cancelOpen,
+                  onOpenChange: setCancelOpen,
+                  mutation: cancel,
+                }}
+                cleaners={Array.from(cleaners.index.values())}
+              />
+            ) : null}
+            <DetailContextLinksBlock
+              propertyId={task.propertyId}
+              reservationId={task.reservationId}
+              canReadProperties={canReadProperties}
+              canReadReservations={canReadReservations}
+            />
+          </div>
+        }
+        renderMessages={(enabled) => (
+          <ManagerCleaningTaskMessagesPanel
+            taskId={task.id}
+            enabled={enabled}
+            onNotFound={onMessagesNotFound}
+          />
+        )}
       />
     </article>
   );
