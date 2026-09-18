@@ -968,6 +968,28 @@
             "title": "Property Id",
             "type": "string"
           },
+          "property_internal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Internal Code"
+          },
+          "property_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Name"
+          },
           "reservation_id": {
             "anyOf": [
               {
@@ -1069,7 +1091,9 @@
           "validated_at",
           "created_at",
           "updated_at",
-          "assignment_blocked_by"
+          "assignment_blocked_by",
+          "property_name",
+          "property_internal_code"
         ],
         "title": "CleaningTaskListItemResponse",
         "type": "object"
