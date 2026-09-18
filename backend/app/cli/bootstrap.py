@@ -38,6 +38,31 @@ class BootstrapConflictError(Exception):
     """Proceeding would leave existing accounts unable to log in."""
 
 
+def reject_local_storage_outside_local_environment(
+    environment: str,
+    storage_type: str,
+    *,
+    exception_type: type[Exception],
+    message: str,
+) -> None:
+    """R3.1/D6: refuse a `LOCAL` storage type resolved outside `environment == "local"`.
+
+    Extracted out of `build_plan()` below (`photo-storage-manager-view` review round 1) because
+    `app/cli/demo_reset.py`'s own `build_plan()` resolves the exact same
+    `settings.bootstrap_storage_type` into its own `BootstrapPlan` — without calling this
+    module's `build_plan()`, since that one reads `BOOTSTRAP_*` variables naming the real
+    tenant, which `demo_reset` must never touch — and needed the same gate rather than a second,
+    independently-maintained copy of the raw condition that could drift from this one.
+
+    Pure and side-effect-free besides the raise, and the exception type and message are the
+    caller's: `bootstrap.py` raises `BootstrapConfigurationError` here, `demo_reset.py` raises
+    its own `DemoResetConfigurationError` at its own call site, and neither should be able to
+    raise the other's type.
+    """
+    if environment != "local" and storage_type == StorageType.LOCAL.value:
+        raise exception_type(message)
+
+
 @dataclass(frozen=True)
 class SeedUser:
     name: str
@@ -85,15 +110,16 @@ def build_plan() -> BootstrapPlan:
             "Missing required environment variables: " + ", ".join(missing)
         )
 
-    if (
-        settings.environment != "local"
-        and settings.bootstrap_storage_type == StorageType.LOCAL.value
-    ):
-        raise BootstrapConfigurationError(
+    reject_local_storage_outside_local_environment(
+        settings.environment,
+        settings.bootstrap_storage_type,
+        exception_type=BootstrapConfigurationError,
+        message=(
             "BOOTSTRAP_STORAGE_TYPE must be set to 'S3' explicitly when "
             f"APP_ENVIRONMENT={settings.environment!r}; LOCAL is only the safe "
             "default for APP_ENVIRONMENT=local."
-        )
+        ),
+    )
 
     return BootstrapPlan(
         tenant_name=settings.bootstrap_tenant_name.strip(),

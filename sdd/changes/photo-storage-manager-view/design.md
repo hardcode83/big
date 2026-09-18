@@ -177,12 +177,33 @@ command outside an allowlist) — rejected, bootstrap must keep running in
 `staging`/`production`; only the silent `LOCAL` default is the problem, not
 the command itself.
 
+**Addendum (review round 1, sdd-security FAIL):** the panel found that
+`app/cli/demo_reset.py`'s own `build_plan()` constructs a `BootstrapPlan`
+directly from `settings.bootstrap_storage_type` — deliberately, per its own
+docstring, because it must not call `bootstrap.build_plan()` (that reads
+`BOOTSTRAP_*` variables naming the real tenant) — and therefore never ran the
+gate above either, even though a manual `python -m app.cli.demo_reset` in
+dev/staging/production is exactly the "non-local environment" case R3.1
+covers. The condition itself was extracted into a shared, pure function,
+`reject_local_storage_outside_local_environment(environment, storage_type, *,
+exception_type, message)` in `app/cli/bootstrap.py` — a caller-supplied
+exception type rather than a second copy of the raw boolean, since
+`bootstrap.py` raises `BootstrapConfigurationError` and `demo_reset.py` raises
+its own `DemoResetConfigurationError`, and neither should raise the other's.
+`bootstrap.build_plan()` now calls it in the same position as the inline
+`if` above; `demo_reset.build_plan()` calls it in its own function, before
+constructing its `BootstrapPlan`, with its own message. Behavior of
+`bootstrap.build_plan()` is unchanged — this is a pure refactor of it — and
+`backend/tests/auth/test_bootstrap.py` is unchanged and still green.
+
 ## Changes by area
 
 | Area | Files | Change |
 |---|---|---|
-| Backend — bootstrap gate | `backend/app/cli/bootstrap.py` | `build_plan()` raises `BootstrapConfigurationError` when `environment != "local"` and `bootstrap_storage_type == LOCAL` (D6). No new file. |
+| Backend — bootstrap gate | `backend/app/cli/bootstrap.py` | `build_plan()` raises `BootstrapConfigurationError` when `environment != "local"` and `bootstrap_storage_type == LOCAL` (D6), via the shared `reject_local_storage_outside_local_environment`. No new file. |
 | Backend — tests | `backend/tests/auth/test_bootstrap.py` | New cases: `environment="dev"`/`"staging"`/`"production"` + default `LOCAL` → raises; `environment="local"` + `LOCAL` → unchanged; any non-local + `S3` → unchanged (mirrors the existing `bootstrap_storage_type` test cases at lines 339/353/358/373/375). |
+| Backend — demo-reset gate (review round 1) | `backend/app/cli/demo_reset.py` | `build_plan()` calls the same shared `reject_local_storage_outside_local_environment`, raising its own `DemoResetConfigurationError`, before constructing its `BootstrapPlan` (D6 addendum). No new file. |
+| Backend — tests (review round 1) | `backend/tests/cli/test_demo_reset.py` | Mirrors the three `test_bootstrap.py` cases above for `demo_reset.build_plan()`. |
 | Frontend — cleaning data layer | `frontend/features/cleaning/data/dto.ts`, `data/cleaning-source.ts`, `data/http/http-cleaning-source.ts`, `hooks/query-keys.ts` | New `CleaningPhotoDto`, `listPhotos` on the interface + HTTP implementation, `cleaningKeys.photos` (D3). |
 | Frontend — cleaning hook | `frontend/features/cleaning/hooks/use-cleaning-photos.ts` (new) | `useCleaningTaskPhotos(taskId)` (D3). |
 | Frontend — cleaning UI | `frontend/features/cleaning/components/detail/detail-photos-block.tsx` (new) + `.test.tsx` | `DetailPhotosBlock`, composed into `cleaning-task-detail-view.tsx` (D1, D4, D5). |
@@ -208,10 +229,13 @@ variable — `BOOTSTRAP_STORAGE_TYPE` already exists in `.env.example` and in
 ## Risks & mitigations
 
 - **`.github/workflows/demo-reset.yml` already passes `BOOTSTRAP_STORAGE_TYPE=S3`
-  inline** (line 138), so D6 is inert for the one automated flow that runs
-  bootstrap against a non-`local` environment today. Mitigation: covered by
+  inline** (line 138), so D6 is inert for the one *automated* flow that runs
+  `demo_reset` against a non-`local` environment today. Mitigation: covered by
   R3.4 and the new test cases; no manual verification needed beyond the
-  suite, since the workflow's behavior does not change.
+  suite, since the workflow's behavior does not change. This does **not**
+  cover a manual `python -m app.cli.demo_reset` run against dev/staging/
+  production with no explicit flag — that path is covered by the D6 addendum
+  above (the shared guard is now also called from `demo_reset.build_plan()`).
 - **A future local developer who sets `APP_ENVIRONMENT=dev` in a personal
   `.env` without meaning to target real dev infra** would now see bootstrap
   refuse rather than silently create a `LOCAL` tenant. This is the intended
