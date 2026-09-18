@@ -309,6 +309,10 @@ class CleaningTaskListItemResponse(BaseModel):
     #: mutation and that refusal is the authority (R3.3). `null` therefore means "nothing known
     #: to be blocking", which is also what an unresolved flat yields.
     assignment_blocked_by: CleaningAssignmentBlocker | None
+    #: The referenced property's name/internal code, or `null` if `property_id` does not
+    #: resolve — fails open, same as `assignment_blocked_by` (R1.3).
+    property_name: str | None
+    property_internal_code: str | None
 
     @classmethod
     def from_domain(cls, view: CleaningTaskListView) -> "CleaningTaskListItemResponse":
@@ -331,6 +335,8 @@ class CleaningTaskListItemResponse(BaseModel):
             created_at=task.created_at,
             updated_at=task.updated_at,
             assignment_blocked_by=view.blocker,
+            property_name=view.property_name,
+            property_internal_code=view.property_internal_code,
         )
 
 

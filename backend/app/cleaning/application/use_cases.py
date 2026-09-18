@@ -1709,16 +1709,24 @@ class ReportTaskIncidentUseCase:
 
 @dataclass(frozen=True)
 class CleaningTaskListView:
-    """One row of `GET /cleaning-tasks`: the task plus its assignment pre-flight.
+    """One row of `GET /cleaning-tasks`: the task plus its assignment pre-flight and the
+    readable identity of the property it points at.
 
     A view and not a wider entity, because `blocker` is not a property of a cleaning task — it
     is a verdict about the task *and* its flat at this instant, and it belongs only to the
     listing (`cleaning-assign-preconditions` D5). The eight endpoints that return a single task
     keep returning `CleaningTaskResponse` and are not asked a question nobody put to them.
+
+    `property_name`/`property_internal_code` (`cleaner-list-property-projection` R1.1) are the
+    same "degrade, do not raise" choice as `blocker`: a `property_id` that does not resolve
+    leaves both `None` (R1.3) rather than failing the whole page, exactly the precedent
+    `ListReservationsUseCase.execute` sets for the same two fields.
     """
 
     task: CleaningTask
     blocker: CleaningAssignmentBlocker | None
+    property_name: str | None
+    property_internal_code: str | None
 
 
 @dataclass(frozen=True)
@@ -1785,19 +1793,30 @@ class ListCleaningTasksUseCase:
         # of the statement is deterministic run to run.
         property_ids = tuple(dict.fromkeys(task.property_id for task in result.items))
         states = await self._properties.states_for(tenant_id, property_ids)
-        return CleaningTaskListPage(
-            items=tuple(
+        # Second batched call over the same distinct ids, for `property_name`/
+        # `property_internal_code` (`cleaner-list-property-projection` R1.1, R2.1). Reuses
+        # `PropertyRepository.list_for_ids` — no new port method (R2.2), the same one
+        # `ListReservationsUseCase.execute` calls for the identical projection.
+        properties_by_id = {
+            p.id: p for p in await self._properties.list_for_ids(tenant_id, property_ids)
+        }
+        views: list[CleaningTaskListView] = []
+        for task in result.items:
+            # `.get()` and not `[...]`: an unresolved id fails open into `None` for both fields
+            # (R1.3), the same criterion `states.get(...)` already applies above for `blocker`.
+            prop = properties_by_id.get(task.property_id)
+            views.append(
                 CleaningTaskListView(
                     task=task,
                     blocker=assignment_blocker(
                         task_status=task.status,
                         property_state=states.get(task.property_id),
                     ),
+                    property_name=prop.name if prop else None,
+                    property_internal_code=prop.internal_code if prop else None,
                 )
-                for task in result.items
-            ),
-            total=result.total,
-        )
+            )
+        return CleaningTaskListPage(items=tuple(views), total=result.total)
 
 
 @dataclass(frozen=True)
